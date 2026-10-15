@@ -1,0 +1,102 @@
+{
+  "name": "panxu-studio",
+  "version": "0.3.1",
+  "private": true,
+  "description": "盘序 · 本地网盘内容营销工作台",
+  "type": "module",
+  "main": "dist-desktop/main.js",
+  "author": "Panxu Studio",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/build-desktop.mjs",
+    "start": "electron .",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:e2e:packaged": "node scripts/e2e-packaged.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "package:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "package:dir": "npm run build && electron-builder --dir --publish never",
+    "verify:providers": "node --import tsx --test tests/providers.test.ts",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"{desktop,core,shared,tests}/**/*.ts\" \"scripts/*.mjs\""
+  },
+  "dependencies": {
+    "lucide-react": "1.57.0",
+    "playwright-core": "1.64.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  },
+  "build": {
+    "appId": "com.panxu.studio",
+    "productName": "盘序",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-desktop/**",
+      "package.json",
+      "!dist/**/*.map",
+      "!dist-desktop/**/*.map"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "dmg": {
+      "title": "盘序安装"
+    },
+    "asarUnpack": [
+      "node_modules/playwright-core/**"
+    ],
+    "artifactName": "Panxu-Studio-${version}-${os}-${arch}.${ext}",
+    "toolsets": {
+      "nsis": "1.2.1"
+    }
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

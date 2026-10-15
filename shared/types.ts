@@ -1,0 +1,400 @@
+export type Provider = "quark" | "baidu";
+export type Platform =
+  | "xiaohongshu"
+  | "douyin"
+  | "kuaishou"
+  | "wechat"
+  | "weibo"
+  | "tieba"
+  | "douban"
+  | "x"
+  | "zhihu"
+  | "csdn";
+export type Endpoint = "longtail" | "suggest" | "metrics" | "radar";
+export type AccountStatus =
+  "disconnected" | "connected" | "expired" | "disabled";
+export type JobStage =
+  | "queued"
+  | "preflight"
+  | "transferring"
+  | "verifying"
+  | "sharing"
+  | "archiving"
+  | "completed"
+  | "waiting_login"
+  | "needs_review"
+  | "failed"
+  | "cancelled";
+export interface Account {
+  id: string;
+  provider: Provider;
+  alias: string;
+  uid: string | null;
+  status: AccountStatus;
+  enabled: boolean;
+  isDefault: boolean;
+  defaultDirectory: string;
+  lastVerifiedAt: string | null;
+  error: string | null;
+}
+export interface RemoteFile {
+  id: string;
+  name: string;
+  isDirectory: boolean;
+  size: number | null;
+  parentId: string;
+  path?: string;
+}
+export interface ShareInput {
+  provider: Provider;
+  shareKey: string;
+  url: string;
+  code: string;
+}
+export interface ShareInspection {
+  shareKey: string;
+  title: string;
+  files: RemoteFile[];
+  hasMore: boolean;
+  page: number;
+  parentId: string;
+}
+export interface Resource {
+  id: string;
+  title: string;
+  sourceUrl: string;
+  provider: Provider;
+  category: string;
+  tags: string[];
+  summary: string;
+  coverId: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  copies: ResourceCopy[];
+}
+export interface ResourcePage {
+  items: Resource[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export interface ResourceTotals {
+  resources: number;
+  readyCopies: number;
+  attentionJobs: number;
+  categories: string[];
+}
+export interface ShareCheck {
+  copyId: string;
+  status: "valid" | "invalid" | "unavailable";
+  checkedAt: string;
+  message: string;
+}
+export interface BackupPreview {
+  token: string;
+  folder: string;
+  createdAt: string;
+  resources: number;
+  accounts: number;
+  drafts: number;
+  covers: number;
+}
+export interface ImportRow {
+  row: number;
+  title: string;
+  provider: Provider | null;
+  account: string;
+  status: "new" | "copy" | "skip" | "invalid";
+  message: string;
+}
+export interface ImportPreview {
+  token: string;
+  rows: ImportRow[];
+}
+export interface ResourceCopy {
+  id: string;
+  resourceId: string;
+  accountId: string;
+  directory: string;
+  folderId: string | null;
+  files: RemoteFile[];
+  status: string;
+  ownerUid: string | null;
+  verifiedAt: string | null;
+  shareId: string | null;
+  shareUrl: string | null;
+  shareOwnerUid: string | null;
+  shareVersion: number;
+  shareVerifiedAt: string | null;
+  noteStatus: string;
+  error: string | null;
+}
+export interface Job {
+  kind: "transfer" | "batch_inspect" | "split_preview" | "split_share";
+  targetId: string | null;
+  batchId: string | null;
+  id: string;
+  copyId: string;
+  resourceId: string;
+  title: string;
+  accountId: string;
+  stage: JobStage;
+  checkpoint: string;
+  attempts: number;
+  error: string | null;
+  logs: { at: string; message: string }[];
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TransferBatchItem {
+  id: string;
+  copyId: string;
+  title: string;
+  accountId: string;
+  state: string;
+  error: string | null;
+  files: RemoteFile[];
+  selectedIds: string[];
+  inspectJobId: string;
+  transferJobId: string | null;
+  stage: JobStage;
+}
+export interface TransferBatch {
+  id: string;
+  createdAt: string;
+  items: TransferBatchItem[];
+}
+export interface SplitItem {
+  id: string;
+  copyId: string;
+  file: RemoteFile;
+  ancestors: RemoteFile[];
+  path: string;
+  depth: number;
+  status: string;
+  shareId: string | null;
+  shareUrl: string | null;
+  ownerUid: string | null;
+  verifiedAt: string | null;
+  error: string | null;
+  jobId: string | null;
+  shareVersion: number;
+  stage: JobStage | null;
+}
+export interface SplitRun {
+  id: string;
+  copyId: string;
+  depth: number;
+  mode: "level" | "all";
+  status: string;
+  error: string | null;
+  createdAt: string;
+  items: SplitItem[];
+  jobId: string;
+}
+export interface Keyword {
+  id: string;
+  word: string;
+  source: string;
+  platform: string | null;
+  metrics: Record<string, number | string | null>;
+  sourceUpdatedAt: string | null;
+  fetchedAt: string;
+  intent?: string;
+}
+export interface Hotspot {
+  id: string;
+  title: string;
+  type: string;
+  sourceUpdatedAt: string | null;
+  fetchedAt: string;
+  events: unknown[];
+  metrics: Record<string, unknown>;
+}
+export interface Pool {
+  id: string;
+  name: string;
+  resourceId: string | null;
+  keywords: Keyword[];
+  createdAt: string;
+}
+export interface ApiPlan {
+  endpoint: Endpoint;
+  configured: boolean;
+  unitPriceMicros: number | null;
+  dailyUnits: number;
+  dailyBudgetMicros: number | null;
+  enabled: boolean;
+}
+export interface ApiCall {
+  id: string;
+  endpoint: string;
+  phase: string;
+  units: number;
+  requestCount: number;
+  estimatedMicros: number | null;
+  reservedMicros: number | null;
+  confirmedMicros: number | null;
+  status: "reserved" | "success" | "uncertain" | "failed" | "cache";
+  message: string;
+  createdAt: string;
+}
+export interface Draft {
+  id: string;
+  resourceId: string;
+  copyId: string;
+  platform: Platform;
+  poolId: string | null;
+  title: string;
+  body: string;
+  tags: string[];
+  coverText: string;
+  version: number;
+  resourceRevision: number;
+  shareVersion: number;
+  model: string;
+  reviewed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface BrowserBinding {
+  id: string;
+  platform: Platform;
+  alias: string;
+  windowId: string;
+  editorUrl: string;
+  linkPermission: "none" | "allowed";
+  ruleNote: string;
+  verifiedAt: string | null;
+  lastCheckedAt: string | null;
+  lastOpenedAt: string | null;
+  openError: string | null;
+}
+export interface SuggestionQuery {
+  id: string;
+  seed: string;
+  platform: string;
+  status: "pending" | "uncertain" | "completed";
+  message: string;
+  createdAt: string;
+  lastRequestedAt: string;
+  resultCount: number;
+  canRequest: boolean;
+}
+export interface ApiUsage {
+  currency: "CNY" | "USD";
+  requestCount: number;
+  cacheHits: number;
+  estimatedMicros: number;
+  estimateUnknownCount: number;
+  confirmedMicros: number;
+  confirmedUnknownCount: number;
+  pendingMicros: number;
+  pendingUnknownCount: number;
+  pendingCount: number;
+}
+export interface Publication {
+  id: string;
+  draftId: string;
+  draftVersion: number;
+  bindingId: string;
+  status: "opened" | "published";
+  url: string | null;
+  createdAt: string;
+}
+export interface AppSettings {
+  vaultPath: string | null;
+  exportCodes: boolean;
+  model: string;
+  openrouterConfigured: boolean;
+  bitUrl: string;
+  bitConfigured: boolean;
+  dailyAiBudgetMicros: number | null;
+  previousWorkspace: boolean;
+}
+export interface AppSnapshot {
+  accounts: Account[];
+  resources: Resource[];
+  resourceTotals: ResourceTotals;
+  shareChecks: ShareCheck[];
+  jobs: Job[];
+  pools: Pool[];
+  drafts: Draft[];
+  bindings: BrowserBinding[];
+  publications: Publication[];
+  plans: ApiPlan[];
+  apiCalls: ApiCall[];
+  asyncQueries: AsyncQuery[];
+  suggestionQueries: SuggestionQuery[];
+  apiUsage: { cny: ApiUsage; usd: ApiUsage };
+  settings: AppSettings;
+  appVersion: string;
+  dataPath: string;
+}
+export interface AiConnection {
+  checkedAt: string;
+  usageMicros: number | null;
+  usageDailyMicros: number | null;
+  limitMicros: number | null;
+  remainingMicros: number | null;
+  limitReset: string | null;
+  freeTier: boolean | null;
+  managementKey: boolean;
+}
+export interface ResourceInput {
+  id?: string;
+  copyId?: string;
+  title: string;
+  sourceText: string;
+  extractionCode?: string;
+  category: string;
+  tags: string[];
+  summary: string;
+  coverData?: string | null;
+  accountId: string;
+  directory: string;
+  rightsConfirmed: boolean;
+  selectedFiles?: RemoteFile[];
+  enqueue: boolean;
+}
+export interface TrafficQuery {
+  endpoint: Endpoint;
+  seeds: string[];
+  pages: number;
+  platform?: string;
+  type?: string;
+  startTime?: string;
+  endTime?: string;
+  useCache: boolean;
+  taskId?: string;
+}
+export interface TrafficResult {
+  keywords: Keyword[];
+  hotspots: Hotspot[];
+  taskId?: string;
+  pending?: boolean;
+  pendingSuggestions?: string[];
+  fromCache: boolean;
+}
+export interface AsyncQuery {
+  taskId: string;
+  seeds: string[];
+  status: string;
+  createdAt: string;
+  lastPolledAt: string | null;
+}
+export interface Result<T> {
+  ok: boolean;
+  value?: T;
+  error?: { code: string; message: string };
+}
+export interface AppApi {
+  invoke<T = unknown>(method: string, args?: unknown): Promise<T>;
+  onChanged(callback: () => void): () => void;
+}
+declare global {
+  interface Window {
+    panxu: AppApi;
+  }
+}

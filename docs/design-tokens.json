@@ -1,0 +1,8 @@
+{
+  "source": "用户已确认的盘序 v0.2 交互原型",
+  "light": { "background": "#f6f8fc", "surface": "#ffffff", "sidebar": "#f0f3f9", "text": "#1d2b42", "muted": "#62718a", "border": "#e1e7f0", "accent": "#2e61d5", "accentSurface": "#edf3ff", "success": "#258063", "warning": "#94651c", "danger": "#b9484e" },
+  "dark": { "background": "#111823", "surface": "#1a2433", "sidebar": "#151e2b", "text": "#e6edf8", "muted": "#a3b1c6", "border": "#303f53", "accent": "#8eafff" },
+  "geometry": { "sidebar": 204, "radius": 10, "controlRadius": 7, "contentPadding": 32 },
+  "typography": { "family": "-apple-system,BlinkMacSystemFont,PingFang SC,Microsoft YaHei,sans-serif", "body": 14, "secondary": 12, "heading": 26 },
+  "surfaces": ["账号管理", "资源库", "录入资源", "转存任务", "流量发现", "内容工作室", "发布准备", "连接与设置"]
+}

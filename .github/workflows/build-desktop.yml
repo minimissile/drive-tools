@@ -1,0 +1,49 @@
+name: Build Panxu desktop
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            command: npm run package:mac
+          - os: windows-latest
+            command: npm run package:win
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: ${{ matrix.command }}
+      - run: npm run verify:release
+      - run: npm run test:e2e:packaged
+        env:
+          PANXU_QA_DIR: ${{ runner.temp }}/panxu-qa
+      - uses: actions/upload-artifact@v7
+        with:
+          name: panxu-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: panxu-qa-${{ matrix.os }}
+          path: ${{ runner.temp }}/panxu-qa
+          if-no-files-found: ignore
+          retention-days: 14

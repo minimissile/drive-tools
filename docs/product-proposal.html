@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>盘序 · 网盘内容营销工作台｜需求与技术方案 v0.2</title>
+<style>
+:root{color-scheme:light dark;--bg:light-dark(#f5f7fa,#121720);--paper:light-dark(#fff,#1b2330);--ink:light-dark(#182434,#e8edf7);--muted:light-dark(#566579,#a5b3c7);--line:light-dark(#dfe5ed,#354357);--accent:light-dark(#245cce,#8cb1ff);--soft:light-dark(#edf3ff,#22334c)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.85 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}main{max-width:1060px;margin:40px auto;padding:54px 66px;background:var(--paper);border:1px solid var(--line);border-radius:14px}h1{font-size:32px;line-height:1.4;margin:12px 0}h2{margin:44px 0 12px;font-size:22px;border-top:1px solid var(--line);padding-top:26px}h3{font-size:17px;margin:25px 0 8px}p{margin:10px 0}a{color:var(--accent);text-underline-offset:3px}small,.meta{color:var(--muted)}.lead{font-size:18px}.callout{background:var(--soft);padding:16px 20px;border-radius:8px;margin:20px 0}table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{background:var(--soft);font-weight:600}code{font:13px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap;background:var(--bg);padding:18px;border:1px solid var(--line);border-radius:8px;font-size:13px;line-height:1.8}.flow{font-weight:600;color:var(--accent);line-height:2.2}li{margin:5px 0}.scroll{overflow-x:auto}nav{display:flex;gap:8px 18px;flex-wrap:wrap;margin:25px 0}nav a{font-size:14px}.status{font-weight:600}.accept td:first-child{width:25%}@media(max-width:700px){main{margin:0;padding:26px 20px;border:0;border-radius:0}h1{font-size:25px}table{min-width:640px}.scroll{margin:0 -4px}}@media print{main{border:0;margin:0;padding:0}body{background:white;color:black}h2{break-after:avoid}tr{break-inside:avoid}nav{display:none}a{color:inherit}}
+</style></head>
+<body><main>
+<div class="meta">产品提案 v0.2 · 2026年10月15日 · 原型评审阶段 · 补充多账号、本人链接、找词找热点与费用核算</div>
+<h1>盘序 · 网盘内容营销工作台</h1>
+<p class="lead">把资源采集、可靠转存、本地知识管理、关键词选题和多平台内容准备连成一条可追踪的工作流。</p>
+<div class="callout"><strong>当前交付范围：</strong>需求分析、公开资料调研、技术选型建议与交互原型。原型中的资源、转存结果、关键词指数、AI文案、账号和发布状态均为演示数据；尚未使用真实网盘会话、API Key 或比特浏览器，也未开始正式产品开发。</div>
+<nav><a href="#scope">需求与边界</a><a href="#accounts">多账号与本人链接</a><a href="#drive">转存调研</a><a href="#stack">技术选型</a><a href="#storage">本地知识库</a><a href="#ai">AI与5118</a><a href="#discovery">找词、热点与费用</a><a href="#platforms">10个平台策略</a><a href="#bit">比特浏览器</a><a href="#delivery">阶段与验收</a><a href="#sources">资料来源</a></nav>
+
+<h2 id="scope">1. 产品定位与完整流程</h2>
+<p>默认面向一个运营者、一个本地工作空间；每种网盘可以绑定多个账号并选择目标账号。保留工作空间与账号标识，为以后多人协作留结构，首版不建设云端账号系统。产品名称“盘序”为暂定名。</p>
+<p class="flow">录入资源 → 校验分享 → 选择文件与目标目录 → 同网盘转存 → 核验目标文件 → 创建自己的分享 → 写入本地知识库 → 提取关键词 → 5118扩词 → 人工选择词池 → 生成平台草稿 → 审阅 → 打开指定指纹窗口 → 人工发布与回填</p>
+<p><strong>需要补充的关键业务对象：</strong>来源分享链接、目标网盘文件、自己的分享链接是三个不同对象。转存成功不代表分享成功；知识库写入成功不代表内容已发布。每一步分别记录状态，避免文案错误使用他人的来源链接。</p>
+<div class="scroll"><table><thead><tr><th>模块</th><th>首版内容</th><th>边界与扩展</th></tr></thead><tbody>
+<tr><td>资源录入</td><td>标题、来源链接/提取码、分类、可选标签、说明正文、封面；从整段分享文案解析链接；本地上传、拖放、粘贴图片；保存草稿与去重提示</td><td>先支持百度与夸克。标题、分类由用户最终确认；原始分享文本保留以便追溯。图片限 JPEG/PNG/WebP，校验实际类型及大小，转存为本地附件</td></tr>
+<tr><td>网盘任务</td><td>登录状态、目标目录、文件选择、转存/核验/建分享分步任务、重试、取消、人工接管、错误原因</td><td>迅雷与UC仅展示“规划中”。跨盘任务首版明确不支持，不伪装成可用能力</td></tr>
+<tr><td>本地知识库</td><td>资源列表与详情、分类标签、文本搜索、状态过滤；SQLite事务保存；可选Obsidian目录镜像；导出记录与重试</td><td>Obsidian未安装不影响工具运行；首版搜索资源标题、摘要、标签和选入的文件名，非网盘文件全文</td></tr>
+<tr><td>流量发现与词池</td><td>AI种子词、5118长尾词、分平台下拉词、搜索量验证、热点雷达候选；筛选、去重、意图分组与手选词池；本地调用台账和估算费用</td><td>按真实字段区分数据源与更新时间；热点权限与新鲜度待联调；官方实际账单与本地估算分开显示</td></tr>
+<tr><td>内容工作室</td><td>10个平台模板、标题/正文/话题/口播脚本/封面文案、可编辑版本、引用资源与词池、渠道规则提示、导出与复制</td><td>首版不生成视频、不自动群发；平台事实与资源内容不足时提醒补充，不编造资源包含的内容</td></tr>
+<tr><td>分发工作台</td><td>平台账号到比特窗口映射、发布入口设置、打开指定窗口与页面、复制文案、下载素材、人工标记发布并回填URL</td><td>打开编辑器只记为“已打开”，不能自动记为“发布成功”；不负责提交、验证码处理或绕过审核</td></tr>
+</tbody></table></div>
+
+<h2 id="accounts">补充需求：同盘多账号与本人链接的强约束</h2>
+<p><strong>同一种网盘支持多个本人账号，登录会话隔离，账号可以灵活切换。</strong>账号管理包含新增、改名、重新登录、设默认、切换使用、启停和移除本地凭据；展示网盘类型、账号别名、脱敏UID、会话状态、默认目录和关联资源/任务。别名只是显示名称，不能作为文件或分享的所有权证明。</p>
+<ul>
+<li><strong>默认账号、当前账号和任务账号分别保存：</strong>默认账号用于新录入，当前工作账号用于筛选和新任务选择；任务创建时锁定目标账号ID与网盘实际UID。切换工作账号不会改变正在运行的任务、历史资源归属和旧分享链接。</li>
+<li><strong>每次录入可选目标账号与目录：</strong>仅列出与来源同一网盘类型的账号。账号过期时等待该账号重新登录，不静默换成其他账号。重新登录后必须核对实际UID，登录成另一个账号要阻止恢复。</li>
+<li><strong>同一资源可有多个本人账号副本：</strong>逻辑资源与资源副本分离；同一来源保存到账号A和B不算重复。转存幂等以来源文件集合、目标账号和目录组合判断；每个副本保留自己的文件ID与本人分享版本。创作时选择具体副本与分享。</li>
+<li><strong>只使用本人的对外链接：</strong>在目标账号A转存→用A核验目标文件归属→用A创建分享→核对分享归属与可用性→获得“可分发”状态。禁止用A转存后无提示切换B创建分享，禁止分享失败时回退来源链接。</li>
+<li><strong>对外链接单独校验：</strong>文案生成服务不接收来源链接；分发服务只读取已核验的owned_share。即使人工把第三方网盘URL粘进草稿，复制/导出/打开发布准备前也要拦截并提示。来源URL可保留在私有知识档案以便追溯，明确标记“仅内部追溯，禁止分发”。</li>
+<li><strong>移除账号不删除云端内容：</strong>停用后禁止新任务；有活动任务时须先完成或取消并核对结果。被资源引用的账号保留历史UID和归属，只移除凭据。云端文件删除和分享撤销均是额外显式操作。</li>
+</ul>
+<pre>可分发条件（全部成立）：
+  目标文件已核验
+  target_owner_uid == selected_account.provider_user_id
+  share_creator_uid == target_owner_uid
+  本人分享已生成且有效
+  分享版本与草稿绑定版本一致
+
+切换“当前账号” ≠ 修改历史任务目标 ≠ 改写已发布链接
+来源分享只用于读取、转存与内部追溯，永不作为分发回退链接。</pre>
+
+<h2 id="drive">2. 网盘转存：调研结论与实施建议</h2>
+<p>公开项目证明同网盘分享转存有可复用的工程基础，<strong>尚不能据此承诺你的账号下长期稳定</strong>。本次验证到文档和公开实现层面，未进行真实登录、转存、分享与容量测试。正式开发确认后，先做限量、可重复的技术验证，再锁定适配方案。</p>
+<div class="scroll"><table><thead><tr><th>路线</th><th>已确认依据</th><th>建议与待验证项</th></tr></thead><tbody>
+<tr><td>夸克网页接口适配</td><td><a href="https://github.com/Cp0204/quark-auto-save">quark-auto-save</a>公开实现会话登录与自动转存；可参考其<a href="https://github.com/Cp0204/quark-auto-save/blob/main/quark_auto_save.py">源码</a>理解分享解析、文件选择、转存及异步任务处理；另有<a href="https://github.com/zsshq/quark-auto-save">同名社区项目</a>在说明中列出创建分享能力，须独立验证，不推定两个项目功能相同</td><td>作为首选验证路线，单独封装适配器。逐一验证登录态、加密分享、多文件、目录、任务轮询和建分享。属于社区封装路线，不能因请求发往官方域名就称为官方授权的开放API。许可证和依赖在引入前核对，当前不直接复制代码</td></tr>
+<tr><td>百度开放平台</td><td><a href="https://yun.baidu.com/open/platform">官方平台</a>提供网盘集成及文件分享相关能力，平台已公告整合升级</td><td>优先核对应用审核、授权范围及“任意个人分享链接转存到本人网盘”是否覆盖。OAuth拿到访问令牌不等于获得该能力；公开资料不足以把它列为已确认主路径</td></tr>
+<tr><td>百度社区实现</td><td><a href="https://github.com/qjfoidnh/BaiduPCS-Go">BaiduPCS-Go</a>包含普通分享链接转存、文件选择和分享命令，支持多平台；仓库标注Apache-2.0</td><td>可作为独立Go辅助进程或实现参考；锁定版本与校验和。验证会话要求、目标路径、退出码与实际结果一致性；必要时扩展结构化输出。不依赖“秒传”功能，不对下载提速作承诺</td></tr>
+<tr><td>浏览器辅助转存</td><td>基于用户正常登录的网盘网页操作，保留人工完成步骤</td><td>接口不可用时打开分享/目标目录，由用户完成转存并触发核验。DOM变化会增加维护成本，不作为首选高并发引擎；此为设计备选，尚未实测</td></tr>
+<tr><td>跨网盘互转</td><td>不同提供方的文件ID与会话无法直接通用</td><td>预留下载→临时存储→上传→校验策略以及能力协商；未来需验证带宽、空间、配额、断点和清理，不能只新增一个按钮就称为已支持</td></tr>
+</tbody></table></div>
+<h3>转存引擎的必要约束</h3>
+<ul>
+<li><strong>按账号串行开始：</strong>首版每个账号默认同时执行一个转存任务，跨账号可有限并行；后续依据实际限流调整。网络错误退避重试；鉴权失败、提取码错误、容量不足、验证码和资源失效分别处理，避免无限重试。</li>
+<li><strong>先预检再转存：</strong>识别真实域名与分享ID，检测分享有效性、提取码、账号身份、目标目录和可获取的容量信息；支持选择文件及按页读取目录。非网盘白名单域名不自动访问。</li>
+<li><strong>幂等与恢复：</strong>以提供方、分享ID、源文件ID集合、目标账号和目录建立任务指纹；操作前记录任务与尝试ID。断网或崩溃后先查询远端任务及目标文件，再决定是否重试。不能仅按文件名判断转存成功。</li>
+<li><strong>核验结果：</strong>获取目标文件ID、路径、数量和可取得的大小；部分成功逐项记录。能获取哈希时使用哈希辅助，不能获取时明确核验程度，不伪造“完整性校验通过”。</li>
+<li><strong>新分享独立重试：</strong>目标文件确认后才创建分享。分享ID、URL、提取码、有效期与最后校验时间单独保存；分享失败可重试，不重复转存。分享失效会使相关草稿进入“链接需更新”。</li>
+<li><strong>取消的真实含义：</strong>取消本地等待不保证远端任务撤销。显示“正在核对远端结果”，不自动删除已经转存的文件；删除需用户明确操作。</li>
+</ul>
+<h3>为扩展预留的适配器合同（设计草案）</h3>
+<pre>DriveProvider
+  capabilities() → inspectShare / transferWithinProvider / createShare /
+                   download / upload / cancelRemoteTask
+  validateSession(accountRef)
+  inspectShare(source, extractionCode, cursor)
+  listDestinationFolders(accountRef, parentId, cursor)
+  transfer(selectedSourceIds, destination, idempotencyKey)
+  getTask(remoteTaskRef) / reconcileTask(taskRef)
+  verifyTarget(targetFileRefs)
+  createShare(targetFileRefs, expiry, extractionCode)
+  inspectOwnShare(shareRef)
+
+TransferStrategy
+  SameProviderTransfer       首版
+  CrossProviderStagedTransfer 后续；需download/upload能力同时可用
+
+统一错误：AUTH_EXPIRED / SHARE_EXPIRED / BAD_CODE / QUOTA_EXCEEDED /
+RATE_LIMITED / USER_ACTION_REQUIRED / PARTIAL_SUCCESS / NETWORK_ERROR</pre>
+<p>接口返回标准数据与原始错误码，禁止把各网盘的特殊限制隐藏在一个“成功/失败”布尔值里。源账号与目标账号分别建模，即使首版仅同提供方转存。</p>
+
+<h2 id="stack">3. 桌面技术选型</h2>
+<p><strong>建议：Electron + React + TypeScript + Vite + SQLite。</strong>界面为桌面应用，业务运行在受控的本地进程；网盘、AI、5118与比特浏览器各自使用适配器。以下为结合本项目需求的工程判断，非供应商对稳定性或性能的承诺。</p>
+<div class="scroll"><table><thead><tr><th>方案</th><th>适配性</th><th>本项目取舍</th></tr></thead><tbody>
+<tr><td>Electron</td><td>统一Chromium、Node生态，可管理本地文件、后台任务、隔离登录会话与CDP连接；包体和内存成本较高</td><td>推荐。当前主要复杂度在网盘会话与本地自动化集成，优先降低两端行为差异。遵循<a href="https://www.electronjs.org/docs/latest/tutorial/security">官方安全建议</a>，不让界面直接持有系统权限</td></tr>
+<tr><td>Tauri 2</td><td>较轻的桌面壳，Rust后端与系统WebView；<a href="https://v2.tauri.app/zh-cn/develop/sidecar/">支持外部辅助程序</a></td><td>可行备选。需维护Rust、WebView会话差异及可能的Node/Go辅助进程。若安装体积成为首要约束，再通过验证重新比较</td></tr>
+<tr><td>Python + WebView</td><td>社区网盘脚本复用方便</td><td>不作为主架构。桌面界面、分发和运行时打包仍需额外工程；可作为隔离辅助程序，用户不需要自行安装Python</td></tr>
+</tbody></table></div>
+<pre>React界面（无Node权限）
+          ↓ 受限、校验参数的IPC
+Electron主进程 / 应用服务
+  ├─ SQLite仓储、持久任务队列、Outbox
+  ├─ 资源与知识库服务 → 附件、Obsidian镜像
+  ├─ 网盘适配器 → 受控Worker / 可选Go辅助进程
+  ├─ OpenRouter适配器 / 5118适配器
+  ├─ 平台模板与版本化规则策略
+  └─ 比特Local API + CDP → 仅打开指定发布页
+
+凭据加密存储独立于Vault；渲染层只显示状态与脱敏标识</pre>
+<p>凭据使用系统保护能力加密保存（例如Electron <a href="https://www.electronjs.org/docs/latest/api/safe-storage">safeStorage</a> 对接的系统机制），并验证加密服务可用性；不可用时不明文降级。每个网盘账号使用隔离会话。启用contextIsolation、sandbox，关闭nodeIntegration，校验IPC来源与参数，外部链接按域名放行。</p>
+<p>打包工具建议electron-builder；目标为Windows x64的NSIS安装版<code>.exe</code>，macOS arm64/x64的<code>.dmg</code>（或经过验证的Universal构建）。SQLite原生依赖与辅助程序需要逐架构重建与签名。Windows与macOS分别构建、安装、升级和卸载验证；面向正常分发需要Windows代码签名及Apple Developer ID签名、公证。具体版本在开发启动时锁定，当前不预设过时版本号。参考<a href="https://www.electron.build/configuration/">打包文档</a>及<a href="https://www.electronjs.org/docs/latest/tutorial/code-signing">签名文档</a>。</p>
+<p>首版关闭应用后暂停本地任务，重新启动后核对远端状态并恢复。窗口关闭时有运行任务则提供“后台继续/退出”选择；系统休眠、网断和系统重启不应使任务被误记成功。</p>
+
+<h2 id="storage">4. SQLite + Obsidian：各自承担什么</h2>
+<p><strong>SQLite是运行记录的唯一权威源，Obsidian是可阅读、可迁移的知识视图。</strong>不能用Obsidian Markdown替代任务数据库，也不需要把Obsidian作为必须安装的服务。用户可以只用本工具，也可以指定现有Vault内的专用子目录。</p>
+<div class="scroll"><table><thead><tr><th>数据</th><th>保存方式</th><th>一致性规则</th></tr></thead><tbody>
+<tr><td>资源、分类、标签、链接版本</td><td>SQLite；外键、唯一索引、迁移与修订号</td><td>先保存草稿；转存未完成也不会丢失录入内容。完成后更新状态</td></tr>
+<tr><td>任务、尝试、远端任务ID、错误</td><td>SQLite jobs / job_attempts / events</td><td>事务提交、重启恢复、单账号互斥，不依赖界面内存计时器</td></tr>
+<tr><td>封面与附件</td><td>应用数据目录，按内容哈希去重；Vault内复制独立附件</td><td>校验真实格式、大小与写入路径；封面失败不丢整条资源</td></tr>
+<tr><td>知识笔记</td><td>Vault/盘序/Resources/&lt;资源ID&gt;.md；封面用相对路径；YAML平铺属性</td><td>数据库事务内生成outbox事件，导出用临时文件+原子替换；失败进入待同步，可独立重试</td></tr>
+<tr><td>人工修改笔记</td><td>自由正文保留，生成区域有边界与内容哈希</td><td>首版从应用单向导出；检测外部修改后提示差异与冲突，不覆盖。用户可显式选择导入可编辑字段；任务与凭据禁止从笔记反向改写</td></tr>
+<tr><td>关键词、词池与内容版本</td><td>SQLite关系数据；可导出到资源笔记下的关联内容</td><td>记录模型、模板、规则版本、输入快照、采集日期和费用，支持追溯</td></tr>
+<tr><td>Cookie、API Key、会话</td><td>系统加密的凭据存储或隔离会话存储</td><td>禁止写入Vault、普通导出、日志和AI提示词；默认备份不包含凭据，迁移后重新登录</td></tr>
+</tbody></table></div>
+<h3>建议数据模型</h3>
+<pre>workspaces       工作空间与本地路径
+resources        标题、摘要、类别、封面引用、revision、归档状态
+resource_tags    标签关联
+drive_accounts   提供方、脱敏展示名、实际UID、凭据引用、会话状态、启停
+account_prefs    每网盘默认账号、当前工作账号、默认目录
+resource_copies  资源×目标账号×目录；实际文件归属与核验凭证
+source_shares    来源URL、分享ID、受保护的提取码引用、有效状态
+resource_files   来源文件ID、层级、目标文件ID、大小、核验状态
+owned_shares     副本ID、创建账号与UID、本人分享URL、提取码引用、有效期、链接版本
+jobs/attempts    任务状态、远端ID、幂等键、检查点、重试时间
+keyword_runs     种子词、接口/模型、成本、缓存键、采集时间
+discovery_runs   找词/热点来源、查询条件、源更新时间、抓取时间
+api_credentials 接口级Key引用；允许不同5118接口配置不同Key
+api_call_ledger 请求ID、业务任务、接口、尝试/轮询、计费单位、状态与未知扣费
+api_price_lots   实际套餐价格/次数、赠送/试用额度、有效日期、估价方法
+billing_syncs   官方用量/账单快照、同步来源、对账差异、待核实费用
+keywords/pools   原始指标、数据源、搜索意图与词池成员
+content_versions 平台、内容版本、输入与规则快照、链接版本、审核状态
+browser_bindings 平台账号、比特窗口ID、编辑器URL、映射验证时间
+publication_logs 已打开/人工已发布、回填URL、人工确认时间
+note_exports     笔记路径、导出revision、哈希、冲突/失败原因
+outbox           待处理副作用及处理状态</pre>
+<p>Obsidian使用本地文件和<a href="https://obsidian.md/help/properties">YAML属性</a>，可配合<a href="https://github.com/obsidianmd/obsidian-help/blob/master/en/Bases/Bases%20syntax.md">Bases</a>展示资源，但不依赖社区插件。笔记包含资源ID、分类、标签、来源与本人分享、转存日期、资源摘要、附件引用与生成内容索引。默认不把分享提取码明文镜像到Vault；用户可在设置中开启，并看清其会进入Vault同步和备份。</p>
+<h3>检索与备份</h3>
+<p>首版先做SQLite索引与FTS5。中文标题/摘要使用trigram子串检索；SQLite的<a href="https://www.sqlite.org/fts5.html">trigram</a>对不足三个字符的查询有限制，1–2字查询使用有结果上限的LIKE或分类/标签精确匹配，验证真实中文语料的召回率。参数绑定并转义查询语法，避免把用户输入当SQL或FTS表达式。大规模或语义检索后续再增加向量索引，不先引入独立数据库服务。</p>
+<p>备份采用SQLite在线备份或受控检查点后的一致快照，连同附件和导出清单；不能只复制正在写入的db文件而遗漏WAL。先备份再迁移，保留恢复入口。删除本地条目默认为归档，不联动删除网盘文件或撤销分享。</p>
+
+<h2 id="ai">5. OpenRouter 与 5118 的工作方式</h2>
+<ol>
+<li>用户补充资源摘要或选入的文件清单。仅有一个分享链接不能自动知道文件正文；首版不默默下载、OCR或阅读整个网盘目录。</li>
+<li>使用用户的OpenRouter Key从标题、摘要、文件名中提取种子词；选支持结构化输出的模型，按JSON Schema验证，失败重试有上限并可手动输入。<a href="https://openrouter.ai/docs/guides/features/structured-outputs">OpenRouter文档</a>说明结构化输出取决于模型支持情况。</li>
+<li>种子词先供用户删改，再调用已购买权限的5118“海量长尾词挖掘API v2”。记录查询条件、分页、来源、时间及接口实际返回字段，缓存同条件结果；调用前显示预估次数，支持单次与每日预算上限。</li>
+<li>保留搜索量/指数的原始名称及来源，缺失值显示“未提供”。按需求意图、资源匹配度分组，用户选择词池。一个资源可以对应多个词池，相关度模型打分如有使用必须标为估计值。</li>
+<li>根据平台和词池生成内容包：标题、正文、话题、封面文案、短视频脚本、资源说明与允许的获取方式。先通过确定性的渠道策略过滤，再提供AI建议；AI不能修改政策以放行外链。</li>
+<li>人工编辑、预览、检查资源事实和链接版本后保存草稿。内容修改后重新检查；使用AI生成内容时保留平台所需的声明/标识入口，具体要求按平台后台核对。</li>
+</ol>
+<p>v0.2补充调研已直接读取5118官方接口详情和从商城链接的官方文档压缩包，确认参数、返回字段及套餐计次方式。官方压缩包以<code>https://apis.5118.com</code>为域名，部分旧网页示例仍写HTTP并关闭证书检查；实现时统一使用HTTPS且验证证书，禁止照搬关闭TLS校验的示例。不同接口分别购买权限、配置Key和核算用量，不能假定一个Key和统一余额覆盖全部接口；真实账号额度仍需联调确认。</p>
+<p>原型中的“百度PC指数（示例）”仅说明数据展示结构。不能将这些数值解读为真实当前流量或其他平台的搜索量，也不能根据AI生成的流量数字作选题判断。调用OpenRouter时默认只发送用户选择的资源文字，分享URL、提取码和Cookie不传入；OpenRouter费用按可取得的实际用量/金额记录；5118费用使用下节的独立台账与对账机制，提前显示的只能是估算。</p>
+
+<h2 id="discovery">补充调研：5118找词、找热点与费用能做到哪一步</h2>
+<p>“流量发现”作为独立工作入口，既能从已有资源开始扩词，也能先发现词或热点，再匹配已有资源或进入待采集清单。来源平台、API更新时间、应用获取时间和本地评估分开保存，不能将旧数据刷新下载的时间当成热点发生时间。</p>
+<div class="scroll"><table><thead><tr><th>能力与官方文档</th><th>已确认的合同</th><th>计费单位与首档套餐</th></tr></thead><tbody>
+<tr><td><a href="https://www.5118.com/apistore/detail/8cf3d6ed-2b12-ed11-8da8-e43d1a103141/-1">海量长尾词API v2</a></td><td>POST /keyword/word/v2；keyword、页码、每页最多100、排序与日期过滤；返回长尾词及接口实际提供的各类指数/检索量</td><td>1关键词×1页＝1次。当前公开首档200元/1万次，摊销0.02元/次；最低宣传价0.003元/次对应更大套餐</td></tr>
+<tr><td><a href="https://www.5118.com/apistore/detail/597e2193-9490-eb11-8daf-e4434bdf6706/-1">下拉联想词API</a></td><td>POST /suggest/list；指定word和platform。文档列出百度、抖音、小红书、知乎等；返回联想词、来源平台与add_time，不将其误当搜索量</td><td>1关键词×1平台＝1次。首档300元/1万次，摊销0.03元/次</td></tr>
+<tr><td><a href="https://www.5118.com/apistore/detail/90f3d6ed-2b12-ed11-8da8-e43d1a103141/-1">关键词搜索量API v2</a></td><td>POST /keywordparam/v2；最多50词一次提交，返回taskid后获取结果。详情页建议60秒提取间隔；按实际字段展示抖音/百度等指标</td><td>1关键词＝1次，50词批量提交并非只扣1次。首档300元/1万次，摊销0.03元/词；结果轮询的扣次规则需账号验证</td></tr>
+<tr><td><a href="https://www.5118.com/apistore/detail/2b74bf4d-1750-e811-80c9-1866da4dbcc0/-1">热点雷达API</a></td><td>详情页标注正常；POST /radar，支持关键词、类型、起止时间，最多10条/页；字段包括热点名、update_date、事件热度与发展脉络。当前4页商城目录及官方压缩包未列出该接口，现售/开通资格与数据时效必须进一步核实</td><td>10条热点数据计1次。首档500元/1万次，摊销0.05元/次；作为需验证的候选接口，不宣称已取得实时热点能力</td></tr>
+</tbody></table></div>
+<p>以上价格来自2026年10月15日公开详情页，用于选型参考；实际费用按你的套餐、试用/赠送额度、优惠和计费规则计算。先做下拉词与长尾词组合找词，热点雷达验证可用后启用；若接口无法开通，保留手工导入热点入口，不将网页会员功能等同为可调用API，也不静默抓取登录后网页。</p>
+<h3>费用统计结论：能统计本地用量并估价，尚未确认可自动查询官方精确账单</h3>
+<p>本次检查了公开商城目录、上述四个接口详情和商城提供的官方参考包。返回合同主要是<code>errcode/errmsg/data</code>和业务字段，<strong>未找到明确公开的账户余额、剩余配额、逐请求实际扣费或账单查询API</strong>；这表示“公开资料中未确认”，不是断言5118绝对没有内部或企业专属接口。<a href="https://account.5118.com/signin/myapi">管理我的API</a>是需登录的网页入口，不当作机器可读费用接口。当前没有登录你的5118账号，也没有发出付费请求。</p>
+<ul>
+<li><strong>请求台账：</strong>记录接口、API凭据引用、任务ID、请求/重试/轮询次数、结果码、时间、分页、关键词数和本地缓存命中。缓存不发出请求，外部请求数计0。</li>
+<li><strong>计费台账：</strong>“预期计费单位”“供应商确认单位”“待核实单位”分开；成功响应也不自动等于已确认扣费。超时、失败、部分返回、异步轮询和重试要保留不确定性，不能默认免费或默认重复扣费。</li>
+<li><strong>套餐估算：</strong>按用户实际购买的每接口套餐录入价格与额度，可记录多个套餐批次、试用及赠送。单位摊销价＝实付金额÷该批次有效计费额度；不把商城“低至”价格直接用到所有用户。费用以足够精度的整数单位记录，避免浮点误差。</li>
+<li><strong>两种金额区分：</strong>“本地估算消耗”表示预付套餐的摊销消耗，不是这次请求新扣了一笔人民币；“已付款金额/官方确认扣费”必须有订单、账单或供应商明确字段依据。官方未返回则显示“未同步”，不能显示0。</li>
+<li><strong>预算：</strong>发起前依据关键词×页数/平台数/关键词数预留额度；并发与超时占用预算，失败或取消只有在确定未计费后释放。提供单任务、每日预算上限和预计余额，预估余额必须标记为本地值。</li>
+<li><strong>对账：</strong>首版允许手工记录官方后台用量/剩余次数/账单快照；仅在后台实际支持导出时提供文件导入。保留供应商适配器口子，若取得官方用量接口再启用自动同步。显示上次对账时间与差额，不自动覆盖本地历史。</li>
+</ul>
+<p>例：使用长尾词首档0.02元/次，3个种子词各查询2页，预期6个计费单位，摊销估算0.12元；不是“发1个批量任务只算1次”，也不是6×最低宣传价。真实账单仍需官方确认；费用原型里的数字均为虚构演示。</p>
+<p>热点选题流程：关键词/类别/时间窗口筛选→查看原始更新时间与事件脉络→匹配资源副本→人工收藏到词池→平台草稿。没有匹配资源时加入待采集清单；不编造热点事实、不承诺接口提供平台上全部最新热搜榜。</p>
+
+<h2 id="platforms">6. 10个平台：外链能力与营销规则分开建模</h2>
+<p>不能只分成“能明发”和“需要隐晦引流”两档。支持输入网址不等于允许用它营销；私信、口令、谐音、评论区和图片二维码也不是自动安全的替代方式。建议建模为：<strong>允许相关链接、需账号/场景确认、仅批准的站内能力、未核实</strong>，并按平台、场景、账号、内容类型、规则日期保存证据。</p>
+<div class="scroll"><table><thead><tr><th>渠道与内容形态</th><th>首版默认获取策略</th><th>核实状态与依据</th></tr></thead><tbody>
+<tr><td>抖音：口播脚本、分镜、字幕、简介</td><td>正文不直接植入网盘链接；使用账号已获准的站内组件。无批准组件时只生成有价值的内容正文，不自动改成私信口令引流</td><td>已查到<a href="https://developer.open-douyin.com/m/docs/resource/zh-CN/mini-app/operation/platform-capabilities/video/video-creator-promote-mount-mgmt-spec">小程序短视频创作者规范</a>的站外购买限制；它的适用范围不是所有普通视频，普通账号具体能力仍需后台核对，当前采用保守产品默认</td></tr>
+<tr><td>快手：视频脚本、封面文案、简介</td><td>默认仅站内允许的组件；不把评论或私信当作绕开导流限制的入口</td><td><a href="https://www2.kuaishou.com/norm?tab=community">社区管理规范</a>覆盖广告与内容治理；未取得普通短视频全部场景的网盘链接明确许可，账号与组件权限待核实</td></tr>
+<tr><td>小红书：图文提纲、标题、正文、话题</td><td>默认不写网盘URL/提取码/变体口令；已开通的官方商业组件按其规则使用</td><td><a href="https://school.xiaohongshu.com/rule/list/645b79800000000000000000?jumpFrom=school">官方规则中心</a>列有交易导流规则；本次未完整取得规则详情，不能扩大为对全部普通笔记的绝对结论</td></tr>
+<tr><td>公众号：文章、摘要、排版、获取说明</td><td>按账号后台实际能力选择阅读原文、允许的链接或合规自动回复；不诱导转发、点赞或强制关注后才领取</td><td><a href="https://weixin.qq.com/agreement/weixin_external_links_content_management_specification">官方外链规则入口</a>本次未能读取，标记“待账号核实”；正文外部超链接资格、阅读原文和回复需分别验证</td></tr>
+<tr><td>微博：短文、话题、配图说明</td><td>可准备相关链接，导出前需确认账号场景与域名可用性；标明资源来源与推广性质，不刷屏</td><td><a href="https://m.weibo.cn/outlink_rules.html">外链管理规范</a>及<a href="https://service.account.weibo.com/h5/roles/gongyue">社区公约</a>明确存在外链审核与营销管理，不能承诺所有网盘链接可跳转</td></tr>
+<tr><td>百度贴吧：讨论帖、资源说明</td><td>先选择具体吧并记录吧规、主题匹配和允许的发布区；未确认时只生成讨论内容，不默认附网盘链接</td><td><a href="https://tieba.baidu.com/tb/zt/notice.html">官方违规处理说明</a>及<a href="https://tieba.baidu.com/tb/cms/manager_apply/bz_agreement.html">吧主协议</a>仅提供一般治理依据；具体吧规必须逐吧核实</td></tr>
+<tr><td>豆瓣：主题讨论、书影音相关经验</td><td>默认关闭营销式资源分发；仅在话题、小组规则与内容均允许时准备真实讨论，普通外链和营销外链区分</td><td><a href="https://www.douban.com/about/guideline">社区指导原则</a>明确治理以营销推广或导流为目的、影响体验的行为；不建议列为默认资源引流渠道</td></tr>
+<tr><td>X / Twitter：短帖、线程</td><td>相关、安全、可合法分享的链接可作为候选；禁止重复批量灌链接或诱骗跳转</td><td><a href="https://help.x.com/en/safety-and-security/phishing-spam-and-malware-links">链接管理</a>与<a href="https://help.x.com/en/rules-and-policies/authenticity">真实性政策</a>支持“有条件链接”判断；仍需实际检查域名、内容与账号状态</td></tr>
+<tr><td>知乎：问题匹配的回答、教程文章</td><td>正文先完整回答问题；相关参考链接需审阅，资源营销优先使用账号已获准能力；不做批量同文回答</td><td><a href="https://www.zhihu.com/plainterms">协议</a>及<a href="https://www.zhihu.com/knowledge-plan/manual">创作者手册</a>说明社区与反垃圾要求，网盘分享各场景明确权限待核实</td></tr>
+<tr><td>CSDN：技术教程、实操步骤、示例</td><td>与技术内容直接相关的引用和官方推广能力分别处理；默认不把第三方网盘营销链接塞入正文</td><td><a href="https://blog.csdn.net/blogdevteam">官方博客</a>及其<a href="https://blog.csdn.net/blogdevteam/category_9581726.html">帮助文档目录</a>可核对创作与推广规则；已读到官方规则的<a href="https://huaweicloud.csdn.net/63a567cab878a5454594682e.html">官方博客镜像</a>，仍需在当前编辑后台复核适用版本</td></tr>
+</tbody></table></div>
+<p>以上是首版模板的保守默认与证据范围，不是对各平台所有场景的放行承诺。规则记录包含来源、适用场景、核实日期与复核状态；发布前显示所用规则版本。规则过期或未核实时不自动补上网盘链接，用户仍可保留纯内容草稿。内容形式的建议属于产品设计判断，不宣称掌握各平台未公开的推荐算法。</p>
+
+<h2 id="bit">7. 比特浏览器：首版可靠地打开正确窗口</h2>
+<p><a href="https://doc.bitbrowser.cn/api-jie-kou-wen-dang/ben-di-fu-wu-zhi-nan">本地服务指南</a>说明从客户端设置获取Local API地址；<a href="https://doc.bitbrowser.cn/api-jie-kou-wen-dang/liu-lan-qi-jie-kou">浏览器接口文档</a>列出<code>POST /health</code>、<code>/browser/list</code>、<code>/browser/open</code>，打开窗口返回WebSocket/HTTP调试地址。文档中的open参数不是直接传任意发布URL的合同，不能假定<code>/browser/open({url})</code>可用。</p>
+<ol>
+<li>用户在设置填写本机Local API地址及版本所需认证信息；默认只接受localhost/127.0.0.1/::1，远程主机需单独配置与评估。</li>
+<li>健康检查→分页读取窗口列表→将“平台账号”绑定到指定窗口ID。显示窗口名称与平台，避免发错账号。</li>
+<li>点击发布准备时，调用<code>/browser/open</code>指定窗口ID，再连接返回的CDP会话；复用或新建对应平台标签页并导航到允许的编辑器URL。首版只导航，不填表、不点发布。</li>
+<li>每个平台发布入口可配置并保存最后核实日期；带登录态的token、临时素材ID不固化。公众号、贴吧、豆瓣、知乎存在不同编辑场景，需选具体目标，不假设一个URL适用于全部内容类型。</li>
+<li>先显式复制文案，再打开页面；封面单独下载。比特未安装、未启动、API鉴权失败、窗口不存在、导航失败分别提示。可以手动复制入口，不能静默打开系统默认浏览器后报告“指定窗口已打开”。</li>
+<li>成功打开仅记为“编辑器已打开”；用户实际提交后手动标记“已发布”并回填URL。版本记录保留实际使用的草稿。</li>
+</ol>
+<p>不在界面写死某个默认端口；以用户本机设置为准。首版导航采用受限CDP，不需要安装额外Chromium。Windows与macOS、比特客户端版本/套餐/API权限均进入真实联调验收。</p>
+
+<h2 id="delivery">8. 开发阶段与验收门槛</h2>
+<div class="scroll"><table><thead><tr><th>阶段</th><th>交付</th><th>进入下一阶段的条件</th></tr></thead><tbody>
+<tr><td>当前：原型评审</td><td>本方案、交互原型、页面与异常流程</td><td>用户确认产品流程、首版范围、界面方向；此前不接真实凭据、不创建正式产品工程</td></tr>
+<tr><td>确认后：技术验证</td><td>夸克/百度各自从分享解析到本人分享的闭环；比特指定窗口导航；5118 HTTPS和付费接口样例；本地笔记写入验证</td><td>明确各账号可用能力及失败分类。若某网盘只支持人工辅助，须单独告知并确认，不能把“辅助”算成自动转存完成</td></tr>
+<tr><td>首版A：资源闭环</td><td>桌面壳、连接与凭据、资源录入与图片粘贴、持久任务、双网盘适配、本地DB和Obsidian镜像、搜索与备份</td><td>在重启、断网、失效链接、容量不足和部分成功情况下不丢记录、不误报成功、不重复转存</td></tr>
+<tr><td>首版B：内容闭环</td><td>OpenRouter、5118、词池、10个平台模板、版本与渠道策略、比特映射与发布回填</td><td>真实数据与示例区分；预算可控；渠道不会误用来源链接；打开页面不误记发布；账号对应正确</td></tr>
+<tr><td>发行验收</td><td>Windows EXE、macOS DMG、签名、公证、安装/升级/恢复说明</td><td>干净机器无需开发环境即可安装使用；两种系统分别实测；安装器不携带个人凭据</td></tr>
+<tr><td>后续版本</td><td>迅雷/UC、跨盘、批量导入、更细平台数据、链接巡检、可选语义搜索</td><td>独立能力验证与成本评估后加入，不影响首版同盘方案</td></tr>
+</tbody></table></div>
+<h3>关键验收样例</h3>
+<div class="scroll"><table class="accept"><thead><tr><th>场景</th><th>正确行为</th></tr></thead><tbody>
+<tr><td>同盘多账号与任务锁定</td><td>夸克/百度各有多个账号；切换当前账号不影响已有任务，重新登录UID不一致时暂停；默认账号仅影响新录入</td></tr>
+<tr><td>本人文件与分享归属</td><td>所选账号保存并核验目标文件，用同一账号创建分享；UID不匹配、缺少本人分享或人工粘入来源URL时阻止分发</td></tr>
+<tr><td>找词、找热点与费用</td><td>下拉词展示来源平台，热点展示源更新时间；50词批量请求按50词预估，3词×2页按6次预估；超时保留待核预算，缓存不计外部请求，官方账单缺失时显示未同步</td></tr>
+<tr><td>粘贴封面与重复录入</td><td>支持剪贴板图片预览/替换；相同分享提示已有记录，可追加不同目标副本；分类必选、标签可空</td></tr>
+<tr><td>夸克和百度正常转存</td><td>公开/提取码分享，单文件/多文件/目录；获得目标文件引用及新分享；核验显示实际程度</td></tr>
+<tr><td>登录失效与验证码</td><td>暂停该账号任务、保留草稿与检查点，用户重新登录后核对并恢复</td></tr>
+<tr><td>转存成功但建分享失败</td><td>标记“已转存/分享待处理”；仅重试分享；含链接的分发保持阻止</td></tr>
+<tr><td>笔记导出失败或手改冲突</td><td>资源仍可在本工具检索；显示“待同步/冲突”，保留人工内容并可重试</td></tr>
+<tr><td>5118额度不足或指标为空</td><td>显示实际原因；使用缓存或手工词池；空值不显示为0或伪造流量</td></tr>
+<tr><td>受限渠道与旧分享链接</td><td>默认不带URL；更换分享版本后提示重生成或更新文案；人工审阅不绕过确定性限制</td></tr>
+<tr><td>比特未启动/窗口失效</td><td>显示错误与映射修复；不误报发布；可以单独复制文案</td></tr>
+<tr><td>重启与升级</td><td>恢复数据库与队列；不重复远端副作用；升级前备份并验证回滚</td></tr>
+</tbody></table></div>
+<h3>原型确认时需要作出的决定</h3>
+<p>确认“本地优先、单人首版、双网盘同盘转存、自动建本人分享、SQLite主库+可选Obsidian镜像、10个平台内容包、比特仅导航”这一范围即可进入技术验证。后续联调才需要你在本地连接测试网盘账号、填写自己的API Key、选择Vault并提供少量有权分享的样例；现在不需要把密码或Key发在聊天中。</p>
+
+<h2>9. 原型检查范围</h2><p>已通过JavaScript语法与Node VM交互逻辑检查。v0.2覆盖9个页面、同盘账号切换与默认账号隔离、任务账号锁定、同来源多账号副本、UID归属不匹配拦截、第三方来源链接拦截、逐接口凭据占位、找词/热点/费用三个页签、热点转为种子词、计费单位换算、超时预留预算和缓存免请求，以及原有资源与内容流程。该检查不等同于真实浏览器渲染验收。预览浏览器策略阻止本地file协议，本轮未完成浏览器视觉核验；真实剪贴板图片、跨系统布局和外部服务均留待后续验证。</p>
+<h2 id="sources">10. 调研记录与证据等级</h2>
+<p>资料检索日期：2026年10月15日。优先采用官方文档和项目作者仓库；社区实现可作为实现证据，不能替代平台授权。部分网页存在登录、读取超时或动态渲染限制，上文已单独标明。v0.2通过直接读取官方公开HTML，补充了长尾词、下拉词、搜索量与热点雷达的字段与定价证据；同时只读检查了商城链接的官方参考包，未安装或执行下载内容。搜索索引片段不能证明付费账号拥有权限。本次未产生真实API费用或任何转存、建分享、发布操作。</p>
+<ul>
+<li>网盘：<a href="https://yun.baidu.com/open/platform">百度开放平台</a>；<a href="https://github.com/Cp0204/quark-auto-save">夸克项目</a>；<a href="https://github.com/qjfoidnh/BaiduPCS-Go">百度项目及许可证/更新记录</a>。</li>
+<li>v0.2新增来源：<a href="https://www.5118.com/apistore/detail/597e2193-9490-eb11-8daf-e4434bdf6706/-1">下拉联想词API</a>；<a href="https://www.5118.com/apistore/detail/90f3d6ed-2b12-ed11-8da8-e43d1a103141/-1">关键词搜索量API v2</a>；<a href="https://www.5118.com/apistore/detail/2b74bf4d-1750-e811-80c9-1866da4dbcc0/-1">热点雷达API</a>；<a href="https://s0.5118img.com/assist/images/apistore/5118-data.rar">商城链接的官方参考包</a>；<a href="https://account.5118.com/signin/myapi">我的API（需登录，未访问账号）</a>。公开资料未确认费用查询API，不应将其表述为绝对不存在。</li>
+<li>关键词与AI：<a href="https://www.5118.com/apistore">5118 API商城</a>；<a href="https://www.5118.com/apistore/detail/8cf3d6ed-2b12-ed11-8da8-e43d1a103141/-1">长尾词API详情（v0.2已直接读取）</a>；<a href="https://openrouter.ai/docs/guides/features/structured-outputs">OpenRouter结构化输出</a>。</li>
+<li>桌面与本地数据：<a href="https://www.electronjs.org/docs/latest/tutorial/security">Electron安全</a>；<a href="https://www.electronjs.org/docs/latest/api/safe-storage">凭据存储</a>；<a href="https://www.electronjs.org/docs/latest/tutorial/code-signing">代码签名</a>；<a href="https://www.electron.build/configuration/">electron-builder</a>；<a href="https://v2.tauri.app/zh-cn/develop/sidecar/">Tauri辅助进程</a>；<a href="https://www.sqlite.org/fts5.html">SQLite FTS5</a>；<a href="https://obsidian.md/help/properties">Obsidian属性</a>。</li>
+<li>浏览器：<a href="https://doc.bitbrowser.cn/api-jie-kou-wen-dang/ben-di-fu-wu-zhi-nan">比特本地服务指南</a>；<a href="https://doc.bitbrowser.cn/api-jie-kou-wen-dang/liu-lan-qi-jie-kou">比特浏览器API合同</a>。</li>
+<li>平台规则：按第6节逐项保留来源与适用范围；本方案中的保守产品默认与已证实的平台规则分开说明。</li>
+</ul>
+</main></body></html>
