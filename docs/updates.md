@@ -76,21 +76,18 @@ Apple 会员和 Windows 证书是两项独立资质。申请审核通过后仍�
 ## 发布流程
 
 1. 同步修改 `package.json` / `package-lock.json` 的版本，编写 `docs/releases/<version>.md`。只使用稳定 `x.y.z`。
-2. 完成检查并提交，推送 `v<version>` 标签触发 `.github/workflows/release-desktop.yml`。手动运行也必须选择对应标签，选择分支会被阻止。
-3. CI 构建 macOS ARM64 / x64 签名公证 DMG、ZIP 和 Windows x64 签名 NSIS EXE。两平台分别执行测试、归档校验、清单校验及打包交互回归。
-4. 两平台全部成功后合并产物，核对版本、架构、文件大小、SHA512、ZIP、blockmap，再生成统一的 `SHA256SUMS.txt`。
+2. 完成检查并提交，推送与源码一致的 `v<version>` 标签。需要云端构建时手动触发 `.github/workflows/release-desktop.yml` 并选择对应标签，选择分支会被阻止；推送标签不会自动上传私钥或触发未配置凭据的构建。
+3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。0.0.1 仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。
+4. 全部已启用平台成功后，核对版本、架构、文件大小、SHA512、ZIP、blockmap，再生成统一的 `SHA256SUMS.txt`。最终检查拒绝缺少已启用平台，也拒绝混入未启用平台的清单或安装包。
 5. 上传到公开仓库的**草稿 Release**，确认所有附件均存在。已公开的同版本不会覆盖；失败后可重跑同一草稿。
 6. 维护者下载验收后，在 GitHub 正式发布草稿并设为最新版本，客户端才会看到更新。不要设为 prerelease。
 
-必须保留全部附件：
+0.0.1 必须保留的附件：
 
 ```text
 Panxu-Studio-<version>-mac-arm64.dmg / .zip
-Panxu-Studio-<version>-mac-x64.dmg / .zip
-Panxu-Studio-<version>-win-x64.exe
 对应的 *.blockmap
 latest-mac.yml
-latest.yml
 SHA256SUMS.txt
 ```
 
@@ -108,7 +105,7 @@ npm run package:win
 npm run verify:release
 npm run verify:updates
 npm run test:e2e:packaged
-# 合并两平台产物后
+# 所有已启用平台产物准备完毕后
 node scripts/verify-updates.mjs --all
 # 仅验收本机构建时，可显式限定架构；正式发布禁止缩小范围
 node scripts/verify-updates.mjs --arch=arm64
@@ -124,3 +121,27 @@ node scripts/verify-updates.mjs --arch=arm64
 - 数据库已有迁移前备份和未来版本保护，旧安装包不能强行打开更高版本数据库。确需回退时先关闭应用、完整复制数据目录，再使用匹配版本的快照；便携恢复继续使用设置页的备份导出/预检流程。
 - 日志在当前数据目录 `logs/updater.log`，512 KiB 轮转一份，只记录版本、阶段、错误代码，不记录凭据、响应正文或临时下载链接。
 - 0.3.1 及更早版本没有更新入口，首次需手动安装具备此功能的版本。真实系统升级验收需要两份使用相同发行仓库、同一签名身份的安装包，在 macOS 和 Windows 分别执行“旧版本 → 新版本”。控制器和界面测试不能替代此验收。
+
+## 0.0.1 正式版起点（2026-10-20）
+
+内部联调版本历史已归档，正式版本从 0.0.1 开始。旧版无法通过自动更新降级，首次手动安装；自动更新继续只接受更高稳定版本，不修改安全边界。
+
+开发默认使用独立的“盘序开发”工作空间，正式版继续使用“盘序”。安装包不包含任何开发数据、密钥或账号；原有数据不因重置版本号被删除。生产禁用 DevTools，也不会加载开发环境 URL。
+
+本机 macOS 可直接使用钥匙串中的 Developer ID Application 证书，无需为本机构建导出私钥。先在交互终端运行：
+
+```sh
+npm run release:setup:mac
+```
+
+输入 Apple ID、应用专用密码和证书对应的 Team ID 后，凭据保存在本机钥匙串。随后运行：
+
+```sh
+APPLE_KEYCHAIN_PROFILE=panxu-notary npm run release:mac
+```
+
+`release:mac` 未显式指定其他公证认证方式时，会自动使用本机钥匙串 `panxu-notary`，只制作 Apple Silicon ARM64 包。`npm run test:e2e:production` 检查全新用户状态与设置恢复；首次基线可运行 `PANXU_NATIVE_UPDATE_TEST=1 CSC_NAME="你的 Developer ID 签名身份" node scripts/e2e-native-update.mjs`，使用独立应用副本和临时数据真实执行 0.0.0→0.0.1 安装重启。此演练不代表正式 GitHub 更新源已验收。
+
+`release:mac` 与 `release:win` 强制检查签名、公证、辅助程序及版本说明，缺项立即退出。仅有 Apple Developer 会员不能签名 Windows；Windows 未办理代码签名时不能宣称已验收安全自动更新。正式签名需要稳定的同一发行主体，不应在不同版本随意更换。
+
+本轮状态见 [0.0.1 验收记录](releases/0.0.1-readiness.md)。

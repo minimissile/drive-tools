@@ -1,3 +1,4 @@
+import { runtimeDataPath } from "./runtime-paths";
 import {
   app,
   BrowserWindow,
@@ -53,10 +54,24 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
-const defaultDataPath = app.getPath("userData");
+const defaultDataPath = runtimeDataPath(app.getPath("appData"), app.isPackaged);
+mkdirSync(defaultDataPath, { recursive: true, mode: 0o700 });
+app.setPath("userData", defaultDataPath);
+app.setPath("sessionData", defaultDataPath);
 const workspaceLocation = join(defaultDataPath, "workspace-location.json");
 let startupError: Error | null = null;
-let selectedDataPath = process.env.PANXU_DATA_DIR;
+let selectedDataPath: string | undefined;
+try {
+  selectedDataPath = process.env.PANXU_DATA_DIR
+    ? runtimeDataPath(
+        app.getPath("appData"),
+        app.isPackaged,
+        process.env.PANXU_DATA_DIR,
+      )
+    : undefined;
+} catch (e) {
+  startupError = e instanceof Error ? e : new Error("工作空间路径无效。");
+}
 if (selectedDataPath && !isAbsolute(selectedDataPath))
   startupError = new Error(
     "PANXU_DATA_DIR必须是绝对路径，未打开其他工作空间。",
@@ -581,6 +596,7 @@ function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
+      devTools: !app.isPackaged,
       // Keep job state and frames in sync while the workbench is in the background.
       backgroundThrottling: false,
       sandbox: true,
@@ -638,7 +654,7 @@ function createWindow() {
       } else quitting = true;
     }
   });
-  const devUrl = process.env.PANXU_DEV_URL;
+  const devUrl = !app.isPackaged ? process.env.PANXU_DEV_URL : undefined;
   if (devUrl) {
     const u = new URL(devUrl);
     if (u.origin !== developmentUrl || u.pathname !== "/" || u.search || u.hash)

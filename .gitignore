@@ -23,3 +23,7 @@ playwright-report/
 /dist-dev/
 
 /build/knowledge-source-*/
+
+/release-archive/
+/release-candidates/
+/release-evidence/

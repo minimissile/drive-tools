@@ -39,7 +39,10 @@ try {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "资源库", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("button", { name: "资源库", exact: true })
+    .click();
   await page.locator(".resource-list").waitFor();
   await page.evaluate(() =>
     window.panxu.invoke("updater.configure", { autoCheck: false }),
@@ -391,7 +394,8 @@ try {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(1280, 900),
   );
-  await nav("批量录入").click();
+  await nav("批量处理").click();
+  await page.getByRole("tab", { name: "1 · 添加资料", exact: true }).click();
   await page
     .getByLabel("批量资源CSV")
     .fill(
@@ -744,7 +748,8 @@ try {
     (id) => window.panxu.invoke("account.check", { id }),
     qaAccount,
   );
-  await nav("批量转存").click();
+  await nav("批量处理").click();
+  await page.getByRole("tab", { name: "2 · 检查并转存", exact: true }).click();
   await page.getByRole("searchbox").fill("批量夸克资料");
   await page
     .getByRole("checkbox", { name: "批量选择批量夸克资料", exact: true })
@@ -985,7 +990,7 @@ try {
     .check();
   assert.equal(await restoreButton.isDisabled(), false);
   await page
-    .locator(".restore-preview")
+    .locator(".settings-backup-preview")
     .screenshot({ path: join(evidence, "10-restore-preview.png") });
   const previewDb = new DatabaseSync(join(backup, "panxu.db"), {
     readOnly: true,

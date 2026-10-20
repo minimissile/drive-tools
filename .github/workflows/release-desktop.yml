@@ -1,7 +1,5 @@
 name: Prepare signed Panxu release
 on:
-  push:
-    tags: ["v[0-9]*"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,19 +10,21 @@ env:
   PANXU_UPDATE_REPOSITORY: ${{ vars.PANXU_UPDATE_REPOSITORY }}
   PANXU_REQUIRE_SIGNING: "1"
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: matrix
+        run: echo "matrix=$(node scripts/release-matrix.mjs)" >> "$GITHUB_OUTPUT"
   installers:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            command: npm run package:mac
-            certificate: MAC_CSC_LINK
-            certificatePassword: MAC_CSC_KEY_PASSWORD
-          - os: windows-latest
-            command: npm run package:win
-            certificate: WIN_CSC_LINK
-            certificatePassword: WIN_CSC_KEY_PASSWORD
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     env:
       CSC_LINK: ${{ secrets[matrix.certificate] }}
@@ -53,6 +53,9 @@ jobs:
       - run: npm run test:e2e:packaged
         env:
           PANXU_QA_DIR: ${{ runner.temp }}/panxu-qa
+      - run: npm run test:e2e:production
+        env:
+          PANXU_QA_DIR: ${{ runner.temp }}/panxu-production-qa
       - run: npm run test:e2e:updates
         env:
           PANXU_QA_DIR: ${{ runner.temp }}/panxu-update-qa
@@ -74,6 +77,7 @@ jobs:
           path: |
             ${{ runner.temp }}/panxu-qa
             ${{ runner.temp }}/panxu-update-qa
+            ${{ runner.temp }}/panxu-production-qa
           if-no-files-found: ignore
           retention-days: 14
   draft:

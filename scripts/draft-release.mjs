@@ -48,6 +48,7 @@ else {
     "--repo",
     repository,
     "--draft",
+    "--verify-tag",
     "--title",
     `盘序 ${pkg.version}`,
     "--notes-file",

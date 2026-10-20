@@ -1,6 +1,6 @@
 {
   "name": "panxu-studio",
-  "version": "0.7.0",
+  "version": "0.0.1",
   "private": true,
   "description": "盘序 · 本地网盘内容营销工作台",
   "type": "module",
@@ -16,8 +16,9 @@
     "test:e2e": "node scripts/e2e.mjs",
     "test:e2e:drives": "node scripts/e2e-drives.mjs",
     "test:e2e:packaged": "node scripts/e2e-packaged.mjs",
+    "test:e2e:production": "node scripts/e2e-production.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "package:mac": "npm run build && electron-builder --config electron-builder.config.cjs --mac dmg zip --arm64 --x64 --publish never",
+    "package:mac": "npm run build && electron-builder --config electron-builder.config.cjs --mac dmg zip --arm64 --publish never",
     "package:win": "npm run build && electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish never",
     "package:dir": "npm run build && electron-builder --config electron-builder.config.cjs --dir --publish never",
     "verify:providers": "node --import tsx --test tests/providers.test.ts",
@@ -39,7 +40,11 @@
     "test:e2e:batch": "node scripts/e2e-batch.mjs",
     "test:e2e:intake": "node scripts/e2e-intake.mjs",
     "test:e2e:zhidao": "node scripts/e2e-zhidao.mjs",
-    "build:pansou": "node scripts/build-pansou.mjs"
+    "build:pansou": "node scripts/build-pansou.mjs",
+    "release:mac": "node scripts/package-release.mjs --platform mac",
+    "release:win": "node scripts/package-release.mjs --platform win",
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "release:setup:mac": "node scripts/configure-notary.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
@@ -93,15 +98,13 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],

@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,7 +29,10 @@ test(
         "node_modules/electron/dist/Electron.app/Contents",
       );
       await mkdir(join(contents, "MacOS"), { recursive: true });
-      const path = join(contents, "Info.plist");
+      await mkdir(join(contents, "Resources"), { recursive: true });
+      await mkdir(join(root, "build"));
+      await writeFile(join(root, "build", "icon.icns"), "test-icon");
+      let path = join(contents, "Info.plist");
       await writeFile(
         path,
         `<?xml version="1.0"?><plist version="1.0"><dict>
@@ -40,7 +50,22 @@ test(
         appId: "com.panxu.studio",
         register: async () => {},
       };
-      assert.equal((await syncMacDevIdentity(options)).changed, true);
+      const identity = await syncMacDevIdentity(options);
+      assert.equal(identity.changed, true);
+      assert.equal(
+        identity.bundle,
+        await realpath(
+          join(root, "node_modules/electron/dist/盘序 & 资料.app"),
+        ),
+      );
+      path = join(identity.bundle, "Contents", "Info.plist");
+      assert.equal(
+        await readFile(
+          join(identity.bundle, "Contents/Resources/panxu-dev.icns"),
+          "utf8",
+        ),
+        "test-icon",
+      );
       const plist = JSON.parse(
         execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", path], {
           encoding: "utf8",

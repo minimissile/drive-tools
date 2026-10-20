@@ -11,7 +11,7 @@
 - 主色沿用 `#2e61d5`；底座从 `#3977ee` 过渡至 `#224cb6`。
 - 前页使用白色，后页使用浅蓝色；以大片面和留白保持小尺寸辨识度。
 - 侧栏显示 36 × 36 的无外阴影标志，旁边保留“盘序 / PANXU STUDIO”；在 840 像素最小窗口中，完整英文副标题仍保持单行。图形为装饰图片，避免屏幕阅读器重复播报产品名。
-- App 图标使用 1024 × 1024 透明画布，底座为 880 × 880，四周留出 72 像素；外阴影只用于 App 资源。
+- App 图标使用 1024 × 1024 透明画布，底座为 824 × 824，四周留出 100 像素；外阴影只用于 App 资源。
 
 ## 资源与维护
 
@@ -38,3 +38,9 @@ macOS 的程序坞悬停名称读取应用包的 `CFBundleName` / `CFBundleDispl
 最终使用的探索提示词：
 
 > Use case: logo-brand. Create a single final macOS app icon concept for Panxu Studio (盘序), a local desktop workspace that organizes multi-cloud-drive resources, archives them into a knowledge library, turns research into AI-assisted content and prepares distribution. Design concept: 'ordered pages become P'. A highly distinctive geometric capital P built from two or three orderly, interlocking folded document ribbons. Bold white front ribbon, a restrained pale ice-blue rear page visible at the lower left. One beautifully balanced clear counter-space; strong silhouette readable at 32 pixels. The outer tile is saturated cobalt blue (#2e61d5) with very subtle directional tonal depth, softly rounded macOS superellipse corners, front-on orthographic, centered on a square transparent canvas with modest equal margins. Restrained premium productivity software identity. Precise consistent curves, crisp vector-like geometry. Very subtle paper overlap depth, no glossy plastic. No text, no Chinese glyph, no wordmark, no cloud, no arrows, no sparkle, no network nodes, no border ring, no extra badges. Only one icon, no presentation board, no multiple variations, no UI mockup. Transparent outside the tile. App icon should occupy approximately 86 percent of canvas width.
+
+## 2026-10-20 Dock 校正
+
+当前 Electron 使用传统 ICNS/PNG 资源，固定采用 1024 画布、824 主体、每侧 100 的透明留白；不再通过目测反复调整整体缩放。Apple 的画布和模板指引参见 https://developer.apple.com/design/human-interface-guidelines/app-icons 。824 为本项目传统圆角方形 ICNS 的统一制作规格，不是所有任意造型图标必须填满的尺寸，也不适用于 Icon Composer 的全画布分层输入。
+
+开发启动将项目内运行时应用包命名为“盘序.app”，旧 Electron.app 路径保留相对符号链接以兼容 npm 工具，实际开发进程使用规范应用包路径。同步包内 ICNS 并刷新该包的 LaunchServices 注册；不重启系统 Dock、不修改全局 Dock 大小或其他项目。

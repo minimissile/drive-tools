@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { dirname } from "node:path";
 import { load } from "js-yaml";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import updateConfig from "./update-config.cjs";
 const require = createRequire(import.meta.url),
   asar = require("@electron/asar"),
@@ -55,6 +55,28 @@ for (const path of archives) {
     expectedUpdate,
     "构建与打包时的更新源或签名模式不一致，请重新执行完整打包命令",
   );
+  const resources = dirname(path);
+  const target = path.includes("win-unpacked")
+    ? "win32-x64"
+    : path.includes("mac-arm64")
+      ? "darwin-arm64"
+      : "darwin-x64";
+  const helperDir = join(resources, "pansou", target);
+  const helper = join(
+    helperDir,
+    target.startsWith("win") ? "pansou-server.exe" : "pansou-server",
+  );
+  assert.ok(existsSync(helper), `缺少 ${target} 辅助程序`);
+  assert.deepEqual(
+    await readFile(join(helperDir, "provenance.json")),
+    await readFile(join("build/pansou", target, "provenance.json")),
+    "辅助程序来源记录不一致",
+  );
+  for (const name of ["LICENSE.txt", "THIRD_PARTY_NOTICES.txt"])
+    assert.deepEqual(
+      await readFile(join(resources, "pansou", name)),
+      await readFile(join("build/pansou", name)),
+    );
   if (runtime.repository) {
     const feed = load(
       await readFile(join(dirname(path), "app-update.yml"), "utf8"),
@@ -80,7 +102,31 @@ for (const path of archives) {
     execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], {
       stdio: "pipe",
     });
+    execFileSync("codesign", ["--verify", "--strict", helper], {
+      stdio: "pipe",
+    });
+    const identity = spawnSync(
+      "codesign",
+      ["--display", "--verbose=4", appPath],
+      { encoding: "utf8" },
+    );
+    assert.equal(identity.status, 0);
+    assert.match(
+      identity.stderr,
+      /Authority=Developer ID Application:/,
+      "macOS 必须使用 Developer ID Application 签名",
+    );
+    assert.match(
+      identity.stderr,
+      /Identifier=com\.panxu\.studio\n/,
+      "正式应用标识不正确",
+    );
     execFileSync("xcrun", ["stapler", "validate", appPath], { stdio: "pipe" });
+    execFileSync(
+      "spctl",
+      ["--assess", "--type", "execute", "--verbose=2", appPath],
+      { stdio: "pipe" },
+    );
   }
   for (const source of sources)
     assert.deepEqual(

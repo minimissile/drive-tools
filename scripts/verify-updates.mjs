@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { load } from "js-yaml";
+import policy from "./release-policy.cjs";
 
 const pkg = JSON.parse(await readFile("package.json", "utf8"));
 const root = resolve(process.env.PANXU_RELEASE_DIR ?? `release/${pkg.version}`);
@@ -20,12 +21,16 @@ const manifests = ["latest.yml", "latest-mac.yml"].filter((name) =>
   names.includes(name),
 );
 assert.ok(manifests.length, "缺少更新清单；必须配置公开更新仓库后重新打包。");
-if (all)
-  assert.equal(
-    manifests.length,
-    2,
-    "正式发布必须同时包含 Windows 和 macOS 更新清单。",
+if (all) {
+  const required = Object.keys(policy.getReleasePolicy())
+    .map((p) => (p === "mac" ? "latest-mac.yml" : "latest.yml"))
+    .sort();
+  assert.deepEqual(
+    [...manifests].sort(),
+    required,
+    "正式发布必须完整包含当前发行计划的清单，且不得混入未启用平台。",
   );
+}
 async function digest(path, algorithm, encoding) {
   const hash = createHash(algorithm);
   for await (const chunk of createReadStream(path)) hash.update(chunk);
@@ -66,7 +71,7 @@ for (const name of manifests) {
       ? ["win-x64.exe"]
       : arch
         ? [`mac-${arch}.zip`, `mac-${arch}.dmg`]
-        : ["mac-arm64.zip", "mac-x64.zip", "mac-arm64.dmg", "mac-x64.dmg"];
+        : ["mac-arm64.zip", "mac-arm64.dmg"];
   for (const suffix of suffixes)
     assert.ok(
       urls.has(`Panxu-Studio-${pkg.version}-${suffix}`),
@@ -86,6 +91,25 @@ const artifacts = names
     ),
   )
   .sort();
+if (all) {
+  const suffixes = Object.entries(policy.getReleasePolicy()).flatMap(
+    ([platform, arches]) =>
+      arches.flatMap((arch) =>
+        (platform === "mac" ? ["dmg", "zip"] : ["exe"]).map(
+          (ext) => `${platform}-${arch}.${ext}`,
+        ),
+      ),
+  );
+  for (const name of artifacts.filter((name) => !name.startsWith("latest")))
+    assert.ok(
+      suffixes.some(
+        (suffix) =>
+          name === `Panxu-Studio-${pkg.version}-${suffix}` ||
+          name === `Panxu-Studio-${pkg.version}-${suffix}.blockmap`,
+      ),
+      "正式发布目录混入未启用平台或架构的产物",
+    );
+}
 for (const name of artifacts)
   assert.ok(
     name.startsWith("latest") ||

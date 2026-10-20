@@ -20,16 +20,24 @@ assert.equal(
   "正式发布必须启用签名检查",
 );
 assert.ok(updateConfig.getUpdateConfig().repository, "缺少公开更新仓库");
-for (const key of ["CSC_LINK", "CSC_KEY_PASSWORD"])
-  assert.ok(process.env[key], `缺少发布密钥 ${key}`);
-if (process.platform === "darwin")
-  for (const key of [
-    "APPLE_ID",
-    "APPLE_APP_SPECIFIC_PASSWORD",
-    "APPLE_TEAM_ID",
-  ])
-    assert.ok(process.env[key], `缺少公证凭据 ${key}`);
-if (process.platform === "win32")
-  assert.ok(process.env.PANXU_WINDOWS_PUBLISHER, "缺少 Windows 签名主体");
+if (process.platform === "darwin") {
+  assert.ok(
+    process.env.CSC_LINK || process.env.CSC_NAME,
+    "缺少 macOS 发行证书配置",
+  );
+  assert.ok(
+    process.env.APPLE_KEYCHAIN_PROFILE ||
+      (process.env.APPLE_ID &&
+        process.env.APPLE_APP_SPECIFIC_PASSWORD &&
+        process.env.APPLE_TEAM_ID) ||
+      (process.env.APPLE_API_KEY &&
+        process.env.APPLE_API_KEY_ID &&
+        process.env.APPLE_API_ISSUER),
+    "缺少公证凭据",
+  );
+} else if (process.platform === "win32") {
+  for (const key of ["CSC_LINK", "CSC_KEY_PASSWORD", "PANXU_WINDOWS_PUBLISHER"])
+    assert.ok(process.env[key], `缺少 Windows 签名配置 ${key}`);
+}
 await readFile(`docs/releases/${pkg.version}.md`, "utf8");
 console.log(`发布预检通过：v${pkg.version}，签名强制启用。`);

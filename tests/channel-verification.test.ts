@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { fixture, removeV11 } from "./helpers";
+import { fixture, currentSchemaVersion, removeV11 } from "./helpers";
 import { Database } from "../core/database";
 import { inspectBackup, stageRestore } from "../core/backups";
 import { bindingEditorUrl, bindingVerificationState } from "../shared/channels";
@@ -395,7 +395,7 @@ test("v10 migration backs up once and preserves existing channel configuration b
     assert.equal(
       migrated.get<{ user_version: number }>("PRAGMA user_version")!
         .user_version,
-      14,
+      currentSchemaVersion,
     );
     assert.equal(
       migrated.get<{ id: string }>(
@@ -429,7 +429,7 @@ test("backup and staged restore retain delivery evidence without credentials or 
     const manifest = JSON.parse(
       await readFile(join(folder, "manifest.json"), "utf8"),
     );
-    assert.equal(manifest.schemaVersion, 14);
+    assert.equal(manifest.schemaVersion, currentSchemaVersion);
     const raw = new DatabaseSync(join(folder, "panxu.db"), { readOnly: true });
     assert.equal(raw.prepare("SELECT COUNT(*) n FROM secrets").get()!.n, 0);
     const stored = JSON.parse(

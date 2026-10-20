@@ -39,12 +39,13 @@ if (!process.versions.electron) {
         join(root, "src/assets/brand/panxu-mark.svg"),
         "utf8",
       );
+      // Classic macOS ICNS: 1024 canvas, 824 tile, 100 transparent inset.
       const inset = master.replace(
         /<svg\b[^>]*>/,
-        '<svg x="72" y="72" width="880" height="880" viewBox="0 0 64 64" fill="none">',
+        '<svg x="100" y="100" width="824" height="824" viewBox="0 0 64 64" fill="none">',
       );
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs><filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#17346e" flood-opacity=".18"/></filter></defs>
+  <defs><filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#17346e" flood-opacity=".18"/></filter></defs>
   <g filter="url(#shadow)">${inset}</g>
 </svg>\n`;
       await writeFile(join(output, "icon.svg"), svg);

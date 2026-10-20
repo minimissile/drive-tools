@@ -467,12 +467,7 @@ test("updates: release verifier rejects missing archives, wrong versions, tamper
   const version = JSON.parse(await readFile("package.json", "utf8")).version;
   try {
     const files = [];
-    for (const suffix of [
-      "mac-arm64.zip",
-      "mac-x64.zip",
-      "mac-arm64.dmg",
-      "mac-x64.dmg",
-    ]) {
+    for (const suffix of ["mac-arm64.zip", "mac-arm64.dmg"]) {
       const url = `Panxu-Studio-${version}-${suffix}`,
         bytes = Buffer.from(suffix);
       await writeFile(join(folder, url), bytes);
@@ -499,7 +494,7 @@ test("updates: release verifier rejects missing archives, wrong versions, tamper
       );
     await writeFile(manifest, JSON.stringify(info));
     run();
-    assert.throws(() => run(true));
+    run(true); // 0.0.1 releases Apple Silicon macOS first.
     await rm(join(folder, `${files[0].url}.blockmap`));
     assert.throws(() => run());
     await writeFile(join(folder, `${files[0].url}.blockmap`), "blockmap");
@@ -521,8 +516,13 @@ test("updates: release verifier rejects missing archives, wrong versions, tamper
         sha512: winFile.sha512,
       }),
     );
+    assert.throws(() => run(true)); // Disabled Windows assets cannot enter this release.
+    await rm(join(folder, "latest.yml"));
+    assert.throws(() => run(true)); // An orphan Windows installer is also rejected.
+    await rm(join(folder, winUrl));
+    await rm(join(folder, `${winUrl}.blockmap`));
     run(true);
-    await writeFile(manifest, JSON.stringify({ ...info, version: "0.0.1" }));
+    await writeFile(manifest, JSON.stringify({ ...info, version: "99.99.99" }));
     assert.throws(() => run());
     await writeFile(
       manifest,

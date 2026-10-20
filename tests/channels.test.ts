@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fixture, removeV10 } from "./helpers";
+import { fixture, currentSchemaVersion, removeV10 } from "./helpers";
 import { Database } from "../core/database";
 import { AiService } from "../core/ai";
 import { platformSpecs } from "../shared/platforms";
@@ -383,7 +383,7 @@ test("v9 upgrade preserves drafts and narrows legacy link permission to the old 
     try {
       assert.equal(
         db.get<{ user_version: number }>("PRAGMA user_version")!.user_version,
-        14,
+        currentSchemaVersion,
       );
       assert.equal(
         db.get<{ content_format: string }>(

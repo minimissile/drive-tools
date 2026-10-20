@@ -38,16 +38,27 @@ module.exports = {
   mac: {
     ...base.mac,
     extraResources: [
-      { from: "build/pansou", to: "pansou", filter: ["darwin-${arch}/**", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt"] },
+      {
+        from: "build/pansou",
+        to: "pansou",
+        filter: ["darwin-${arch}/**", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt"],
+      },
     ],
     ...(signed ? {} : { identity: null }),
     hardenedRuntime: true,
+    // Non-executable assets remain covered by the app's resource seal. Signing
+    // them separately adds timestamp requests without protecting executable code.
+    signIgnore: ["\\.(?:pak|ttf|otf|woff2?|icns|png)$"],
     notarize: signed,
   },
   win: {
     ...base.win,
     extraResources: [
-      { from: "build/pansou", to: "pansou", filter: ["win32-${arch}/**", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt"] },
+      {
+        from: "build/pansou",
+        to: "pansou",
+        filter: ["win32-${arch}/**", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt"],
+      },
     ],
     verifyUpdateCodeSignature: true,
     ...(process.env.PANXU_WINDOWS_PUBLISHER

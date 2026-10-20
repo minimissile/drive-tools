@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs><filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#17346e" flood-opacity=".18"/></filter></defs>
-  <g filter="url(#shadow)"><svg x="72" y="72" width="880" height="880" viewBox="0 0 64 64" fill="none">
+  <defs><filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#17346e" flood-opacity=".18"/></filter></defs>
+  <g filter="url(#shadow)"><svg x="100" y="100" width="824" height="824" viewBox="0 0 64 64" fill="none">
   <defs>
     <linearGradient id="tile" x1="10" y1="0" x2="52" y2="64" gradientUnits="userSpaceOnUse">
       <stop stop-color="#3977ee"/>

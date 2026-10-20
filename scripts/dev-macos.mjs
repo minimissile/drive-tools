@@ -1,5 +1,12 @@
 import { execFile } from "node:child_process";
-import { copyFile, realpath, rename, rm, utimes } from "node:fs/promises";
+import {
+  copyFile,
+  realpath,
+  rename,
+  rm,
+  utimes,
+  symlink,
+} from "node:fs/promises";
 import {
   basename,
   dirname,
@@ -27,7 +34,14 @@ export async function syncMacDevIdentity({
   appId,
   register = registerBundle,
 }) {
-  const bundle = await realpath(resolve(dirname(executable), "../.."));
+  if (
+    !productName ||
+    /[\\/\x00-\x1f]/.test(productName) ||
+    [".", ".."].includes(productName)
+  )
+    throw new Error("开发应用名称无效。");
+  let bundle = await realpath(resolve(dirname(executable), "../.."));
+  const originalBundle = bundle;
   const dependencies = await realpath(join(root, "node_modules"));
   const within = relative(dependencies, bundle);
   if (
@@ -35,12 +49,28 @@ export async function syncMacDevIdentity({
     within === ".." ||
     within.startsWith(`..${sep}`) ||
     isAbsolute(within) ||
-    basename(bundle) !== "Electron.app"
+    !["Electron.app", `${productName}.app`].includes(basename(bundle))
   )
     throw new Error(
       "开发名称只能同步到当前项目 node_modules 内的 Electron.app。",
     );
 
+  // Dock can retain the Electron bundle filename even when the plist name is set.
+  // Keep the npm executable path valid with a relative alias; launch the real bundle.
+  let renamed = false;
+  if (basename(bundle) === "Electron.app") {
+    const destination = join(dirname(bundle), `${productName}.app`);
+    await rename(bundle, destination);
+    try {
+      await symlink(basename(destination), originalBundle);
+    } catch (error) {
+      await rename(destination, originalBundle);
+      throw error;
+    }
+    bundle = destination;
+    renamed = true;
+  }
+  const resolvedExecutable = join(bundle, "Contents", "MacOS", "Electron");
   const path = join(bundle, "Contents", "Info.plist");
   const { stdout } = await run("/usr/bin/plutil", [
     "-convert",
@@ -54,9 +84,27 @@ export async function syncMacDevIdentity({
     CFBundleName: productName,
     CFBundleDisplayName: productName,
     CFBundleIdentifier: `${appId}.dev`,
+    CFBundleIconFile: "panxu-dev.icns",
   };
-  if (Object.entries(expected).every(([key, value]) => current[key] === value))
-    return { changed: false, bundle, ...expected };
+  const iconPath = join(root, "build", "icon.icns");
+  await copyFile(
+    iconPath,
+    join(bundle, "Contents", "Resources", expected.CFBundleIconFile),
+  );
+  const fieldsChanged = !Object.entries(expected).every(
+    ([key, value]) => current[key] === value,
+  );
+  if (!fieldsChanged) {
+    const now = new Date();
+    await utimes(bundle, now, now);
+    await register(bundle);
+    return {
+      changed: renamed,
+      bundle,
+      executable: resolvedExecutable,
+      ...expected,
+    };
+  }
 
   const temporary = `${path}.panxu-${process.pid}`;
   try {
@@ -77,5 +125,5 @@ export async function syncMacDevIdentity({
   }
   // Refresh this bundle's registration without restarting the user's Dock.
   await register(bundle);
-  return { changed: true, bundle, ...expected };
+  return { changed: true, bundle, executable: resolvedExecutable, ...expected };
 }

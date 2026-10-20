@@ -17,6 +17,7 @@ const output = join(root, "dist-dev");
 const require = createRequire(import.meta.url);
 const states = new Map(),
   builds = [];
+let devExecutable = require("electron");
 let child,
   server,
   debounce,
@@ -61,7 +62,7 @@ function launch() {
     );
   }
   let ready = false;
-  const current = (child = spawn(require("electron"), args, {
+  const current = (child = spawn(devExecutable, args, {
     cwd: root,
     env,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
@@ -141,6 +142,7 @@ try {
       productName,
       appId: pkg.build.appId,
     });
+    devExecutable = identity.executable;
     if (identity.changed) log(`macOS 程序坞名称已同步为“${productName}”。`);
   }
   await writeFile(
