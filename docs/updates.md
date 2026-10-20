@@ -146,4 +146,6 @@ APPLE_KEYCHAIN_PROFILE=panxu-notary npm run release:mac
 
 `release:mac` 与 `release:win` 强制检查签名、公证、辅助程序及版本说明，缺项立即退出。仅有 Apple Developer 会员不能签名 Windows；Windows 未办理代码签名时不能宣称已验收安全自动更新。正式签名需要稳定的同一发行主体，不应在不同版本随意更换。
 
-本轮状态见 [0.0.1 验收记录](releases/0.0.1-readiness.md)。
+0.0.1 已发布到 [GitHub](https://github.com/minimissile/drive-tools/releases/tag/v0.0.1)，附件与更新清单的远端 SHA256 均已核对。公开源在本机有成功版本识别和下载启动记录，也出现匿名 403 与慢速下载超时；完整公开下载未标为验收通过。更换可访问 GitHub 的网络后可重试，应用不会将网络失败伪报为最新版本。隔离的本机完整安装重启演练与正式安装副本验收已通过。
+
+本轮状态见 [0.0.1 验收记录](releases/0.0.1-readiness.md)及[目录清理记录](releases/0.0.1-cleanup.md)。
