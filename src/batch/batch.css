@@ -1,0 +1,128 @@
+.batch-insertion {
+  display: grid;
+  gap: var(--space-5, 20px);
+}
+.insertion-material-list,
+.insertion-target-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.insertion-material {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.insertion-material label,
+.insertion-target-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.insertion-material label {
+  flex: 1;
+}
+.insertion-material span,
+.insertion-target-list span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.insertion-material small,
+.insertion-target-list small {
+  display: block;
+  margin-top: 3px;
+}
+.insertion-target-list label {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.insertion-tree-node {
+  min-width: 0;
+}
+.insertion-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+}
+.insertion-tree-row button {
+  justify-content: flex-start;
+  min-width: 0;
+}
+.insertion-tree-row button span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.insertion-tree-row svg {
+  flex-shrink: 0;
+}
+.insertion-expanded {
+  transform: rotate(90deg);
+}
+.insertion-tree-children {
+  margin-left: 18px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.insertion-selected {
+  margin: 16px 0;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+.insertion-selected > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.insertion-selected span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.insertion-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.insertion-result-warning {
+  color: var(--amber);
+}
+.batch-insertion table {
+  table-layout: fixed;
+  width: 100%;
+}
+.batch-insertion td,
+.batch-insertion th {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 960px) {
+  .batch-insertion .field-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.insertion-preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+  margin: 0 auto;
+}
+.insertion-preview-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 65vh;
+  overflow-y: auto;
+  font: inherit;
+}

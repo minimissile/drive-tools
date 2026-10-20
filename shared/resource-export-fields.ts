@@ -1,0 +1,18 @@
+export const exportFields = {
+  title: "资源名称",
+  category: "分类",
+  tags: "标签",
+  summary: "资源说明",
+  provider: "网盘",
+  accounts: "保存账号",
+  filenames: "文件清单",
+  formats: "文件格式",
+  fileCount: "已记录文件数",
+  status: "归档状态",
+  shareUrls: "本人分享链接",
+  extractionCodes: "本人分享提取码",
+  note: "知识笔记",
+  updatedAt: "更新时间",
+  reason: "匹配依据",
+  blank: "留空（无对应数据）",
+} as const;

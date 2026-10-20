@@ -1,0 +1,47 @@
+[
+  {
+    "name": "e2e.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e.mjs.log"
+  },
+  {
+    "name": "e2e-search.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-search.mjs.log"
+  },
+  {
+    "name": "e2e-studio-media.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-studio-media.mjs.log"
+  },
+  {
+    "name": "e2e-ideas.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-ideas.mjs.log"
+  },
+  {
+    "name": "e2e-resource-export.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-resource-export.mjs.log"
+  },
+  {
+    "name": "e2e-share-statistics.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-share-statistics.mjs.log"
+  },
+  {
+    "name": "e2e-drives.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-drives.mjs.log"
+  },
+  {
+    "name": "e2e-ui.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-ui.mjs.log"
+  },
+  {
+    "name": "e2e-ui-audit.mjs",
+    "code": 0,
+    "log": "/private/tmp/panxu-visual-regression-e2e-ui-audit.mjs.log"
+  }
+]

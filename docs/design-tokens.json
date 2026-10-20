@@ -1,8 +1,97 @@
 {
   "source": "用户已确认的盘序 v0.2 交互原型",
-  "light": { "background": "#f6f8fc", "surface": "#ffffff", "sidebar": "#f0f3f9", "text": "#1d2b42", "muted": "#62718a", "border": "#e1e7f0", "accent": "#2e61d5", "accentSurface": "#edf3ff", "success": "#258063", "warning": "#94651c", "danger": "#b9484e" },
-  "dark": { "background": "#111823", "surface": "#1a2433", "sidebar": "#151e2b", "text": "#e6edf8", "muted": "#a3b1c6", "border": "#303f53", "accent": "#8eafff" },
-  "geometry": { "sidebar": 204, "radius": 10, "controlRadius": 7, "contentPadding": 32 },
-  "typography": { "family": "-apple-system,BlinkMacSystemFont,PingFang SC,Microsoft YaHei,sans-serif", "body": 14, "secondary": 12, "heading": 26 },
-  "surfaces": ["账号管理", "资源库", "录入资源", "转存任务", "流量发现", "内容工作室", "发布准备", "连接与设置"]
+  "light": {
+    "background": "#f6f8fc",
+    "surface": "#ffffff",
+    "sidebar": "#f0f3f9",
+    "text": "#1d2b42",
+    "muted": "#5d6c84",
+    "border": "#e1e7f0",
+    "controlBorder": "#8090a8",
+    "coverSurface": "#e1eafd",
+    "uploadBorder": "#bdcce5",
+    "accent": "#2e61d5",
+    "accentSurface": "#edf3ff",
+    "success": "#237a5e",
+    "warning": "#94651c",
+    "danger": "#b9484e"
+  },
+  "geometry": {
+    "sidebar": 204,
+    "radius": 10,
+    "controlRadius": 7,
+    "contentPadding": 24,
+    "controlHeight": 36,
+    "compactControlHeight": 30,
+    "spacing": [
+      4,
+      8,
+      12,
+      16,
+      20,
+      24,
+      32
+    ]
+  },
+  "typography": {
+    "family": "-apple-system,BlinkMacSystemFont,PingFang SC,Microsoft YaHei,sans-serif",
+    "body": 14,
+    "secondary": 12,
+    "heading": 24
+  },
+  "surfaces": [
+    "账号管理",
+    "资源库",
+    "录入资源",
+    "转存任务",
+    "流量发现",
+    "内容工作室",
+    "发布准备",
+    "连接与设置"
+  ],
+  "theme": "light",
+  "implementation": "src/styles/tokens.css",
+  "motion": {
+    "controlFocusDurationMs": 160,
+    "controlFocusEasing": "cubic-bezier(0.16, 1, 0.3, 1)",
+    "reducedMotionDurationMs": 0
+  },
+  "formControls": {
+    "implementation": "src/ui/form-controls.css",
+    "selection": "src/ui/Select.tsx",
+    "searchSelection": "src/ui/SearchSelect.tsx",
+    "freeTextSuggestions": "src/ui/TextSuggestions.tsx",
+    "focusBoundary": "single 2px accent outline, inset 1px; compound inputs own only the outer boundary"
+  },
+  "dataFeedback": {
+    "implementation": "src/ui/DataState.tsx",
+    "styles": "src/ui/data-state.css",
+    "firstRead": "region placeholder, never a false zero count",
+    "refresh": "retain content; show progress in existing control or heading",
+    "empty": "shared title, description and action; fill bounded list region",
+    "failure": "one persistent recovery region with retry",
+    "motion": "static skeletons; only the progress icon rotates, disabled with reduced motion"
+  },
+  "toastFeedback": {
+    "implementation": "src/ui/Toast.tsx",
+    "styles": "src/ui/toast.css",
+    "contract": "src/lib/feedback.ts; notify(text, tone) requires an explicit tone",
+    "tones": {
+      "success": "green",
+      "error": "red",
+      "warning": "amber",
+      "info": "blue"
+    },
+    "dismissal": "success/info: 6500ms, paused while hovered or focused; error/warning: manual close",
+    "motion": "180ms entrance; disabled with reduced motion"
+  },
+  "accountManagement": {
+    "layout": "responsive account rows with identity / capacity / contextual actions; actions flow below on narrower workspaces",
+    "styles": "src/accounts/accounts.css",
+    "icons": "src/resources/ProviderIcon.tsx with local assets in src/assets/providers",
+    "creation": "header action reveals an inline form; empty workspace reveals it initially; saved account receives login focus",
+    "selection": "current account is local to the workspace and independent of the per-provider default",
+    "capacity": "src/accounts/Capacity.tsx; retained previous values and explicit refresh; unknown never becomes zero",
+    "security": "credential removal confirms scope and explains account disabling; enabled and default operations retain backend rules"
+  }
 }

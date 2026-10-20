@@ -1,0 +1,24 @@
+(node:77838) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Audit evidence: /var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-audit-Ifo6XC
+{
+  "checks": [
+    "录入长文本切页与重载恢复，授权不恢复，保存后清理暂存",
+    "CSV输入切页保留，预检与提交保持显式",
+    "手工词池未保存输入切页保留",
+    "设置输入切页保留、分区保存、备份更新定位",
+    "异常任务默认直达，状态数量准确，完成记录按需展开",
+    "公共可搜索资源选择器查找并选中全库资源",
+    "原生840窗口选择即呈现档案，Esc返回并恢复列表焦点",
+    "14模块原生840窗口无页面溢出，工作室默认紧凑渠道",
+    "原生840窗口200%缩放下设置可滚动且无页面横向溢出",
+    "提示文本不透明且使用校正颜色；系统暗色下仍白色，减少动态效果",
+    "初始化读取失败停止假加载，点击重试恢复而不需重启",
+    "列表读取失败不会冒充空库，显式重试恢复",
+    "慢读取晚于新筛选返回时不会覆盖当前结果",
+    "提交中禁止重复操作，提交成功后的刷新失败不丢返回值，重试只读取视图"
+  ],
+  "errors": [],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-audit-Ifo6XC",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-audit-Ifo6XC/data"
+}

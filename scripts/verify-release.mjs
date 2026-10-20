@@ -4,10 +4,18 @@ import { existsSync, createReadStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
+import { dirname } from "node:path";
+import { load } from "js-yaml";
+import { execFileSync } from "node:child_process";
+import updateConfig from "./update-config.cjs";
 const require = createRequire(import.meta.url),
   asar = require("@electron/asar"),
-  root = resolve(process.env.PANXU_RELEASE_DIR ?? "release");
+  root = resolve(
+    process.env.PANXU_RELEASE_DIR ??
+      `release/${JSON.parse(await readFile("package.json", "utf8")).version}`,
+  );
 const pkg = JSON.parse(await readFile("package.json", "utf8"));
+const expectedUpdate = updateConfig.getUpdateConfig();
 const sources = [];
 async function walk(folder) {
   for (const entry of await readdir(folder, { withFileTypes: true })) {
@@ -39,6 +47,41 @@ for (const path of archives) {
     JSON.parse(asar.extractFile(path, "package.json").toString()).version,
     pkg.version,
   );
+  const runtime = JSON.parse(
+    asar.extractFile(path, "dist-desktop/update-config.json").toString(),
+  );
+  assert.deepEqual(
+    runtime,
+    expectedUpdate,
+    "构建与打包时的更新源或签名模式不一致，请重新执行完整打包命令",
+  );
+  if (runtime.repository) {
+    const feed = load(
+      await readFile(join(dirname(path), "app-update.yml"), "utf8"),
+    );
+    assert.equal(feed.provider, "github");
+    assert.equal(`${feed.owner}/${feed.repo}`, runtime.repository);
+    assert.equal(feed.private, false);
+    assert.equal(feed.token, undefined, "客户端不能包含发布令牌");
+    if (runtime.signed && path.includes("win-unpacked")) {
+      assert.ok(
+        Array.isArray(feed.publisherName) &&
+          feed.publisherName.includes(process.env.PANXU_WINDOWS_PUBLISHER),
+        "Windows 更新配置缺少签名发布者",
+      );
+    }
+  }
+  if (
+    runtime.signed &&
+    process.platform === "darwin" &&
+    path.includes(".app")
+  ) {
+    const appPath = path.slice(0, path.indexOf(".app") + 4);
+    execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], {
+      stdio: "pipe",
+    });
+    execFileSync("xcrun", ["stapler", "validate", appPath], { stdio: "pipe" });
+  }
   for (const source of sources)
     assert.deepEqual(
       asar.extractFile(path, source),
@@ -47,9 +90,27 @@ for (const path of archives) {
     );
 }
 const artifacts = (await readdir(root)).filter((name) =>
-  /\.(dmg|exe)$/.test(name),
+  /\.(dmg|exe|zip)$/.test(name),
 );
 assert.ok(artifacts.length, "没有找到安装包");
+if (expectedUpdate.signed && process.platform === "win32") {
+  const script =
+    '$s = Get-AuthenticodeSignature -LiteralPath $env:PANXU_VERIFY_EXECUTABLE; if ($s.Status -ne "Valid") { throw "Invalid installer signature" }; $cn = $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false); if ($cn -cne $env:PANXU_WINDOWS_PUBLISHER) { throw "Unexpected installer publisher" }';
+  for (const name of artifacts.filter((name) => name.endsWith(".exe")))
+    execFileSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        env: { ...process.env, PANXU_VERIFY_EXECUTABLE: join(root, name) },
+        stdio: "pipe",
+      },
+    );
+}
 const sums = [];
 for (const name of artifacts) {
   const hash = createHash("sha256");

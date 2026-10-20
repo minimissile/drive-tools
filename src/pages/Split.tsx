@@ -1,21 +1,36 @@
+import { Select } from "../ui/Select";
+import { QueryError } from "../ui/QueryError";
+import { ipc } from "../api/client";
 import { useEffect, useState, useRef } from "react";
 import {
   Button,
   Field,
   Header,
+  LoadingState,
   Notice,
   Panel,
-  ResourcePicker,
-  ResourceRequired,
-  formatTime,
-} from "../components";
-import { useApp } from "../state";
-import { FolderTree, RefreshCw } from "lucide-react";
+} from "../ui/primitives";
+import { ResourcePicker, ResourceRequired } from "../resources/components";
+import { formatTime } from "../lib/format";
+import {
+  useAppActions,
+  useAppActivity,
+  useAppData,
+  useAppNavigation,
+  useAppSelection,
+} from "../state";
+import { RefreshCw } from "lucide-react";
 import SplitTree from "./SplitTree";
 import type { SplitItem, SplitRun } from "../../shared/types";
 export default function Split() {
-  const { data, resource, copy, command, busy, notify, navigate } = useApp();
+  const { data } = useAppData(),
+    { resource, copy } = useAppSelection(),
+    { navigate, openSearch } = useAppNavigation(),
+    { command, notify } = useAppActions(),
+    { busy } = useAppActivity();
   const initialized = useRef("");
+  const [readError, setReadError] = useState("");
+  const [readRevision, setReadRevision] = useState(0);
   const [runId, setRunId] = useState(""),
     [run, setRun] = useState<SplitRun | null>(null),
     [history, setHistory] = useState<
@@ -40,8 +55,8 @@ export default function Split() {
   useEffect(() => {
     if (!copy) return;
     let alive = true;
-    void window.panxu
-      .invoke<typeof history>("split.list", { copyId: copy.id })
+    setReadError("");
+    void ipc("split.list", { copyId: copy.id })
       .then((r) => {
         if (alive) {
           setHistory(r);
@@ -50,16 +65,20 @@ export default function Split() {
           );
         }
       })
-      .catch((e) => notify(e.message, true));
+      .catch((e) => {
+        if (alive) {
+          setReadError(e.message);
+        }
+      });
     return () => {
       alive = false;
     };
-  }, [copy?.id, data?.jobs, notify]);
+  }, [copy?.id, data?.jobs, readRevision]);
   useEffect(() => {
     if (!runId) return;
     let alive = true;
-    void window.panxu
-      .invoke<SplitRun>("split.get", { id: runId })
+    setReadError("");
+    void ipc("split.get", { id: runId })
       .then((r) => {
         if (alive) {
           setRun(r);
@@ -69,11 +88,15 @@ export default function Split() {
           }
         }
       })
-      .catch((e) => notify(e.message, true));
+      .catch((e) => {
+        if (alive) {
+          setReadError(e.message);
+        }
+      });
     return () => {
       alive = false;
     };
-  }, [runId, data?.jobs, notify]);
+  }, [runId, data?.jobs, readRevision]);
   const current = run?.copyId === copy?.id ? run : null,
     selected = current?.items.filter((i) => selectedIds.has(i.id)) ?? [],
     allReady =
@@ -85,69 +108,78 @@ export default function Split() {
         title="展开目录，勾选你想单独分享的资源。"
         description="直接查看前三层文件与文件夹，每个勾选项生成一个独立的本人链接。"
       />
+      <QueryError
+        error={readError}
+        onRetry={() => setReadRevision((n) => n + 1)}
+      />
       <ResourceRequired>
-        <ResourcePicker />
-        <Panel className="split-intro">
-          <div className="split-intro-copy">
-            <span className="split-intro-icon">
-              <FolderTree size={24} />
-            </span>
-            <div>
-              <h2>先看目录，再选资源</h2>
-              <p>
-                一次展示最多三级目录，可自由勾选，也可按层快捷选择。读取目录最多2000项，每批生成最多100个链接。
-              </p>
-            </div>
-          </div>
-          <Button
-            primary
-            disabled={
-              copy?.status !== "ready" ||
-              busy > 0 ||
-              (!!current && ["pending", "inspecting"].includes(current.status))
-            }
-            onClick={async () => {
-              const r = await command<SplitRun>(
-                "split.preview",
-                { copyId: copy!.id, depth: 3, mode: "all" },
-                "正在读取三级目录，此步骤不创建分享。",
-              );
-              if (r) {
-                setRunId(r.id);
-                setRun(r);
-                setSelectedIds(new Set());
-                initialized.current = "";
-                setRights(false);
+        <Panel className="split-source">
+          <div className="split-source-controls">
+            <ResourcePicker />
+            <Button
+              primary
+              disabled={
+                copy?.status !== "ready" ||
+                busy > 0 ||
+                (!!current &&
+                  ["pending", "inspecting"].includes(current.status))
               }
-            }}
-          >
-            <RefreshCw size={15} />
-            {current ? "重新读取三级目录" : "读取三级目录"}
-          </Button>
+              onClick={async () => {
+                const r = await command(
+                  "split.preview",
+                  { copyId: copy!.id, depth: 3, mode: "all" },
+                  {
+                    text: "正在读取三级目录，此步骤不创建分享。",
+                    tone: "info",
+                  },
+                );
+                if (r) {
+                  setRunId(r.id);
+                  setRun(r);
+                  setSelectedIds(new Set());
+                  initialized.current = "";
+                  setRights(false);
+                }
+              }}
+            >
+              <RefreshCw size={15} />
+              {current ? "重新读取三级目录" : "读取三级目录"}
+            </Button>
+          </div>
+          <small>
+            最多展示三级、2000项资源。每个勾选项独立建链，每批最多100个。
+          </small>
         </Panel>
         {copy?.status !== "ready" ? (
           <Notice warning>请先完成这份资料的本人转存与文件归属核验。</Notice>
         ) : null}
         {history.length ? (
-          <Field label="拆分记录">
-            <select
-              aria-label="拆分记录"
-              value={runId}
-              onChange={(e) => {
-                setRunId(e.target.value);
-                setSelectedIds(new Set());
-                initialized.current = "";
-                setRights(false);
-              }}
-            >
-              {history.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {formatTime(h.createdAt)} · 第{h.depth}层 ·{" "}
-                  {h.mode === "all" ? "逐层" : "按层级"}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <details className="split-history">
+            <summary>查看以往拆分记录（{history.length}次）</summary>
+            <Field label="拆分记录">
+              <Select
+                aria-label="拆分记录"
+                value={runId}
+                onValueChange={(nextValue) => {
+                  setRunId(nextValue);
+                  setSelectedIds(new Set());
+                  initialized.current = "";
+                  setRights(false);
+                }}
+                items={[
+                  ...history.map((h) => ({
+                    value: h.id,
+                    label: (
+                      <>
+                        {formatTime(h.createdAt)} · 第{h.depth}层 ·{" "}
+                        {h.mode === "all" ? "目录树" : "历史层级预览"}
+                      </>
+                    ),
+                  })),
+                ]}
+              />
+            </Field>
+          </details>
         ) : null}
         {current ? (
           <Panel
@@ -175,9 +207,9 @@ export default function Split() {
               </Notice>
             ) : null}
             {["pending", "inspecting"].includes(current.status) ? (
-              <Notice>
-                正在读取本人目录。预览成功后显示预计链接数，确认后才会创建分享。
-              </Notice>
+              <LoadingState label="正在读取本人目录…" compact>
+                预览成功后显示预计链接数，确认后才会创建分享。
+              </LoadingState>
             ) : null}
             {current.status === "ready" &&
             (current.depth < 3 || current.mode !== "all") ? (
@@ -206,6 +238,7 @@ export default function Split() {
                   if (ids.length > 100)
                     notify(
                       `本层有${ids.length}项，已选择前100项，其余可分批勾选。`,
+                      "warning",
                     );
                 }}
                 renderDetails={(item) => (
@@ -223,10 +256,9 @@ export default function Split() {
                         quiet
                         disabled={item.status !== "ready" || busy > 0}
                         onClick={async () => {
-                          const link = await command<{ text: string }>(
-                            "split.link",
-                            { itemId: item.id },
-                          );
+                          const link = await command("split.link", {
+                            itemId: item.id,
+                          });
                           if (link)
                             await command(
                               "system.copyText",
@@ -236,6 +268,19 @@ export default function Split() {
                         }}
                       >
                         核验并复制
+                      </Button>
+                      <Button
+                        quiet
+                        disabled={
+                          item.status !== "ready" ||
+                          !item.verifiedAt ||
+                          busy > 0
+                        }
+                        onClick={() =>
+                          openSearch({ copyId: copy!.id, splitItemId: item.id })
+                        }
+                      >
+                        用于创作 →
                       </Button>
                       {[
                         "failed",
@@ -247,7 +292,7 @@ export default function Split() {
                           quiet
                           disabled={busy > 0}
                           onClick={() =>
-                            void command("job.retry", { id: item.jobId })
+                            void command("job.retry", { id: item.jobId! })
                           }
                         >
                           核对并恢复
@@ -290,10 +335,7 @@ export default function Split() {
                     busy > 0
                   }
                   onClick={async () => {
-                    const r = await command<{
-                      created: number;
-                      reused: number;
-                    }>("split.start", {
+                    const r = await command("split.start", {
                       id: current.id,
                       itemIds: selected.map((i) => i.id),
                       rightsConfirmed: true,
@@ -301,6 +343,7 @@ export default function Split() {
                     if (r)
                       notify(
                         `已排队${r.created}项，复用${r.reused}项；原文件与资料链接保持保留。`,
+                        "success",
                       );
                   }}
                 >
@@ -309,14 +352,11 @@ export default function Split() {
                 <Button
                   disabled={!allReady || busy > 0}
                   onClick={async () => {
-                    const text = await command<{ text: string }>(
-                      "split.package",
-                      {
-                        id: current.id,
-                        itemIds: selected.map((i) => i.id),
-                        includeCodes: exportCodes,
-                      },
-                    );
+                    const text = await command("split.package", {
+                      id: current.id,
+                      itemIds: selected.map((i) => i.id),
+                      includeCodes: exportCodes,
+                    });
                     if (text)
                       await command(
                         "system.copyText",
@@ -330,12 +370,12 @@ export default function Split() {
                 <Button
                   disabled={!allReady || busy > 0}
                   onClick={async () => {
-                    const path = await command<string | null>("split.export", {
+                    const path = await command("split.export", {
                       id: current.id,
                       itemIds: selected.map((i) => i.id),
                       includeCodes: exportCodes,
                     });
-                    if (path) notify(`本人链接清单已导出：${path}`);
+                    if (path) notify(`本人链接清单已导出：${path}`, "success");
                   }}
                 >
                   导出本人链接CSV
@@ -364,7 +404,8 @@ export default function Split() {
   );
 }
 function RecoverSplit({ item }: { item: SplitItem }) {
-  const { command, busy } = useApp(),
+  const { command } = useAppActions(),
+    { busy } = useAppActivity(),
     [text, setText] = useState("");
   return (
     <details>

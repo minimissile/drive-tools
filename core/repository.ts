@@ -1,3 +1,5 @@
+import type { PublicationDeliveryCheck } from "../shared/publication-checks";
+import { defaultContentFormat } from "../shared/channels";
 import type {
   Account,
   AppSnapshot,
@@ -21,10 +23,15 @@ import type {
 import { Database, now, parseJson } from "./database";
 import { AppError } from "./errors";
 import packageInfo from "../package.json" with { type: "json" };
+import { resolveAiModels } from "../shared/ai-models";
+import { accountCapacitySchema } from "../shared/drive-capacity";
 export type Row = Record<string, any>;
 export class Repository {
   constructor(readonly db: Database) {}
   account(row: Row): Account {
+    const capacity = accountCapacitySchema.safeParse(
+      this.db.setting(`account:capacity:${row.id}`, null),
+    );
     return {
       id: row.id,
       provider: row.provider,
@@ -36,12 +43,19 @@ export class Repository {
       defaultDirectory: row.default_directory,
       lastVerifiedAt: row.verified_at,
       error: row.error,
+      capacity:
+        capacity.success && capacity.data.ownerUid === row.uid
+          ? capacity.data
+          : null,
+      ...(row.copy_count == null
+        ? {}
+        : { resourceCopies: Number(row.copy_count) }),
     };
   }
   accounts() {
     return this.db
       .all<Row>(
-        "SELECT * FROM accounts ORDER BY provider,is_default DESC,created_at",
+        "SELECT a.*,(SELECT count(*) FROM copies c WHERE c.account_id=a.id) copy_count FROM accounts a ORDER BY provider,is_default DESC,created_at",
       )
       .map((r) => this.account(r));
   }
@@ -80,6 +94,7 @@ export class Repository {
       id: row.id,
       title: row.title,
       sourceUrl: row.source_url,
+      sourceKind: row.source_kind ?? "share",
       provider: row.provider,
       category: row.category,
       tags: parseJson(row.tags, []),
@@ -269,7 +284,16 @@ export class Repository {
       .map((r) => this.draftRow(r));
   }
   private draftRow(r: Row): Draft {
+    const creative = this.db.get<{ data: string }>(
+      "SELECT data FROM studio_packages WHERE draft_id=?",
+      r.id,
+    );
     return {
+      contentFormat: r.content_format || defaultContentFormat(r.platform),
+      creative: creative ? parseJson(creative.data, null) : null,
+      topicId: r.topic_id ?? null,
+      splitItemId: r.split_item_id ?? null,
+      splitShareVersion: r.split_share_version ?? null,
       id: r.id,
       resourceId: r.resource_id,
       copyId: r.copy_id,
@@ -311,6 +335,10 @@ export class Repository {
         id: r.id,
         platform: r.platform,
         alias: r.alias,
+        capabilities: parseJson(r.capabilities, {
+          formats: [],
+          linkPositions: [],
+        }),
         windowId: r.window_id,
         editorUrl: r.editor_url,
         linkPermission: r.link_permission,
@@ -320,6 +348,15 @@ export class Repository {
         lastOpenedAt: r.last_opened_at,
         openError: r.open_error,
       }));
+  }
+  deliveryChecks(publicationId: string): PublicationDeliveryCheck[] {
+    return this.db
+      .all<{ data: string }>(
+        "SELECT data FROM publication_delivery_checks WHERE publication_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100",
+        publicationId,
+      )
+      .map((r) => parseJson<PublicationDeliveryCheck | null>(r.data, null))
+      .filter((v): v is PublicationDeliveryCheck => v !== null);
   }
   calls(): ApiCall[] {
     return this.db
@@ -404,6 +441,10 @@ export class Repository {
       vaultPath: this.db.setting("vaultPath", null),
       exportCodes: this.db.setting("exportCodes", false),
       model: this.db.setting("model", ""),
+      aiModels: resolveAiModels(
+        this.db.setting("aiModels", null),
+        this.db.setting("model", ""),
+      ),
       openrouterConfigured: hasSecret("openrouter"),
       bitUrl: this.db.setting("bitUrl", ""),
       bitConfigured: hasSecret("bit"),

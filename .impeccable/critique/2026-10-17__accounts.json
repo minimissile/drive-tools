@@ -1,0 +1,135 @@
+{
+  "date": "2026-10-17",
+  "project": "盘序",
+  "mode": "Operate",
+  "theme": "white only",
+  "scope": "账号管理页面排列、六网盘 Logo 与任务交互重排",
+  "findings": [
+    {
+      "id": "A01",
+      "priority": "P2",
+      "kind": "布局与交互",
+      "problem": "账号信息、容量和六个按钮纵向堆叠，新增入口位于列表底部，主要下一步不明确",
+      "evidence": "before-1440.png",
+      "resolution": "改为按列对齐的账号列表；新增入口置于页面标题区并按需展开行内表单；空账号时直接展开；创建后切换对应筛选、清除阻碍可见性的搜索并聚焦登录。",
+      "code": [
+        "src/pages/Accounts.tsx",
+        "src/accounts/AddAccountForm.tsx",
+        "src/accounts/AccountRow.tsx",
+        "src/accounts/accounts.css"
+      ],
+      "status": "resolved"
+    },
+    {
+      "id": "A02",
+      "priority": "P2",
+      "kind": "视觉识别与复用",
+      "problem": "网盘仅使用汉字首字母占位，六网盘的视觉识别不足",
+      "resolution": "提供 ProviderIcon，统一使用六家官网的本地品牌资源，复用于网盘筛选、添加选择器、账号身份和管理弹窗。保留资源来源与 UC 原始图像裁切规则，不运行外站图标请求。",
+      "code": [
+        "src/resources/ProviderIcon.tsx",
+        "src/resources/provider-icon.css",
+        "src/assets/providers/SOURCES.md"
+      ],
+      "status": "resolved"
+    },
+    {
+      "id": "A03",
+      "priority": "P2",
+      "kind": "交互层级",
+      "problem": "当前使用、新任务默认和登录状态混在同一排；打开窗口、核验、刷新、默认和管理均占据列表主要操作区",
+      "resolution": "按状态突出登录或切换，保留显式 UID 核验；容量刷新归入容量区域，默认设置和本地凭据操作归入管理。当前使用与按网盘默认保持独立，已有任务不改绑。",
+      "code": [
+        "src/accounts/AccountRow.tsx",
+        "src/accounts/AccountEditor.tsx",
+        "src/accounts/useAccountOperations.ts"
+      ],
+      "status": "resolved"
+    },
+    {
+      "id": "A04",
+      "priority": "P2",
+      "kind": "边界与恢复",
+      "problem": "容量区域占用过大，限制状态的操作提示不清晰；新增输入缺少切页恢复",
+      "resolution": "容量以已使用/总容量、使用率、剩余空间和更新时间组成紧凑区域；未知显示破折号；慢响应保留旧值，失败显示上次记录并支持手动恢复；停用或未登录核验时禁用容量刷新。新增复用 useLocalDraft 隔离工作空间保存别名，不恢复凭据或自动操作。",
+      "code": [
+        "src/accounts/Capacity.tsx",
+        "src/accounts/capacity.css",
+        "src/accounts/AddAccountForm.tsx"
+      ],
+      "status": "resolved"
+    },
+    {
+      "id": "A05",
+      "priority": "P2",
+      "kind": "确认与可访问性",
+      "problem": "本地凭据移除未明确呈现后续停用状态；账号增多与窄窗口容易造成操作换行混乱",
+      "resolution": "凭据移除先确认，准确说明移除后账号会停用，并保持 UID/历史和云端数据；取消恢复焦点。按工作区宽度将操作移至行下、容量与身份堆叠；沿用公共焦点/减少动态效果，保留所有六家网盘现有能力说明。",
+      "code": [
+        "src/accounts/AccountEditor.tsx",
+        "src/accounts/accounts.css"
+      ],
+      "status": "resolved"
+    }
+  ],
+  "architecture": {
+    "composition": "src/pages/Accounts.tsx",
+    "domainComponents": [
+      "src/accounts/AccountRow.tsx",
+      "src/accounts/AddAccountForm.tsx",
+      "src/accounts/AccountEditor.tsx",
+      "src/accounts/Capacity.tsx"
+    ],
+    "operations": "src/accounts/useAccountOperations.ts",
+    "reused": [
+      "src/ui/Select.tsx",
+      "src/ui/Tabs.tsx",
+      "src/ui/Dialog.tsx",
+      "src/hooks/useLocalDraft.ts",
+      "src/api/client.ts",
+      "shared/drive-capacity.ts"
+    ],
+    "canonicalStyles": [
+      "src/accounts/accounts.css",
+      "src/accounts/capacity.css",
+      "src/resources/provider-icon.css"
+    ],
+    "cleanup": "删除 workspaces.css、responsive.css 中失效的账号与字母占位 Logo 定义；未在末尾追加修补覆盖；保留工作区并行增加的六网盘、品牌及其他业务改动。"
+  },
+  "validation": {
+    "typescript": "npx tsc --noEmit: passed",
+    "unitTests": 219,
+    "accountScenarios": 8,
+    "regressions": [
+      {
+        "suite": "e2e-ui-audit",
+        "exitCode": 0
+      },
+      {
+        "suite": "e2e-controls",
+        "exitCode": 0
+      },
+      {
+        "suite": "e2e-toasts",
+        "exitCode": 0
+      },
+      {
+        "suite": "e2e",
+        "exitCode": 0
+      }
+    ],
+    "regressionGroups": {
+      "e2e-ui-audit": 14,
+      "e2e-controls": 5,
+      "e2e-toasts": 8
+    },
+    "build": "Vite frontend production build in temporary panxu-accounts-build-7eTGy5 passed; no installation package or version bump",
+    "development": "existing npm run dev source on localhost:5173; __panxu_dev identity checked",
+    "visual": "Viewed native captures at 1440px, 1024px, 840px and 200% zoom, including account list, long labels, inline creation and management dialog. Captured 1320px as well.",
+    "evidence": ".impeccable/critique/evidence/2026-10-17-accounts",
+    "isolation": "Disposable SQLite and sessions; account login/check/capacity are locally simulated in targeted tests; network blocked; other regressions use their own local mocks.",
+    "limitations": [
+      "真实网盘登录、网盘接口在线可用性与 Windows 实机效果未在本轮验证。"
+    ]
+  }
+}

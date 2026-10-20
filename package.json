@@ -1,6 +1,6 @@
 {
   "name": "panxu-studio",
-  "version": "0.3.1",
+  "version": "0.7.0",
   "private": true,
   "description": "盘序 · 本地网盘内容营销工作台",
   "type": "module",
@@ -9,33 +9,59 @@
   "license": "UNLICENSED",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "build:icons": "node scripts/generate-icons.mjs",
     "build": "tsc --noEmit && vite build && node scripts/build-desktop.mjs",
     "start": "electron .",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:e2e": "node scripts/e2e.mjs",
+    "test:e2e:drives": "node scripts/e2e-drives.mjs",
     "test:e2e:packaged": "node scripts/e2e-packaged.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "package:mac": "npm run build && electron-builder --mac dmg --publish never",
-    "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "package:dir": "npm run build && electron-builder --dir --publish never",
+    "package:mac": "npm run build && electron-builder --config electron-builder.config.cjs --mac dmg zip --arm64 --x64 --publish never",
+    "package:win": "npm run build && electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish never",
+    "package:dir": "npm run build && electron-builder --config electron-builder.config.cjs --dir --publish never",
     "verify:providers": "node --import tsx --test tests/providers.test.ts",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"{desktop,core,shared,tests}/**/*.ts\" \"scripts/*.mjs\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"{desktop,core,shared,tests}/**/*.ts\" \"scripts/*.mjs\"",
+    "verify:updates": "node scripts/verify-updates.mjs",
+    "test:e2e:updates": "node scripts/e2e-updates.mjs",
+    "test:e2e:search": "node scripts/e2e-search.mjs",
+    "test:e2e:share-statistics": "node scripts/e2e-share-statistics.mjs",
+    "test:e2e:ideas": "node scripts/e2e-ideas.mjs",
+    "test:e2e:resource-export": "node scripts/e2e-resource-export.mjs",
+    "test:e2e:studio-media": "node scripts/e2e-studio-media.mjs",
+    "test:e2e:ui": "node scripts/e2e-ui.mjs",
+    "test:e2e:ui-audit": "node scripts/e2e-ui-audit.mjs",
+    "test:e2e:visual": "node scripts/e2e-visual.mjs",
+    "test:e2e:controls": "node scripts/e2e-controls.mjs",
+    "test:e2e:states": "node scripts/e2e-data-states.mjs",
+    "test:e2e:toasts": "node scripts/e2e-toasts.mjs",
+    "test:e2e:accounts": "node scripts/e2e-accounts.mjs",
+    "test:e2e:batch": "node scripts/e2e-batch.mjs",
+    "test:e2e:intake": "node scripts/e2e-intake.mjs",
+    "test:e2e:zhidao": "node scripts/e2e-zhidao.mjs",
+    "build:pansou": "node scripts/build-pansou.mjs"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
+    "builder-util-runtime": "9.7.0",
+    "electron-updater": "6.8.9",
     "lucide-react": "1.57.0",
     "playwright-core": "1.64.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "semver": "7.7.3",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/semver": "7.7.1",
     "@vitejs/plugin-react": "6.1.2",
     "electron": "44.7.2",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
+    "js-yaml": "4.3.2",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
@@ -45,7 +71,7 @@
     "appId": "com.panxu.studio",
     "productName": "盘序",
     "directories": {
-      "output": "release"
+      "output": "release/${version}"
     },
     "files": [
       "dist/**",
@@ -55,11 +81,24 @@
       "!dist-desktop/**/*.map"
     ],
     "asar": true,
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "brand/icon.png"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "arm64",
             "x64"

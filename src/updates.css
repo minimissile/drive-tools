@@ -1,0 +1,82 @@
+.update-summary,
+.update-options,
+.update-release-heading,
+.update-footer,
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.update-summary strong {
+  display: block;
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+.update-summary small {
+  display: block;
+}
+.update-options {
+  margin: 20px 0 14px;
+}
+.update-release {
+  margin-top: 24px;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--line);
+}
+.update-release-heading h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.update-notes {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 14px 0;
+}
+.update-progress {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+.update-progress progress {
+  width: 100%;
+  height: 9px;
+  accent-color: var(--blue);
+}
+.update-error-code {
+  display: block;
+  margin-top: 6px;
+}
+.update-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #e3e8ef);
+}
+.update-banner {
+  background: var(--blue-bg);
+  border: 1px solid var(--line);
+  color: var(--blue);
+  border-radius: 12px;
+  padding: 9px 16px;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+.update-spin {
+  animation: update-spin 1.2s linear infinite;
+}
+@keyframes update-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-spin {
+    animation: none;
+  }
+}

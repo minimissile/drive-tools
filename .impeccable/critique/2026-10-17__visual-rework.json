@@ -1,0 +1,290 @@
+{
+  "date": "2026-10-17",
+  "project": "盘序",
+  "mode": "Operate",
+  "theme": "white only",
+  "scope": "用户截图触发的视觉重审与结构整改；保留当前品牌、业务规则和其他任务的工作区改动",
+  "priorVerdictCorrection": "上一轮功能回归通过，不足以支持UI细节已完成的结论。本轮以用户截图、实际界面、独立复核和定向回归重新验收。",
+  "findings": [
+    {
+      "id": "V01",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "复合搜索框内部出现第二圈焦点，图标被排除",
+      "resolution": "搜索输入、可搜索选择器和目录搜索共用 input-frame；完整外壳处理焦点，内部不再重复绘制",
+      "code": "src/ui/primitives.tsx; src/ui/SearchSelect.tsx; src/pages/SplitTree.tsx; src/styles/controls.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V02",
+      "priority": "P1",
+      "category": "交互",
+      "problem": "详情关键动作被封面和说明推到首屏之外，短窗口再次暴露复制动作不可达",
+      "resolution": "详情分为标题、滚动内容和固定动作区；复制分享、创建选题、编辑在1600、1366和840窗口直接可达",
+      "code": "src/library/ResourceDetail.tsx; src/library/library.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V03",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "无封面缩略图挤出竖排标题，详情重复巨大标题占位",
+      "resolution": "占位图改为固定文件图标，真实封面保留图片；完整名称由正常标题负责",
+      "code": "src/resources/components.tsx; src/resources/resources.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V04",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "选中背景绕开复选框，批量操作与资源行视觉断裂",
+      "resolution": "选中、悬停由完整行容器负责；勾选与打开档案仍为两个独立语义控件",
+      "code": "src/pages/Library.tsx; src/library/library.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V05",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "标语、统计、筛选、批量操作前奏占据大量高度，列表和详情左空右挤",
+      "resolution": "紧凑页头与统计；筛选及选择工具集中到列表；列表和档案独立滚动；窄于1100px采用档案对话框",
+      "code": "src/pages/Library.tsx; src/styles/shell.css; src/library/library.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V06",
+      "priority": "P2",
+      "category": "实现一致性",
+      "problem": "按钮、输入和选择器不同高度，禁用态整体变透明",
+      "resolution": "36px常规和30px紧凑尺寸；显式禁用文字、背景和边框；增加4px基础间距变量",
+      "code": "src/styles/tokens.css; src/styles/base.css; src/styles/controls.css; docs/design-tokens.json",
+      "status": "resolved"
+    },
+    {
+      "id": "V07",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "单页仍显示两个失效翻页按钮，分页占据过大空间",
+      "resolution": "单页只显示紧凑结果说明，多页显示完整翻页；公共分页样式归组件所有；翻页重置列表滚动",
+      "code": "src/ui/Pagination.tsx; src/ui/pagination.css; src/pages/Library.tsx",
+      "status": "resolved"
+    },
+    {
+      "id": "V08",
+      "priority": "P1",
+      "category": "交互",
+      "problem": "本轮首个保存栏实现悬浮遮住表单，经第二次独立复核发现",
+      "resolution": "改用通用 Workspace：表单滚动区与 ActionBar 物理分离；操作栏不覆盖表单；稿件操作栏保持普通流",
+      "code": "src/ui/Workspace.tsx; src/ui/ActionBar.tsx; src/pages/Intake.tsx; src/pages/Studio.tsx",
+      "status": "resolved"
+    },
+    {
+      "id": "V09",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "工作室渠道导航再占一列，模板装饰和规则前奏挤压编辑器",
+      "resolution": "渠道改为公共搜索选择器，完整目录显式展开；移除重复装饰预览；规则按需展开，审阅和业务限制保留",
+      "code": "src/pages/Studio.tsx; src/studio/CreativeSetup.tsx; src/studio/studio.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V10",
+      "priority": "P2",
+      "category": "视觉",
+      "problem": "设置页模型卡片层层套框，容量辅助信息权重过高",
+      "resolution": "模型配置改为有分隔线的表单行，状态和解释独立分组；账号容量作为概要；保存范围与状态有清晰间距",
+      "code": "src/ai/ModelSettings.tsx; src/ai/models.css; src/accounts/capacity.css; src/settings/settings.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V11",
+      "priority": "P2",
+      "category": "交互",
+      "problem": "分享统计首次使用展示空指标和无效筛选，同步区域远在下方",
+      "resolution": "无成功快照时优先空态和账号同步；有快照或筛选状态时保留完整数据控件；筛选使用明确栅格",
+      "code": "src/pages/ShareStatistics.tsx; src/share-statistics.css",
+      "status": "resolved"
+    },
+    {
+      "id": "V12",
+      "priority": "P1",
+      "category": "交互",
+      "problem": "200%缩放时完整导航目录占据首屏，主工作区被推到下方",
+      "resolution": "窄内容视口显示带当前模块的导航开关，按需展开完整目录，切页后收起；验证主标题直接可见、主内容宽度400px无溢出。",
+      "code": "src/App.tsx; src/styles/shell.css; src/styles/responsive.css",
+      "status": "resolved"
+    }
+  ],
+  "architecture": {
+    "sharedUI": [
+      "Workspace（单一滚动工作面与独立底栏）",
+      "ActionBar（状态与操作分组）",
+      "DropdownMenu/MenuAction（Base UI门户、键盘与焦点）",
+      "Pagination（单页与多页）",
+      "SearchField/SearchSelect（统一复合输入焦点）"
+    ],
+    "domainStyles": [
+      "src/library/library.css",
+      "src/resources/resources.css",
+      "src/settings/settings.css"
+    ],
+    "state": "现有业务hooks和IPC方向保留；列表滚动重置为局部effect，未引入全局上下文或自动付费请求。",
+    "styleOwnership": "修改原始定义并移除旧规则；资源库布局不再散落workspaces/batch/responsive，分页样式由组件拥有。",
+    "maintenanceRules": "AGENTS.md 已加入样式归属、避免补丁式覆盖以及实际截图验收要求。"
+  },
+  "validation": {
+    "source": {
+      "command": "npm run dev",
+      "serverProcess": "node scripts/dev.mjs",
+      "identity": {
+        "root": "/Users/nuke/Desktop/drive-tools",
+        "mode": "development",
+        "revision": 4
+      },
+      "actualElectronWindow": true
+    },
+    "unitTests": {
+      "command": "npm test",
+      "passed": 203,
+      "failed": 0
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit --noUnusedLocals --noUnusedParameters",
+      "exitCode": 0
+    },
+    "whitespaceCheck": {
+      "command": "git diff --check",
+      "exitCode": 0
+    },
+    "regressions": [
+      {
+        "name": "e2e.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e.mjs.log"
+      },
+      {
+        "name": "e2e-search.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-search.mjs.log"
+      },
+      {
+        "name": "e2e-studio-media.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-studio-media.mjs.log"
+      },
+      {
+        "name": "e2e-ideas.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-ideas.mjs.log"
+      },
+      {
+        "name": "e2e-resource-export.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-resource-export.mjs.log"
+      },
+      {
+        "name": "e2e-share-statistics.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-share-statistics.mjs.log"
+      },
+      {
+        "name": "e2e-drives.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-drives.mjs.log"
+      },
+      {
+        "name": "e2e-ui.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-ui.mjs.log"
+      },
+      {
+        "name": "e2e-ui-audit.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-visual-regression-e2e-ui-audit.mjs.log"
+      }
+    ],
+    "visual": {
+      "script": "scripts/e2e-visual.mjs",
+      "checks": [
+        "复合搜索统一外框焦点、筛选等高、缩略图无挤压文字、详情与核心操作首屏可达",
+        "次要操作菜单键盘开关、禁用与焦点恢复，翻页回到列表顶部，筛选空态释放详情列",
+        "1366×768、1920×1080与1024×768原生窗口布局",
+        "录入表单滚动区与底部保存栏物理分离，底部授权和操作可达",
+        "统计首次使用不显示空指标与无效筛选，账号同步进入首屏",
+        "紧凑渠道选择、手工编辑、暂存、保存版本与人工审阅流程",
+        "840 原生窗口档案对话框操作区始终可达",
+        "原生840与200%缩放无页面横向溢出，关闭档案返回选中行"
+      ],
+      "errors": [],
+      "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-visual-Xjzegf",
+      "screenshots": 32,
+      "captureMethod": "普通尺寸采用Playwright截图；200%缩放用Electron原生webContents.capturePage避免Playwright按缩放后的viewport截取半幅。",
+      "zoomGeometry": {
+        "name": "200% native capture",
+        "client": 400,
+        "scroll": 400,
+        "innerWidth": 420,
+        "height": 364,
+        "font": "22px"
+      }
+    },
+    "sizes": {
+      "nativeWindows": [
+        "1600×1000",
+        "1320×900",
+        "1366×768",
+        "1920×1080",
+        "1024×768",
+        "840×760"
+      ],
+      "zoom": "840px原生窗口，200%缩放；内容区高度扣除macOS标题栏"
+    },
+    "detector": {
+      "command": "impeccable detect --json src",
+      "result": [],
+      "interpretation": "仅代表源码规则无命中；不能代替上述渲染检查。"
+    },
+    "independentReview": "A 独立检查截图发现并复核了保存栏遮挡、档案半截操作和统计空态；B 独立源码机械评估。二者均未操作同一个Electron窗口。",
+    "build": {
+      "output": "/private/tmp/panxu-visual-build-dwP3GX",
+      "renderer": "最终源码Vite构建",
+      "desktop": "esbuild主进程与预加载构建",
+      "installer": false,
+      "versionChanged": false
+    },
+    "compactNavigationRegressions": [
+      {
+        "name": "e2e-ui.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-compact-nav-e2e-ui.mjs.log"
+      },
+      {
+        "name": "e2e-ui-audit.mjs",
+        "code": 0,
+        "log": "/private/tmp/panxu-compact-nav-e2e-ui-audit.mjs.log"
+      }
+    ]
+  },
+  "unverified": [
+    "真实网盘、付费AI/5118、远端转存/建链/发布和更新安装均通过模拟或未触发，未验证真实服务环境。",
+    "未进行Windows硬件、VoiceOver/NVDA或触摸设备全流程验收。",
+    "这轮证据覆盖主要页面及受影响流程，不宣称已穷尽所有数据与业务状态组合。"
+  ],
+  "evidenceArchive": "/Users/nuke/Desktop/drive-tools/.impeccable/critique/evidence/2026-10-17-visual-rework",
+  "reviewedScreenshots": [
+    "after-library-filtered.png",
+    "after-library.png",
+    "after-library-1366.png",
+    "after-library-detail-840.png",
+    "after-library-840.png",
+    "after-library-menu.png",
+    "after-intake.png",
+    "after-intake-bottom.png",
+    "after-studio-editor.png",
+    "after-share-statistics.png",
+    "after-settings.png",
+    "after-publish.png",
+    "visual-checks.json",
+    "after-library-200-percent.png"
+  ]
+}

@@ -1,0 +1,206 @@
+/* Form boundaries and focus feedback have one owner, including compound inputs. */
+input:where(:not([type="checkbox"]):not([type="file"]):not([type="hidden"])),
+textarea,
+.input-frame,
+.select-control {
+  border: 1px solid var(--control-line);
+  background: var(--surface);
+  border-radius: var(--control-radius);
+  outline: 2px solid transparent;
+  outline-offset: -1px;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  transition:
+    border-color var(--control-focus-duration) var(--control-focus-ease),
+    outline-color var(--control-focus-duration) var(--control-focus-ease);
+}
+input:where(:not([type="checkbox"]):not([type="file"]):not([type="hidden"])),
+.select-control {
+  height: var(--control-height);
+  padding: 7px 11px;
+}
+textarea {
+  resize: vertical;
+  min-height: 88px;
+  padding: 10px 12px;
+  line-height: 1.75;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+input:where(
+    :not([type="checkbox"]):not([type="file"]):not([type="hidden"])
+  ):focus,
+textarea:focus,
+.input-frame:focus-within,
+.select-control:focus,
+.select-control[data-popup-open] {
+  border-color: var(--blue);
+  outline-color: var(--blue);
+  outline-offset: -1px;
+}
+input[aria-invalid="true"],
+textarea[aria-invalid="true"],
+.input-frame:has([aria-invalid="true"]),
+.select-control[aria-invalid="true"] {
+  border-color: var(--red);
+}
+input[aria-invalid="true"]:focus,
+textarea[aria-invalid="true"]:focus,
+.input-frame:has([aria-invalid="true"]):focus-within,
+.select-control[aria-invalid="true"]:focus {
+  outline-color: var(--red);
+}
+input:disabled,
+textarea:disabled,
+.select-control:disabled,
+.input-frame:has(input:disabled) {
+  color: var(--disabled-text);
+  background: var(--disabled-bg);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+.input-frame {
+  display: flex;
+  align-items: center;
+  height: var(--control-height);
+  color: var(--text);
+}
+.input-frame > svg {
+  flex: none;
+  color: var(--muted);
+}
+.input-frame > .spin {
+  color: var(--blue);
+}
+.input-frame input,
+.input-frame input:focus {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 6px 0;
+  background: transparent;
+  outline: none;
+  transition: none;
+}
+.input-frame button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  align-self: stretch;
+  width: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+.input-frame button:hover,
+.input-frame button:focus-visible {
+  outline: none;
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+.input-frame button:active:not(:disabled),
+.select-control:active:not(:disabled) {
+  transform: none;
+}
+.select-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+.select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.select-chevron {
+  display: flex;
+  flex: none;
+  color: var(--muted);
+}
+.select-control:disabled .select-chevron {
+  color: inherit;
+}
+.search-select {
+  flex: 1;
+  min-width: 180px;
+  max-width: 390px;
+  padding-left: 10px;
+}
+.select-positioner {
+  z-index: 40;
+  max-width: calc(100vw - 16px);
+}
+.select-popup {
+  width: max-content;
+  min-width: var(--anchor-width);
+  max-width: min(440px, calc(100vw - 16px));
+  max-height: min(360px, var(--available-height));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  box-shadow: 0 8px 24px #182a4215;
+  outline: none;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.select-feedback {
+  padding: 8px;
+}
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+}
+.select-option > :first-child {
+  min-width: 0;
+}
+.select-option[data-highlighted] {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+.select-option[data-selected] {
+  color: var(--blue);
+  font-weight: 600;
+}
+.select-option[data-disabled] {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+.select-check {
+  display: flex;
+  flex: none;
+}
+.suggestion-label {
+  display: grid;
+  gap: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --control-focus-duration: 0ms;
+  }
+}

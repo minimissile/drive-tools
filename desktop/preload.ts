@@ -18,5 +18,13 @@ const api: AppApi = {
     ipcRenderer.on("panxu:changed", handler);
     return () => ipcRenderer.removeListener("panxu:changed", handler);
   },
+  onUpdateChanged(callback) {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: import("../shared/updates").UpdateState,
+    ) => callback(state);
+    ipcRenderer.on("panxu:update", handler);
+    return () => ipcRenderer.removeListener("panxu:update", handler);
+  },
 };
 contextBridge.exposeInMainWorld("panxu", Object.freeze(api));

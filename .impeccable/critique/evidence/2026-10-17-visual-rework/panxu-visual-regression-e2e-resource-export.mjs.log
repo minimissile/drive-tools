@@ -1,0 +1,13 @@
+{
+  "passed": 5,
+  "checks": [
+    "文字与截图组合输入 → 视觉模型解析 → 表头改名、映射及调序",
+    "33份全库分批 → 暂停 → 页面重载读取检查点 → 完成筛选与匹配依据",
+    "真实保存对话框端口 → XLSX与CSV落盘 → 核对列序、中文与筛选范围",
+    "未匹配资料手工补选 → 选中资源生成短文 → 编辑导出 → 选择变更提示重新生成",
+    "1320px与840px布局、历史离线回看、页面身份、无框架覆盖层及前端异常"
+  ],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-export-qa-iJI9JK",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-export-e2e-KtK0rU",
+  "errors": []
+}

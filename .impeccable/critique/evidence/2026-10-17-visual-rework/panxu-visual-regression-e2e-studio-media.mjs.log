@@ -1,0 +1,14 @@
+{
+  "passed": 6,
+  "checks": [
+    "四种形式与自定义模板 → AI方案 → 实际PNG生成、显示、导出及审阅门槛",
+    "文案另存版本保留已有图片，不重新生成或增加素材费用",
+    "图文组图按所选页数生成独立图片并保留页面文案与画面要求",
+    "真实动态视频接口任务 → 重载保留ID → 查询下载MP4 → 本地播放器实际播放、导出且无重复提交",
+    "发布准备显示当前已审阅版本的视频成品",
+    "1320px与840px布局、页面身份、无前端异常、无真实外部调用"
+  ],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-studio-qa-tFZo1I",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-studio-e2e-HJmnbn",
+  "errors": []
+}

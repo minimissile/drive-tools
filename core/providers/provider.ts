@@ -6,8 +6,15 @@ import type {
   ShareInspection,
 } from "../../shared/types";
 import { AppError } from "../errors";
+import type { DriveCapacity } from "../../shared/drive-capacity";
+import type { ProviderShareStatsPage } from "../../shared/share-statistics";
 export type JsonObject = Record<string, any>;
 export interface ProviderTransport {
+  ownShareCode?(accountId: string, shareId: string): Promise<string | null>;
+  authHeaders?(
+    accountId: string,
+    refresh?: boolean,
+  ): Promise<Record<string, string>>;
   principalId?(accountId: string, provider: Provider): Promise<string | null>;
   json(accountId: string, url: string, init?: RequestInit): Promise<JsonObject>;
   text(accountId: string, url: string, init?: RequestInit): Promise<string>;
@@ -32,13 +39,26 @@ export interface TransferResult {
   taskId: string | null;
 }
 export interface DriveProvider {
+  manage?(account: Account, action: "mkdir" | "rename" | "delete", path: string, name?: string): Promise<void>;
+  upload?(
+    account: Account,
+    parentId: string,
+    asset: import("./small-upload").UploadAsset,
+  ): Promise<void>;
   readonly id: Provider;
+  capacity?(account: Account): Promise<DriveCapacity>;
+  shareStatistics?(
+    account: Account,
+    page: number,
+    cursor?: string,
+  ): Promise<ProviderShareStatsPage>;
   identity(account: Account): Promise<Identity>;
   inspect(
     account: Account,
     source: ShareInput,
     parentId?: string,
     page?: number,
+    cursor?: string,
   ): Promise<ShareInspection>;
   list(account: Account, parentId: string): Promise<RemoteFile[]>;
   ensureFolder(account: Account, path: string): Promise<string>;
@@ -65,6 +85,7 @@ export interface DriveProvider {
     account: Account,
     shareId: string,
     files: RemoteFile[],
+    code?: string,
   ): Promise<boolean>;
 }
 export function normalizeRemoteFile(
@@ -72,11 +93,20 @@ export function normalizeRemoteFile(
   provider: Provider,
   parentId: string,
 ): RemoteFile {
+  const cloud = provider === "quark" || provider === "uc";
   const fileId = String(
-    provider === "quark" ? (row.fid ?? "") : (row.fs_id ?? ""),
+    cloud
+      ? (row.fid ?? "")
+      : provider === "xunlei" || provider === "pikpak"
+        ? (row.id ?? "")
+        : (row.fs_id ?? ""),
   );
   const name = String(
-    provider === "quark" ? (row.file_name ?? "") : (row.server_filename ?? ""),
+    cloud
+      ? (row.file_name ?? "")
+      : provider === "xunlei" || provider === "pikpak"
+        ? (row.name ?? "")
+        : (row.server_filename ?? ""),
   );
   if (!fileId || !name)
     throw new AppError(
@@ -86,9 +116,10 @@ export function normalizeRemoteFile(
   return {
     id: fileId,
     name,
-    isDirectory: [true, 1, "1"].includes(
-      provider === "quark" ? row.dir : row.isdir,
-    ),
+    isDirectory:
+      provider === "xunlei" || provider === "pikpak"
+        ? row.kind === "drive#folder"
+        : [true, 1, "1"].includes(cloud ? row.dir : row.isdir),
     size: row.size == null ? null : Number(row.size),
     parentId,
     path: typeof row.path === "string" ? row.path : undefined,

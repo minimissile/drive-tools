@@ -3,10 +3,12 @@ import type { BrowserBinding } from "../shared/types";
 import { validateEditorUrl, validateLoopback } from "./links";
 import { AppError } from "./errors";
 import { fetchJson } from "./http";
+import { platformSpecs } from "../shared/platforms";
 export function assertEditorPage(
   editor: string,
   current: string,
   extensionText = "",
+  httpStatus = 200,
 ) {
   const target = new URL(editor),
     page = new URL(current);
@@ -24,10 +26,22 @@ export function assertEditorPage(
       "比特客户端扩展拦截了网站访问。请在已打开的指纹窗口查看具体原因，处理后回到盘序重试。",
     );
   }
-  if (page.protocol !== "https:" || page.hostname !== target.hostname)
+  const platform = platformSpecs.find((p) => p.hosts.includes(target.hostname));
+  if (
+    page.protocol !== "https:" ||
+    page.username ||
+    page.password ||
+    page.port ||
+    !(platform?.hosts ?? [target.hostname]).includes(page.hostname)
+  )
     throw new AppError(
       "EDITOR_REDIRECTED",
       "已打开窗口，但页面跳转到登录或其他域名，请在窗口核对平台账号后重试。",
+    );
+  if (httpStatus >= 400)
+    throw new AppError(
+      "EDITOR_HTTP_ERROR",
+      `编辑器返回HTTP ${httpStatus}，页面未能正常加载。请检查平台入口，或在比特窗口查看提示后重试。`,
     );
   if (/(^|\/)(login|signin|passport|auth)(\/|$)/i.test(page.pathname))
     throw new AppError(
@@ -124,7 +138,7 @@ export class BitBrowser {
         throw new AppError("BIT_CONTEXT_MISSING", "未连接到指定指纹窗口。");
       // Leave existing editors and unsaved drafts untouched.
       const page = await context.newPage();
-      await page.goto(editor, {
+      const navigation = await page.goto(editor, {
         waitUntil: "domcontentloaded",
         timeout: 30_000,
       });
@@ -137,7 +151,12 @@ export class BitBrowser {
               .innerText({ timeout: 3000 })
               .catch(() => "")
           : "";
-      assertEditorPage(editor, current, extensionText.slice(0, 12000));
+      assertEditorPage(
+        editor,
+        current,
+        extensionText.slice(0, 12000),
+        navigation?.status(),
+      );
     } finally {
       await browser.close();
     } // CDP disconnects the client; the existing BitBrowser window is not closed.

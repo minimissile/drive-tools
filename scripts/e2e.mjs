@@ -1,3 +1,5 @@
+import { openAccountForm } from "./e2e-account-form.mjs";
+import { chooseOption } from "./e2e-select.mjs";
 import { _electron as electron } from "playwright-core";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
@@ -11,11 +13,20 @@ const evidence =
   process.env.PANXU_QA_DIR ??
   (await mkdtemp(join(tmpdir(), "panxu-evidence-")));
 await mkdir(evidence, { recursive: true });
-const env = { ...process.env, PANXU_DATA_DIR: dataPath };
+// Browser plugin not available. PANXU_E2E_DEV=1 uses the running npm run dev server.
+const dev = process.env.PANXU_E2E_DEV === "1";
+const launchArgs = [dev ? join(process.cwd(), "dist-dev") : process.cwd()];
+const env = {
+  ...process.env,
+  PANXU_DATA_DIR: dataPath,
+  ...(dev
+    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    : {}),
+};
 delete env.ELECTRON_RUN_AS_NODE;
 let app = await electron.launch({
   executablePath: process.env.PANXU_ELECTRON_PATH ?? require("electron"),
-  args: [process.cwd()],
+  args: launchArgs,
   env,
   timeout: 45000,
 });
@@ -28,9 +39,19 @@ try {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "资源库", exact: true }).click();
   await page.locator(".resource-list").waitFor();
+  await page.evaluate(() =>
+    window.panxu.invoke("updater.configure", { autoCheck: false }),
+  );
   assert.match(await page.title(), /盘序/);
-  assert.match(page.url(), /dist\/index.html/);
+  if (dev) {
+    assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+    assert.equal(
+      (await page.evaluate(() => window.panxu.invoke("dev.status"))).mode,
+      "development",
+    );
+  } else assert.match(page.url(), /dist\/index.html/);
   checks.push("启动身份与首屏");
   await page.emulateMedia({ colorScheme: "light" });
   await page.screenshot({ path: join(evidence, "01-empty.png") });
@@ -41,16 +62,18 @@ try {
   const navIcons = await page
     .locator('nav[aria-label="主导航"] button > svg')
     .evaluateAll((icons) => icons.map((icon) => icon.getAttribute("class")));
-  assert.equal(navIcons.length, 11);
-  assert.equal(new Set(navIcons).size, 11);
-  checks.push("11个侧边栏入口均使用不同且对应功能的图标");
+  assert.ok(navIcons.length >= 11);
+  assert.equal(new Set(navIcons).size, navIcons.length);
+  checks.push(`${navIcons.length}个侧边栏入口均使用不同且对应功能的图标`);
   await nav("账号管理").click();
   for (const alias of ["联调夸克主账号", "联调夸克备用账号"]) {
+    await openAccountForm(page);
     await page.getByRole("textbox", { name: "新增账号别名" }).fill(alias);
     await page.getByRole("button", { name: "添加账号", exact: true }).click();
     await page.getByRole("heading", { name: alias, exact: true }).waitFor();
   }
-  await page.getByLabel("新增账号网盘").selectOption("baidu");
+  await openAccountForm(page);
+  await chooseOption(page.getByLabel("新增账号网盘"), "baidu");
   await page
     .getByRole("textbox", { name: "新增账号别名" })
     .fill("联调百度账号");
@@ -58,6 +81,7 @@ try {
   await page
     .getByRole("heading", { name: "联调百度账号", exact: true })
     .waitFor();
+  await page.getByRole("tab", { name: /^全部网盘/ }).click();
   const primary = page.locator(".account-row").filter({
     has: page.getByRole("heading", { name: "联调夸克主账号", exact: true }),
   });
@@ -246,7 +270,7 @@ try {
     });
   });
   await nav("流量发现").click();
-  await page.getByLabel("找词方法", { exact: true }).selectOption("suggest");
+  await chooseOption(page.getByLabel("找词方法", { exact: true }), "suggest");
   await page.getByLabel("查询种子词").fill("办公");
   await page.getByRole("button", { name: "查询关键词", exact: true }).click();
   await page
@@ -270,7 +294,7 @@ try {
     1,
   );
   await page.reload();
-  await page.getByLabel("找词方法", { exact: true }).selectOption("suggest");
+  await chooseOption(page.getByLabel("找词方法", { exact: true }), "suggest");
   await page
     .getByRole("heading", { name: "已保存的下拉词分析", exact: true })
     .waitFor();
@@ -304,7 +328,7 @@ try {
   await page
     .getByRole("button", { name: "查看已存结果", exact: true })
     .waitFor();
-  assert.equal(await page.locator(".toast.danger").count(), 0);
+  assert.equal(await page.locator('.toast[data-tone="error"]').count(), 0);
   await app.evaluate(() => {
     Date.now = globalThis.__panxuQaDateNow;
   });
@@ -314,7 +338,7 @@ try {
   );
   await nav("资源库").click();
   await nav("流量发现").click();
-  await page.getByLabel("找词方法", { exact: true }).selectOption("suggest");
+  await chooseOption(page.getByLabel("找词方法", { exact: true }), "suggest");
   await page.getByRole("button", { name: "查看已存结果", exact: true }).click();
   await page
     .getByRole("checkbox", { name: "选择办公清单", exact: true })
@@ -412,32 +436,50 @@ try {
   );
   checks.push("手工词池去重、资源关联及复制编辑");
   await nav("内容工作室").click();
-  for (const [name, fragment] of [
-    ["抖音", "演示分镜"],
-    ["快手", "操作演示"],
-    ["小红书", "我的实际使用记录"],
-    ["公众号", "为什么整理这份资料"],
-    ["微博", "一个值得记录的发现"],
-    ["百度贴吧", "问题背景"],
-    ["豆瓣", "与本组主题的关系"],
-    ["X / Twitter", "最有用的一个要点"],
-    ["知乎", "先回答问题"],
-    ["CSDN", "环境与前置条件"],
+  await page.getByRole("button", { name: /浏览全部渠道/ }).click();
+  for (const [name, platform] of [
+    ["抖音", "douyin"],
+    ["快手", "kuaishou"],
+    ["小红书", "xiaohongshu"],
+    ["公众号", "wechat"],
+    ["微博", "weibo"],
+    ["百度贴吧", "tieba"],
+    ["豆瓣", "douban"],
+    ["X / Twitter", "x"],
+    ["知乎", "zhihu"],
+    ["CSDN", "csdn"],
   ]) {
     await page
       .getByRole("navigation", { name: "内容平台" })
       .getByRole("button", { name, exact: true })
       .click();
+    if (
+      !(await page
+        .getByRole("button", { name: "使用本地平台模板", exact: true })
+        .isVisible())
+    )
+      await page.locator(".studio-creation > summary").click();
+    const versions = page.getByLabel("内容版本", { exact: true });
+    const beforeId = (await versions.count())
+      ? await versions.getAttribute("data-value")
+      : "";
     await page
       .getByRole("button", { name: "使用本地平台模板", exact: true })
       .click();
-    await page.waitForFunction(
-      (fragment) =>
-        document
-          .querySelector('[aria-label="内容正文"]')
-          ?.value.includes(fragment),
-      fragment,
+    await page.waitForFunction((beforeId) => {
+      const id = document.querySelector('[aria-label="内容版本"]')?.dataset
+        .value;
+      return id && id !== beforeId;
+    }, beforeId);
+    const created = await page.evaluate(() =>
+      window.panxu.invoke("draft.get", {
+        id: document.querySelector('[aria-label="内容版本"]').dataset.value,
+      }),
     );
+    assert.equal(created.platform, platform);
+    assert.equal(created.model, "local-template");
+    assert.match(created.body, /本地交互验证资料/);
+    assert.ok(created.contentFormat);
     assert.equal(
       await page.getByLabel("已人工审阅", { exact: true }).isChecked(),
       false,
@@ -546,12 +588,14 @@ try {
     );
   seed.close();
   await page.reload();
-  await page.getByLabel("分类筛选").selectOption("大库分类");
+  // Library filters intentionally survive reload; clear the previous scenario's query.
+  await page.getByRole("searchbox").fill("");
+  await chooseOption(page.getByLabel("分类筛选"), "大库分类");
   await page.getByText("共 509 份资源", { exact: true }).waitFor();
   assert.equal(await page.locator(".resource-row").count(), 25);
   await page.getByRole("button", { name: "下一页", exact: true }).click();
   await page.getByText("第 2 / 21 页 · 每页 25 份", { exact: true }).waitFor();
-  await page.getByLabel("分类筛选").selectOption("all");
+  await chooseOption(page.getByLabel("分类筛选"), "all");
   await page.getByRole("searchbox").fill("深层旧档唯一词");
   await page.getByText("共 1 份资源", { exact: true }).waitFor();
   await page.locator(".resource-row").click();
@@ -568,6 +612,7 @@ try {
       document.querySelector('[aria-label="内容正文"]')?.value ===
       "旧稿保留的实际资料说明。",
   );
+  await page.locator(".studio-creation > summary").click();
   await page
     .getByRole("button", { name: "使用本地平台模板", exact: true })
     .click();
@@ -735,8 +780,9 @@ try {
   await nav("资源库").click();
   await page.getByRole("searchbox").fill("批量夸克资料");
   await page.getByText("共 1 份资源", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "更多资源操作", exact: true }).click();
   await page
-    .getByRole("button", { name: "拆分为多个链接", exact: true })
+    .getByRole("menuitem", { name: "拆分为多个链接", exact: true })
     .click();
   await page.getByRole("button", { name: "读取三级目录", exact: true }).click();
   let splitRunId;
@@ -816,6 +862,11 @@ try {
   assert.equal(await tree.getByRole("treeitem").count(), 3);
   await page.keyboard.press("ArrowRight");
   assert.equal(await tree.getByRole("treeitem").count(), 7);
+  await page.locator(".toast").waitFor({ state: "hidden", timeout: 15000 });
+  await tree.locator('[data-node-id="own-video"] .split-node-name').click();
+  await page.evaluate(() => {
+    document.querySelector(".main-content").scrollTop = 0;
+  });
   await page.screenshot({ path: join(evidence, "12-split-tree-selected.png") });
   checks.push(
     "三级树状目录、逐项独立勾选、按层保留浅层文件/空目录、父子重叠提示、收起/搜索保留选择及键盘展开",
@@ -845,15 +896,17 @@ try {
     1,
   );
   assert.equal(await app.evaluate(() => globalThis.__panxuQaDrive.shares), 3);
-  await page
-    .locator("section.panel")
-    .filter({
-      has: page.getByRole("heading", {
-        name: "资源目录与独立链接",
-        exact: true,
-      }),
-    })
-    .screenshot({ path: join(evidence, "12-split-links.png") });
+  await page.locator(".toast").waitFor({ state: "hidden", timeout: 15000 });
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(1280, 1100),
+  );
+  await page.evaluate(() => {
+    document.querySelector(".main-content").scrollTop = 0;
+  });
+  await page.screenshot({ path: join(evidence, "12-split-links.png") });
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(1280, 900),
+  );
   checks.push(
     "三级拆分保留浅层文件和空目录、不读取第四层、只为所选文件/目录建本人链接",
   );
@@ -875,7 +928,18 @@ try {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(840, 760),
   );
+  await page.locator(".toast").waitFor({ state: "hidden", timeout: 15000 });
+  await page.evaluate(() => {
+    const panel = document.querySelector(".split-workspace-panel");
+    document.querySelector(".main-content").scrollTop = panel.offsetTop - 65;
+  });
   await page.screenshot({ path: join(evidence, "13-split-compact.png") });
+  await page
+    .getByRole("complementary", { name: "拆分选择清单" })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: join(evidence, "14-split-compact-selection.png"),
+  });
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -958,7 +1022,7 @@ try {
     await app.close();
     app = await electron.launch({
       executablePath: process.env.PANXU_ELECTRON_PATH ?? require("electron"),
-      args: [process.cwd()],
+      args: launchArgs,
       env: { ...env, PANXU_DATA_DIR: path },
       timeout: 45000,
     });

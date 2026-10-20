@@ -1,0 +1,104 @@
+name: Prepare signed Panxu release
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: panxu-release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PANXU_UPDATE_REPOSITORY: ${{ vars.PANXU_UPDATE_REPOSITORY }}
+  PANXU_REQUIRE_SIGNING: "1"
+jobs:
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            command: npm run package:mac
+            certificate: MAC_CSC_LINK
+            certificatePassword: MAC_CSC_KEY_PASSWORD
+          - os: windows-latest
+            command: npm run package:win
+            certificate: WIN_CSC_LINK
+            certificatePassword: WIN_CSC_KEY_PASSWORD
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_LINK: ${{ secrets[matrix.certificate] }}
+      CSC_KEY_PASSWORD: ${{ secrets[matrix.certificatePassword] }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      PANXU_WINDOWS_PUBLISHER: ${{ vars.PANXU_WINDOWS_PUBLISHER }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-release.mjs
+      - name: Resolve version
+        id: version
+        run: node -e 'require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "version=" + require("./package.json").version + "\n")'
+      - run: npm test
+      - run: ${{ matrix.command }}
+      - run: npm run verify:release
+      - run: npm run verify:updates
+      - run: npm run test:e2e:packaged
+        env:
+          PANXU_QA_DIR: ${{ runner.temp }}/panxu-qa
+      - run: npm run test:e2e:updates
+        env:
+          PANXU_QA_DIR: ${{ runner.temp }}/panxu-update-qa
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signed-${{ matrix.os }}
+          path: |
+            release/${{ steps.version.outputs.version }}/*.dmg
+            release/${{ steps.version.outputs.version }}/*.zip
+            release/${{ steps.version.outputs.version }}/*.exe
+            release/${{ steps.version.outputs.version }}/*.blockmap
+            release/${{ steps.version.outputs.version }}/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-qa-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/panxu-qa
+            ${{ runner.temp }}/panxu-update-qa
+          if-no-files-found: ignore
+          retention-days: 14
+  draft:
+    needs: installers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Resolve version
+        id: version
+        run: node -e 'require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "version=" + require("./package.json").version + "\n")'
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: signed-*
+          merge-multiple: true
+          path: release/${{ steps.version.outputs.version }}
+      - name: Verify all platforms and upload release draft
+        run: node scripts/draft-release.mjs
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}

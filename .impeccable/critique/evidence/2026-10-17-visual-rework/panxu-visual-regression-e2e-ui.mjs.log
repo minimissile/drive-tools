@@ -1,0 +1,14 @@
+UI evidence: /var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-U0CQGq
+{
+  "checks": [
+    "当前源码启动、非空首屏、无框架错误遮罩",
+    "统一弹窗：初始焦点、Tab/Shift+Tab 边界、Esc、关闭后焦点恢复、长标题",
+    "统一 Tabs：左右方向键、Home/End、单一 Tab 停靠点；手工词池本地保存",
+    "搜索视图语义与共用弹窗输入、退出",
+    "仅白色主题；设置保存；资源导出切页恢复；未调用任何生成接口",
+    "5 个页面的 1024px 布局无页面级横向溢出"
+  ],
+  "errors": [],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-U0CQGq",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-U0CQGq/database"
+}

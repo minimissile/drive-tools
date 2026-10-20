@@ -1,0 +1,19 @@
+.resource-kind-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 48px;
+  border-radius: var(--control-radius);
+  color: var(--blue);
+  background: var(--blue-bg);
+}
+.resource-kind-icon[data-kind="folder"] {
+  color: var(--amber);
+  background: var(--amber-bg);
+}
+.resource-kind-icon[data-kind="unknown"] {
+  color: var(--muted);
+  background: var(--bg);
+}

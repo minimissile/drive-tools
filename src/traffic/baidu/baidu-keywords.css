@@ -1,0 +1,192 @@
+.baidu-keywords-workspace {
+  display: grid;
+  gap: var(--space-5, 20px);
+  min-width: 0;
+}
+.baidu-traffic {
+  min-width: 0;
+}
+.baidu-traffic > .tabs {
+  flex-wrap: wrap;
+}
+.baidu-research-form,
+.baidu-research-results {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.baidu-research-form {
+  margin-top: var(--space-4);
+}
+.baidu-research-form > .button {
+  justify-self: start;
+}
+.baidu-research-form p,
+.baidu-research-form h3 {
+  margin: 0;
+}
+.baidu-research-form .row > p {
+  flex: 1 1 320px;
+}
+.baidu-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: var(--space-4);
+}
+.baidu-form-grid > .button {
+  justify-self: start;
+}
+.baidu-form-grid[data-columns="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.baidu-form-grid > .field,
+.baidu-research-form > .field,
+.baidu-dimension > .field,
+.baidu-keyword-query-form > .field {
+  margin-top: 0;
+}
+.baidu-filter-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 8px);
+  padding: var(--space-3);
+}
+.baidu-filter-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.baidu-filter-details[open] summary {
+  margin-bottom: var(--space-4);
+}
+.baidu-region-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: var(--space-3);
+}
+.baidu-region-options label,
+.baidu-research-form label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.baidu-dimensions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-3);
+}
+.baidu-dimension {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 8px);
+}
+.baidu-trend {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 8px);
+}
+.baidu-trend figcaption,
+.baidu-trend text {
+  color: var(--muted);
+  font-size: 12px;
+  fill: currentColor;
+}
+.baidu-trend svg {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+}
+.baidu-research-results td {
+  max-width: 280px;
+  overflow-wrap: anywhere;
+}
+.baidu-research-results .baidu-keyword-table {
+  min-width: 720px;
+}
+.baidu-research-results td[data-field="createTime"],
+.baidu-research-results td[data-field="submitTime"] {
+  min-width: 140px;
+  white-space: nowrap;
+}
+.baidu-result-actions {
+  min-width: 160px;
+}
+.baidu-result-actions .button {
+  white-space: nowrap;
+}
+.baidu-keyword-query-form {
+  display: grid;
+  gap: var(--space-4);
+}
+.baidu-keyword-query-form > p {
+  margin: 0;
+}
+.baidu-keyword-connection,
+.baidu-keyword-save {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: var(--space-4, 16px);
+}
+.baidu-keyword-toolbar {
+  margin-block: var(--space-3, 12px);
+}
+.baidu-keyword-toolbar > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.baidu-keyword-toolbar .select {
+  min-width: 170px;
+}
+.baidu-keyword-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+.baidu-keyword-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.baidu-keyword-table th,
+.baidu-keyword-table td {
+  padding: var(--space-3) 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.baidu-keyword-table th {
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.baidu-keyword-table td:nth-child(2) {
+  min-width: 130px;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+.baidu-keyword-table td:nth-child(n + 3) {
+  font-variant-numeric: tabular-nums;
+}
+.baidu-keyword-table[data-view="devices"] {
+  min-width: 740px;
+}
+.baidu-keyword-save {
+  margin-block: var(--space-4, 16px);
+}
+@media (max-width: 1050px) {
+  .baidu-form-grid,
+  .baidu-form-grid[data-columns="3"] {
+    grid-template-columns: 1fr;
+  }
+  .baidu-keyword-connection,
+  .baidu-keyword-save {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .baidu-keyword-connection > .button {
+    justify-self: start;
+  }
+}

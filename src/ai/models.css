@@ -1,0 +1,57 @@
+.ai-model-settings {
+  margin-top: 20px;
+}
+.ai-model-settings h3 {
+  margin: 0 0 8px;
+}
+.ai-model-settings > .row {
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ai-model-settings > .row > div:first-child {
+  flex: 1;
+  min-width: 240px;
+}
+.ai-purpose-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  margin: 16px 0;
+}
+.ai-purpose-card {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(180px, 0.8fr);
+  gap: 8px 24px;
+  align-items: start;
+  min-width: 0;
+  background: var(--surface);
+}
+.ai-purpose-card .field {
+  margin: 0;
+}
+.ai-purpose-card input {
+  width: 100%;
+}
+.ai-purpose-description {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+.ai-purpose-card strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ai-purpose-card small {
+  line-height: 1.6;
+}
+.ai-model-warning {
+  color: var(--amber);
+}
+@container settings-content (max-width: 650px) {
+  .ai-purpose-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

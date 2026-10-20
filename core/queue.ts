@@ -2,7 +2,7 @@ import type { DriveProvider } from "./providers/provider";
 import { assertManifest } from "./providers/provider";
 import type { Job, Provider, RemoteFile, ShareInput } from "../shared/types";
 import { Repository } from "./repository";
-import { now, parseJson } from "./database";
+import { now } from "./database";
 import { AppError, safeMessage } from "./errors";
 import { SecretStore } from "./secrets";
 import { NoteExporter } from "./notes";
@@ -36,6 +36,10 @@ export class TransferQueue {
   workers: Partial<Record<Job["kind"], (jobId: string) => Promise<void>>> = {};
   private running = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private stopped = false;
+  get isBusy() {
+    return this.running.size > 0;
+  }
   constructor(
     private repo: Repository,
     private providers: Record<Provider, DriveProvider>,
@@ -45,6 +49,8 @@ export class TransferQueue {
     private changed: () => void,
   ) {}
   start() {
+    if (this.timer) return;
+    this.stopped = false;
     this.timer = setInterval(() => {
       void this.pump();
     }, 3000);
@@ -53,8 +59,11 @@ export class TransferQueue {
   }
   stop() {
     if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.stopped = true;
   }
   async pump() {
+    if (this.stopped) return;
     const active = [
       "queued",
       "preflight",
@@ -141,15 +150,18 @@ export class TransferQueue {
           );
         const live: RemoteFile[] = [];
         for (const parentId of [...new Set(selected.map((f) => f.parentId))]) {
+          let cursor: string | undefined;
           for (let page = 1; page <= 100; page++) {
             const inspection = await provider.inspect(
               account,
               source,
               parentId,
               page,
+              cursor,
             );
             live.push(...inspection.files);
             if (!inspection.hasMore) break;
+            cursor = inspection.nextCursor;
           }
         }
         const refreshed = selected.map((f) =>
@@ -309,8 +321,21 @@ export class TransferQueue {
             ),
           );
         } catch (error) {
+          if (
+            error instanceof AppError &&
+            !error.uncertain &&
+            ["AUTH_EXPIRED", "USER_ACTION_REQUIRED", "QUOTA_EXCEEDED"].includes(
+              error.code,
+            )
+          ) {
+            this.repo.db.run(
+              "UPDATE jobs SET checkpoint='verified' WHERE id=?",
+              jobId,
+            );
+            throw error;
+          }
           throw new AppError(
-            "UNCERTAIN_SHARE_RESULT",
+            error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
             safeMessage(error),
             true,
           );
@@ -360,6 +385,8 @@ export class TransferQueue {
                 "ACCOUNT_UID_MISMATCH",
                 "PARTIAL_SUCCESS",
                 "TARGET_NOT_EMPTY",
+                "USER_ACTION_REQUIRED",
+                "QUOTA_EXCEEDED",
               ].includes(appError.code)
             ? "needs_review"
             : "failed";
@@ -370,6 +397,17 @@ export class TransferQueue {
         now(),
         jobId,
       );
+      if (
+        current.checkpoint === "transfer_requested" &&
+        !appError.uncertain &&
+        ["AUTH_EXPIRED", "USER_ACTION_REQUIRED", "QUOTA_EXCEEDED"].includes(
+          appError.code,
+        )
+      )
+        this.repo.db.run(
+          "UPDATE jobs SET checkpoint='folder_ready' WHERE id=?",
+          jobId,
+        );
       this.repo.db.run(
         "UPDATE copies SET status=?,error=? WHERE id=?",
         stage,

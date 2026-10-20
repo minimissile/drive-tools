@@ -3,6 +3,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   base: "./",
+  resolve: { dedupe: ["react", "react-dom"] },
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom/client",
+      "@base-ui/react/dialog",
+      "@base-ui/react/tabs",
+    ],
+  },
   plugins: [
     react(),
     {

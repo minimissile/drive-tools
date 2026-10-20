@@ -1,0 +1,482 @@
+{
+  "checks": [
+    "复合搜索统一外框焦点、筛选等高、缩略图无挤压文字、详情与核心操作首屏可达",
+    "次要操作菜单键盘开关、禁用与焦点恢复，翻页回到列表顶部，筛选空态释放详情列",
+    "1366×768、1920×1080与1024×768原生窗口布局",
+    "录入表单滚动区与底部保存栏物理分离，底部授权和操作可达",
+    "统计首次使用不显示空指标与无效筛选，账号同步进入首屏",
+    "紧凑渠道选择、手工编辑、暂存、保存版本与人工审阅流程",
+    "840 原生窗口档案对话框操作区始终可达",
+    "原生840与200%缩放无页面横向溢出，关闭档案返回选中行"
+  ],
+  "errors": [],
+  "geometry": [
+    {
+      "name": "library-filtered-1600",
+      "width": 1600,
+      "height": 968,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1396,
+        "height": 920,
+        "top": 48,
+        "right": 1600,
+        "bottom": 968,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "library-1600",
+      "width": 1600,
+      "height": 968,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1396,
+        "height": 920,
+        "top": 48,
+        "right": 1600,
+        "bottom": 968,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "资源库",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "录入资源",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "批量录入",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "批量转存",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "input-frame search ",
+          "height": 36
+        },
+        {
+          "class": "",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "资料拆分",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "转存任务",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "搜索运营",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "input-frame search ",
+          "height": 36
+        },
+        {
+          "class": "",
+          "height": 36
+        },
+        {
+          "class": "button   ",
+          "height": 36
+        },
+        {
+          "class": "button  quiet ",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "流量发现",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "分享统计",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "内容工作室",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "",
+          "height": 36
+        },
+        {
+          "class": "button primary  ",
+          "height": 36
+        },
+        {
+          "class": "button   ",
+          "height": 36
+        },
+        {
+          "class": "button   ",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "发布准备",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "grow",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "账号管理",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "连接与设置",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "AI 资源导出",
+      "width": 1320,
+      "height": 868,
+      "main": {
+        "x": 204,
+        "y": 48,
+        "width": 1116,
+        "height": 820,
+        "top": 48,
+        "right": 1320,
+        "bottom": 868,
+        "left": 204
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "840-录入资源",
+      "width": 840,
+      "height": 728,
+      "main": {
+        "x": 176,
+        "y": 48,
+        "width": 664,
+        "height": 680,
+        "top": 48,
+        "right": 840,
+        "bottom": 728,
+        "left": 176
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "840-流量发现",
+      "width": 840,
+      "height": 728,
+      "main": {
+        "x": 176,
+        "y": 48,
+        "width": 664,
+        "height": 680,
+        "top": 48,
+        "right": 840,
+        "bottom": 728,
+        "left": 176
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "840-内容工作室",
+      "width": 840,
+      "height": 728,
+      "main": {
+        "x": 176,
+        "y": 48,
+        "width": 664,
+        "height": 680,
+        "top": 48,
+        "right": 840,
+        "bottom": 728,
+        "left": 176
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "",
+          "height": 36
+        },
+        {
+          "class": "button primary  ",
+          "height": 36
+        },
+        {
+          "class": "button   ",
+          "height": 36
+        },
+        {
+          "class": "button   ",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "840-发布准备",
+      "width": 840,
+      "height": 728,
+      "main": {
+        "x": 176,
+        "y": 48,
+        "width": 664,
+        "height": 680,
+        "top": 48,
+        "right": 840,
+        "bottom": 728,
+        "left": 176
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "grow",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "840-账号管理",
+      "width": 840,
+      "height": 728,
+      "main": {
+        "x": 176,
+        "y": 48,
+        "width": 664,
+        "height": 680,
+        "top": 48,
+        "right": 840,
+        "bottom": 728,
+        "left": 176
+      },
+      "overflow": false,
+      "controls": [
+        {
+          "class": "",
+          "height": 36
+        }
+      ]
+    },
+    {
+      "name": "840-连接与设置",
+      "width": 840,
+      "height": 728,
+      "main": {
+        "x": 176,
+        "y": 48,
+        "width": 664,
+        "height": 680,
+        "top": 48,
+        "right": 840,
+        "bottom": 728,
+        "left": 176
+      },
+      "overflow": false,
+      "controls": []
+    },
+    {
+      "name": "200% native capture",
+      "client": 400,
+      "scroll": 400,
+      "innerWidth": 420,
+      "height": 364,
+      "font": "22px"
+    }
+  ]
+}

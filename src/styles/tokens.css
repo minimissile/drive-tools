@@ -1,0 +1,51 @@
+:root {
+  color-scheme: only light;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+  font-weight: 400;
+  color: #1d2b42;
+  background: #f6f8fc;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --control-height: 36px;
+  --control-compact-height: 30px;
+  --control-radius: 7px;
+  --control-focus-duration: 160ms;
+  --control-focus-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --panel-radius: 10px;
+  --page-padding: 24px;
+  --disabled-text: #8b96a7;
+  --disabled-bg: #f4f6f9;
+  --bg: #f6f8fc;
+  --surface: #fff;
+  --sidebar: #f0f3f9;
+  --text: #1d2b42;
+  --muted: #5d6c84;
+  --control-line: #8090a8;
+  --cover-bg: #e1eafd;
+  --upload-line: #bdcce5;
+  --line: #e1e7f0;
+  --blue: #2e61d5;
+  --blue-bg: #edf3ff;
+  --green: #237a5e;
+  --green-bg: #ecf7f1;
+  --amber: #94651c;
+  --amber-bg: #fff7e7;
+  --red: #b9484e;
+  --red-bg: #fff0f1;
+  --on-blue: #fff;
+  --scrollbar-thumb: #bac7db;
+  --scrollbar-hover: #8da5c7;
+  --scrollbar-active: #647fa8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}

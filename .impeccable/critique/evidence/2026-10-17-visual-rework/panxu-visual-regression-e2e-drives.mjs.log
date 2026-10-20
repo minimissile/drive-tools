@@ -1,0 +1,27 @@
+auth console uc warning %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://
+auth console xunlei warning %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://
+{
+  "passed": 7,
+  "checks": [
+    "uc: official-window session isolation and UID binding (mock HTTPS)",
+    "uc: official share handoff keeps selected account, source and code",
+    "uc: UI transfer, own share, archive and split reuses verified own link",
+    "xunlei: official-window session isolation and UID binding (mock HTTPS)",
+    "xunlei: official share handoff keeps selected account, source and code",
+    "xunlei: UI transfer, own share, archive and split reuses verified own link",
+    "840px layout, page identity, nonblank renderer and no console errors"
+  ],
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-drives-e2e-Zl8MOa",
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-drives-evidence-wwuVue",
+  "errors": []
+}

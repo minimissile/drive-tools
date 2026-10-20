@@ -1,0 +1,85 @@
+.account-capacity {
+  min-width: 0;
+}
+.capacity-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.capacity-heading .capacity-refresh {
+  margin-left: auto;
+  min-height: 24px;
+  width: 24px;
+  padding: 0;
+}
+.capacity-heading .tag {
+  font-size: 10px;
+  padding: 0 5px;
+}
+.capacity-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  margin-top: var(--space-1);
+  font-size: 11px;
+  color: var(--muted);
+}
+.capacity-values strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.capacity-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 10px;
+  color: var(--muted);
+}
+.capacity-meter progress {
+  flex: 1;
+  min-width: 40px;
+  height: 5px;
+  appearance: none;
+  border: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--line);
+}
+.capacity-meter progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: 4px;
+}
+.capacity-meter progress::-webkit-progress-value {
+  background: var(--blue);
+  border-radius: 4px;
+}
+.capacity-warning progress::-webkit-progress-value {
+  background: var(--amber);
+}
+.capacity-warning {
+  color: var(--amber);
+}
+.capacity-remaining {
+  margin-top: var(--space-1);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.capacity-status {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.capacity-error {
+  color: var(--amber);
+}

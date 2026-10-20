@@ -1,0 +1,168 @@
+/* Read feedback has one visual contract across pages, panels, lists and dialogs. */
+.data-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 180px;
+  padding: var(--space-8) var(--space-6);
+  color: var(--muted);
+  text-align: center;
+}
+.data-state[data-fill],
+.data-loading-list[data-fill] {
+  min-height: 100%;
+}
+.data-state-symbol {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--control-radius);
+  color: var(--blue);
+  background: var(--blue-bg);
+}
+.data-state-copy {
+  min-width: 0;
+  max-width: 440px;
+  overflow-wrap: anywhere;
+}
+.data-state-copy h3 {
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 550;
+  color: var(--text);
+}
+.data-state-copy p {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.data-state-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-top: var(--space-1);
+}
+.data-state--error .data-state-symbol {
+  color: var(--red);
+  background: var(--red-bg);
+}
+.data-state--compact {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-3);
+  text-align: left;
+}
+.data-state--compact .data-state-symbol {
+  width: 20px;
+  height: 22px;
+  background: transparent;
+}
+.data-state--compact .data-state-copy {
+  flex: 1;
+  max-width: none;
+}
+.data-state--compact .data-state-copy h3 {
+  font-size: 12px;
+  font-weight: 500;
+}
+.data-state--compact .data-state-copy p {
+  margin-top: var(--space-1);
+}
+.data-state--compact .data-state-action {
+  flex: none;
+  align-self: center;
+  margin-top: 0;
+}
+.data-state--error.data-state--compact {
+  margin: var(--space-3) 0;
+  background: var(--red-bg);
+  border-radius: var(--control-radius);
+}
+.data-state--error.data-state--compact .data-state-copy {
+  color: var(--red);
+}
+.loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 20px;
+  vertical-align: middle;
+}
+.loading > svg {
+  flex: none;
+  color: var(--blue);
+}
+.loading > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.data-loading-list {
+  min-width: 0;
+  padding: var(--space-5);
+}
+.data-loading-list > .loading {
+  margin-bottom: var(--space-4);
+}
+.data-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 88px;
+  border-bottom: 1px solid var(--line);
+}
+.data-skeleton-row:last-child {
+  border-bottom: 0;
+}
+.data-skeleton-icon,
+.data-skeleton-copy > span {
+  display: block;
+  background: var(--bg);
+  border-radius: 4px;
+}
+.data-skeleton-icon {
+  width: 40px;
+  height: 48px;
+  flex: none;
+}
+.data-skeleton-copy {
+  display: grid;
+  flex: 1;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.data-skeleton-copy > span {
+  height: 10px;
+  width: 72%;
+}
+.data-skeleton-copy > span:nth-child(2) {
+  width: 48%;
+}
+.data-skeleton-copy > span:nth-child(3) {
+  width: 28%;
+}
+@media (max-width: 700px) {
+  .data-state--compact {
+    flex-wrap: wrap;
+  }
+  .data-state--compact .data-state-copy {
+    flex-basis: calc(100% - 28px);
+  }
+  .data-state--compact .data-state-action {
+    margin-left: 28px;
+    justify-content: flex-start;
+  }
+}

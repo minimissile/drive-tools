@@ -1,0 +1,372 @@
+/* Settings owns its layout and domain forms; no lazy page supplies these styles. */
+.settings-page {
+  container: settings / inline-size;
+}
+.settings-save-summary {
+  margin: -8px 0 24px;
+  max-width: 80ch;
+}
+.settings-save-summary p {
+  line-height: 1.75;
+}
+.settings-layout {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.settings-nav {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 4px;
+  padding: 4px 0;
+  z-index: 2;
+}
+.settings-nav a {
+  padding: 11px 14px;
+  border-radius: var(--control-radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-nav a:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.settings-nav a[aria-current="location"] {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+.settings-content {
+  min-width: 0;
+  container: settings-content / inline-size;
+}
+.settings-content > [id] {
+  scroll-margin-top: 20px;
+  outline: none;
+}
+.settings-content .panel {
+  margin-bottom: 24px;
+}
+.settings-content .panel-heading {
+  gap: 12px;
+  align-items: center;
+}
+.settings-content .panel-heading h2 {
+  font-size: 16px;
+}
+.settings-content .field > span {
+  display: grid;
+  gap: 3px;
+  line-height: 1.5;
+}
+.settings-content .field > span small {
+  display: block;
+  margin: 0;
+  font-weight: 400;
+}
+.settings-content .field {
+  min-width: 0;
+}
+.settings-content .panel > small,
+.settings-content .api-plan > small {
+  display: block;
+  max-width: 85ch;
+  line-height: 1.8;
+  margin: 10px 0;
+}
+.settings-content .field-pair {
+  gap: 16px 20px;
+  align-items: start;
+}
+.settings-content .field-pair .field {
+  margin: 0;
+}
+.settings-content .field-pair + .field {
+  margin-top: 18px;
+}
+.settings-content .checkbox {
+  align-items: start;
+  line-height: 1.7;
+  margin: 16px 0;
+}
+.settings-content .checkbox input {
+  flex: none;
+  margin-top: 3px;
+}
+.settings-operation-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 18px 0;
+}
+.settings-operation-row small {
+  flex: 1 1 240px;
+  line-height: 1.7;
+}
+.settings-path-row,
+.secret-row {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.settings-path-row .field,
+.secret-row .field {
+  flex: 1 1 230px;
+  margin: 0;
+}
+.settings-secret {
+  margin: 18px 0;
+}
+.settings-secret-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-secret-input {
+  padding: 0 8px 0 11px;
+  gap: 6px;
+}
+.settings-remove-confirm {
+  background: var(--red-bg);
+  padding: 14px 16px;
+  border-radius: var(--control-radius);
+  margin-top: 12px;
+}
+.settings-remove-confirm p {
+  margin: 0 0 12px;
+  line-height: 1.7;
+}
+.settings-remove-confirm .danger {
+  color: var(--red);
+  border-color: currentColor;
+}
+.settings-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+.settings-actions > span {
+  font-size: 12px;
+}
+.settings-unsaved {
+  color: var(--amber);
+}
+.settings-error {
+  font-size: 12px;
+  color: var(--red);
+  margin: 8px 0;
+}
+.settings-result {
+  color: var(--green);
+  line-height: 1.75;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.api-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+}
+.api-plan {
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+  min-width: 0;
+}
+.api-plan .panel-heading h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.api-plan .secret-row {
+  align-items: start;
+}
+.api-plan .secret-row .field {
+  flex-basis: 100%;
+}
+.api-plan form > .row {
+  margin-top: 20px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.settings-content .channel-fieldset {
+  min-width: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 18px 0 0;
+  margin: 24px 0;
+}
+.settings-content .channel-fieldset legend {
+  padding: 0 12px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-content .channel-fieldset > small {
+  display: block;
+  margin-bottom: 14px;
+  line-height: 1.75;
+  max-width: 85ch;
+}
+.settings-content .channel-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.settings-content .channel-capabilities .checkbox {
+  margin: 8px 0;
+}
+.settings-form-title {
+  margin: 0 0 18px;
+  font-size: 14px;
+}
+.settings-list-title {
+  font-size: 14px;
+  margin: 32px 0 16px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.settings-list-title span {
+  margin-left: 6px;
+  font-weight: 400;
+}
+.settings-bindings-panel table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+.settings-bindings-panel td {
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.settings-bindings-panel th:last-child {
+  width: 160px;
+}
+.settings-bindings-panel td small {
+  display: block;
+  margin-top: 6px;
+}
+.settings-bindings-panel td > .button {
+  margin-top: 8px;
+}
+.binding-open-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.binding-open-actions .select-control {
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
+}
+.settings-backup-path {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.settings-backup-path code {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.7;
+}
+.settings-backup-group + .settings-backup-group {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.settings-backup-group h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.settings-backup-group p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.8;
+  max-width: 80ch;
+  margin: 0 0 14px;
+}
+.settings-backup-preview {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.settings-backup-preview h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.settings-backup-preview > p {
+  overflow-wrap: anywhere;
+  line-height: 1.75;
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-backup-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  margin: 16px 0;
+}
+.settings-backup-counts div {
+  display: grid;
+  gap: 6px;
+}
+.settings-backup-counts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-backup-counts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+}
+@container settings-content (max-width: 780px) {
+  .api-plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container settings (max-width: 920px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .settings-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    top: 0;
+    padding: 10px 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-nav a {
+    padding: 9px 12px;
+  }
+  .settings-content > [id] {
+    scroll-margin-top: calc(var(--settings-nav-height, 80px) + 20px);
+  }
+}
+@container settings-content (max-width: 520px) {
+  .settings-content .field-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-actions {
+    align-items: start;
+  }
+  .settings-content .panel-heading {
+    align-items: start;
+    flex-wrap: wrap;
+  }
+}
+
+.settings-binding-summary {
+  margin: 18px 0 24px;
+  line-height: 1.75;
+}

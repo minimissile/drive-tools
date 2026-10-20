@@ -1,0 +1,38 @@
+.provider-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.provider-icon--small {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+.provider-icon--medium {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+.provider-icon--large {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+}
+.provider-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* The official UC wordmark begins with a 144px square mark in a 468×144 image. */
+.provider-icon[data-provider="uc"] {
+  justify-content: flex-start;
+}
+.provider-icon[data-provider="uc"] img {
+  width: auto;
+  max-width: none;
+  flex: none;
+}

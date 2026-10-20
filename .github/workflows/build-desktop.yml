@@ -15,7 +15,7 @@ jobs:
             command: npm run package:win
     runs-on: ${{ matrix.os }}
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,19 +31,27 @@ jobs:
       - run: npm run test:e2e:packaged
         env:
           PANXU_QA_DIR: ${{ runner.temp }}/panxu-qa
+      - run: npm run test:e2e:updates
+        env:
+          PANXU_QA_DIR: ${{ runner.temp }}/panxu-update-qa
       - uses: actions/upload-artifact@v7
         with:
           name: panxu-${{ matrix.os }}
           path: |
-            release/*.dmg
-            release/*.exe
-            release/SHA256SUMS.txt
+            release/*/*.dmg
+            release/*/*.zip
+            release/*/*.exe
+            release/*/*.blockmap
+            release/*/latest*.yml
+            release/*/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: panxu-qa-${{ matrix.os }}
-          path: ${{ runner.temp }}/panxu-qa
+          path: |
+            ${{ runner.temp }}/panxu-qa
+            ${{ runner.temp }}/panxu-update-qa
           if-no-files-found: ignore
           retention-days: 14

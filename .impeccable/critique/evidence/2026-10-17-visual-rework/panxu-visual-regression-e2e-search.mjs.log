@@ -1,0 +1,15 @@
+(node:77682) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "ok": true,
+  "browser": "Browser plugin not available; repository Electron Playwright",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-search-e2e-pji0R4",
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-search-evidence-qXpMqN",
+  "checks": [
+    "已有词池 → 去重选题 → 已核验子资料关联 → 内容工作室 CSDN 教程",
+    "新草稿版本保留关联 → 人工审阅 → 发布准备展示正确子链接 → 回填文章 → 效果零值与未知值持久化",
+    "原三级目录树保留；本人拆分结果新增用于创作入口",
+    "看板与窄窗口显示、重启后选题与效果仍保留"
+  ],
+  "consoleErrors": []
+}

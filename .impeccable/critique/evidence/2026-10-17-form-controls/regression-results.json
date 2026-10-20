@@ -1,0 +1,180 @@
+{
+  "e2e-resource-export.mjs": {
+    "passed": true,
+    "groups": 5,
+    "checks": [
+      "文字与截图组合输入 → 视觉模型解析 → 表头改名、映射及调序",
+      "33份全库分批 → 暂停 → 页面重载读取检查点 → 完成筛选与匹配依据",
+      "真实保存对话框端口 → XLSX与CSV落盘 → 核对列序、中文与筛选范围",
+      "未匹配资料手工补选 → 选中资源生成短文 → 编辑导出 → 选择变更提示重新生成",
+      "1320px与840px布局、历史离线回看、页面身份、无框架覆盖层及前端异常"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-export-qa-Bq7Urb",
+    "errors": []
+  },
+  "e2e.mjs": {
+    "passed": true,
+    "groups": 24,
+    "checks": [
+      "启动身份与首屏",
+      "14个侧边栏入口均使用不同且对应功能的图标",
+      "同网盘多账号与工作账号切换",
+      "资源、上传及粘贴封面、账号归属与SQLite落库",
+      "中文全文检索与空结果",
+      "编辑同副本不重复创建或转存",
+      "手工写稿、版本、审阅与未核验分享发布拦截",
+      "流量、账单、任务、连接页面无虚假成功记录",
+      "下拉词分析记录持久化、重复提交合并、计费确认、60秒限频与离线结果",
+      "人民币估算与美元实费分列、微小金额精度、未知实费及待核预留",
+      "840px桌面最小窗口布局",
+      "重载后数据持久化",
+      "批量CSV预检、错行与重复拦截、仅落本地草稿",
+      "手工词池去重、资源关联及复制编辑",
+      "十个平台本地模板、初始未审阅、无AI请求及未核验分享导出拦截",
+      "本地说明文件经对话框导入并保存",
+      "超过500份的分类统计、分页、全文检索、准确编辑、历史稿读取及创作绑定",
+      "批量转存只读预检、权利确认、同账号队列、本人建链和完整归档（本地网盘响应）",
+      "三级树状目录、逐项独立勾选、按层保留浅层文件/空目录、父子重叠提示、收起/搜索保留选择及键盘展开",
+      "三级拆分保留浅层文件和空目录、不读取第四层、只为所选文件/目录建本人链接",
+      "拆分结果归属复核导出、默认不导出提取码、840px新页面布局",
+      "一致性备份导出、凭据排除、恢复预检及重启确认门槛",
+      "恢复空间启动、凭据与预算重置、切回原空间及原数据保留（测试器接管重启进程）",
+      "无空白、框架覆盖层或前端异常"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-evidence-SVzwGL",
+    "errors": []
+  },
+  "e2e-search.mjs": {
+    "passed": true,
+    "groups": 4,
+    "checks": [
+      "已有词池 → 去重选题 → 已核验子资料关联 → 内容工作室 CSDN 教程",
+      "新草稿版本保留关联 → 人工审阅 → 发布准备展示正确子链接 → 回填文章 → 效果零值与未知值持久化",
+      "原三级目录树保留；本人拆分结果新增用于创作入口",
+      "看板与窄窗口显示、重启后选题与效果仍保留"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-search-evidence-0FHgZn",
+    "errors": []
+  },
+  "e2e-share-statistics.mjs": {
+    "passed": true,
+    "groups": 7,
+    "checks": [
+      "页面身份、首屏、空态及账号入口",
+      "真实IPC与三盘只读适配同步；迅雷认证失败保留历史快照",
+      "四盘过滤与真实0、缺失指标、100+下限分别显示",
+      "整份资料与拆分子链接关联、路径搜索",
+      "分页与全部筛选结果CSV导出，无提取码",
+      "二次同步快照增量、消失分享历史保留",
+      "900px与390px无页面溢出、无框架错误、控制台健康、未打开分享页或写远端数据"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-share-statistics-evidence-3FrZiY",
+    "errors": []
+  },
+  "e2e-visual.mjs": {
+    "passed": true,
+    "groups": 8,
+    "checks": [
+      "复合搜索统一外框焦点、筛选等高、缩略图无挤压文字、详情与核心操作首屏可达",
+      "次要操作菜单键盘开关、禁用与焦点恢复，翻页回到列表顶部，筛选空态释放详情列",
+      "1366×768、1920×1080与1024×768原生窗口布局",
+      "录入表单滚动区与底部保存栏物理分离，底部授权和操作可达",
+      "统计首次使用不显示空指标与无效筛选，账号同步进入首屏",
+      "紧凑渠道选择、手工编辑、暂存、保存版本与人工审阅流程",
+      "840 原生窗口档案对话框操作区始终可达",
+      "原生840与200%缩放无页面横向溢出，关闭档案返回选中行"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-visual-grUqzO",
+    "errors": []
+  },
+  "e2e-ui-audit.mjs": {
+    "passed": true,
+    "groups": 14,
+    "checks": [
+      "录入长文本切页与重载恢复，授权不恢复，保存后清理暂存",
+      "CSV输入切页保留，预检与提交保持显式",
+      "手工词池未保存输入切页保留",
+      "设置输入切页保留、分区保存、备份更新定位",
+      "异常任务默认直达，状态数量准确，完成记录按需展开",
+      "公共可搜索资源选择器查找并选中全库资源",
+      "原生840窗口选择即呈现档案，Esc返回并恢复列表焦点",
+      "14模块原生840窗口无页面溢出，工作室默认紧凑渠道",
+      "原生840窗口200%缩放下设置可滚动且无页面横向溢出",
+      "提示文本不透明且使用校正颜色；系统暗色下仍白色，减少动态效果",
+      "初始化读取失败停止假加载，点击重试恢复而不需重启",
+      "列表读取失败不会冒充空库，显式重试恢复",
+      "慢读取晚于新筛选返回时不会覆盖当前结果",
+      "提交中禁止重复操作，提交成功后的刷新失败不丢返回值，重试只读取视图"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-audit-uVdBpC",
+    "errors": []
+  },
+  "e2e-drives.mjs": {
+    "passed": true,
+    "groups": 7,
+    "checks": [
+      "uc: official-window session isolation and UID binding (mock HTTPS)",
+      "uc: official share handoff keeps selected account, source and code",
+      "uc: UI transfer, own share, archive and split reuses verified own link",
+      "xunlei: official-window session isolation and UID binding (mock HTTPS)",
+      "xunlei: official share handoff keeps selected account, source and code",
+      "xunlei: UI transfer, own share, archive and split reuses verified own link",
+      "840px layout, page identity, nonblank renderer and no console errors"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-drives-evidence-kUqBvu",
+    "errors": []
+  },
+  "e2e-studio-media.mjs": {
+    "passed": true,
+    "groups": 6,
+    "checks": [
+      "四种形式与自定义模板 → AI方案 → 实际PNG生成、显示、导出及审阅门槛",
+      "文案另存版本保留已有图片，不重新生成或增加素材费用",
+      "图文组图按所选页数生成独立图片并保留页面文案与画面要求",
+      "真实动态视频接口任务 → 重载保留ID → 查询下载MP4 → 本地播放器实际播放、导出且无重复提交",
+      "发布准备显示当前已审阅版本的视频成品",
+      "1320px与840px布局、页面身份、无前端异常、无真实外部调用"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-studio-qa-O1T7r6",
+    "errors": []
+  },
+  "e2e-ideas.mjs": {
+    "passed": true,
+    "groups": 4,
+    "checks": [
+      "local references → bounded SEO/GEO request → grouped ideas → explicit selection → append-only 5118 handoff without query",
+      "saving retains original resource binding, unverified provenance and empty metrics after resource changes",
+      "840px no overflow; reload/history reads offline; type filter and visible selection stay accurate",
+      "invalid AI citation rejected with fee retained, previous history intact, no blank renderer or console errors"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ideas-qa-eVDizE",
+    "errors": []
+  },
+  "e2e-ui.mjs": {
+    "passed": true,
+    "groups": 6,
+    "checks": [
+      "当前源码启动、非空首屏、无框架错误遮罩",
+      "统一弹窗：初始焦点、Tab/Shift+Tab 边界、Esc、关闭后焦点恢复、长标题",
+      "统一 Tabs：左右方向键、Home/End、单一 Tab 停靠点；手工词池本地保存",
+      "搜索视图语义与共用弹窗输入、退出",
+      "仅白色主题；设置保存；资源导出切页恢复；未调用任何生成接口",
+      "5 个页面的 1024px 布局无页面级横向溢出"
+    ],
+    "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-BLZO7n",
+    "errors": []
+  },
+  "e2e-controls.mjs": {
+    "passed": true,
+    "groups": 5,
+    "checks": [
+      "下拉初始标签、空值约定、真实鼠标选择、方向键/Home/End、Enter、Esc焦点恢复、外部关闭",
+      "42项长列表滚动与超长文案、筛选生效、搜索下拉远程读取、数字值迁移",
+      "空值与禁用占位、分类建议选择与自由输入、模型/窗口ID离线手填、普通/密码/多行/复合/下拉统一单层焦点",
+      "表单隐式标签仍可访问；模态弹窗内选择、字母匹配与焦点约束",
+      "减少动态效果保留焦点且关闭过渡；840px/200%实际捕获；14模块无可见系统下拉与页面横向溢出"
+    ],
+    "evidence": "/Users/nuke/Desktop/drive-tools/.impeccable/critique/evidence/2026-10-17-form-controls",
+    "errors": []
+  }
+}

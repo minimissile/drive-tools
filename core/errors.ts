@@ -22,6 +22,15 @@ export class ProviderHttpError extends AppError {
     );
   }
 }
+export class ServiceHttpError extends AppError {
+  constructor(
+    public status: number,
+    message: string,
+    code = "HTTP_ERROR",
+  ) {
+    super(code, message);
+  }
+}
 export const ensure = (
   condition: unknown,
   code: string,
@@ -32,9 +41,10 @@ export const ensure = (
 export function safeMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "操作失败，请重试。";
   return message
+    .replace(/\bBearer\s+[^\s,;"'}]+/gi, "Bearer [已隐藏]")
     .replace(/\bsk-or-v1-[a-zA-Z0-9_-]{8,}\b/g, "[已隐藏Key]")
     .replace(
-      /(authorization|cookie|access_token|bdstoken|stoken|api_?key)\s*[:=]\s*[^\s,;]+/gi,
+      /(authorization|cookie|access_token|refresh_token|captcha_token|pass_code_token|bdstoken|stoken|api_?key)["']?\s*[:=]\s*["']?[^\s,;"'}]+/gi,
       "$1=[已隐藏]",
     )
     .slice(0, 600);

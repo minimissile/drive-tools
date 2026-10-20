@@ -1,10 +1,12 @@
+import { uploadQuark } from "./quark-upload";
+import type { UploadAsset } from "./small-upload";
 import type {
   Account,
   RemoteFile,
   ShareInput,
   ShareInspection,
 } from "../../shared/types";
-import { AppError, ProviderHttpError } from "../errors";
+import { AppError, ProviderHttpError, safeMessage } from "../errors";
 import type {
   DriveProvider,
   JsonObject,
@@ -13,14 +15,23 @@ import type {
 } from "./provider";
 import { normalizeRemoteFile, normalizedDirectory } from "./provider";
 import { parseShare } from "../links";
+import { normalizeShareStatistic, numericCount } from "./share-statistics";
+import { normalizeCapacity } from "./capacity";
 
 export class QuarkProvider implements DriveProvider {
-  readonly id = "quark" as const;
-  constructor(private transport: ProviderTransport) {}
+  constructor(
+    private transport: ProviderTransport,
+    readonly id: "quark" | "uc" = "quark",
+  ) {}
+  private get label() {
+    return this.id === "uc" ? "UC" : "夸克";
+  }
   private url(path: string, query: Record<string, string | number> = {}) {
-    const url = new URL(`https://drive-pc.quark.cn/1/clouddrive/${path}`);
+    const url = new URL(
+      `https://${this.id === "uc" ? "pc-api.uc.cn" : "drive-pc.quark.cn"}/1/clouddrive/${path}`,
+    );
     Object.entries({
-      pr: "ucpro",
+      pr: this.id === "uc" ? "UCBrowser" : "ucpro",
       fr: "pc",
       uc_param_str: "",
       ...query,
@@ -56,30 +67,30 @@ export class QuarkProvider implements DriveProvider {
       (result.status != null && Number(result.status) !== 200)
     ) {
       const code = Number(result.code ?? result.status);
-      const message = String(result.message ?? "夸克请求失败");
+      const message = String(result.message ?? `${this.label}请求失败`);
       if (
         [401, 31001, 31002].includes(code) ||
         /登录|login|cookie/i.test(message)
       )
         throw new AppError(
           "AUTH_EXPIRED",
-          "夸克登录已失效，请在原账号窗口重新登录。",
+          `${this.label}登录已失效，请在原账号窗口重新登录。`,
         );
       if (/容量|空间|quota|capacity/i.test(message))
         throw new AppError(
           "QUOTA_EXCEEDED",
-          "夸克可用空间不足，请处理后重试。",
+          `${this.label}可用空间不足，请处理后重试。`,
         );
       if (/验证码|验证|频繁|风控|captcha|risk/i.test(message))
         throw new AppError(
           "USER_ACTION_REQUIRED",
-          "夸克要求人工验证，请在登录窗口处理后重试。",
+          `${this.label}要求人工验证，请在登录窗口处理后重试。`,
         );
       if (/提取码|passcode/i.test(message))
-        throw new AppError("BAD_CODE", "夸克分享提取码不正确。");
+        throw new AppError("BAD_CODE", `${this.label}分享提取码不正确。`);
       throw new AppError(
         "REMOTE_ERROR",
-        `夸克请求失败（${code}）：${message.slice(0, 160)}`,
+        `${this.label}请求失败（${code}）：${message.slice(0, 160)}`,
       );
     }
     return result;
@@ -87,39 +98,53 @@ export class QuarkProvider implements DriveProvider {
   private realNameRequired() {
     return new AppError(
       "USER_ACTION_REQUIRED",
-      "夸克要求当前账号完成实名认证后才能创建分享（32011）。请在夸克官方客户端或官网处理，再使用“恢复本人分享”。已保存文件无需重复转存。",
+      `${this.label}要求当前账号完成实名认证后才能创建分享（32011）。请在${this.label}官方客户端或官网处理，再使用“恢复本人分享”。已保存文件无需重复转存。`,
     );
   }
   async identity(account: Account) {
     const result = await this.transport.json(
       account.id,
-      "https://pan.quark.cn/account/info?fr=pc&platform=pc",
+      `https://${this.id === "uc" ? "drive.uc.cn" : "pan.quark.cn"}/account/info?fr=pc&platform=pc`,
     );
     const data = result.data;
     if (
       !data ||
+      typeof data !== "object" ||
+      Object.keys(data).length === 0 ||
       result.success === false ||
       !["0", "OK"].includes(String(result.code ?? "0"))
     )
       throw new AppError(
         "AUTH_EXPIRED",
-        "夸克官方账号接口尚未确认登录，请在原账号窗口完成登录。",
+        `${this.label}官方账号接口尚未确认登录，请在原账号窗口完成登录。`,
       );
     const uid =
       data.user_id ??
       data.uid ??
       data.qid ??
       data.quark_id ??
-      (await this.transport.principalId?.(account.id, "quark"));
+      data.uc_id ??
+      (await this.transport.principalId?.(account.id, this.id));
     if (uid == null || String(uid) === "")
       throw new AppError(
         "UID_UNAVAILABLE",
-        "夸克已确认登录，但尚未取得稳定账号ID。请重新打开官方登录窗口后再次核验。",
+        `${this.label}已确认登录，但尚未取得稳定账号ID。请重新打开官方登录窗口后再次核验。`,
       );
     return {
       uid: String(uid),
       nickname: String(data.nickname ?? data.nick_name ?? ""),
     };
+  }
+  async capacity(account: Account) {
+    const result = await this.request(account, "member", {
+      fetch_subscribe: "false",
+      _ch: "home",
+      fetch_identity: "false",
+    });
+    return normalizeCapacity(
+      result.data?.total_capacity,
+      result.data?.use_capacity,
+    );
   }
   private async sharedRows(
     account: Account,
@@ -129,13 +154,17 @@ export class QuarkProvider implements DriveProvider {
   ) {
     const token = await this.request(
       account,
-      "share/sharepage/token",
+      this.id === "uc" ? "share/sharepage/v2/detail" : "share/sharepage/token",
       {},
       { pwd_id: source.shareKey, passcode: source.code },
     );
-    const stoken = token.data?.stoken;
+    const stoken =
+      this.id === "uc" ? token.data?.token_info?.stoken : token.data?.stoken;
     if (!stoken)
-      throw new AppError("SHARE_EXPIRED", "夸克分享已失效或提取码错误。");
+      throw new AppError(
+        "SHARE_EXPIRED",
+        `${this.label}分享已失效或提取码错误。`,
+      );
     const result = await this.request(account, "share/sharepage/detail", {
       pwd_id: source.shareKey,
       stoken,
@@ -150,7 +179,7 @@ export class QuarkProvider implements DriveProvider {
     if (!Array.isArray(result.data?.list))
       throw new AppError(
         "REMOTE_SCHEMA_CHANGED",
-        "夸克未返回文件列表，未继续操作。",
+        `${this.label}未返回文件列表，未继续操作。`,
       );
     return {
       rows: result.data.list as JsonObject[],
@@ -189,7 +218,7 @@ export class QuarkProvider implements DriveProvider {
       if (!Array.isArray(result.data?.list))
         throw new AppError(
           "REMOTE_SCHEMA_CHANGED",
-          "夸克目标文件列表格式变化。",
+          `${this.label}目标文件列表格式变化。`,
         );
       files.push(
         ...result.data.list.map((r: JsonObject) =>
@@ -203,6 +232,11 @@ export class QuarkProvider implements DriveProvider {
         return files;
     }
     throw new AppError("TOO_MANY_FILES", "目录过大，请选择更小的目标目录。");
+  }
+  async upload(account: Account, parentId: string, asset: UploadAsset) {
+    await uploadQuark(this.id, parentId, asset, (path, body) =>
+      this.request(account, path, {}, body),
+    );
   }
   async ensureFolder(account: Account, path: string) {
     let parent = "0";
@@ -234,7 +268,7 @@ export class QuarkProvider implements DriveProvider {
       if (!parent)
         throw new AppError(
           "REMOTE_SCHEMA_CHANGED",
-          "夸克创建目录未返回ID，请核对远端目录后重试。",
+          `${this.label}创建目录未返回ID，请核对远端目录后重试。`,
           true,
         );
     }
@@ -290,7 +324,7 @@ export class QuarkProvider implements DriveProvider {
     if (!result.data?.task_id)
       throw new AppError(
         "UNCERTAIN_REMOTE_RESULT",
-        "夸克未返回转存任务ID，请核对目标目录，不能直接重复转存。",
+        `${this.label}未返回转存任务ID，请核对目标目录，不能直接重复转存。`,
         true,
       );
     return { taskId: String(result.data.task_id) };
@@ -304,10 +338,33 @@ export class QuarkProvider implements DriveProvider {
     if ([3, 4].includes(Number(result.data?.status)))
       throw new AppError(
         "REMOTE_TASK_FAILED",
-        "夸克远端任务未完成，请核对文件结果。",
+        `${this.label}远端任务未完成，请核对文件结果。`,
         true,
       );
     return false;
+  }
+  async shareStatistics(account: Account, page: number) {
+    const result = await this.request(account, "share/mypage/detail", {
+      _page: page,
+      _size: 100,
+      _order_field: "created_at",
+      _order_type: "desc",
+      _fetch_total: 1,
+    });
+    const rows = result.data?.list;
+    if (!Array.isArray(rows))
+      throw new AppError(
+        "REMOTE_SCHEMA_CHANGED",
+        `${this.label}本人分享统计列表结构已变化。`,
+      );
+    const total = numericCount(
+      result.metadata?._total ?? result.metadata?.total,
+    );
+    return {
+      items: rows.map((row) => normalizeShareStatistic(row, this.id)),
+      hasMore: total == null ? rows.length === 100 : page * 100 < total,
+      total,
+    };
   }
   private async ownRows(account: Account) {
     const rows: JsonObject[] = [];
@@ -359,12 +416,14 @@ export class QuarkProvider implements DriveProvider {
     const parsed = parseShare(
       String(result.data?.share_url ?? result.data?.url ?? ""),
     );
-    if (parsed.provider !== "quark")
+    if (parsed.provider !== this.id)
       throw new AppError("INVALID_OWN_SHARE", "返回的本人分享链接类型不正确。");
     return {
       id: shareId,
       url: parsed.url,
-      code: String(result.data?.passcode ?? ""),
+      code: String(
+        result.data?.passcode ?? result.data?.pass_code ?? parsed.code ?? "",
+      ),
       ownerUid: identity.uid,
     };
   }
@@ -375,31 +434,39 @@ export class QuarkProvider implements DriveProvider {
       {},
       { fid_list: files.map((f) => f.id), title, url_type: 1, expired_type: 1 },
     );
-    let shareId = result.data?.share_id;
-    if (!shareId && result.data?.task_id) {
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const task = await this.request(account, "task", {
-          task_id: result.data.task_id,
-          retry_index: attempt,
-        });
-        shareId = task.data?.share_id ?? task.data?.share?.share_id;
-        if (shareId) break;
+    try {
+      let shareId = result.data?.share_id;
+      if (!shareId && result.data?.task_id) {
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const task = await this.request(account, "task", {
+            task_id: result.data.task_id,
+            retry_index: attempt,
+          });
+          shareId = task.data?.share_id ?? task.data?.share?.share_id;
+          if (shareId) break;
+        }
       }
-    }
-    if (!shareId)
+      if (!shareId)
+        throw new AppError(
+          "UNCERTAIN_SHARE_RESULT",
+          `${this.label}分享未返回ID，请先核对本人分享记录。`,
+          true,
+        );
+      const share = await this.shareInfo(account, String(shareId));
+      if (!(await this.verifyShare(account, share.id, files)))
+        throw new AppError(
+          "OWNERSHIP_UNVERIFIED",
+          "未在本人分享记录中确认目标文件，暂不允许分发。",
+        );
+      return share;
+    } catch (error) {
       throw new AppError(
-        "UNCERTAIN_SHARE_RESULT",
-        "夸克分享未返回ID，请先核对本人分享记录。",
+        error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
+        safeMessage(error),
         true,
       );
-    const share = await this.shareInfo(account, String(shareId));
-    if (!(await this.verifyShare(account, share.id, files)))
-      throw new AppError(
-        "OWNERSHIP_UNVERIFIED",
-        "未在本人分享记录中确认目标文件，暂不允许分发。",
-      );
-    return share;
+    }
   }
   private async containsFiles(
     account: Account,

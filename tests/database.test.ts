@@ -5,7 +5,7 @@ import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "../core/database";
-import { removeV5 } from "./helpers";
+import { removeV5, currentSchemaVersion } from "./helpers";
 
 test("v2数据库升级前创建一致性备份，保留资料与加密值，重开不重复迁移", async () => {
   const dir = await mkdtemp(join(tmpdir(), "panxu-migration-"));
@@ -41,7 +41,7 @@ test("v2数据库升级前创建一致性备份，保留资料与加密值，重
     assert.equal(
       upgraded.get<{ user_version: number }>("PRAGMA user_version")!
         .user_version,
-      5,
+      currentSchemaVersion,
     );
     assert.equal(upgraded.setting("model", ""), "test/model");
     assert.equal(

@@ -1,8 +1,8 @@
+import { TrafficKnowledge } from "./traffic-knowledge";
 import { createHash } from "node:crypto";
 import { endpointSpecs } from "../shared/platforms";
 import type {
   Endpoint,
-  Hotspot,
   Keyword,
   TrafficQuery,
   TrafficResult,
@@ -39,6 +39,7 @@ const suggestPlatforms = [
   "xiaohongshu",
 ];
 export class TrafficService {
+  readonly knowledge: TrafficKnowledge;
   private submissions = new Map<string, Promise<TrafficResult>>();
   private suggestions = new Map<string, Promise<TrafficResult>>();
   constructor(
@@ -46,7 +47,11 @@ export class TrafficService {
     private secrets: SecretStore,
     private changed: () => void,
     private requestJson = fetchJson,
-  ) {}
+  ) {
+    this.knowledge = new TrafficKnowledge(db);
+    this.knowledge.recoverLegacy();
+    this.knowledge.recoverBaidu();
+  }
   private reserve(
     endpoint: Endpoint | "openrouter",
     units: number,
@@ -130,6 +135,7 @@ export class TrafficService {
       plan.daily_units,
       plan.daily_budget_micros,
     );
+    const archiveId = this.knowledge.begin(callId, endpoint, phase, body, key);
     try {
       beforeRequest?.();
       const result = await this.requestJson(
@@ -143,9 +149,13 @@ export class TrafficService {
           body: new URLSearchParams(body).toString(),
         },
         45_000,
+        (text, status) => this.knowledge.receive(archiveId, text, status, key),
       );
+      // Injected transports may return parsed JSON without the HTTP observer.
+      this.knowledge.receive(archiveId, result, null, key);
       const code = String(result.errcode ?? result.error_code ?? "");
       if ((phase === "poll" || endpoint === "suggest") && code === "200104") {
+        this.knowledge.finish(archiveId, "pending");
         this.db.run(
           "UPDATE api_calls SET status=?,message=? WHERE id=?",
           "uncertain",
@@ -190,14 +200,18 @@ export class TrafficService {
           : "请求成功，按套餐估算，实际扣费待官方对账。",
         callId,
       );
+      this.knowledge.finish(archiveId, "success");
       return result;
     } catch (error) {
+      const message = safeMessage(error).split(key).join("[凭据已隐藏]");
+      this.knowledge.finish(archiveId, "uncertain", message);
       this.db.run(
         "UPDATE api_calls SET status=?,message=? WHERE id=?",
         "uncertain",
-        `${safeMessage(error)}；可能已计费，保留预算。`,
+        `${message}；可能已计费，保留预算。`,
         callId,
       );
+      if (error instanceof Error) error.message = message;
       throw error;
     } finally {
       this.changed();

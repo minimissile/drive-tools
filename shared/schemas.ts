@@ -1,17 +1,10 @@
 import { z } from "zod";
-export const providerSchema = z.enum(["quark", "baidu"]);
-export const platformSchema = z.enum([
-  "xiaohongshu",
-  "douyin",
-  "kuaishou",
-  "wechat",
-  "weibo",
-  "tieba",
-  "douban",
-  "x",
-  "zhihu",
-  "csdn",
-]);
+import { platformIds, contentFormatIds, linkPositionIds } from "./channels";
+import { providerIds } from "./providers";
+export const providerSchema = z.enum(providerIds);
+export const platformSchema = z.enum(platformIds);
+export const contentFormatSchema = z.enum(contentFormatIds);
+export const linkPositionSchema = z.enum(linkPositionIds);
 export const endpointSchema = z.enum([
   "longtail",
   "suggest",
@@ -38,7 +31,7 @@ export const resourceInputSchema = z.object({
   coverData: z.string().max(12_000_000).nullable().optional(),
   accountId: z.string().min(1),
   directory: z.string().max(500),
-  rightsConfirmed: z.boolean(),
+  rightsConfirmed: z.boolean().optional(),
   selectedFiles: z.array(fileSchema).max(100).optional(),
   enqueue: z.boolean(),
 });
@@ -65,4 +58,15 @@ export const keywordSchema = z.object({
   sourceUpdatedAt: z.string().nullable(),
   fetchedAt: z.string(),
   intent: z.string().max(100).optional(),
+  idea: z
+    .object({
+      runId: z.string().max(100),
+      kind: z.string().max(30),
+      cluster: z.string().max(40),
+      angle: z.string().max(200),
+      answerQuestion: z.string().max(180),
+      evidenceNeeded: z.string().max(200),
+      references: z.array(z.string().max(100)).max(3),
+    })
+    .optional(),
 });

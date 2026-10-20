@@ -1,0 +1,65 @@
+Toast evidence: /var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-toasts-3O9S4e
+{
+  "checks": [
+    "创建账号的完成提示为绿色，悬停暂停自动关闭，移出后正常关闭",
+    "相同文案的连续操作重新计时；键盘聚焦暂停，Enter 可关闭",
+    "附件限制使用琥珀色警告，持续可读并可手动关闭",
+    "操作异常使用红色错误，保留错误原因与恢复指引，不提前消失",
+    "弹窗内的保存失败可见，Toast 进入当前弹窗焦点范围，键盘关闭不离开弹窗",
+    "提交成功、刷新失败显示警告；重试只恢复读取，不重复创建账号",
+    "知识库带入查询的下一步指引用蓝色信息，未执行外部查询",
+    "840px、200% 和超长中文/路径可换行滚动；关闭可达，减少动态效果停止入场动画"
+  ],
+  "colors": [
+    {
+      "tone": "success",
+      "color": "rgb(35, 122, 94)",
+      "background": "rgb(236, 247, 241)",
+      "contrast": 4.765120307082096
+    },
+    {
+      "tone": "success",
+      "color": "rgb(35, 122, 94)",
+      "background": "rgb(236, 247, 241)",
+      "contrast": 4.765120307082096
+    },
+    {
+      "tone": "warning",
+      "color": "rgb(148, 101, 28)",
+      "background": "rgb(255, 247, 231)",
+      "contrast": 4.763888909574947
+    },
+    {
+      "tone": "error",
+      "color": "rgb(185, 72, 78)",
+      "background": "rgb(255, 240, 241)",
+      "contrast": 4.63099170582551
+    },
+    {
+      "tone": "error",
+      "color": "rgb(185, 72, 78)",
+      "background": "rgb(255, 240, 241)",
+      "contrast": 4.63099170582551
+    },
+    {
+      "tone": "warning",
+      "color": "rgb(148, 101, 28)",
+      "background": "rgb(255, 247, 231)",
+      "contrast": 4.763888909574947
+    },
+    {
+      "tone": "info",
+      "color": "rgb(46, 97, 213)",
+      "background": "rgb(237, 243, 255)",
+      "contrast": 4.981730269793834
+    },
+    {
+      "tone": "error",
+      "color": "rgb(185, 72, 78)",
+      "background": "rgb(255, 240, 241)",
+      "contrast": 4.63099170582551
+    }
+  ],
+  "errors": [],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-toasts-3O9S4e"
+}

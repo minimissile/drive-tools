@@ -1,0 +1,312 @@
+.accounts-page {
+  container: accounts / inline-size;
+}
+.account-connect {
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+  margin-bottom: var(--space-6);
+}
+.account-connect-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.account-connect-heading p {
+  font-size: 12px;
+  color: var(--muted);
+}
+.account-connect-fields {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+}
+.account-connect-fields .field + .field {
+  margin-top: 0;
+}
+.account-connect-fields > .button {
+  align-self: end;
+}
+.provider-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.accounts-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.accounts-list-toolbar h2 {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.accounts-list-toolbar h2 > span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.accounts-list-toolbar p {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: var(--space-1);
+}
+.accounts-list-toolbar .search {
+  width: 240px;
+}
+.accounts-provider-filter {
+  margin-bottom: var(--space-3);
+}
+.accounts-provider-filter .tabs {
+  padding-bottom: 0;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.accounts-provider-filter .tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 10px;
+}
+.account-filter-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.accounts-list {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+  min-width: 0;
+}
+.accounts-column-head,
+.account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(210px, 0.9fr) 250px;
+  gap: var(--space-6);
+  padding-inline: var(--space-5);
+}
+.accounts-column-head {
+  padding-block: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.account-row {
+  padding-block: var(--space-5);
+  align-items: center;
+}
+.account-row + .account-row {
+  border-top: 1px solid var(--line);
+}
+.account-row[data-enabled="false"] {
+  background: var(--bg);
+}
+.account-row:last-child {
+  border-radius: 0 0 var(--panel-radius) var(--panel-radius);
+}
+.account-identity {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  min-width: 0;
+}
+.account-identity .provider-icon {
+  margin-top: 2px;
+}
+.account-identity-content {
+  min-width: 0;
+}
+.account-identity h3 {
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.account-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 9px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.account-badges .status,
+.account-badges .tag {
+  font-size: 10px;
+}
+.account-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+.account-identity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px var(--space-3);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.account-verified {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.account-error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--amber);
+  overflow-wrap: anywhere;
+}
+.account-action-cell {
+  min-width: 0;
+}
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.account-actions .button {
+  white-space: nowrap;
+}
+.account-action-cell > p {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: var(--space-2);
+  line-height: 1.6;
+}
+.accounts-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  font-size: 11px;
+  color: var(--muted);
+}
+.accounts-footnote > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.account-editor-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: var(--space-5);
+}
+.account-editor-identity .button {
+  margin-left: auto;
+}
+.account-default-setting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-4);
+}
+.account-default-setting > div {
+  flex: 1;
+  min-width: 0;
+}
+.account-default-setting strong,
+.account-editor-security > strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.account-default-setting p,
+.account-editor-security > p {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: var(--space-1);
+}
+.account-default-setting .button {
+  flex: none;
+}
+.account-editor-security {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}
+.account-editor-security > .button {
+  margin-top: var(--space-2);
+}
+.account-editor .account-clear-button {
+  color: var(--red);
+}
+.account-clear-confirm .row {
+  justify-content: flex-end;
+}
+@container accounts (max-width: 1000px) {
+  .accounts-column-head {
+    display: none;
+  }
+  .account-row {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: var(--space-4) var(--space-6);
+  }
+  .account-action-cell {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    padding-left: 52px;
+  }
+  .account-action-cell > p {
+    margin-top: 0;
+  }
+}
+@container accounts (max-width: 570px) {
+  .account-connect-fields {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .account-connect-fields > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .account-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .account-row .account-capacity {
+    padding-left: 52px;
+  }
+  .account-actions {
+    gap: 6px;
+  }
+  .accounts-list-toolbar .search {
+    width: 100%;
+  }
+}
+@container accounts (max-width: 350px) {
+  .account-connect,
+  .account-row {
+    padding: var(--space-4);
+  }
+  .account-connect-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .account-connect-fields > .button {
+    width: 100%;
+  }
+  .account-row .account-capacity,
+  .account-action-cell {
+    padding-left: 0;
+  }
+}

@@ -1,0 +1,16 @@
+(node:77758) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "checks": [
+    "页面身份、首屏、空态及账号入口",
+    "真实IPC与三盘只读适配同步；迅雷认证失败保留历史快照",
+    "四盘过滤与真实0、缺失指标、100+下限分别显示",
+    "整份资料与拆分子链接关联、路径搜索",
+    "分页与全部筛选结果CSV导出，无提取码",
+    "二次同步快照增量、消失分享历史保留",
+    "900px与390px无页面溢出、无框架错误、控制台健康、未打开分享页或写远端数据"
+  ],
+  "errors": [],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-share-statistics-evidence-a6ebQw",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-share-statistics-e2e-C76CI8"
+}

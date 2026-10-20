@@ -1,15 +1,8 @@
-export type Provider = "quark" | "baidu";
-export type Platform =
-  | "xiaohongshu"
-  | "douyin"
-  | "kuaishou"
-  | "wechat"
-  | "weibo"
-  | "tieba"
-  | "douban"
-  | "x"
-  | "zhihu"
-  | "csdn";
+import type { AccountCapacity } from "./drive-capacity";
+export type Provider =
+  "quark" | "baidu" | "uc" | "xunlei" | "guangya" | "pikpak";
+export type { Platform } from "./channels";
+import type { Platform, ContentFormat, ChannelCapabilities } from "./channels";
 export type Endpoint = "longtail" | "suggest" | "metrics" | "radar";
 export type AccountStatus =
   "disconnected" | "connected" | "expired" | "disabled";
@@ -36,6 +29,8 @@ export interface Account {
   defaultDirectory: string;
   lastVerifiedAt: string | null;
   error: string | null;
+  capacity?: AccountCapacity | null;
+  resourceCopies?: number;
 }
 export interface RemoteFile {
   id: string;
@@ -58,8 +53,10 @@ export interface ShareInspection {
   hasMore: boolean;
   page: number;
   parentId: string;
+  nextCursor?: string;
 }
 export interface Resource {
+  sourceKind?: "share" | "owned";
   id: string;
   title: string;
   sourceUrl: string;
@@ -202,6 +199,7 @@ export interface Keyword {
   sourceUpdatedAt: string | null;
   fetchedAt: string;
   intent?: string;
+  idea?: import("./ideas").IdeaProvenance;
 }
 export interface Hotspot {
   id: string;
@@ -241,6 +239,11 @@ export interface ApiCall {
   createdAt: string;
 }
 export interface Draft {
+  contentFormat: ContentFormat;
+  creative: import("./studio").CreativePackage | null;
+  topicId: string | null;
+  splitItemId: string | null;
+  splitShareVersion: number | null;
   id: string;
   resourceId: string;
   copyId: string;
@@ -259,6 +262,7 @@ export interface Draft {
   updatedAt: string;
 }
 export interface BrowserBinding {
+  capabilities: ChannelCapabilities;
   id: string;
   platform: Platform;
   alias: string;
@@ -299,7 +303,7 @@ export interface Publication {
   draftId: string;
   draftVersion: number;
   bindingId: string;
-  status: "opened" | "published";
+  status: "opened" | "submitted" | "published";
   url: string | null;
   createdAt: string;
 }
@@ -307,6 +311,7 @@ export interface AppSettings {
   vaultPath: string | null;
   exportCodes: boolean;
   model: string;
+  aiModels: import("./ai-models").AiModelSelection;
   openrouterConfigured: boolean;
   bitUrl: string;
   bitConfigured: boolean;
@@ -354,7 +359,8 @@ export interface ResourceInput {
   coverData?: string | null;
   accountId: string;
   directory: string;
-  rightsConfirmed: boolean;
+  /** Legacy callers may still send this; resource intake no longer requires a checkbox. */
+  rightsConfirmed?: boolean;
   selectedFiles?: RemoteFile[];
   enqueue: boolean;
 }
@@ -392,6 +398,9 @@ export interface Result<T> {
 export interface AppApi {
   invoke<T = unknown>(method: string, args?: unknown): Promise<T>;
   onChanged(callback: () => void): () => void;
+  onUpdateChanged(
+    callback: (state: import("./updates").UpdateState) => void,
+  ): () => void;
 }
 declare global {
   interface Window {

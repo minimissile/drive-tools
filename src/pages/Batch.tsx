@@ -1,36 +1,46 @@
+import { Select } from "../ui/Select";
+import { QueryError } from "../ui/QueryError";
+import { ipc } from "../api/client";
+import { useIpcQuery } from "../api/useIpcQuery";
 import { useEffect, useState } from "react";
 import {
   Button,
+  Empty,
+  LoadingState,
   Field,
   Header,
   Notice,
   Panel,
   SearchField,
   Status,
-  accountLabel,
-  formatTime,
-  stageName,
-} from "../components";
-import { useApp } from "../state";
+} from "../ui/primitives";
+import { accountLabel, stageName } from "../resources/labels";
+import { formatTime } from "../lib/format";
+import { updateSelection } from "../lib/selection";
+import { Pagination } from "../ui/Pagination";
+import {
+  useAppActions,
+  useAppActivity,
+  useAppData,
+  useAppNavigation,
+} from "../state";
 import type { TransferBatch } from "../../shared/types";
-type CandidatePage = {
-  total: number;
-  page: number;
-  pageSize: number;
-  items: {
-    copyId: string;
-    accountId: string;
-    title: string;
-    provider: string;
-    category: string;
-  }[];
-};
-export default function Batch() {
-  const { data, command, busy, notify, navigate } = useApp();
+export default function Batch({
+  embedded = false,
+  seed,
+  onImport,
+}: {
+  embedded?: boolean;
+  seed?: string[];
+  onImport?: () => void;
+}) {
+  const { data } = useAppData(),
+    { navigate } = useAppNavigation(),
+    { command, notify } = useAppActions(),
+    { busy } = useAppActivity();
   const [query, setQuery] = useState(""),
     [account, setAccount] = useState("all"),
     [page, setPage] = useState(1),
-    [candidates, setCandidates] = useState<CandidatePage | null>(null),
     [copies, setCopies] = useState<string[]>(() => {
       try {
         return JSON.parse(localStorage.getItem("panxu-batch-seed") ?? "[]");
@@ -42,62 +52,60 @@ export default function Batch() {
       () => localStorage.getItem("panxu-batch-id") ?? "",
     ),
     [batch, setBatch] = useState<TransferBatch | null>(null),
-    [history, setHistory] = useState<
-      { id: string; createdAt: string; count: number }[]
-    >([]),
     [excluded, setExcluded] = useState<string[]>([]),
     [rights, setRights] = useState(false);
   useEffect(() => {
+    if (seed) setCopies(seed.slice(0, 100));
+  }, [seed]);
+  useEffect(() => {
     localStorage.removeItem("panxu-batch-seed");
   }, []);
-  useEffect(() => {
-    let alive = true;
-    const timer = setTimeout(() => {
-      void window.panxu
-        .invoke<CandidatePage>("batch.candidates", {
-          query,
-          accountId: account,
-          page,
-        })
-        .then((r) => {
-          if (alive) setCandidates(r);
-        })
-        .catch((e) => notify(e.message, true));
-    }, 180);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [query, account, page, data?.jobs, data?.resources, notify]);
-  useEffect(() => {
-    let alive = true;
-    void window.panxu
-      .invoke<typeof history>("batch.list")
-      .then((r) => {
-        if (alive) setHistory(r);
-      })
-      .catch((e) => notify(e.message, true));
-    return () => {
-      alive = false;
-    };
-  }, [data?.jobs, notify]);
+  const {
+    data: candidates,
+    loading: candidatesLoading,
+    error: candidatesError,
+    reload: retryCandidates,
+  } = useIpcQuery(
+    "batch.candidates",
+    { query, accountId: account, page },
+    {
+      delay: 180,
+      revision: data?.jobs,
+      invalidate: data?.resources,
+      keepPrevious: true,
+    },
+  );
+  const {
+    data: batches,
+    error: historyError,
+    reload: retryHistory,
+  } = useIpcQuery("batch.list", undefined, {
+    revision: data?.jobs,
+  });
+  const history = batches ?? [];
+  const [readError, setReadError] = useState("");
+  const [readRevision, setReadRevision] = useState(0);
   useEffect(() => {
     if (!batchId) {
       setBatch(null);
       return;
     }
     let alive = true;
+    setReadError("");
     localStorage.setItem("panxu-batch-id", batchId);
-    void window.panxu
-      .invoke<TransferBatch>("batch.get", { id: batchId })
+    void ipc("batch.get", { id: batchId })
       .then((r) => {
         if (alive) setBatch(r);
       })
-      .catch((e) => notify(e.message, true));
+      .catch((e) => {
+        if (alive) {
+          setReadError(e.message);
+        }
+      });
     return () => {
       alive = false;
     };
-  }, [batchId, data?.jobs, notify]);
+  }, [batchId, data?.jobs, readRevision]);
   const ready =
       batch?.items.filter(
         (i) => i.state === "ready" && !excluded.includes(i.id),
@@ -107,115 +115,131 @@ export default function Batch() {
     );
   return (
     <>
-      <Header
-        title="一次预检，按账号逐份转存。"
-        description="先读取分享并选择文件，再统一确认；同账号串行、不同账号最多并行两个任务。"
-      />
+      {!embedded && (
+        <Header
+          title="一次预检，按账号逐份转存。"
+          description="先读取分享并选择文件，再统一确认；同账号串行、不同账号最多并行两个任务。"
+        />
+      )}
       <Notice>
         每批最多100份资料。未选择过文件的草稿默认读取分享根目录；目录整体转存，不递归打散原文件。单份根目录超过100项时，请先在录入页面选择文件。
       </Notice>
+      <QueryError error={historyError} onRetry={retryHistory} />
+      <QueryError
+        error={readError}
+        onRetry={() => setReadRevision((n) => n + 1)}
+      />
       <Panel
         title="选择待转存草稿"
         extra={
-          <Button quiet onClick={() => navigate("bulk")}>
+          <Button
+            quiet
+            onClick={() => (onImport ? onImport() : navigate("bulk"))}
+          >
             批量录入CSV
           </Button>
         }
       >
         <div className="toolbar">
           <SearchField
+            loading={candidatesLoading}
             value={query}
             onChange={(v) => {
               setQuery(v);
               setPage(1);
             }}
           />
-          <select
+          <Select
             aria-label="批量转存账号筛选"
             value={account}
-            onChange={(e) => {
-              setAccount(e.target.value);
+            onValueChange={(nextValue) => {
+              setAccount(nextValue);
               setPage(1);
             }}
-          >
-            <option value="all">全部账号</option>
-            {data!.accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.alias}
-              </option>
-            ))}
-          </select>
+            items={[
+              { value: "all", label: "全部账号" },
+              ...data!.accounts.map((a) => ({ value: a.id, label: a.alias })),
+            ]}
+          />
           <small>已选 {copies.length} / 100 份</small>
         </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>选择</th>
-                <th>资料</th>
-                <th>目标账号</th>
-                <th>分类</th>
-              </tr>
-            </thead>
-            <tbody>
-              {candidates?.items.map((i) => (
-                <tr key={i.copyId}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`批量选择${i.title}`}
-                      checked={copies.includes(i.copyId)}
-                      disabled={
-                        !copies.includes(i.copyId) && copies.length >= 100
-                      }
-                      onChange={(e) =>
-                        setCopies((old) =>
-                          e.target.checked
-                            ? [...old, i.copyId]
-                            : old.filter((id) => id !== i.copyId),
-                        )
-                      }
-                    />
-                  </td>
-                  <td>{i.title}</td>
-                  <td>{accountLabel(data!.accounts, i.accountId)}</td>
-                  <td>{i.category}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {candidates?.total === 0 ? (
-          <p className="muted">
-            没有符合条件的草稿。已有转存任务的资料请从“转存任务”恢复。
-          </p>
-        ) : null}
-        <div className="row spread pagination">
-          <Button
-            disabled={!candidates || candidates.page <= 1}
-            onClick={() => setPage((candidates?.page ?? 1) - 1)}
-          >
-            上一批草稿
-          </Button>
-          <small>
-            共 {candidates?.total ?? 0} 份 · 第 {candidates?.page ?? 1} 页
-          </small>
-          <Button
-            disabled={
-              !candidates ||
-              candidates.page * candidates.pageSize >= candidates.total
-            }
-            onClick={() => setPage((candidates?.page ?? 1) + 1)}
-          >
-            下一批草稿
-          </Button>
-        </div>
+        <QueryError
+          error={candidatesError}
+          loading={candidatesLoading}
+          onRetry={retryCandidates}
+        />
+        {candidates?.items.length ? (
+          <>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>选择</th>
+                    <th>资料</th>
+                    <th>目标账号</th>
+                    <th>分类</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidates?.items.map((i) => (
+                    <tr key={i.copyId}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`批量选择${i.title}`}
+                          checked={copies.includes(i.copyId)}
+                          disabled={
+                            candidatesLoading ||
+                            (!copies.includes(i.copyId) && copies.length >= 100)
+                          }
+                          onChange={(e) =>
+                            setCopies((old) =>
+                              updateSelection(
+                                old,
+                                [i.copyId],
+                                e.target.checked,
+                                100,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td>{i.title}</td>
+                      <td>{accountLabel(data!.accounts, i.accountId)}</td>
+                      <td>{i.category}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : candidatesLoading ? (
+          <LoadingState label="正在读取待转存草稿…" />
+        ) : candidatesError ? null : (
+          <Empty title="没有符合条件的草稿">
+            已有转存任务的资料请从“转存任务”恢复。
+          </Empty>
+        )}
+        <Pagination
+          label="待转存草稿翻页"
+          page={candidates?.page ?? page}
+          pageSize={candidates?.pageSize ?? 25}
+          total={candidates?.total ?? 0}
+          disabled={!candidates || candidatesLoading}
+          previousLabel="上一批草稿"
+          nextLabel="下一批草稿"
+          onPageChange={setPage}
+        >
+          {candidates && !candidatesLoading
+            ? `共 ${candidates.total} 份 · 第 ${candidates.page} 页`
+            : "每页 25 份"}
+        </Pagination>
         <div className="actions">
           <Button
             primary
             disabled={!copies.length || busy > 0}
             onClick={async () => {
-              const r = await command<TransferBatch>(
+              const r = await command(
                 "batch.preview",
                 { copyIds: copies },
                 "预检已排队，完成后再确认转存。",
@@ -238,22 +262,26 @@ export default function Batch() {
       </Panel>
       {history.length ? (
         <Field label="批次记录">
-          <select
+          <Select
             aria-label="批量转存批次"
             value={batchId}
-            onChange={(e) => {
-              setBatchId(e.target.value);
+            onValueChange={(nextValue) => {
+              setBatchId(nextValue);
               setExcluded([]);
               setRights(false);
             }}
-          >
-            <option value="">选择批次</option>
-            {history.map((h) => (
-              <option key={h.id} value={h.id}>
-                {formatTime(h.createdAt)} · {h.count}份
-              </option>
-            ))}
-          </select>
+            items={[
+              { value: "", label: "选择批次" },
+              ...history.map((h) => ({
+                value: h.id,
+                label: (
+                  <>
+                    {formatTime(h.createdAt)} · {h.count}份
+                  </>
+                ),
+              })),
+            ]}
+          />
         </Field>
       ) : null}
       {batch ? (
@@ -357,9 +385,9 @@ export default function Batch() {
             </div>
           ))}
           {reading ? (
-            <Notice>
-              正在逐份读取分享。可以离开此页，预检进度会保存在任务记录中。
-            </Notice>
+            <LoadingState label="正在逐份读取分享…" compact>
+              可以离开此页，预检进度会保存在任务记录中。
+            </LoadingState>
           ) : null}
           <label className="checkbox">
             <input
@@ -381,11 +409,7 @@ export default function Batch() {
                 busy > 0
               }
               onClick={async () => {
-                const r = await command<{
-                  created: number;
-                  reused: number;
-                  skipped: number;
-                }>("batch.start", {
+                const r = await command("batch.start", {
                   id: batch.id,
                   itemIds: ready.map((i) => i.id),
                   rightsConfirmed: true,
@@ -393,6 +417,7 @@ export default function Batch() {
                 if (r)
                   notify(
                     `已创建${r.created}个转存任务，复用${r.reused}个，跳过${r.skipped}个。`,
+                    "success",
                   );
               }}
             >

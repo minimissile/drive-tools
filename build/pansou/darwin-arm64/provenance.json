@@ -1,0 +1,15 @@
+{
+  "upstream": "https://github.com/fish2018/pansou",
+  "originalBinaryEquivalence": "unverified; compatible source build",
+  "target": "darwin-arm64",
+  "patches": [
+    "loopback-only HTTP listener",
+    "register configured ash source",
+    "exit after parent process ends"
+  ],
+  "sourceMainSha256": "fb8574d6427c15125bc4998b00e425934926790bd1a173bda430e967e3f1bfdf",
+  "patchedMainSha256": "06a05674bf16cfc6a94eb198690e0e37e9b5421e0a90d80f14060eba009d3b63",
+  "goModSha256": "8c9d76e0597c2d7efb065477b56877bf668bcb7b321e8391f6a9cab26bae3f41",
+  "goSumSha256": "461901de6122e2fea638efeabf760fba87796fb16f16bb3caac2a84abea39f31",
+  "binarySha256": "d0326a9d4ac28df258d0c550d3345d6df0edef8b23221734cc3869a99abeb992"
+}

@@ -1,27 +1,62 @@
+import type { IpcMethod, IpcArguments, IpcValue } from "../shared/ipc";
+import { ipc } from "./api/client";
+import {
+  FeedbackProvider,
+  useFeedbackActions,
+  useAppActivity,
+  useAppToast,
+} from "./state/feedback";
+import { useSnapshot } from "./state/useSnapshot";
+import {
+  shouldRefreshSnapshot,
+  type Command,
+  type CommandArguments,
+} from "./api/client";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
-  useRef,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
-import type { AppSnapshot, Resource, ResourceCopy } from "../shared/types";
+import type {
+  AppSnapshot,
+  Resource,
+  ResourceCopy,
+  Draft,
+} from "../shared/types";
 export type Page =
+  | "workbench" | "zhidao-mine" | "zhidao-collect" | "zhidao-qa" | "zhidao-templates" | "zhidao-publish" | "zhidao-accounts" | "drive-files"
+  | "resource-export"
   | "library"
   | "accounts"
+  | "website-accounts"
   | "intake"
   | "tasks"
   | "traffic"
+  | "share-statistics"
   | "studio"
   | "publish"
   | "settings"
   | "bulk"
   | "batch"
-  | "split";
+  | "split"
+  | "search";
 // Batch operations keep their own durable plans; navigation stores no credentials.
+export interface SearchFocus {
+  topicId?: string;
+  poolId?: string;
+  copyId?: string;
+  splitItemId?: string;
+}
 interface Store {
+  settingsSection: SettingsSection;
+  openSettings(section: SettingsSection): void;
+  searchFocus: SearchFocus | null;
+  openSearch(focus?: SearchFocus): void;
+  openDraft(draft: Draft, destination?: "studio" | "publish"): void;
   data: AppSnapshot | null;
   page: Page;
   navigate(page: Page): void;
@@ -35,37 +70,88 @@ interface Store {
   editResourceId: string | null;
   editCopyId: string | null;
   edit(resourceId: string | null, copyId?: string): void;
-  command<T = unknown>(
-    method: string,
-    args?: unknown,
-    success?: string,
-  ): Promise<T | undefined>;
+  command: Command;
   refresh(): Promise<void>;
   busy: number;
-  toast: { text: string; error: boolean } | null;
-  notify(text: string, error?: boolean): void;
+  toast: ReturnType<typeof useAppToast>;
+  notify: ReturnType<typeof useFeedbackActions>["notify"];
 }
-const Context = createContext<Store | null>(null);
-export function useApp() {
-  const ctx = useContext(Context);
-  if (!ctx) throw new Error("AppProvider missing");
-  return ctx;
+type DataStore = Pick<Store, "data">;
+type SelectionStore = Pick<
+  Store,
+  | "resource"
+  | "copy"
+  | "selectedResourceId"
+  | "selectedCopyId"
+  | "activeAccounts"
+  | "setActiveAccount"
+  | "select"
+>;
+type NavigationStore = Pick<
+  Store,
+  | "settingsSection"
+  | "openSettings"
+  | "page"
+  | "navigate"
+  | "searchFocus"
+  | "openSearch"
+  | "openDraft"
+  | "editResourceId"
+  | "editCopyId"
+  | "edit"
+>;
+type ActionStore = Pick<Store, "command" | "refresh" | "notify">;
+const DataContext = createContext<DataStore | null>(null);
+const SelectionContext = createContext<SelectionStore | null>(null);
+const NavigationContext = createContext<NavigationStore | null>(null);
+const ActionContext = createContext<ActionStore | null>(null);
+function useRequired<T>(context: import("react").Context<T | null>): T {
+  const value = useContext(context);
+  if (!value) throw new Error("AppProvider missing");
+  return value;
+}
+export const useAppData = () => useRequired(DataContext);
+export const useAppSelection = () => useRequired(SelectionContext);
+export const useAppNavigation = () => useRequired(NavigationContext);
+export const useAppActions = () => useRequired(ActionContext);
+export { useAppActivity } from "./state/feedback";
+// Compatibility entry point. New components subscribe only to the state they use.
+export function useApp(): Store {
+  return {
+    ...useAppData(),
+    ...useAppSelection(),
+    ...useAppNavigation(),
+    ...useAppActions(),
+    ...useAppActivity(),
+    toast: useAppToast(),
+  };
 }
 const pages: Page[] = [
+  "workbench", "zhidao-mine", "zhidao-collect", "zhidao-qa", "zhidao-templates", "zhidao-publish", "zhidao-accounts", "drive-files",
+  "resource-export",
   "library",
   "accounts",
+  "website-accounts",
   "intake",
   "tasks",
   "traffic",
+  "share-statistics",
   "studio",
   "publish",
   "settings",
   "bulk",
   "batch",
   "split",
+  "search",
 ];
+export type SettingsSection =
+  "ai" | "traffic" | "notes" | "browser" | "bindings" | "maintenance";
+const WorkspaceStatus = createContext({ loading: true, error: "" });
+export const useWorkspaceStatus = () => useContext(WorkspaceStatus);
 function savedUi(): {
   page?: Page;
+  editResourceId?: string | null;
+  editCopyId?: string | null;
   resourceId?: string;
   copyId?: string;
   activeAccounts?: Record<string, string>;
@@ -73,7 +159,10 @@ function savedUi(): {
   try {
     const data = JSON.parse(localStorage.getItem("panxu-ui-v1") ?? "{}");
     return {
-      page: pages.includes(data.page) ? data.page : "library",
+      page: pages.includes(data.page) ? data.page : "workbench",
+      editResourceId:
+        typeof data.editResourceId === "string" ? data.editResourceId : null,
+      editCopyId: typeof data.editCopyId === "string" ? data.editCopyId : null,
       resourceId: typeof data.resourceId === "string" ? data.resourceId : "",
       copyId: typeof data.copyId === "string" ? data.copyId : "",
       activeAccounts:
@@ -86,75 +175,100 @@ function savedUi(): {
   }
 }
 export function AppProvider({ children }: { children: ReactNode }) {
-  const saved = useRef(savedUi());
-  const [data, setData] = useState<AppSnapshot | null>(null),
-    [extraResource, setExtraResource] = useState<Resource | null>(null),
-    [page, setPage] = useState<Page>(saved.current.page ?? "library"),
-    [selectedResourceId, setResourceId] = useState(
-      saved.current.resourceId ?? "",
-    ),
-    [selectedCopyId, setCopyId] = useState(saved.current.copyId ?? ""),
-    [activeAccounts, setActiveAccounts] = useState<Record<string, string>>(
-      saved.current.activeAccounts ?? {},
-    ),
-    [editResourceId, setEditResourceId] = useState<string | null>(null),
-    [editCopyId, setEditCopyId] = useState<string | null>(null),
-    [busy, setBusy] = useState(0),
-    [toast, setToast] = useState<Store["toast"]>(null);
-  const notify = useCallback(
-    (text: string, error = false) => setToast({ text, error }),
-    [],
+  return (
+    <FeedbackProvider>
+      <WorkspaceProvider>{children}</WorkspaceProvider>
+    </FeedbackProvider>
   );
-  const refresh = useCallback(async () => {
-    if (!window.panxu) return;
-    const snapshot = await window.panxu.invoke<AppSnapshot>("snapshot", {
-      resourceId: selectedResourceId || undefined,
-    });
-    setData(snapshot);
-  }, [selectedResourceId]);
-  useEffect(() => {
-    void refresh().catch((e) => notify(e.message, true));
-    return window.panxu?.onChanged(() => {
-      void refresh().catch((e) => notify(e.message, true));
-    });
-  }, [refresh, notify]);
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), toast.error ? 12_000 : 6500);
-    return () => clearTimeout(timer);
-  }, [toast]);
-  useEffect(() => {
-    localStorage.setItem(
-      "panxu-ui-v1",
-      JSON.stringify({
-        page,
-        resourceId: selectedResourceId,
-        copyId: selectedCopyId,
-        activeAccounts,
-      }),
+}
+function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const [saved] = useState(savedUi);
+  const { notify, clearToast, begin, end } = useFeedbackActions();
+  const [searchFocus, setSearchFocus] = useState<SearchFocus | null>(null);
+  const [extraResource, setExtraResource] = useState<Resource | null>(null),
+    [page, setPage] = useState<Page>(saved.page ?? "workbench"),
+    [selectedResourceId, setResourceId] = useState(saved.resourceId ?? ""),
+    [selectedCopyId, setCopyId] = useState(saved.copyId ?? ""),
+    [activeAccounts, setActiveAccounts] = useState<Record<string, string>>(
+      saved.activeAccounts ?? {},
+    ),
+    [editResourceId, setEditResourceId] = useState<string | null>(
+      saved.editResourceId ?? null,
+    ),
+    [editCopyId, setEditCopyId] = useState<string | null>(
+      saved.editCopyId ?? null,
     );
-  }, [page, selectedResourceId, selectedCopyId, activeAccounts]);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("ai");
+  const openSettings = useCallback((section: SettingsSection) => {
+    setSettingsSection(section);
+    setPage("settings");
+  }, []);
+  const {
+    data,
+    refresh,
+    error: snapshotError,
+    loading: snapshotLoading,
+  } = useSnapshot(selectedResourceId);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "panxu-ui-v1",
+        JSON.stringify({
+          page,
+          resourceId: selectedResourceId,
+          copyId: selectedCopyId,
+          activeAccounts,
+          editResourceId,
+          editCopyId,
+        }),
+      );
+    } catch {
+      /* A preference write must not crash the workspace. */
+    }
+  }, [
+    page,
+    selectedResourceId,
+    selectedCopyId,
+    activeAccounts,
+    editResourceId,
+    editCopyId,
+  ]);
   const command = useCallback(
-    async <T,>(
-      method: string,
-      args?: unknown,
-      success?: string,
-    ): Promise<T | undefined> => {
-      setBusy((n) => n + 1);
-      setToast(null);
+    async <M extends IpcMethod>(
+      method: M,
+      ...[args, success, throwErrors = false]: CommandArguments<M>
+    ): Promise<IpcValue<M> | undefined> => {
+      begin();
+      clearToast();
       try {
-        const result = await window.panxu.invoke<T>(method, args);
-        await refresh();
-        if (success) notify(success);
+        const result = await ipc(method, ...([args] as IpcArguments<M>));
+        let refreshed = true;
+        if (shouldRefreshSnapshot(method)) {
+          try {
+            await refresh();
+          } catch {
+            refreshed = false;
+            notify(
+              "操作已完成，但本地视图暂未刷新。请使用页面的重试读取，避免重复提交。",
+              "warning",
+            );
+          }
+        }
+        if (success && refreshed)
+          notify(
+            typeof success === "string" ? success : success.text,
+            typeof success === "string" ? "success" : success.tone,
+          );
         return result;
       } catch (error) {
-        notify(error instanceof Error ? error.message : "操作失败", true);
+        notify(error instanceof Error ? error.message : "操作失败", "error");
+        if (throwErrors) throw error;
         return undefined;
       } finally {
-        setBusy((n) => n - 1);
+        end();
       }
     },
-    [refresh, notify],
+    [refresh, notify, begin, end, clearToast],
   );
   useEffect(() => {
     if (
@@ -164,14 +278,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
       return;
     let active = true;
-    void window.panxu
-      .invoke<Resource>("resource.get", { id: selectedResourceId })
+    void ipc("resource.get", { id: selectedResourceId })
       .then((r) => {
         if (active) setExtraResource(r);
       })
       .catch((error) => {
         if (active) {
-          notify(error.message, true);
+          notify(error.message, "error");
           setResourceId(data.resources[0]?.id ?? "");
           setExtraResource(null);
         }
@@ -187,52 +300,117 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const copy =
     resource?.copies.find((c) => c.id === selectedCopyId) ??
     resource?.copies[0];
-  const select = (resourceId: string, copyId?: string) => {
+  const select = useCallback((resourceId: string, copyId?: string) => {
     setResourceId(resourceId);
     setCopyId(copyId ?? "");
-  };
-  const edit = (resourceId: string | null, copyId?: string) => {
-    setEditResourceId(resourceId);
-    setEditCopyId(copyId ?? null);
-    if (resourceId) {
-      setResourceId(resourceId);
-      setCopyId(copyId === "new" ? "" : (copyId ?? ""));
-    }
-    if (resourceId && !data?.resources.some((r) => r.id === resourceId)) {
-      void window.panxu
-        .invoke<Resource>("resource.get", { id: resourceId })
-        .then((r) => {
-          setExtraResource(r);
-          setPage("intake");
-        })
-        .catch((error) => notify(error.message, true));
-    } else setPage("intake");
-  };
+  }, []);
+  const edit = useCallback(
+    (resourceId: string | null, copyId?: string) => {
+      setEditResourceId(resourceId);
+      setEditCopyId(copyId ?? null);
+      if (resourceId) {
+        setResourceId(resourceId);
+        setCopyId(copyId === "new" ? "" : (copyId ?? ""));
+      }
+      if (resourceId && !data?.resources.some((r) => r.id === resourceId)) {
+        void ipc("resource.get", { id: resourceId })
+          .then((r) => {
+            setExtraResource(r);
+            setPage("intake");
+          })
+          .catch((error) => notify(error.message, "error"));
+      } else setPage("intake");
+    },
+    [data?.resources, notify],
+  );
+  const openSearch = useCallback((focus: SearchFocus = {}) => {
+    setSearchFocus(focus);
+    setPage("search");
+  }, []);
+  const openDraft = useCallback(
+    (draft: Draft, destination: "studio" | "publish" = "studio") => {
+      select(draft.resourceId, draft.copyId);
+      localStorage.setItem(
+        "panxu-studio-selection-v1",
+        JSON.stringify({
+          id: draft.id,
+          platform: draft.platform,
+          copyId: draft.copyId,
+          resourceId: draft.resourceId,
+        }),
+      );
+      localStorage.setItem("panxu-publish-draft", draft.id);
+      setPage(destination);
+    },
+    [select],
+  );
+  const setActiveAccount = useCallback(
+    (provider: string, id: string) =>
+      setActiveAccounts((a) => ({ ...a, [provider]: id })),
+    [],
+  );
+  const dataValue = useMemo(() => ({ data }), [data]);
+  const selectionValue = useMemo(
+    () => ({
+      resource,
+      copy,
+      selectedResourceId: selectedResourceId || resource?.id || "",
+      selectedCopyId: copy?.id ?? "",
+      activeAccounts,
+      setActiveAccount,
+      select,
+    }),
+    [
+      resource,
+      copy,
+      selectedResourceId,
+      activeAccounts,
+      setActiveAccount,
+      select,
+    ],
+  );
+  const navigationValue = useMemo(
+    () => ({
+      page,
+      settingsSection,
+      openSettings,
+      navigate: setPage,
+      searchFocus,
+      openSearch,
+      openDraft,
+      editResourceId,
+      editCopyId,
+      edit,
+    }),
+    [
+      page,
+      settingsSection,
+      openSettings,
+      searchFocus,
+      openSearch,
+      openDraft,
+      editResourceId,
+      editCopyId,
+      edit,
+    ],
+  );
+  const actionValue = useMemo(
+    () => ({ command, refresh, notify }),
+    [command, refresh, notify],
+  );
   return (
-    <Context.Provider
-      value={{
-        data,
-        page,
-        navigate: setPage,
-        selectedResourceId: selectedResourceId || resource?.id || "",
-        selectedCopyId: copy?.id ?? "",
-        select,
-        resource,
-        copy,
-        activeAccounts,
-        setActiveAccount: (provider, id) =>
-          setActiveAccounts((a) => ({ ...a, [provider]: id })),
-        editResourceId,
-        editCopyId,
-        edit,
-        command,
-        refresh,
-        busy,
-        toast,
-        notify,
-      }}
+    <WorkspaceStatus.Provider
+      value={{ loading: snapshotLoading, error: snapshotError }}
     >
-      {children}
-    </Context.Provider>
+      <ActionContext.Provider value={actionValue}>
+        <NavigationContext.Provider value={navigationValue}>
+          <DataContext.Provider value={dataValue}>
+            <SelectionContext.Provider value={selectionValue}>
+              {children}
+            </SelectionContext.Provider>
+          </DataContext.Provider>
+        </NavigationContext.Provider>
+      </ActionContext.Provider>
+    </WorkspaceStatus.Provider>
   );
 }

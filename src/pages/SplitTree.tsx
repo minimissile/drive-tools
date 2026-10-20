@@ -17,7 +17,8 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { Button, Status, stageName } from "../components";
+import { Button, SearchField, Status } from "../ui/primitives";
+import { stageName } from "../resources/labels";
 import {
   buildSplitTree,
   selectSplitLevel,
@@ -141,16 +142,13 @@ export default function SplitTree({
       <div className="split-workbench">
         <div className="split-explorer">
           <div className="split-tree-toolbar">
-            <label className="split-search">
-              <Search size={15} aria-hidden="true" />
-              <input
-                type="search"
-                aria-label="搜索拆分目录"
-                placeholder="搜索文件、文件夹或路径"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
+            <SearchField
+              className="split-search"
+              label="搜索拆分目录"
+              placeholder="搜索文件、文件夹或路径"
+              value={query}
+              onChange={setQuery}
+            />
             <div className="row compact">
               <Button quiet onClick={() => setCollapsed(new Set())}>
                 全部展开

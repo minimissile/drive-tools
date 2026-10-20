@@ -8,19 +8,51 @@ import {
   safeStorage,
   session,
   shell,
+  protocol,
 } from "electron";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { isAbsolute, join } from "node:path";
 import { AppService, type AppPorts } from "../core/service";
+import { createZhidaoSession } from "./zhidao-session";
+import { createWebsiteSessions } from "./website-sessions";
+import { readTableBytes } from "../core/table-files";
 import { QuarkProvider } from "../core/providers/quark";
+import { UcProvider } from "../core/providers/uc";
+import { PikPakProvider } from "../core/providers/pikpak";
+import { GuangyaProvider } from "../core/providers/guangya";
+import { providerRequestReferer } from "../core/providers/request-context";
+import { XunleiProvider } from "../core/providers/xunlei";
+import { WebTokenSession } from "../core/providers/web-token-session";
+import {
+  providerSpecs,
+  providerAuthAllowed,
+  providerApiAllowed,
+} from "../shared/providers";
 import { BaiduProvider } from "../core/providers/baidu";
 import type { ProviderTransport } from "../core/providers/provider";
 import type { Account, Result } from "../shared/types";
 import { AppError, ProviderHttpError, safeMessage } from "../core/errors";
 import { readLimited } from "../core/http";
 import { ZodError } from "zod";
+import { createUpdater } from "./updater";
+import type { UpdateManager } from "../core/updates";
+import { snapshotBeforeUpdate } from "../core/update-backup";
 
 app.setName("盘序");
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "panxu-media",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+]);
 const defaultDataPath = app.getPath("userData");
 const workspaceLocation = join(defaultDataPath, "workspace-location.json");
 let startupError: Error | null = null;
@@ -53,45 +85,48 @@ if (selectedDataPath && isAbsolute(selectedDataPath)) {
 }
 let window: BrowserWindow | null = null;
 let service: AppService;
+let updater: UpdateManager;
+let activeOperations = 0;
+let installingUpdate = false;
 let quitting = false;
+let devRestarting = false;
+const developmentUrl = `http://127.0.0.1:${Number(process.env.PANXU_DEV_PORT || 5173)}`;
+const development =
+  !app.isPackaged && process.env.PANXU_DEV_URL === developmentUrl;
+const appIconPath = app.isPackaged
+  ? join(process.resourcesPath, "brand", "icon.png")
+  : join(import.meta.dirname, "../build/icon.png");
 const loginWindows = new Map<string, BrowserWindow>();
 const clearingSessions = new Set<string>();
 const partition = (accountId: string) =>
   session.fromPartition(`persist:panxu-${accountId}`);
-const providerHosts = new Set([
-  "pan.quark.cn",
-  "drive-pc.quark.cn",
-  "pan.baidu.com",
-]);
-function allowedProviderUrl(text: string) {
-  const url = new URL(text);
-  if (
-    url.protocol !== "https:" ||
-    !providerHosts.has(url.hostname) ||
-    url.username ||
-    url.password ||
-    url.port
-  )
-    throw new AppError("PROVIDER_URL_BLOCKED", "网盘请求目标不在允许列表。");
-  return url;
+function allowedProviderUrl(accountId: string, text: string) {
+  const account = service.repo.getAccount(accountId);
+  if (!providerApiAllowed(account.provider, text))
+    throw new AppError(
+      "PROVIDER_URL_BLOCKED",
+      "请求目标不属于此网盘账号的允许接口。",
+    );
+  return new URL(text);
 }
 async function providerResponse(
   accountId: string,
   text: string,
   init: RequestInit = {},
 ) {
-  const url = allowedProviderUrl(text);
+  const url = allowedProviderUrl(accountId, text);
   const requestSession = partition(accountId);
-  const referrer = url.hostname.includes("quark")
-    ? "https://pan.quark.cn/"
-    : "https://pan.baidu.com/disk/home";
+  const referrer = providerRequestReferer(
+    service.repo.getAccount(accountId).provider,
+    url,
+  );
   const response = await requestSession.fetch(url.href, {
     ...init,
-    credentials: "include",
+    credentials: init.credentials ?? "include",
     signal: AbortSignal.timeout(45_000),
     headers: { Referer: referrer, ...init.headers },
   });
-  if (![200, 201].includes(response.status)) {
+  if (![200, 201, 202].includes(response.status)) {
     let detail = "";
     let remoteCode = "";
     try {
@@ -99,7 +134,7 @@ async function providerResponse(
       remoteCode = String(
         data.code ?? data.errno ?? data.error_code ?? "",
       ).slice(0, 30);
-      detail = `（${String(data.code ?? data.errno ?? data.error_code ?? "").slice(0, 30)}：${String(data.message ?? data.errmsg ?? data.error_msg ?? "").slice(0, 180)}）`;
+      detail = `（${String(data.code ?? data.errno ?? data.error_code ?? "").slice(0, 30)}：${String(data.message ?? data.errmsg ?? data.error_msg ?? data.error_description ?? data.error ?? "").slice(0, 180)}）`;
     } catch {}
     throw new ProviderHttpError(
       response.status,
@@ -114,11 +149,36 @@ async function providerResponse(
   }
   return response;
 }
+const captureErrors = new Map<string, Error>();
 const transport: ProviderTransport = {
+  async ownShareCode(accountId, shareId) {
+    const copy = service.db.get<{ id: string }>(
+      "SELECT id FROM copies WHERE account_id=? AND share_id=? LIMIT 1",
+      accountId,
+      shareId,
+    );
+    if (copy) return service.secrets.get(`share:${copy.id}`);
+    const item = service.db.get<{ id: string }>(
+      "SELECT i.id FROM split_items i JOIN copies c ON c.id=i.copy_id WHERE c.account_id=? AND i.share_id=? LIMIT 1",
+      accountId,
+      shareId,
+    );
+    return item ? service.secrets.get(`split:${item.id}`) : null;
+  },
+  async authHeaders(accountId, refresh) {
+    const error = captureErrors.get(accountId);
+    if (error) throw error;
+    return tokenSession(service.repo.getAccount(accountId).provider).headers(
+      accountId,
+      refresh,
+    );
+  },
   async principalId(accountId, provider) {
-    if (provider !== "quark") return null;
+    if (provider !== "quark" && provider !== "uc") return null;
     const uid = (
-      await partition(accountId).cookies.get({ url: "https://pan.quark.cn/" })
+      await partition(accountId).cookies.get({
+        url: providerSpecs[provider].home,
+      })
     ).find((c) => c.name === "__uid")?.value;
     // Only the provider-assigned user ID is exposed to adapters; credentials
     // and the rest of the cookie jar stay inside Electron's session.
@@ -141,7 +201,7 @@ const transport: ProviderTransport = {
     return readLimited(await providerResponse(accountId, url, init));
   },
   async setCookie(accountId, url, name, value) {
-    allowedProviderUrl(url);
+    allowedProviderUrl(accountId, url);
     await partition(accountId).cookies.set({
       url,
       name,
@@ -152,23 +212,54 @@ const transport: ProviderTransport = {
     });
   },
 };
-function authHostAllowed(provider: Account["provider"], text: string) {
-  try {
-    const u = new URL(text);
-    return (
-      u.protocol === "https:" &&
-      !u.username &&
-      !u.password &&
-      (provider === "baidu"
-        ? u.hostname === "baidu.com" || u.hostname.endsWith(".baidu.com")
-        : u.hostname === "quark.cn" ||
-          u.hostname.endsWith(".quark.cn") ||
-          u.hostname === "uc.cn" ||
-          u.hostname.endsWith(".uc.cn"))
-    );
-  } catch {
-    return false;
+const thunderSessions = new WebTokenSession(() => service.secrets, transport);
+const pikpakSessions = new WebTokenSession(
+  () => service.secrets,
+  transport,
+  "pikpak",
+);
+const guangyaSessions = new WebTokenSession(
+  () => service.secrets,
+  transport,
+  "guangya",
+);
+const usesTokenSession = (provider: string) =>
+  ["xunlei", "pikpak", "guangya"].includes(provider);
+function tokenSession(provider: string) {
+  if (provider === "pikpak") return pikpakSessions;
+  if (provider === "guangya") return guangyaSessions;
+  if (provider === "xunlei") return thunderSessions;
+  throw new AppError("AUTH_EXPIRED", "该网盘不使用令牌会话。");
+}
+const authHostAllowed = providerAuthAllowed;
+
+async function captureTokenStorage(account: Account, auth: BrowserWindow) {
+  let origin = "";
+  if (!auth.isDestroyed()) {
+    try {
+      origin = new URL(auth.webContents.getURL()).origin;
+    } catch {}
   }
+  if (
+    !usesTokenSession(account.provider) ||
+    auth.isDestroyed() ||
+    origin !== new URL(providerSpecs[account.provider].home).origin
+  )
+    return;
+  const candidates = await auth.webContents.executeJavaScript(`(() => {
+    const values = [];
+    for (const key of Object.keys(localStorage).filter(k => k.startsWith('credentials_')).slice(0, 10)) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw || raw.length > 64000) continue;
+        const entry = JSON.parse(raw);
+        const value = entry && typeof entry.value === 'object' ? entry.value : entry;
+        if (value && typeof value.access_token === 'string' && typeof value.refresh_token === 'string') values.push({ access_token: value.access_token, refresh_token: value.refresh_token });
+      } catch {}
+    }
+    return values;
+  })()`);
+  await tokenSession(account.provider).captureRefresh(account.id, candidates);
 }
 async function openAccountWindow(account: Account, url?: string) {
   const existing = loginWindows.get(account.id);
@@ -198,6 +289,56 @@ async function openAccountWindow(account: Account, url?: string) {
     },
   });
   loginWindows.set(account.id, auth);
+  if (usesTokenSession(account.provider)) {
+    const captureFailure = (error: unknown) => {
+      if (auth.isDestroyed() || clearingSessions.has(account.id) || quitting)
+        return;
+      captureErrors.set(
+        account.id,
+        error instanceof Error
+          ? error
+          : new AppError(
+              "AUTH_CAPTURE_FAILED",
+              "网盘本机会话未能安全保存，请重新登录。",
+            ),
+      );
+    };
+    authSession.webRequest.onBeforeSendHeaders(
+      {
+        urls: providerSpecs[account.provider].apiHosts.map(
+          (host) => `https://${host}/*`,
+        ),
+      },
+      (details, callback) => {
+        callback({ requestHeaders: details.requestHeaders });
+        if (auth.isDestroyed() || details.webContentsId !== auth.webContents.id)
+          return;
+        void tokenSession(account.provider)
+          .capture(account.id, details.requestHeaders)
+          .then(async (captured) => {
+            if (!captured) return;
+            captureErrors.delete(account.id);
+            await captureTokenStorage(account, auth);
+          })
+          .catch(captureFailure);
+      },
+    );
+    auth.webContents.on("did-finish-load", () => {
+      void captureTokenStorage(account, auth).catch(captureFailure);
+    });
+    let closing = false;
+    auth.on("close", (event) => {
+      if (closing || quitting) return;
+      event.preventDefault();
+      closing = true;
+      void captureTokenStorage(account, auth)
+        .catch(captureFailure)
+        .finally(() => {
+          if (!auth.isDestroyed()) auth.destroy();
+        });
+    });
+  }
+
   auth.webContents.setWindowOpenHandler(({ url: target }) => {
     if (authHostAllowed(account.provider, target)) void auth.loadURL(target);
     return { action: "deny" };
@@ -212,12 +353,7 @@ async function openAccountWindow(account: Account, url?: string) {
       /* status remains unverified until user checks */
     });
   });
-  await auth.loadURL(
-    url ??
-      (account.provider === "quark"
-        ? "https://pan.quark.cn/"
-        : "https://pan.baidu.com/disk/main"),
-  );
+  await auth.loadURL(url ?? providerSpecs[account.provider].home);
 }
 let notifyTimer: ReturnType<typeof setTimeout> | null = null;
 function changed() {
@@ -228,13 +364,64 @@ function changed() {
       window.webContents.send("panxu:changed");
   }, 80);
 }
+const websiteSessions = createWebsiteSessions(() => service.dataPath);
 const ports: AppPorts = {
+  zhidaoSession: createZhidaoSession(),
+  baiduKeywords: websiteSessions.baiduKeywords,
+  websiteSessions: websiteSessions.sessions,
+  pansouBinary: join(
+    app.isPackaged
+      ? process.resourcesPath
+      : join(import.meta.dirname, "../build"),
+    "pansou",
+    `${process.platform}-${process.arch}`,
+    process.platform === "win32" ? "pansou-server.exe" : "pansou-server",
+  ),
+  async readTable(kind) {
+    const selected = await dialog.showOpenDialog(window!, {
+      title: kind === "keywords" ? "导入关键词文件" : "导入资源表",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "表格与文本",
+          extensions:
+            kind === "keywords" ? ["txt", "csv", "xlsx"] : ["csv", "xlsx"],
+        },
+      ],
+    });
+    if (selected.canceled || !selected.filePaths.length) return null;
+    if (selected.filePaths.length > 20)
+      throw new AppError("FILE_LIMIT", "一次最多导入20份文件。");
+    const rows: string[][] = [];
+    for (const path of selected.filePaths) {
+      if ((await stat(path)).size > 8_000_000)
+        throw new AppError("FILE_TOO_LARGE", "每份导入文件不能超过8MB。");
+      rows.push(
+        ...readTableBytes(
+          path,
+          await import("node:fs/promises").then((fs) => fs.readFile(path)),
+        ),
+      );
+      if (rows.length > 501)
+        throw new AppError("ROW_LIMIT", "一次最多导入500条记录。");
+    }
+    return {
+      name: selected.filePaths
+        .map((path) => path.split(/[\\/]/).pop()!)
+        .join("、"),
+      rows,
+    };
+  },
   login: (a) => openAccountWindow(a),
   async closeAccountWindow(accountId) {
     clearingSessions.add(accountId);
     try {
       const win = loginWindows.get(accountId);
-      if (win && !win.isDestroyed()) win.close();
+      if (win && !win.isDestroyed())
+        await new Promise<void>((resolve) => {
+          win.once("closed", () => resolve());
+          win.close();
+        });
     } finally {
       clearingSessions.delete(accountId);
     }
@@ -243,14 +430,23 @@ const ports: AppPorts = {
     clearingSessions.add(accountId);
     try {
       const win = loginWindows.get(accountId);
-      if (win && !win.isDestroyed()) win.close();
+      if (win && !win.isDestroyed())
+        await new Promise<void>((resolve) => {
+          win.once("closed", () => resolve());
+          win.close();
+        });
+      if (usesTokenSession(service.repo.getAccount(accountId).provider))
+        await tokenSession(service.repo.getAccount(accountId).provider).clear(
+          accountId,
+        );
+      captureErrors.delete(accountId);
       await partition(accountId).clearStorageData();
       await partition(accountId).clearCache();
     } finally {
       clearingSessions.delete(accountId);
     }
   },
-  async chooseDirectory(kind) {
+  async chooseDirectory(kind, defaultPath) {
     const result = await dialog.showOpenDialog(window!, {
       title: {
         vault: "选择Obsidian Vault根目录",
@@ -259,6 +455,7 @@ const ports: AppPorts = {
         content: "选择内容包保存目录",
       }[kind],
       properties: ["openDirectory", "createDirectory"],
+      defaultPath,
     });
     return result.canceled ? null : result.filePaths[0];
   },
@@ -342,12 +539,23 @@ const ports: AppPorts = {
     clipboard.writeText(text);
   },
   async saveFile(name, bytes) {
-    const extension = name.endsWith(".csv") ? "csv" : "png";
+    const extension =
+      name.match(/\.(csv|xlsx|md|json|txt|png|mp4)$/)?.[1] ?? "txt";
     const result = await dialog.showSaveDialog(window!, {
       defaultPath: name,
       filters: [
         {
-          name: extension === "csv" ? "CSV表格" : "PNG图片",
+          name: (
+            {
+              csv: "CSV表格",
+              xlsx: "Excel工作簿",
+              md: "Markdown文档",
+              json: "JSON档案",
+              txt: "文本文件",
+              png: "PNG图片",
+              mp4: "MP4视频",
+            } as Record<string, string>
+          )[extension],
           extensions: [extension],
         },
       ],
@@ -360,12 +568,16 @@ const ports: AppPorts = {
 };
 function createWindow() {
   window = new BrowserWindow({
+    show: false,
     width: 1320,
     height: 900,
     minWidth: 840,
     minHeight: 650,
-    title: "盘序 · 内容营销工作台",
+    title: development
+      ? "盘序 · 开发调试（源码实时更新）"
+      : "盘序 · 内容营销工作台",
     backgroundColor: "#f6f8fc",
+    icon: appIconPath,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
@@ -378,6 +590,15 @@ function createWindow() {
       spellcheck: false,
     },
   });
+  window.once("ready-to-show", () => {
+    window?.maximize();
+    window?.show();
+  });
+  if (development)
+    window.on("page-title-updated", (event) => {
+      event.preventDefault();
+      window?.setTitle("盘序 · 开发调试（源码实时更新）");
+    });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler(
@@ -397,7 +618,12 @@ function createWindow() {
           "archiving",
         ].includes(j.stage),
       );
-    if (running.length) {
+    if (
+      running.length ||
+      service.studio.isBusy ||
+      service.zhidao.isBusy ||
+      service.driveFiles.isBusy
+    ) {
       const choice = dialog.showMessageBoxSync(window!, {
         type: "question",
         title: "任务仍在执行",
@@ -415,7 +641,7 @@ function createWindow() {
   const devUrl = process.env.PANXU_DEV_URL;
   if (devUrl) {
     const u = new URL(devUrl);
-    if (u.origin !== "http://127.0.0.1:5173")
+    if (u.origin !== developmentUrl || u.pathname !== "/" || u.search || u.hash)
       throw new Error("开发服务地址不在允许范围。");
     void window.loadURL(devUrl);
   } else void window.loadFile(join(import.meta.dirname, "../dist/index.html"));
@@ -433,6 +659,7 @@ else {
     .whenReady()
     .then(async () => {
       if (startupError) throw startupError;
+      if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
       const codec = {
         available: () => safeStorage.isEncryptionAvailable(),
         async encrypt(text: string) {
@@ -446,15 +673,120 @@ else {
           ).result;
         },
       };
+      protocol.handle("panxu-media", async (request) => {
+        try {
+          const url = new URL(request.url);
+          if (
+            url.hostname !== "asset" ||
+            !["GET", "HEAD"].includes(request.method)
+          )
+            return new Response("Not found", { status: 404 });
+          const name = url.pathname.slice(1),
+            path = await service.studio.assetPath(name),
+            size = (await stat(path)).size;
+          let start = 0,
+            end = size - 1,
+            status = 200;
+          const range = request.headers.get("range");
+          if (range) {
+            const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+            if (!match || (!match[1] && !match[2]))
+              return new Response(null, {
+                status: 416,
+                headers: { "Content-Range": `bytes */${size}` },
+              });
+            start = match[1]
+              ? Number(match[1])
+              : Math.max(0, size - Number(match[2]));
+            end =
+              match[1] && match[2]
+                ? Math.min(size - 1, Number(match[2]))
+                : size - 1;
+            if (start > end || start >= size)
+              return new Response(null, {
+                status: 416,
+                headers: { "Content-Range": `bytes */${size}` },
+              });
+            status = 206;
+          }
+          const headers: Record<string, string> = {
+            "Content-Type": name.endsWith(".mp4") ? "video/mp4" : "image/png",
+            "Content-Length": String(end - start + 1),
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+          };
+          if (status === 206)
+            headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+          return new Response(
+            request.method === "HEAD"
+              ? null
+              : (Readable.toWeb(
+                  createReadStream(path, { start, end }),
+                ) as BodyInit),
+            { status, headers },
+          );
+        } catch {
+          return new Response("Not found", { status: 404 });
+        }
+      });
       service = new AppService(
         app.getPath("userData"),
         codec,
         {
           quark: new QuarkProvider(transport),
           baidu: new BaiduProvider(transport),
+          uc: new UcProvider(transport),
+          xunlei: new XunleiProvider(transport),
+          pikpak: new PikPakProvider(transport),
+          guangya: new GuangyaProvider(transport),
         },
         ports,
         changed,
+      );
+      updater = createUpdater(
+        service,
+        (state) => {
+          if (window && !window.isDestroyed())
+            window.webContents.send("panxu:update", state);
+        },
+        async (version) => {
+          const assertIdle = () => service.assertUpdateIdle(activeOperations);
+          assertIdle();
+          const result = await dialog.showMessageBox(window!, {
+            type: "question",
+            title: "重启并安装更新",
+            message: `即将从 ${app.getVersion()} 更新到 ${version}`,
+            detail:
+              "请先保存正在编辑的内容。盘序会保存本机数据库快照，然后关闭并重启；工作空间和登录数据保留。",
+            buttons: ["稍后", "重启并安装"],
+            defaultId: 0,
+            cancelId: 0,
+          });
+          if (result.response !== 1) return false;
+          assertIdle();
+          installingUpdate = true;
+          service.queue.stop();
+          await service.notes.flush();
+          const backup = await snapshotBeforeUpdate(
+            service.db,
+            service.dataPath,
+          );
+          service.db.setSetting("updater.lastInstall", {
+            from: app.getVersion(),
+            to: version,
+            backup,
+            at: new Date().toISOString(),
+          });
+          service.db.run("PRAGMA wal_checkpoint(FULL)");
+          quitting = true;
+          return true;
+        },
+        () => {
+          if (!installingUpdate) return;
+          installingUpdate = false;
+          quitting = false;
+          service.queue.start();
+        },
       );
       ipcMain.handle(
         "panxu:invoke",
@@ -481,10 +813,45 @@ else {
             )
               throw new AppError("INVALID_REQUEST", "请求格式不正确。");
             const args = "args" in request ? request.args : undefined;
-            return {
-              ok: true,
-              value: await service.invoke(request.method, args),
-            };
+            if (development && request.method === "dev.status")
+              return {
+                ok: true,
+                value: {
+                  mode: "development",
+                  root: process.env.PANXU_DEV_ROOT,
+                  revision: process.env.PANXU_DEV_REVISION,
+                  builtAt: process.env.PANXU_DEV_BUILT_AT,
+                  pid: process.pid,
+                },
+              };
+            if (development && request.method === "dev.tools") {
+              window.webContents.toggleDevTools();
+              return { ok: true, value: true };
+            }
+            if (devRestarting && request.method !== "snapshot")
+              throw new AppError(
+                "DEV_RESTARTING",
+                "后端源码已更新，正在重启开发窗口，请稍候。",
+              );
+            if (request.method.startsWith("updater."))
+              return {
+                ok: true,
+                value: await updater.invoke(request.method, args),
+              };
+            if (installingUpdate && request.method !== "snapshot")
+              throw new AppError(
+                "UPDATE_INSTALLING",
+                "正在准备重启安装更新，请稍候。",
+              );
+            if (request.method !== "snapshot") activeOperations++;
+            try {
+              return {
+                ok: true,
+                value: await service.invoke(request.method, args),
+              };
+            } finally {
+              if (request.method !== "snapshot") activeOperations--;
+            }
           } catch (error) {
             return {
               ok: false,
@@ -506,6 +873,48 @@ else {
       );
       createWindow();
       service.queue.start();
+      updater.start();
+      if (development && process.send) {
+        process.send({
+          type: "panxu:dev-ready",
+          revision: process.env.PANXU_DEV_REVISION,
+        });
+        process.on("message", async (message) => {
+          if (
+            !message ||
+            typeof message !== "object" ||
+            !("type" in message) ||
+            message.type !== "panxu:dev-restart" ||
+            devRestarting
+          )
+            return;
+          try {
+            service.assertUpdateIdle(activeOperations);
+            if (
+              loginWindows.size ||
+              clearingSessions.size ||
+              ports.zhidaoSession?.isOpen?.() ||
+              ports.websiteSessions?.isOpen()
+            )
+              throw new Error("请先完成并关闭账号登录窗口。");
+            devRestarting = true;
+            service.queue.stop();
+            await service.notes.flush();
+            service.db.run("PRAGMA wal_checkpoint(FULL)");
+            quitting = true;
+            app.quit();
+          } catch {
+            if (devRestarting) {
+              devRestarting = false;
+              service.queue.start();
+            }
+            process.send?.({
+              type: "panxu:dev-busy",
+              reason: "仍有任务、接口操作或账号窗口，请完成或停止后自动重启。",
+            });
+          }
+        });
+      }
       app.on("activate", () => {
         if (!window || window.isDestroyed()) createWindow();
         else window.show();
@@ -523,6 +932,7 @@ else {
   app.on("before-quit", () => {
     quitting = true;
     service?.queue.stop();
+    updater?.dispose();
   });
   app.on("window-all-closed", () => app.quit());
 }

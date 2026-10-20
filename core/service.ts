@@ -1,4 +1,18 @@
-import { z } from "zod";
+import { InsertionService } from "./insertion";
+import { DriveFiles } from "./drive-files";
+import { WebsiteAccounts } from "./website-accounts";
+import { ZhidaoOperations } from "./zhidao/service";
+import { createApplicationHandlers } from "./ipc";
+import type { AppPorts } from "./ports";
+export type { AppPorts } from "./ports";
+import { PublicationChecks } from "./publication-checks";
+import {
+  bindingEditorUrl,
+  hasVerifiedFormat,
+  linkPositionLabels,
+  type ContentFormat,
+  type LinkPosition,
+} from "../shared/channels";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -7,7 +21,6 @@ import {
   copyFile,
   readdir,
   chmod,
-  rm,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { Database, id, now } from "./database";
@@ -16,77 +29,56 @@ import { SecretStore, type SecretCodec } from "./secrets";
 import { AccountMutex, TransferQueue } from "./queue";
 import { NoteExporter } from "./notes";
 import { AiService } from "./ai";
+import { KeywordIdeas } from "./ideas";
+import { ResourceExports } from "./resource-export";
+import { StudioService, studioAssetPattern } from "./studio";
 import { TrafficService } from "./traffic";
 import { BitBrowser } from "./bitbrowser";
+import {
+  canUseLinkPosition,
+  includesOwnShareLink,
+} from "../shared/publication";
 import { BulkImporter } from "./bulk";
-import { inspectBackup, stageRestore } from "./backups";
-import { localTemplate } from "./templates";
 import { Operations } from "./operations";
+import { SearchOperations } from "./search";
+import { ShareStatisticsService } from "./share-statistics";
 import { AppError, safeMessage } from "./errors";
-import { csv } from "./csv";
-import {
-  parseShare,
-  validateEditorUrl,
-  validateOutgoingLinks,
-  validateLoopback,
-  validatePublicationUrl,
-} from "./links";
-import {
-  normalizedDirectory,
-  assertManifest,
-  type DriveProvider,
-} from "./providers/provider";
+import { driveCapacitySchema } from "../shared/drive-capacity";
+import { parseShare, validateOutgoingLinks } from "./links";
+import { normalizedDirectory, type DriveProvider } from "./providers/provider";
 import type {
   Account,
   BrowserBinding,
   Provider,
   ResourceInput,
   ResourceCopy,
-  BackupPreview,
   ShareCheck,
 } from "../shared/types";
-import { platformSpecs } from "../shared/platforms";
-import {
-  endpointSchema,
-  fileSchema,
-  keywordSchema,
-  platformSchema,
-  providerSchema,
-  querySchema,
-  resourceInputSchema,
-} from "../shared/schemas";
 
-export interface AppPorts {
-  login(account: Account): Promise<void>;
-  clearSession(accountId: string): Promise<void>;
-  closeAccountWindow(accountId: string): Promise<void>;
-  chooseDirectory(
-    kind: "vault" | "backup" | "restore" | "content",
-  ): Promise<string | null>;
-  readText(
-    kind: "csv" | "summary",
-  ): Promise<{ name: string; text: string } | null>;
-  activateDataPath(path: string): Promise<void>;
-  normalizeCover(bytes: Buffer): Promise<Buffer>;
-  openPath(path: string): Promise<void>;
-  openAccountPage(account: Account, url: string): Promise<void>;
-  openExternal(url: string): Promise<void>;
-  copyText(text: string): Promise<void>;
-  saveFile(name: string, bytes: Buffer): Promise<string | null>;
-}
 export class AppService {
+  readonly websiteAccounts: WebsiteAccounts;
+  readonly driveFiles: DriveFiles;
+  readonly zhidao: ZhidaoOperations;
   readonly db: Database;
   readonly repo: Repository;
   readonly secrets: SecretStore;
   readonly queue: TransferQueue;
   readonly notes: NoteExporter;
   readonly ai: AiService;
+  readonly ideas: KeywordIdeas;
+  readonly resourceExports: ResourceExports;
+  readonly studio: StudioService;
   readonly traffic: TrafficService;
   readonly bit: BitBrowser;
   readonly importer: BulkImporter;
   readonly operations: Operations;
-  private backupPreview: (BackupPreview & { hash: string }) | null = null;
+  readonly insertion: InsertionService;
+  readonly search: SearchOperations;
+  readonly shareStatistics: ShareStatisticsService;
+  readonly publicationChecks: PublicationChecks;
+  private readonly handlers: ReturnType<typeof createApplicationHandlers>;
   private switchingWorkspace = false;
+  private capacityRequests = new Map<string, Promise<Account>>();
   readonly mutex = new AccountMutex();
   constructor(
     readonly dataPath: string,
@@ -98,6 +90,7 @@ export class AppService {
   ) {
     this.db = new Database(dbPath);
     this.repo = new Repository(this.db);
+    this.websiteAccounts = new WebsiteAccounts(this.db, ports);
     this.secrets = new SecretStore(this.db, codec);
     this.notes = new NoteExporter(this.repo, this.secrets, dataPath);
     this.queue = new TransferQueue(
@@ -109,6 +102,34 @@ export class AppService {
       changed,
     );
     this.ai = new AiService(this.repo, this.secrets, changed);
+    this.zhidao = new ZhidaoOperations(
+      this.repo,
+      this.secrets,
+      this.ai,
+      this.ports,
+      dataPath,
+      changed,
+      {
+        verifyCopy: async (copyId) => {
+          const check = await this.checkShare(copyId);
+          if (check.status !== "valid")
+            throw new AppError(
+              "SHARE_INVALID",
+              "本人分享未通过实时核验，请检查后再生成或发布。",
+            );
+        },
+      },
+    );
+    this.ideas = new KeywordIdeas(this.repo, this.ai, changed);
+    this.resourceExports = new ResourceExports(this.repo, this.ai, changed);
+    this.studio = new StudioService(
+      this.repo,
+      this.secrets,
+      this.ai,
+      dataPath,
+      (bytes) => ports.normalizeCover(bytes),
+      changed,
+    );
     this.traffic = new TrafficService(this.db, this.secrets, changed);
     this.bit = new BitBrowser(async () => ({
       url: this.db.setting("bitUrl", ""),
@@ -125,6 +146,24 @@ export class AppService {
       (id) => this.verifyAccount(id),
       changed,
     );
+    this.insertion = new InsertionService(
+      this.db,
+      this.repo,
+      (id, fn) => this.authenticated(id, fn),
+      changed,
+      (id) => this.assertNoActiveJobs(id),
+    );
+    this.search = new SearchOperations(this.repo, this.operations, changed);
+    this.publicationChecks = new PublicationChecks(
+      this.repo,
+      this.search,
+      changed,
+    );
+    this.shareStatistics = new ShareStatisticsService(
+      this.repo,
+      (id, fn) => this.authenticated(id, fn),
+      changed,
+    );
     for (const kind of [
       "batch_inspect",
       "split_preview",
@@ -133,6 +172,56 @@ export class AppService {
       this.queue.workers[kind] = (jobId) => this.operations.execute(jobId);
     this.queue.onAccountBlocked = (accountId, stage, message) =>
       this.operations.pauseAccount(accountId, stage, message);
+    this.driveFiles = new DriveFiles({
+      db: this.db,
+      repo: this.repo,
+      secrets: this.secrets,
+      changed,
+      authenticated: (id, action) => this.authenticated(id, action),
+      assertNoActiveJobs: (id) => this.assertNoActiveJobs(id),
+    });
+    this.handlers = createApplicationHandlers({
+      websiteAccounts: this.websiteAccounts,
+      driveFiles: this.driveFiles,
+      zhidao: this.zhidao,
+      db: this.db,
+      repo: this.repo,
+      secrets: this.secrets,
+      queue: this.queue,
+      notes: this.notes,
+      ai: this.ai,
+      ideas: this.ideas,
+      resourceExports: this.resourceExports,
+      studio: this.studio,
+      traffic: this.traffic,
+      bit: this.bit,
+      importer: this.importer,
+      operations: this.operations,
+      insertion: this.insertion,
+      search: this.search,
+      shareStatistics: this.shareStatistics,
+      publicationChecks: this.publicationChecks,
+      dataPath: this.dataPath,
+      ports: this.ports,
+      changed: () => this.changed(),
+      snapshot: (resourceId) => this.snapshot(resourceId),
+      account: (id) => this.account(id),
+      authenticated: (id, fn) => this.authenticated(id, fn),
+      assertNoActiveJobs: (id) => this.assertNoActiveJobs(id),
+      refreshCapacity: (id) => this.refreshCapacity(id),
+      assertOwnCopy: (copy) => this.assertOwnCopy(copy),
+      checkShare: (id) => this.checkShare(id),
+      saveResource: (input) => this.saveResource(input),
+      openBinding: (binding, format) => this.openBinding(binding, format),
+      contentPackage: (draft, binding, includeLink, position) =>
+        this.contentPackage(draft, binding, includeLink, position),
+      hasRunningJobs: () => this.hasRunningJobs(),
+      backup: () => this.backup(),
+      setSwitchingWorkspace: (switching) => {
+        this.switchingWorkspace = switching;
+      },
+      invoke: (method, raw) => this.invoke(method, raw),
+    });
   }
   snapshot(resourceId?: string) {
     return this.repo.snapshot(
@@ -140,6 +229,18 @@ export class AppService {
       this.dataPath,
       resourceId,
     );
+  }
+  assertUpdateIdle(activeOperations = 0) {
+    if (
+      this.switchingWorkspace ||
+      activeOperations ||
+      this.queue.isBusy ||
+      this.hasRunningJobs()
+    )
+      throw new AppError(
+        "UPDATE_TASKS_RUNNING",
+        "仍有任务、工作空间切换或其他操作正在进行，请完成或停止后再安装更新。",
+      );
   }
   private account(id: string) {
     const a = this.repo.getAccount(id);
@@ -181,8 +282,15 @@ export class AppService {
       return this.repo.getAccount(account.id);
     } catch (error) {
       this.db.run(
-        "UPDATE accounts SET status=?,error=?,updated_at=? WHERE id=?",
-        "expired",
+        "UPDATE accounts SET status=CASE WHEN ? THEN 'expired' ELSE status END,error=?,updated_at=? WHERE id=?",
+        Number(
+          error instanceof AppError &&
+            [
+              "AUTH_EXPIRED",
+              "ACCOUNT_UID_MISMATCH",
+              "DUPLICATE_ACCOUNT",
+            ].includes(error.code),
+        ),
         safeMessage(error),
         now(),
         accountId,
@@ -190,6 +298,77 @@ export class AppService {
       this.changed();
       throw error;
     }
+  }
+  private capacityError(accountId: string, error: unknown) {
+    const account = this.repo.getAccount(accountId);
+    if (!account.enabled || !account.uid) return;
+    this.db.setSetting(`account:capacity:${accountId}`, {
+      ownerUid: account.uid,
+      value: account.capacity?.value ?? null,
+      updatedAt: account.capacity?.updatedAt ?? null,
+      attemptedAt: now(),
+      error: safeMessage(error),
+    });
+    this.changed();
+  }
+  private async readCapacity(account: Account) {
+    try {
+      const provider = this.providers[account.provider];
+      if (!provider.capacity)
+        throw new AppError(
+          "CAPACITY_UNSUPPORTED",
+          "当前网盘连接尚不支持容量查询。",
+        );
+      const parsed = driveCapacitySchema.safeParse(
+        await provider.capacity(account),
+      );
+      if (!parsed.success)
+        throw new AppError(
+          "CAPACITY_UNAVAILABLE",
+          "网盘返回的容量数据不完整，请稍后刷新。",
+        );
+      const current = this.repo.getAccount(account.id);
+      if (!current.enabled || current.uid !== account.uid) return current;
+      const time = now();
+      this.db.setSetting(`account:capacity:${account.id}`, {
+        ownerUid: account.uid,
+        value: parsed.data,
+        updatedAt: time,
+        attemptedAt: time,
+        error: null,
+      });
+      this.changed();
+    } catch (error) {
+      if (error instanceof AppError && error.code === "AUTH_EXPIRED") {
+        this.db.run(
+          "UPDATE accounts SET status='expired',error=?,updated_at=? WHERE id=?",
+          safeMessage(error),
+          now(),
+          account.id,
+        );
+      }
+      this.capacityError(account.id, error);
+    }
+    return this.repo.getAccount(account.id);
+  }
+  private refreshCapacity(accountId: string): Promise<Account> {
+    const pending = this.capacityRequests.get(accountId);
+    if (pending) return pending;
+    const task = this.mutex.run(accountId, async () => {
+      let account: Account;
+      try {
+        account = await this.verifyAccount(accountId);
+      } catch (error) {
+        this.capacityError(accountId, error);
+        throw error;
+      }
+      return this.readCapacity(account);
+    });
+    this.capacityRequests.set(accountId, task);
+    void task
+      .finally(() => this.capacityRequests.delete(accountId))
+      .catch(() => {});
+    return task;
   }
   async authenticated<T>(
     accountId: string,
@@ -207,1222 +386,17 @@ export class AppService {
         "工作空间正在切换，请等待应用重启。",
       );
     const object = raw ?? {};
-    switch (method) {
-      case "snapshot":
-        return this.snapshot(
-          z.object({ resourceId: z.string().max(100).optional() }).parse(object)
-            .resourceId,
-        );
-      case "resource.search":
-        return this.repo.resources(
-          z.object({ query: z.string().max(200) }).parse(object).query,
-        );
-      case "resource.get": {
-        const { id } = z.object({ id: z.string() }).parse(object);
-        return this.repo.getResource(id);
-      }
-      case "resource.page":
-        return this.repo.resourcePage(
-          z
-            .object({
-              query: z.string().max(200).default(""),
-              category: z.string().max(60).default("all"),
-              accountId: z.string().max(100).default("all"),
-              page: z.number().int().min(1).max(100000).default(1),
-              pageSize: z.number().int().min(1).max(100).default(25),
-            })
-            .parse(object),
-        );
-      case "resource.importPreview": {
-        const { text, targets } = z
-          .object({
-            text: z.string().max(2_000_000),
-            targets: z
-              .object({
-                quark: z.string().optional(),
-                baidu: z.string().optional(),
-              })
-              .default({}),
-          })
-          .parse(object);
-        return this.importer.preview(text, targets);
-      }
-      case "resource.importCommit": {
-        const { token, rows } = z
-          .object({
-            token: z.string(),
-            rows: z.array(z.number().int().min(2).max(501)).max(500),
-          })
-          .parse(object);
-        return this.importer.commit(token, rows);
-      }
-      case "resource.importFile":
-        return this.ports.readText("csv");
-      case "resource.summaryFile":
-        return this.ports.readText("summary");
-      case "batch.candidates": {
-        const i = z
-          .object({
-            query: z.string().max(200).default(""),
-            accountId: z.string().default("all"),
-            page: z.number().int().min(1).max(100000).default(1),
-          })
-          .parse(object);
-        return this.operations.candidates(i.query, i.accountId, i.page);
-      }
-      case "batch.list":
-        return this.operations.batches();
-      case "batch.get":
-        return this.operations.batch(
-          z.object({ id: z.string() }).parse(object).id,
-        );
-      case "batch.preview": {
-        const { copyIds } = z
-          .object({ copyIds: z.array(z.string()).min(1).max(100) })
-          .parse(object);
-        const result = this.operations.createBatch(copyIds);
-        void this.queue.pump();
-        return result;
-      }
-      case "batch.selection": {
-        const i = z
-          .object({ itemId: z.string(), fileIds: z.array(z.string()).max(100) })
-          .parse(object);
-        return this.operations.selectBatchItem(i.itemId, i.fileIds);
-      }
-      case "batch.start": {
-        const i = z
-          .object({
-            id: z.string(),
-            itemIds: z.array(z.string()).min(1).max(100),
-            rightsConfirmed: z.literal(true),
-          })
-          .parse(object);
-        const batch = this.operations.batch(i.id);
-        for (const accountId of new Set(
-          batch.items
-            .filter((item) => i.itemIds.includes(item.id))
-            .map((item) => item.accountId),
-        ))
-          await this.ports.closeAccountWindow(accountId);
-        const result = this.operations.startBatch(i.id, i.itemIds);
-        void this.queue.pump();
-        return result;
-      }
-      case "batch.cancel":
-      case "batch.retry":
-      case "split.cancel": {
-        const { id } = z.object({ id: z.string() }).parse(object),
-          ids =
-            method === "split.cancel"
-              ? this.operations.splitJobs(id)
-              : this.operations.batchJobs(id);
-        for (const jobId of ids) {
-          const job = this.repo.getJob(jobId);
-          if (
-            method === "batch.retry" &&
-            ["failed", "waiting_login", "needs_review", "cancelled"].includes(
-              job.stage,
-            )
-          )
-            await this.invoke("job.retry", { id: jobId });
-          else if (
-            method !== "batch.retry" &&
-            !["completed", "cancelled"].includes(job.stage)
-          )
-            await this.invoke("job.cancel", { id: jobId });
-        }
-        return true;
-      }
-      case "split.list":
-        return this.operations.splits(
-          z.object({ copyId: z.string() }).parse(object).copyId,
-        );
-      case "split.get":
-        return this.operations.split(
-          z.object({ id: z.string() }).parse(object).id,
-        );
-      case "split.preview": {
-        const i = z
-          .object({
-            copyId: z.string(),
-            depth: z.number().int().min(1).max(3),
-            mode: z.enum(["level", "all"]).default("level"),
-          })
-          .parse(object);
-        const result = this.operations.createSplit(i.copyId, i.depth, i.mode);
-        void this.queue.pump();
-        return result;
-      }
-      case "split.start": {
-        const i = z
-            .object({
-              id: z.string(),
-              itemIds: z.array(z.string()).min(1).max(100),
-              rightsConfirmed: z.literal(true),
-            })
-            .parse(object),
-          run = this.operations.split(i.id);
-        await this.ports.closeAccountWindow(
-          this.repo.getCopy(run.copyId).accountId,
-        );
-        const result = this.operations.startSplit(i.id, i.itemIds);
-        void this.queue.pump();
-        return result;
-      }
-      case "split.link": {
-        const i = z
-            .object({
-              itemId: z.string(),
-              includeCode: z.boolean().default(true),
-            })
-            .parse(object),
-          item = this.operations.splitItem(i.itemId);
-        return this.authenticated(
-          this.repo.getCopy(item.copyId).accountId,
-          () => this.operations.splitLink(item.id, i.includeCode),
-        );
-      }
-      case "split.recover": {
-        const i = z
-            .object({
-              itemId: z.string(),
-              text: z.string().min(1).max(8000),
-              code: z.string().max(30).optional(),
-            })
-            .parse(object),
-          item = this.operations.splitItem(i.itemId);
-        if (
-          item.jobId &&
-          ["queued", "preflight", "verifying", "sharing", "archiving"].includes(
-            this.repo.getJob(item.jobId).stage,
-          )
-        )
-          throw new AppError(
-            "JOB_RUNNING",
-            "该拆分项仍在执行，请先停止本地等待。",
-          );
-        return this.authenticated(
-          this.repo.getCopy(item.copyId).accountId,
-          () => this.operations.recoverSplit(item.id, i.text, i.code),
-        );
-      }
-      case "split.package":
-      case "split.export": {
-        const i = z
-            .object({
-              id: z.string(),
-              itemIds: z.array(z.string()).min(1).max(100),
-              includeCodes: z.boolean().default(false),
-            })
-            .parse(object),
-          run = this.operations.split(i.id);
-        if (i.itemIds.some((id) => !run.items.some((item) => item.id === id)))
-          throw new AppError("INVALID_SELECTION", "拆分项不属于该预览。");
-        const rows: (string | number)[][] = [
-          ["路径", "标题", "本人网盘链接", "提取码"],
-        ];
-        for (const itemId of new Set(i.itemIds)) {
-          const link = (await this.invoke("split.link", {
-            itemId,
-            includeCode: i.includeCodes,
-          })) as { path: string; title: string; url: string; code: string };
-          rows.push([link.path, link.title, link.url, link.code]);
-        }
-        if (method === "split.package")
-          return {
-            text: rows
-              .slice(1)
-              .map(
-                (row) =>
-                  `${row[0]}\n${row[2]}${row[3] ? `\n提取码：${row[3]}` : ""}`,
-              )
-              .join("\n\n"),
-          };
-        return this.ports.saveFile(
-          "本人拆分链接.csv",
-          Buffer.from(csv(rows), "utf8"),
-        );
-      }
-      case "account.add": {
-        const input = z
-            .object({
-              provider: providerSchema,
-              alias: z.string().trim().min(1).max(60),
-            })
-            .parse(object),
-          accountId = id("account"),
-          time = now();
-        const isDefault = !this.repo
-          .accounts()
-          .some((a) => a.provider === input.provider && a.enabled);
-        this.db.run(
-          "INSERT INTO accounts(id,provider,alias,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-          accountId,
-          input.provider,
-          input.alias,
-          Number(isDefault),
-          time,
-          time,
-        );
-        this.changed();
-        return this.repo.getAccount(accountId);
-      }
-      case "account.update": {
-        const input = z
-          .object({
-            id: z.string(),
-            alias: z.string().trim().min(1).max(60),
-            defaultDirectory: z.string().max(500),
-            enabled: z.boolean(),
-          })
-          .parse(object);
-        const account = this.repo.getAccount(input.id);
-        if (!input.enabled) this.assertNoActiveJobs(account.id);
-        this.db.run(
-          "UPDATE accounts SET alias=?,default_directory=?,enabled=?,status=CASE WHEN ?=0 THEN ? WHEN uid IS NOT NULL THEN ? ELSE ? END,updated_at=? WHERE id=?",
-          input.alias,
-          normalizedDirectory(input.defaultDirectory),
-          Number(input.enabled),
-          Number(input.enabled),
-          "disabled",
-          account.status === "disabled" ? "expired" : account.status,
-          "disconnected",
-          now(),
-          input.id,
-        );
-        if (!input.enabled)
-          this.db.run("UPDATE accounts SET is_default=0 WHERE id=?", input.id);
-        this.changed();
-        return this.repo.getAccount(input.id);
-      }
-      case "account.default": {
-        const { id: accountId } = z.object({ id: z.string() }).parse(object),
-          account = this.account(accountId);
-        this.db.transaction(() => {
-          this.db.run(
-            "UPDATE accounts SET is_default=0 WHERE provider=?",
-            account.provider,
-          );
-          this.db.run(
-            "UPDATE accounts SET is_default=1 WHERE id=?",
-            account.id,
-          );
-        });
-        this.changed();
-        return true;
-      }
-      case "account.login": {
-        const { id: accountId } = z.object({ id: z.string() }).parse(object);
-        this.assertNoActiveJobs(accountId);
-        await this.ports.login(this.account(accountId));
-        return true;
-      }
-      case "account.check": {
-        const { id: accountId } = z.object({ id: z.string() }).parse(object);
-        const account = await this.mutex.run(accountId, () =>
-          this.verifyAccount(accountId),
-        );
-        await this.ports.closeAccountWindow(accountId);
-        this.db.run(
-          "UPDATE jobs SET stage=?,error=NULL WHERE copy_id IN (SELECT id FROM copies WHERE account_id=?) AND stage=?",
-          "queued",
-          account.id,
-          "waiting_login",
-        );
-        void this.queue.pump();
-        return account;
-      }
-      case "account.clear": {
-        const { id: accountId } = z.object({ id: z.string() }).parse(object);
-        this.assertNoActiveJobs(accountId);
-        await this.ports.clearSession(accountId);
-        this.db.run(
-          "UPDATE accounts SET status=?,enabled=0,is_default=0,verified_at=NULL WHERE id=?",
-          "disabled",
-          accountId,
-        );
-        this.changed();
-        return true;
-      }
-      case "share.parse": {
-        const { text, code } = z
-          .object({
-            text: z.string().max(8000),
-            code: z.string().max(30).optional(),
-          })
-          .parse(object);
-        return parseShare(text, code);
-      }
-      case "share.inspect": {
-        const input = z
-            .object({
-              accountId: z.string(),
-              sourceText: z.string().max(8000),
-              code: z.string().max(30).optional(),
-              resourceId: z.string().optional(),
-              parentId: z.string().max(1000).default("0"),
-              page: z.number().int().min(1).max(100).default(1),
-            })
-            .parse(object),
-          source = parseShare(input.sourceText, input.code);
-        if (
-          !source.code &&
-          input.resourceId &&
-          this.repo.getResource(input.resourceId).sourceUrl === source.url
-        )
-          source.code =
-            (await this.secrets.get(`source:${input.resourceId}`)) ?? "";
-        return this.authenticated(input.accountId, async (a, p) => {
-          if (a.provider !== source.provider)
-            throw new AppError(
-              "CROSS_PROVIDER_UNSUPPORTED",
-              "首版仅支持同网盘转存。",
-            );
-          return p.inspect(a, source, input.parentId, input.page);
-        });
-      }
-      case "directory.list": {
-        const { accountId, parentId } = z
-          .object({ accountId: z.string(), parentId: z.string().max(1000) })
-          .parse(object);
-        return this.authenticated(accountId, async (a, p) =>
-          (await p.list(a, parentId)).filter((f) => f.isDirectory),
-        );
-      }
-      case "resource.save":
-        return this.saveResource(resourceInputSchema.parse(object));
-      case "cover.export": {
-        const { id: coverId } = z
-          .object({ id: z.string().regex(/^[a-f0-9]{64}$/) })
-          .parse(object);
-        return this.ports.saveFile(
-          "资源封面.png",
-          await readFile(join(this.dataPath, "covers", `${coverId}.png`)),
-        );
-      }
-      case "copy.link": {
-        const { copyId } = z.object({ copyId: z.string() }).parse(object);
-        const copy = this.repo.getCopy(copyId),
-          account = this.assertOwnCopy(copy);
-        await this.authenticated(account.id, async (a, p) => {
-          if (!(await p.verifyShare(a, copy.shareId!, copy.files)))
-            throw new AppError("SHARE_INVALID", "本人分享未能通过有效性检查。");
-        });
-        const code = await this.secrets.get(`share:${copy.id}`);
-        return { text: `${copy.shareUrl}${code ? `\n提取码：${code}` : ""}` };
-      }
-      case "copies.check": {
-        const { copyIds } = z
-          .object({ copyIds: z.array(z.string()).min(1).max(25) })
-          .parse(object);
-        const results: ShareCheck[] = [];
-        for (const copyId of new Set(copyIds))
-          results.push(await this.checkShare(copyId));
-        return results;
-      }
-      case "cover.get": {
-        const { id: coverId } = z
-          .object({ id: z.string().regex(/^[a-f0-9]{64}$/) })
-          .parse(object);
-        return (
-          "data:image/png;base64," +
-          (
-            await readFile(join(this.dataPath, "covers", `${coverId}.png`))
-          ).toString("base64")
-        );
-      }
-      case "job.retry": {
-        const { id: jobId } = z.object({ id: z.string() }).parse(object);
-        const job = this.repo.getJob(jobId);
-        if (
-          !["waiting_login", "needs_review", "failed", "cancelled"].includes(
-            job.stage,
-          )
-        )
-          throw new AppError("JOB_RUNNING", "任务仍在运行或已完成。");
-        this.account(job.accountId);
-        await this.ports.closeAccountWindow(job.accountId);
-        this.db.run(
-          "UPDATE jobs SET stage=?,error=NULL,attempts=attempts+1,updated_at=? WHERE id=?",
-          "queued",
-          now(),
-          jobId,
-        );
-        this.changed();
-        void this.queue.pump();
-        return true;
-      }
-      case "job.cancel": {
-        const { id: jobId } = z.object({ id: z.string() }).parse(object);
-        const job = this.repo.getJob(jobId);
-        if (job.stage === "completed")
-          throw new AppError("JOB_COMPLETED", "任务已完成，不需要取消。");
-        this.db.run(
-          "UPDATE jobs SET stage=?,error=?,updated_at=? WHERE id=?",
-          "cancelled",
-          "本地等待已停止，未撤销网盘已执行的操作。",
-          now(),
-          jobId,
-        );
-        if (job.kind === "transfer")
-          this.db.run(
-            "UPDATE copies SET status=?,error=? WHERE id=?",
-            ["new", "folder_ready"].includes(job.checkpoint)
-              ? "draft"
-              : "needs_review",
-            "请核对远端结果；不会自动删除文件。",
-            job.copyId,
-          );
-        else this.operations.cancelled(job);
-        this.changed();
-        return true;
-      }
-      case "copy.open": {
-        const { id: copyId } = z.object({ id: z.string() }).parse(object);
-        const copy = this.repo.getCopy(copyId),
-          resource = this.repo.getResource(copy.resourceId);
-        this.assertNoActiveJobs(copy.accountId);
-        await this.ports.openAccountPage(
-          this.account(copy.accountId),
-          copy.shareUrl ??
-            (resource.provider === "quark"
-              ? "https://pan.quark.cn/"
-              : "https://pan.baidu.com/disk/main"),
-        );
-        return true;
-      }
-      case "copy.createShare":
-      case "copy.recoverShare": {
-        const { copyId, text, code } = z
-          .object({
-            copyId: z.string(),
-            text: z.string().max(8000).default(""),
-            code: z.string().max(30).optional(),
-          })
-          .parse(object);
-        const copy = this.repo.getCopy(copyId),
-          resource = this.repo.getResource(copy.resourceId),
-          source = text ? parseShare(text, code) : null;
-        if (
-          !copy.folderId ||
-          !copy.ownerUid ||
-          !copy.verifiedAt ||
-          !copy.files.length ||
-          (source &&
-            (source.url === resource.sourceUrl ||
-              source.provider !== resource.provider)) ||
-          (method === "copy.recoverShare" && !source)
-        )
-          throw new AppError(
-            "OWNERSHIP_UNVERIFIED",
-            "请先完成目标文件核验，并填写本人新建的分享链接。",
-          );
-        this.assertNoActiveJobs(copy.accountId);
-        return this.authenticated(copy.accountId, async (a, p) => {
-          if (a.uid !== copy.ownerUid)
-            throw new AppError("ACCOUNT_UID_MISMATCH", "文件归属UID不匹配。");
-          const actual = await p.list(a, copy.folderId!);
-          assertManifest(copy.files, actual);
-          if (
-            actual.length !== copy.files.length ||
-            !copy.files.every((f) => actual.some((c) => c.id === f.id))
-          )
-            throw new AppError(
-              "TARGET_CHANGED",
-              "目标文件发生变化，请先核对网盘目录。",
-            );
-          let share;
-          try {
-            share =
-              method === "copy.createShare"
-                ? await p.findOwnShare(a, copy.files)
-                : await p.recoverOwnShare(a, source!, copy.files);
-            if (!share) {
-              this.db.run(
-                "UPDATE jobs SET checkpoint=? WHERE copy_id=? AND kind='transfer' AND stage<>?",
-                "share_requested",
-                copy.id,
-                "completed",
-              );
-              share = await p.createShare(a, copy.files, resource.title);
-            }
-          } catch (error) {
-            this.db.run(
-              "UPDATE copies SET error=? WHERE id=?",
-              safeMessage(error),
-              copyId,
-            );
-            this.db.run(
-              "UPDATE jobs SET stage=?,error=? WHERE copy_id=? AND kind='transfer' AND stage<>?",
-              "needs_review",
-              safeMessage(error),
-              copyId,
-              "completed",
-            );
-            this.changed();
-            throw error;
-          }
-          const parsedShare = parseShare(share.url);
-          if (
-            parsedShare.provider !== resource.provider ||
-            parsedShare.url === resource.sourceUrl ||
-            !(await p.verifyShare(a, share.id, copy.files))
-          )
-            throw new AppError(
-              "OWNERSHIP_UNVERIFIED",
-              "本人分享仍未通过文件与有效性核验。",
-            );
-          if (
-            share.ownerUid !== a.uid ||
-            (source && parsedShare.url !== source.url)
-          )
-            throw new AppError(
-              "OWNERSHIP_UNVERIFIED",
-              "本人分享归属核验失败。",
-            );
-          const changedVersion =
-            copy.shareId !== share.id ||
-            copy.shareUrl !== parsedShare.url ||
-            (await this.secrets.get(`share:${copyId}`)) !== share.code;
-          await this.secrets.set(`share:${copyId}`, share.code);
-          this.db.transaction(() => {
-            this.db.run(
-              "UPDATE copies SET status=?,share_id=?,share_url=?,share_owner_uid=?,share_version=share_version+?,share_verified_at=?,error=NULL WHERE id=?",
-              "ready",
-              share.id,
-              parsedShare.url,
-              a.uid,
-              Number(changedVersion),
-              now(),
-              copyId,
-            );
-            this.db.run(
-              "UPDATE jobs SET stage=?,checkpoint=?,error=NULL,updated_at=? WHERE copy_id=? AND kind='transfer' AND stage<>?",
-              "completed",
-              "complete",
-              now(),
-              copyId,
-              "completed",
-            );
-            this.notes.enqueue(copyId);
-          });
-          await this.notes.flush();
-          this.changed();
-          return this.repo.getCopy(copyId);
-        });
-      }
-      case "notes.export": {
-        const { copyId } = z.object({ copyId: z.string() }).parse(object);
-        this.notes.enqueue(copyId);
-        await this.notes.flush();
-        this.changed();
-        return this.repo.getCopy(copyId);
-      }
-      case "notes.open": {
-        const { copyId } = z.object({ copyId: z.string() }).parse(object);
-        const row = this.db.get<{ path: string }>(
-          "SELECT path FROM note_exports WHERE copy_id=?",
-          copyId,
-        );
-        if (!row)
-          throw new AppError("NOTE_NOT_EXPORTED", "此副本尚未导出知识笔记。");
-        await this.ports.openPath(row.path);
-        return true;
-      }
-      case "settings.vault": {
-        const path = await this.ports.chooseDirectory("vault");
-        if (path) {
-          this.db.setSetting("vaultPath", path);
-          for (const c of this.db.all<{ id: string }>(
-            "SELECT id FROM copies WHERE status='ready'",
-          ))
-            this.notes.enqueue(c.id);
-          void this.notes.flush().finally(() => this.changed());
-          this.changed();
-        }
-        return path;
-      }
-      case "settings.save": {
-        const input = z
-          .object({
-            model: z.string().max(200),
-            exportCodes: z.boolean(),
-            bitUrl: z.string().max(300),
-            dailyAiBudgetMicros: z.number().int().nonnegative().nullable(),
-          })
-          .parse(object);
-        if (input.bitUrl) validateLoopback(input.bitUrl);
-        this.db.transaction(() => {
-          for (const [key, value] of Object.entries(input))
-            this.db.setSetting(key, value);
-        });
-        this.changed();
-        return true;
-      }
-      case "secret.save": {
-        const input = z
-          .object({
-            kind: z.enum([
-              "openrouter",
-              "bit",
-              "5118:longtail",
-              "5118:suggest",
-              "5118:metrics",
-              "5118:radar",
-            ]),
-            value: z.string().max(20000),
-          })
-          .parse(object);
-        await this.secrets.set(input.kind, input.value);
-        this.db.setSetting(
-          `keyRevision:${input.kind.replace("5118:", "")}`,
-          now(),
-        );
-        this.changed();
-        return true;
-      }
-      case "api.plan": {
-        const input = z
-          .object({
-            endpoint: endpointSchema,
-            unitPriceMicros: z
-              .number()
-              .int()
-              .nonnegative()
-              .max(1_000_000_000)
-              .nullable(),
-            dailyUnits: z.number().int().min(1).max(1_000_000),
-            dailyBudgetMicros: z.number().int().nonnegative().nullable(),
-            enabled: z.boolean(),
-          })
-          .parse(object);
-        if (input.dailyBudgetMicros != null && input.unitPriceMicros == null)
-          throw new AppError(
-            "API_PRICE_REQUIRED",
-            "设置金额预算需录入实际套餐单价。",
-          );
-        this.db.run(
-          "UPDATE api_plans SET unit_price_micros=?,daily_units=?,daily_budget_micros=?,enabled=? WHERE endpoint=?",
-          input.unitPriceMicros,
-          input.dailyUnits,
-          input.dailyBudgetMicros,
-          Number(input.enabled),
-          input.endpoint,
-        );
-        this.changed();
-        return true;
-      }
-      case "api.export": {
-        const calls = this.db.all<Record<string, any>>(
-          "SELECT * FROM api_calls ORDER BY created_at",
-        );
-        return this.ports.saveFile(
-          "盘序-调用费用台账.csv",
-          Buffer.from(
-            csv([
-              [
-                "时间UTC",
-                "接口",
-                "阶段",
-                "外部请求数",
-                "预留计费单位",
-                "币种",
-                "套餐摊销估算",
-                "预算预留",
-                "API返回实际金额",
-                "状态",
-                "说明",
-              ],
-              ...calls.map((c) => [
-                c.created_at,
-                c.endpoint,
-                c.phase,
-                c.request_count,
-                c.units,
-                c.endpoint === "openrouter" ? "USD" : "CNY",
-                c.estimated_micros == null ? null : c.estimated_micros / 1e6,
-                c.reserved_micros == null ? null : c.reserved_micros / 1e6,
-                c.confirmed_micros == null ? null : c.confirmed_micros / 1e6,
-                c.status,
-                c.message,
-              ]),
-            ]),
-          ),
-        );
-      }
-      case "traffic.releaseSubmission": {
-        const { taskId } = z.object({ taskId: z.string() }).parse(object);
-        const task = this.db.get<{ status: string }>(
-          "SELECT status FROM async_queries WHERE task_id=?",
-          taskId,
-        );
-        if (!task || task.status !== "uncertain")
-          throw new AppError(
-            "INVALID_TASK_STATE",
-            "只可解除已人工核对的待核提交记录。",
-          );
-        this.db.run(
-          "UPDATE async_queries SET status='released' WHERE task_id=?",
-          taskId,
-        );
-        this.changed();
-        return true;
-      }
-      case "traffic.query":
-        return this.traffic.query(querySchema.parse(object));
-      case "traffic.suggestionResult": {
-        const { id } = z.object({ id: z.string() }).parse(object);
-        return this.traffic.suggestionResult(id);
-      }
-      case "traffic.resumeSuggestion": {
-        const { id } = z
-          .object({ id: z.string(), chargeAcknowledged: z.literal(true) })
-          .parse(object);
-        return this.traffic.resumeSuggestion(id);
-      }
-      case "ai.connection":
-        return this.ai.connection();
-      case "ai.models":
-        return this.ai.models();
-      case "ai.keywords": {
-        const { resourceId } = z
-          .object({ resourceId: z.string() })
-          .parse(object);
-        return this.ai.extract(resourceId);
-      }
-      case "pool.save": {
-        const input = z
-          .object({
-            name: z.string().trim().min(1).max(100),
-            resourceId: z.string().nullable(),
-            keywords: z.array(keywordSchema).min(1).max(1000),
-          })
-          .parse(object);
-        if (input.resourceId) this.repo.getResource(input.resourceId);
-        const poolId = id("pool");
-        this.db.run(
-          "INSERT INTO pools(id,name,resource_id,keywords,created_at) VALUES(?,?,?,?,?)",
-          poolId,
-          input.name,
-          input.resourceId,
-          JSON.stringify(input.keywords),
-          now(),
-        );
-        this.changed();
-        return this.repo.pools().find((p) => p.id === poolId);
-      }
-      case "pool.manual": {
-        const input = z
-          .object({
-            name: z.string().trim().min(1).max(100),
-            resourceId: z.string().nullable(),
-            words: z.string().max(100000),
-          })
-          .parse(object);
-        const words = [
-          ...new Set(
-            input.words
-              .split(/[,，\n]/)
-              .map((w) => w.trim())
-              .filter(Boolean),
-          ),
-        ];
-        if (
-          !words.length ||
-          words.length > 1000 ||
-          words.some((w) => w.length > 200)
-        )
-          throw new AppError(
-            "INVALID_KEYWORDS",
-            "请录入1至1000个词，每词不超过200字。",
-          );
-        return this.invoke("pool.save", {
-          name: input.name,
-          resourceId: input.resourceId,
-          keywords: words.map((word) => ({
-            id: id("manual"),
-            word,
-            source: "手工录入",
-            platform: null,
-            metrics: {},
-            sourceUpdatedAt: null,
-            fetchedAt: now(),
-          })),
-        });
-      }
-      case "draft.generate": {
-        const { copyId, platform, poolId } = z
-          .object({
-            copyId: z.string(),
-            platform: platformSchema,
-            poolId: z.string().nullable(),
-          })
-          .parse(object);
-        return this.ai.draft(copyId, platform, poolId);
-      }
-      case "draft.manual": {
-        const { copyId, platform, template } = z
-          .object({
-            copyId: z.string(),
-            platform: platformSchema,
-            template: z.boolean().default(false),
-          })
-          .parse(object);
-        const copy = this.repo.getCopy(copyId),
-          resource = this.repo.getResource(copy.resourceId),
-          draftId = id("draft"),
-          time = now();
-        const content = template
-          ? localTemplate(resource, platform)
-          : { title: resource.title, body: "", tags: [], coverText: "" };
-        this.db.run(
-          "INSERT INTO drafts(id,resource_id,copy_id,platform,title,body,tags,resource_revision,share_version,model,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-          draftId,
-          resource.id,
-          copyId,
-          platform,
-          content.title,
-          content.body,
-          JSON.stringify(content.tags),
-          resource.revision,
-          copy.shareVersion,
-          template ? "local-template" : "manual",
-          time,
-          time,
-        );
-        this.changed();
-        return this.repo.draft(draftId);
-      }
-      case "draft.save": {
-        const input = z
-          .object({
-            id: z.string(),
-            title: z.string().trim().min(1).max(200),
-            body: z.string().max(30000),
-            tags: z.array(z.string().max(60)).max(30),
-            coverText: z.string().max(300),
-          })
-          .parse(object);
-        const draft = this.repo.draft(input.id),
-          draftId = id("draft"),
-          time = now();
-        this.db.run(
-          "INSERT INTO drafts(id,resource_id,copy_id,platform,pool_id,title,body,tags,cover_text,version,resource_revision,share_version,model,reviewed,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          draftId,
-          draft.resourceId,
-          draft.copyId,
-          draft.platform,
-          draft.poolId,
-          input.title,
-          input.body,
-          JSON.stringify(input.tags),
-          input.coverText,
-          draft.version + 1,
-          draft.resourceRevision,
-          draft.shareVersion,
-          draft.model,
-          0,
-          time,
-          time,
-        );
-        this.changed();
-        return this.repo.draft(draftId);
-      }
-      case "draft.review": {
-        const { id: draftId, reviewed } = z
-          .object({ id: z.string(), reviewed: z.boolean() })
-          .parse(object);
-        const draft = this.repo.draft(draftId),
-          resource = this.repo.getResource(draft.resourceId),
-          copy = this.repo.getCopy(draft.copyId);
-        if (reviewed && !draft.body.trim())
-          throw new AppError("EMPTY_DRAFT", "请先填写内容正文。");
-        this.db.run(
-          "UPDATE drafts SET reviewed=?,resource_revision=?,share_version=?,updated_at=? WHERE id=?",
-          Number(reviewed),
-          resource.revision,
-          copy.shareVersion,
-          now(),
-          draftId,
-        );
-        this.changed();
-        return this.repo.draft(draftId);
-      }
-      case "bit.health":
-        return this.bit.health();
-      case "bit.windows":
-        return this.bit.windows();
-      case "binding.open": {
-        const { id: bindingId } = z.object({ id: z.string() }).parse(object);
-        const binding = this.repo.bindings().find((b) => b.id === bindingId);
-        if (!binding)
-          throw new AppError("NOT_FOUND", "未找到对应的平台窗口映射。");
-        return this.openBinding(binding);
-      }
-      case "binding.save": {
-        const input = z
-          .object({
-            id: z.string().optional(),
-            platform: platformSchema,
-            alias: z.string().trim().min(1).max(80),
-            windowId: z.string().min(1).max(200),
-            editorUrl: z.string().max(2000),
-            linkPermission: z.enum(["none", "allowed"]),
-            ruleNote: z.string().max(2000),
-          })
-          .parse(object);
-        const spec = platformSpecs.find((p) => p.id === input.platform)!;
-        if (input.id) {
-          const prior = this.repo.bindings().find((b) => b.id === input.id);
-          if (!prior || prior.platform !== input.platform)
-            throw new AppError(
-              "BINDING_MISMATCH",
-              "已有映射不能修改所属平台，请为新平台新建映射。",
-            );
-        }
-        if (
-          input.linkPermission === "allowed" &&
-          (spec.linkMode === "blocked" || input.ruleNote.trim().length < 10)
-        )
-          throw new AppError(
-            "CHANNEL_RULE_REQUIRED",
-            "此平台默认禁止链接，或尚未记录足够的账号场景核实依据。",
-          );
-        const bindingId = input.id ?? id("binding");
-        this.db.run(
-          "INSERT INTO browser_bindings(id,platform,alias,window_id,editor_url,link_permission,rule_note,verified_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET alias=excluded.alias,window_id=excluded.window_id,editor_url=excluded.editor_url,link_permission=excluded.link_permission,rule_note=excluded.rule_note,verified_at=excluded.verified_at,last_checked_at=NULL,last_opened_at=NULL,open_error=NULL",
-          bindingId,
-          input.platform,
-          input.alias,
-          input.windowId,
-          validateEditorUrl(input.platform, input.editorUrl),
-          input.linkPermission,
-          input.ruleNote,
-          now(),
-        );
-        this.changed();
-        return this.repo.bindings().find((b) => b.id === bindingId);
-      }
-      case "publication.package": {
-        const input = z
-          .object({
-            draftId: z.string(),
-            bindingId: z.string().nullable(),
-            includeLink: z.boolean(),
-          })
-          .parse(object);
-        return this.contentPackage(
-          input.draftId,
-          input.bindingId,
-          input.includeLink,
-        );
-      }
-      case "publication.open": {
-        const { draftId, bindingId } = z
-          .object({ draftId: z.string(), bindingId: z.string() })
-          .parse(object);
-        await this.contentPackage(draftId, bindingId, false);
-        const binding = this.repo.bindings().find((b) => b.id === bindingId)!;
-        const result = await this.openBinding(binding);
-        const draft = this.repo.draft(draftId);
-        this.db.run(
-          "INSERT INTO publications(id,draft_id,draft_version,binding_id,status,created_at) VALUES(?,?,?,?,?,?)",
-          id("pub"),
-          draftId,
-          draft.version,
-          bindingId,
-          "opened",
-          now(),
-        );
-        this.changed();
-        return result;
-      }
-      case "publication.export": {
-        const { draftId, bindingId, includeLink } = z
-          .object({
-            draftId: z.string(),
-            bindingId: z.string().nullable(),
-            includeLink: z.boolean(),
-          })
-          .parse(object);
-        const result = await this.contentPackage(
-          draftId,
-          bindingId,
-          includeLink,
-        );
-        const selected = await this.ports.chooseDirectory("content");
-        if (!selected) return null;
-        const folder = join(selected, `盘序内容包-${id("export")}`);
-        await mkdir(folder, { mode: 0o700 });
-        try {
-          await writeFile(join(folder, "发布文案.txt"), result.text, {
-            mode: 0o600,
-          });
-          await writeFile(
-            join(folder, "内容信息.json"),
-            JSON.stringify(
-              {
-                title: result.title,
-                platform: result.platform,
-                exportedAt: now(),
-                published: false,
-                includesOwnLink: includeLink,
-              },
-              null,
-              2,
-            ),
-            { mode: 0o600 },
-          );
-          if (result.coverId)
-            await copyFile(
-              join(this.dataPath, "covers", `${result.coverId}.png`),
-              join(folder, "封面.png"),
-            );
-          return { folder };
-        } catch (error) {
-          await rm(folder, { recursive: true, force: true });
-          throw error;
-        }
-      }
-      case "publication.mark": {
-        const { draftId, bindingId, url } = z
-          .object({
-            draftId: z.string(),
-            bindingId: z.string(),
-            url: z.url().max(2000),
-          })
-          .parse(object);
-        const draft = this.repo.draft(draftId);
-        validatePublicationUrl(draft.platform, url);
-        if (
-          !this.db.get(
-            "SELECT id FROM publications WHERE draft_id=? AND draft_version=? AND binding_id=? AND status=?",
-            draftId,
-            draft.version,
-            bindingId,
-            "opened",
-          )
-        )
-          throw new AppError(
-            "EDITOR_NOT_OPENED",
-            "当前草稿版本尚未打开指定编辑器。",
-          );
-        this.db.run(
-          "INSERT INTO publications(id,draft_id,draft_version,binding_id,status,url,created_at) VALUES(?,?,?,?,?,?,?)",
-          id("pub"),
-          draftId,
-          draft.version,
-          bindingId,
-          "published",
-          url,
-          now(),
-        );
-        this.changed();
-        return true;
-      }
-      case "system.copyText": {
-        const { text } = z
-          .object({ text: z.string().max(100000) })
-          .parse(object);
-        await this.ports.copyText(text);
-        return true;
-      }
-      case "system.dataFolder":
-        await this.ports.openPath(this.dataPath);
-        return true;
-      case "system.backup":
-        return this.backup();
-      case "system.backupPreview": {
-        const folder = await this.ports.chooseDirectory("restore");
-        if (!folder) return null;
-        const checked = await inspectBackup(folder);
-        const preview: BackupPreview = {
-          token: id("restore"),
-          folder,
-          createdAt: checked.createdAt,
-          resources: checked.resources,
-          accounts: checked.accounts,
-          drafts: checked.drafts,
-          covers: checked.covers.length,
-        };
-        this.backupPreview = { ...preview, hash: checked.databaseSha256 };
-        return preview;
-      }
-      case "system.restore": {
-        const { token } = z
-          .object({ token: z.string(), confirmed: z.literal(true) })
-          .parse(object);
-        if (!this.backupPreview || this.backupPreview.token !== token)
-          throw new AppError(
-            "RESTORE_PREVIEW_REQUIRED",
-            "请先选择备份并完成预检。",
-          );
-        if (this.hasRunningJobs())
-          throw new AppError(
-            "JOBS_RUNNING",
-            "请先停止当前任务并核对远端结果，再恢复工作空间。",
-          );
-        const preview = this.backupPreview;
-        this.backupPreview = null;
-        this.switchingWorkspace = true;
-        try {
-          const restored = await stageRestore(
-            preview.folder,
-            this.dataPath,
-            preview.hash,
-          );
-          await this.ports.activateDataPath(restored.dataPath);
-          return restored;
-        } catch (error) {
-          this.switchingWorkspace = false;
-          throw error;
-        }
-      }
-      case "system.previousWorkspace": {
-        const previous = this.db.setting<string>("restorePreviousDataPath", "");
-        if (!previous)
-          throw new AppError("NOT_FOUND", "当前没有恢复前的工作空间。");
-        if (this.hasRunningJobs())
-          throw new AppError("JOBS_RUNNING", "请先停止任务后再切换工作空间。");
-        this.switchingWorkspace = true;
-        try {
-          await this.ports.activateDataPath(previous);
-        } catch (error) {
-          this.switchingWorkspace = false;
-          throw error;
-        }
-        return true;
-      }
-      case "system.external": {
-        const { url } = z.object({ url: z.url().max(2000) }).parse(object);
-        const u = new URL(url);
-        const allowed = [
-          "www.5118.com",
-          "account.5118.com",
-          "openrouter.ai",
-          "doc.bitbrowser.cn",
-          "www.bitbrowser.cn",
-          ...platformSpecs.flatMap((p) => [new URL(p.ruleUrl).hostname]),
-        ];
-        if (
-          u.protocol !== "https:" ||
-          !allowed.includes(u.hostname) ||
-          u.username ||
-          u.password
-        )
-          throw new AppError(
-            "EXTERNAL_URL_BLOCKED",
-            "此外部地址未在应用允许列表内。",
-          );
-        await this.ports.openExternal(url);
-        return true;
-      }
-      default:
-        throw new AppError("UNKNOWN_METHOD", "不支持此操作。");
-    }
+    return this.handlers.invoke(method, object);
   }
+
   private assertNoActiveJobs(accountId: string) {
+    if (this.driveFiles?.busyAccount(accountId))
+      throw new AppError("ACTIVE_JOBS", "此账号正在管理网盘文件，请等待完成。");
+    if (this.insertion?.busyAccount(accountId))
+      throw new AppError(
+        "ACTIVE_JOBS",
+        "此账号正在执行批量插入，请先取消并等待结束。",
+      );
     if (
       this.db.get(
         "SELECT j.id FROM jobs j JOIN copies c ON c.id=j.copy_id WHERE c.account_id=? AND j.stage IN ('queued','preflight','transferring','verifying','sharing','archiving') LIMIT 1",
@@ -1442,13 +416,10 @@ export class AppService {
         "CROSS_PROVIDER_UNSUPPORTED",
         "来源与目标账号网盘类型不同，首版仅支持同网盘转存。",
       );
-    if (
-      input.enqueue &&
-      (!input.rightsConfirmed || !input.selectedFiles?.length)
-    )
+    if (input.enqueue && !input.selectedFiles?.length)
       throw new AppError(
         "SELECTION_REQUIRED",
-        "开始转存前，请确认分享权利并读取、选择需要保存的文件。",
+        "开始转存前，请读取并选择需要保存的文件。",
       );
     const existing = this.db.get<{ id: string }>(
       "SELECT id FROM resources WHERE source_url=?",
@@ -1593,9 +564,15 @@ export class AppService {
     }
     return { resourceId, copyId, jobId };
   }
-  private async openBinding(binding: BrowserBinding) {
+  private async openBinding(
+    binding: BrowserBinding,
+    contentFormat?: ContentFormat,
+  ) {
     try {
-      const result = await this.bit.open(binding);
+      const result = await this.bit.open({
+        ...binding,
+        editorUrl: bindingEditorUrl(binding, contentFormat),
+      });
       this.db.run(
         "UPDATE browser_bindings SET last_checked_at=?,last_opened_at=?,open_error=NULL WHERE id=?",
         now(),
@@ -1616,8 +593,15 @@ export class AppService {
     }
   }
   private hasRunningJobs() {
-    return !!this.db.get(
-      "SELECT id FROM jobs WHERE stage IN ('queued','preflight','transferring','verifying','sharing','archiving') LIMIT 1",
+    return (
+      this.driveFiles.isBusy ||
+      this.zhidao.isBusy ||
+      this.insertion.isBusy ||
+      this.studio.isBusy ||
+      this.shareStatistics.isBusy ||
+      !!this.db.get(
+        "SELECT id FROM jobs WHERE stage IN ('queued','preflight','transferring','verifying','sharing','archiving') LIMIT 1",
+      )
     );
   }
   private async checkShare(copyId: string): Promise<ShareCheck> {
@@ -1633,7 +617,7 @@ export class AppService {
             copy.status !== "ready" ||
             !copy.shareId ||
             !copy.shareUrl ||
-            copy.shareUrl === resource.sourceUrl ||
+            (copy.shareUrl === resource.sourceUrl && resource.sourceKind !== "owned") ||
             !copy.files.length ||
             !copy.verifiedAt ||
             copy.ownerUid !== account.uid ||
@@ -1685,7 +669,7 @@ export class AppService {
         "OWNERSHIP_UNVERIFIED",
         "资源副本与本人分享尚未通过同账号UID核验，禁止分发。",
       );
-    if (copy.shareUrl === this.repo.getResource(copy.resourceId).sourceUrl)
+    if (copy.shareUrl === this.repo.getResource(copy.resourceId).sourceUrl && this.repo.getResource(copy.resourceId).sourceKind !== "owned")
       throw new AppError(
         "FOREIGN_SHARE_BLOCKED",
         "本人分享与来源链接相同，禁止分发。",
@@ -1696,16 +680,26 @@ export class AppService {
     draftId: string,
     bindingId: string | null,
     includeLink: boolean,
+    linkPosition: LinkPosition = "body",
   ) {
     const draft = this.repo.draft(draftId),
       copy = this.repo.getCopy(draft.copyId),
       resource = this.repo.getResource(draft.resourceId),
-      account = this.assertOwnCopy(copy);
+      split = draft.splitItemId
+        ? this.search.assertTarget(copy.id, draft.splitItemId).split
+        : null,
+      account = split
+        ? this.repo.getAccount(copy.accountId)
+        : this.assertOwnCopy(copy);
     if (!draft.reviewed)
       throw new AppError("REVIEW_REQUIRED", "请先保存并人工审阅当前内容版本。");
+    this.studio.assertWorkingCopySaved(draftId);
+    await this.studio.assertReady(draftId);
     if (
       draft.resourceRevision !== resource.revision ||
-      draft.shareVersion !== copy.shareVersion
+      (split
+        ? draft.splitShareVersion !== split.shareVersion
+        : draft.shareVersion !== copy.shareVersion)
     )
       throw new AppError(
         "STALE_DRAFT",
@@ -1716,45 +710,90 @@ export class AppService {
       : null;
     if (bindingId && (!binding || binding.platform !== draft.platform))
       throw new AppError("BINDING_MISMATCH", "所选发布账号与草稿平台不匹配。");
-    const spec = platformSpecs.find((p) => p.id === draft.platform)!;
-    const allowLinks =
-      !!binding &&
-      binding.linkPermission === "allowed" &&
-      spec.linkMode !== "blocked" &&
-      !!binding.verifiedAt &&
-      Date.now() - new Date(binding.verifiedAt).getTime() < 30 * 24 * 3600_000;
+    if (binding && !hasVerifiedFormat(binding, draft.contentFormat))
+      throw new AppError(
+        "CHANNEL_FORMAT_UNVERIFIED",
+        "此发布账号尚未核实当前内容形式，请在连接与设置中补充账号能力。",
+      );
+    const allowLinks = canUseLinkPosition(
+      draft.platform,
+      binding,
+      draft.contentFormat,
+      linkPosition,
+    );
+    const allowBodyLinks = canUseLinkPosition(
+      draft.platform,
+      binding,
+      draft.contentFormat,
+      "body",
+    );
     if (includeLink && !allowLinks)
       throw new AppError(
         "CHANNEL_LINK_BLOCKED",
         "此发布场景未核实允许网盘链接，或权限核实记录已超过30天。",
       );
-    let text = `${draft.title}\n\n${draft.body}\n\n${draft.tags.join(" ")}`;
-    validateOutgoingLinks(text, copy.shareUrl!, allowLinks);
-    await this.authenticated(account.id, async (a, p) => {
-      if (!(await p.verifyShare(a, copy.shareId!, copy.files))) {
-        this.db.run(
-          "UPDATE copies SET share_verified_at=NULL,error=? WHERE id=?",
-          "本人分享已失效或文件不匹配，请重新处理分享。",
-          copy.id,
-        );
-        this.changed();
-        throw new AppError(
-          "SHARE_INVALID",
-          "未能重新确认本人分享有效性，已阻止分发。",
-        );
-      }
-    });
-    this.db.run(
-      "UPDATE copies SET share_verified_at=? WHERE id=?",
-      now(),
-      copy.id,
-    );
+    let body = draft.body;
+    let text = `${draft.title}\n\n${body}\n\n${draft.tags.join(" ")}`;
+    const ownUrl = split?.shareUrl ?? copy.shareUrl!;
+    validateOutgoingLinks(text, ownUrl, allowBodyLinks);
+    if (split) {
+      await this.authenticated(account.id, () =>
+        this.operations.splitLink(split.id, false),
+      );
+    } else
+      await this.authenticated(account.id, async (a, p) => {
+        if (!(await p.verifyShare(a, copy.shareId!, copy.files))) {
+          this.db.run(
+            "UPDATE copies SET share_verified_at=NULL,error=? WHERE id=?",
+            "本人分享已失效或文件不匹配，请重新处理分享。",
+            copy.id,
+          );
+          this.changed();
+          throw new AppError(
+            "SHARE_INVALID",
+            "未能重新确认本人分享有效性，已阻止分发。",
+          );
+        }
+      });
+    if (!split)
+      this.db.run(
+        "UPDATE copies SET share_verified_at=? WHERE id=?",
+        now(),
+        copy.id,
+      );
+    let delivery: {
+      position: LinkPosition;
+      label: string;
+      url: string;
+      code: string;
+      instruction: string;
+    } | null = null;
     if (includeLink) {
-      const code = await this.secrets.get(`share:${copy.id}`);
-      text += `\n\n资源链接：${copy.shareUrl}${code ? `\n提取码：${code}` : ""}`;
+      const code = await this.secrets.get(
+        split ? `split:${split.id}` : `share:${copy.id}`,
+      );
+      const linkText = `\n\n资源链接：${ownUrl}${code ? `\n提取码：${code}` : ""}`;
+      delivery = {
+        position: linkPosition,
+        label: linkPositionLabels[linkPosition],
+        url: ownUrl,
+        code: code ?? "",
+        instruction:
+          linkPosition === "body"
+            ? "正文已附加；发布后点击核验。"
+            : "仅供填写已获准的平台字段；尚未挂载，勿粘贴到正文，发布后点击核验。",
+      };
+      if (linkPosition === "body") {
+        text += linkText;
+        body += linkText;
+      }
     }
     return {
       text,
+      body,
+      delivery,
+      contentFormat: draft.contentFormat,
+      includesOwnLink: includesOwnShareLink(body, ownUrl),
       coverId: resource.coverId,
       title: draft.title,
       platform: draft.platform,
@@ -1771,6 +810,10 @@ export class AppService {
     copy.run("PRAGMA secure_delete=ON");
     copy.run("DELETE FROM secrets");
     copy.run("UPDATE accounts SET status=?,verified_at=NULL", "disconnected");
+    copy.run("UPDATE website_accounts SET status='disconnected'");
+    copy.run(
+      "UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')",
+    );
     copy.run("VACUUM");
     copy.run("PRAGMA journal_mode=DELETE");
     copy.close();
@@ -1781,6 +824,17 @@ export class AppService {
       for (const entry of await readdir(covers))
         if (/^[a-f0-9]{64}\.png$/.test(entry))
           await copyFile(join(covers, entry), join(folder, "covers", entry));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await mkdir(join(folder, "media"), { mode: 0o700 });
+    try {
+      for (const entry of await readdir(join(this.dataPath, "media")))
+        if (studioAssetPattern.test(entry))
+          await copyFile(
+            join(this.dataPath, "media", entry),
+            join(folder, "media", entry),
+          );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -1807,6 +861,7 @@ export class AppService {
     return folder;
   }
   close() {
+    this.zhidao.close();
     this.queue.stop();
     this.db.close();
   }

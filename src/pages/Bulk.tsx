@@ -1,19 +1,37 @@
+import { Select } from "../ui/Select";
+import { z } from "zod";
+import { useLocalDraft } from "../hooks/useLocalDraft";
+import { updateSelection } from "../lib/selection";
+import { providerIds } from "../../shared/providers";
 import { useState } from "react";
+import { Button, Field, Header, Notice, Panel } from "../ui/primitives";
+import { providerName } from "../resources/labels";
 import {
-  Button,
-  Field,
-  Header,
-  Notice,
-  Panel,
-  providerName,
-} from "../components";
-import { useApp } from "../state";
+  useAppActions,
+  useAppActivity,
+  useAppData,
+  useAppNavigation,
+} from "../state";
 import type { ImportPreview, Provider } from "../../shared/types";
-export default function Bulk() {
-  const { data, command, busy, navigate } = useApp();
-  const [text, setText] = useState(""),
-    [targets, setTargets] = useState<Partial<Record<Provider, string>>>({}),
-    [preview, setPreview] = useState<ImportPreview | null>(null),
+export default function Bulk({
+  embedded = false,
+  onImported,
+}: {
+  embedded?: boolean;
+  onImported?: (ids: string[]) => void;
+}) {
+  const { data } = useAppData(),
+    { navigate } = useAppNavigation(),
+    { command } = useAppActions(),
+    { busy } = useAppActivity();
+  const draft = useLocalDraft(
+    `panxu-bulk-v1:${data!.dataPath}`,
+    { text: "", targets: {} as Partial<Record<Provider, string>> },
+    parseBulkDraft,
+  );
+  const { text, targets } = draft.value;
+  const setText = (text: string) => draft.update({ text });
+  const [preview, setPreview] = useState<ImportPreview | null>(null),
     [selected, setSelected] = useState<number[]>([]),
     [report, setReport] = useState<{
       created: number;
@@ -29,21 +47,26 @@ export default function Bulk() {
   };
   return (
     <>
-      <Header
-        title="一次整理多份资源，逐份核验后转存。"
-        description="CSV预检会识别账号、重复链接和错误行；导入后先保存在本地资料草稿。"
-      />
+      {!embedded && (
+        <Header
+          title="一次整理多份资源，逐份核验后转存。"
+          description="CSV预检会识别账号、重复链接和错误行；导入后先保存在本地资料草稿。"
+        />
+      )}
+      {draft.error ? (
+        <Notice danger>{draft.error}</Notice>
+      ) : draft.restored ? (
+        <Notice>已恢复未导入的CSV输入。请重新预检，再确认导入。</Notice>
+      ) : null}
       <Notice>
-        导入只建立本地草稿。之后可进入批量转存，统一读取分享、调整文件选择并确认目标账号后开始任务。
+        导入先建立本地草稿。继续到“检查并转存”读取分享、选择文件并确认目标账号；也可以仅导入，稍后处理。
       </Notice>
-      <Panel title="导入CSV">
+      <Panel title="导入CSV" className="bulk-input-panel">
         <div className="row">
           <Button
             disabled={busy > 0}
             onClick={async () => {
-              const file = await command<{ name: string; text: string } | null>(
-                "resource.importFile",
-              );
+              const file = await command("resource.importFile");
               if (file) {
                 setText(file.text);
                 reset();
@@ -59,7 +82,7 @@ export default function Bulk() {
         <Field label="CSV内容">
           <textarea
             aria-label="批量资源CSV"
-            className="content-textarea"
+            className="bulk-csv-input"
             value={text}
             onChange={(e) => {
               setText(e.target.value);
@@ -69,28 +92,27 @@ export default function Bulk() {
           />
         </Field>
         <div className="field-pair">
-          {(["quark", "baidu"] as const).map((provider) => (
+          {providerIds.map((provider) => (
             <Field key={provider} label={`${providerName(provider)}目标账号`}>
-              <select
+              <Select
                 aria-label={`${providerName(provider)}导入账号`}
                 value={targets[provider] ?? ""}
-                onChange={(e) => {
-                  setTargets((old) => ({
-                    ...old,
-                    [provider]: e.target.value || undefined,
-                  }));
+                onValueChange={(nextValue) => {
+                  draft.update({
+                    targets: {
+                      ...targets,
+                      [provider]: nextValue || undefined,
+                    },
+                  });
                   reset();
                 }}
-              >
-                <option value="">使用该网盘默认账号</option>
-                {data!.accounts
-                  .filter((a) => a.provider === provider && a.enabled)
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.alias}
-                    </option>
-                  ))}
-              </select>
+                items={[
+                  { value: "", label: "使用该网盘默认账号" },
+                  ...data!.accounts
+                    .filter((a) => a.provider === provider && a.enabled)
+                    .map((a) => ({ value: a.id, label: a.alias })),
+                ]}
+              />
             </Field>
           ))}
         </div>
@@ -98,10 +120,10 @@ export default function Bulk() {
           primary
           disabled={!text.trim() || busy > 0}
           onClick={async () => {
-            const result = await command<ImportPreview>(
-              "resource.importPreview",
-              { text, targets },
-            );
+            const result = await command("resource.importPreview", {
+              text,
+              targets,
+            });
             if (result) {
               setPreview(result);
               setReport(null);
@@ -144,9 +166,7 @@ export default function Bulk() {
                         checked={selected.includes(r.row)}
                         onChange={(e) =>
                           setSelected((old) =>
-                            e.target.checked
-                              ? [...old, r.row]
-                              : old.filter((n) => n !== r.row),
+                            updateSelection(old, [r.row], e.target.checked),
                           )
                         }
                       />
@@ -180,11 +200,14 @@ export default function Bulk() {
               primary
               disabled={!selected.length || busy > 0 || !!report}
               onClick={async () => {
-                const result = await command<typeof report>(
-                  "resource.importCommit",
-                  { token: preview.token, rows: selected },
-                );
-                if (result) setReport(result);
+                const result = await command("resource.importCommit", {
+                  token: preview.token,
+                  rows: selected,
+                });
+                if (result) {
+                  setReport(result);
+                  if (!result.failed) draft.clear();
+                }
               }}
             >
               导入所选{selected.length}份资料草稿
@@ -193,6 +216,10 @@ export default function Bulk() {
             {report?.copyIds.length ? (
               <Button
                 onClick={() => {
+                  if (onImported) {
+                    onImported(report.copyIds);
+                    return;
+                  }
                   localStorage.setItem(
                     "panxu-batch-seed",
                     JSON.stringify(report.copyIds.slice(0, 100)),
@@ -200,7 +227,7 @@ export default function Bulk() {
                   navigate("batch");
                 }}
               >
-                将已导入资料加入批量转存
+                继续检查并转存
                 {report.copyIds.length > 100 ? "（先选前100份）" : ""}
               </Button>
             ) : null}
@@ -221,3 +248,11 @@ export default function Bulk() {
     </>
   );
 }
+
+const parseBulkDraft = (value: unknown) =>
+  z
+    .object({
+      text: z.string(),
+      targets: z.partialRecord(z.enum(providerIds), z.string()),
+    })
+    .parse(value);

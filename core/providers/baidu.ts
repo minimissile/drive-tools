@@ -1,3 +1,4 @@
+import { digest, type UploadAsset } from "./small-upload";
 import { randomBytes } from "node:crypto";
 import type {
   Account,
@@ -14,6 +15,8 @@ import type {
   ProviderTransport,
 } from "./provider";
 import { normalizeRemoteFile, normalizedDirectory } from "./provider";
+import { normalizeShareStatistic, numericCount } from "./share-statistics";
+import { normalizeCapacity } from "./capacity";
 
 // Parse only data literals. Remote HTML is never evaluated as JavaScript.
 export function extractBaiduShareData(html: string): JsonObject {
@@ -141,6 +144,13 @@ export class BaiduProvider implements DriveProvider {
     const data = await this.sessionData(account);
     return { uid: data.uid, nickname: data.nickname };
   }
+  async capacity(account: Account) {
+    const result = await this.request(account, "/api/quota", {
+      checkexpire: 1,
+      checkfree: 1,
+    });
+    return normalizeCapacity(result.total, result.used);
+  }
   private async shareData(account: Account, source: ShareInput) {
     const short = source.shareKey.startsWith("1")
       ? source.shareKey.slice(1)
@@ -232,6 +242,68 @@ export class BaiduProvider implements DriveProvider {
     }
     throw new AppError("TOO_MANY_FILES", "目标目录过大，请选择更小的目录。");
   }
+  async upload(account: Account, parentId: string, asset: UploadAsset) {
+    const path =
+      normalizedDirectory(parentId).replace(/\/$/, "") + "/" + asset.name;
+    const token = (await this.sessionData(account)).token;
+    const blocks = [digest("md5", asset.bytes)];
+    // rtype=0 rejects a name conflict; never overwrite or silently rename.
+    const body = {
+      path,
+      size: String(asset.bytes.length),
+      isdir: "0",
+      autoinit: "1",
+      rtype: "0",
+      block_list: JSON.stringify(blocks),
+    };
+    const pre = await this.request(
+      account,
+      "/api/precreate",
+      { bdstoken: token },
+      body,
+    );
+    if (!pre.uploadid)
+      throw new AppError(
+        "UNCERTAIN_REMOTE_RESULT",
+        "百度未返回预上传任务。",
+        true,
+      );
+    if (Number(pre.return_type) !== 2) {
+      const url = new URL("https://d.pcs.baidu.com/rest/2.0/pcs/superfile2");
+      Object.entries({
+        method: "upload",
+        app_id: "250528",
+        channel: "chunlei",
+        clienttype: "0",
+        web: "1",
+        path,
+        uploadid: String(pre.uploadid),
+        partseq: "0",
+      }).forEach(([k, v]) => url.searchParams.set(k, v));
+      const form = new FormData();
+      form.set(
+        "file",
+        new Blob([new Uint8Array(asset.bytes)], { type: asset.mime }),
+        asset.name,
+      );
+      const part = await this.transport.json(account.id, url.href, {
+        method: "POST",
+        body: form,
+      });
+      if (part.md5 !== blocks[0])
+        throw new AppError(
+          "UNCERTAIN_REMOTE_RESULT",
+          "百度分块摘要核验失败。",
+          true,
+        );
+    }
+    await this.request(
+      account,
+      "/api/create",
+      { a: "commit", bdstoken: token, rtype: "0" },
+      { ...body, uploadid: String(pre.uploadid) },
+    );
+  }
   async ensureFolder(account: Account, path: string) {
     const token = (await this.sessionData(account)).token;
     let current = "";
@@ -252,6 +324,26 @@ export class BaiduProvider implements DriveProvider {
         );
     }
     return current || "/";
+  }
+  async manage(account: Account, action: "mkdir" | "rename" | "delete", path: string, name = "") {
+    const target = normalizedDirectory(path);
+    if (action !== "mkdir" && target === "/") throw new AppError("ROOT_PROTECTED", "不能修改网盘根目录。");
+    if (action !== "delete" && (!name.trim() || /[\\/:*?"<>|\x00-\x1f]/.test(name) || [".", ".."].includes(name))) throw new AppError("INVALID_NAME", "名称不能为空或包含路径和特殊字符。");
+    const token = (await this.sessionData(account)).token;
+    if (action === "mkdir") {
+      const created = normalizedDirectory(target.replace(/\/$/, "") + "/" + name);
+      await this.request(account, "/api/create", { a: "commit", bdstoken: token }, { path: created, isdir: "1", block_list: "[]" });
+      return;
+    }
+    const result = await this.request(account, "/api/filemanager", { opera: action, async: 2, onnest: "fail", bdstoken: token }, { async: "1", filelist: JSON.stringify(action === "rename" ? [{ path: target, newname: name }] : [target]) });
+    if (Array.isArray(result.info) && result.info.some((v: any) => Number(v.errno ?? 0) !== 0)) throw new AppError("FILE_OPERATION_FAILED", "百度未完成文件操作，请核对网盘结果。");
+    if (result.taskid) {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (await this.poll(account, String(result.taskid))) return;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      throw new AppError("UNCERTAIN_REMOTE_RESULT", "网盘操作尚未确认完成，请刷新目录核对，避免重复提交。", true);
+    }
   }
   async transfer(
     account: Account,
@@ -298,6 +390,27 @@ export class BaiduProvider implements DriveProvider {
         true,
       );
     return false;
+  }
+  async shareStatistics(account: Account, page: number) {
+    const result = await this.request(account, "/share/record", {
+      page,
+      num: 100,
+      order: "time",
+      desc: 1,
+    });
+    if (!Array.isArray(result.list))
+      throw new AppError(
+        "REMOTE_SCHEMA_CHANGED",
+        "百度本人分享统计列表结构已变化。",
+      );
+    const total = numericCount(result.total ?? result.total_count);
+    return {
+      items: result.list.map((row: JsonObject) =>
+        normalizeShareStatistic(row, this.id),
+      ),
+      hasMore: total == null ? result.list.length === 100 : page * 100 < total,
+      total,
+    };
   }
   private async ownRows(account: Account) {
     const rows: JsonObject[] = [];

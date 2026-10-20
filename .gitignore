@@ -16,3 +16,10 @@ test-results/
 playwright-report/
 
 .npm-cache/
+
+/build/drive-snapshot-*/
+/build/drive-source-*/
+
+/dist-dev/
+
+/build/knowledge-source-*/

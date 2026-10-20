@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile, writeFile, readdir, symlink, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fixture, removeV5 } from "./helpers";
+import { fixture, removeV5, currentSchemaVersion } from "./helpers";
 import { parseCsv } from "../core/bulk";
 import { inspectBackup, stageRestore, fileHash } from "../core/backups";
 import { Database } from "../core/database";
@@ -213,7 +212,7 @@ test("本人分享巡检区分有效、失效与网络失败；不转存、不�
   }
 });
 
-test("十个平台本地模板不调用AI、不携带来源链接，手工词池去重且不伪造指标", async () => {
+test("全部渠道本地模板不调用AI、不携带来源链接，手工词池去重且不伪造指标", async () => {
   const f = await fixture();
   try {
     const saved = await f.add(false, {
@@ -232,7 +231,7 @@ test("十个平台本地模板不调用AI、不携带来源链接，手工词池
       assert.doesNotMatch(d.body, /https?:|abcd/);
       bodies.add(d.body);
     }
-    assert.equal(bodies.size, 10);
+    assert.ok(bodies.size >= 4, "不同内容形式使用不同写作结构");
     assert.equal(f.app.snapshot().apiCalls.length, 0);
     const pool = (await f.app.invoke("pool.manual", {
       name: "本地词池",
@@ -291,11 +290,14 @@ test("内容包导出执行人工审阅、本人分享和渠道检查，导出�
     const text = await readFile(join(result.folder, "发布文案.txt"), "utf8");
     assert.match(text, /已核实/);
     assert.doesNotMatch(text, /source123|own123|提取码/);
-    assert.equal(
-      JSON.parse(await readFile(join(result.folder, "内容信息.json"), "utf8"))
-        .published,
-      false,
+    const metadata = JSON.parse(
+      await readFile(join(result.folder, "内容信息.json"), "utf8"),
     );
+    assert.equal(metadata.published, false);
+    assert.equal(metadata.draftId, draft.id);
+    assert.equal(metadata.draftVersion, 2);
+    assert.equal(metadata.resourceId, saved.resourceId);
+    assert.equal(metadata.copyId, saved.copyId);
     assert.equal(f.app.snapshot().publications.length, 0);
     f.provider.ownValid = false;
     await assert.rejects(f.app.invoke("publication.export", args), {
@@ -546,7 +548,10 @@ test("v3升级v4前备份并只执行一次迁移", async () => {
     old.exec(removeV5 + "DROP TABLE share_checks; PRAGMA user_version=3");
     old.close();
     const db = new Database(path);
-    assert.equal(db.get<any>("PRAGMA user_version").user_version, 5);
+    assert.equal(
+      db.get<any>("PRAGMA user_version").user_version,
+      currentSchemaVersion,
+    );
     db.close();
     const backups = (await readdir(f.dir)).filter((p) =>
       p.includes("migration-v3.db.before-v4-"),

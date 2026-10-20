@@ -1,14 +1,17 @@
-import { AppError } from "./errors";
+import { AppError, ServiceHttpError } from "./errors";
 export async function readLimited(
   response: Response,
   maxBytes = 8_000_000,
 ): Promise<string> {
+  return (await readLimitedBytes(response, maxBytes)).toString("utf8");
+}
+export async function readLimitedBytes(response: Response, maxBytes = 8_000_000): Promise<Buffer> {
   if (Number(response.headers.get("content-length") ?? 0) > maxBytes)
     throw new AppError(
       "RESPONSE_TOO_LARGE",
       "服务返回的数据过大，已停止读取。",
     );
-  if (!response.body) return "";
+  if (!response.body) return Buffer.alloc(0);
   const reader = response.body.getReader(),
     chunks: Uint8Array[] = [];
   let length = 0;
@@ -27,12 +30,13 @@ export async function readLimited(
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
 }
 export async function fetchJson(
   url: string,
   init: RequestInit = {},
   timeout = 30_000,
+  onResponse?: (text: string, status: number) => void,
 ): Promise<Record<string, any>> {
   const response = await fetch(url, {
     ...init,
@@ -40,6 +44,7 @@ export async function fetchJson(
     redirect: "error",
   });
   const text = await readLimited(response);
+  onResponse?.(text, response.status);
   let value: Record<string, any>;
   try {
     value = JSON.parse(text);
@@ -50,8 +55,8 @@ export async function fetchJson(
     );
   }
   if (!response.ok)
-    throw new AppError(
-      "HTTP_ERROR",
+    throw new ServiceHttpError(
+      response.status,
       `服务请求失败（HTTP ${response.status}）。${String(value.error?.message ?? value.message ?? "").slice(0, 180)}`,
     );
   return value;

@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { Database, id } from "./database";
 import { AppError } from "./errors";
+import { studioWorkingCopy } from "../shared/studio";
 
 export async function fileHash(path: string) {
   const hash = createHash("sha256");
@@ -51,7 +52,7 @@ export async function inspectBackup(folder: string) {
   const manifest = z
     .object({
       product: z.literal("panxu-studio"),
-      schemaVersion: z.number().int().min(1).max(5),
+      schemaVersion: z.number().int().min(1).max(15),
       createdAt: z.string(),
       credentialsIncluded: z.literal(false),
       databaseSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -65,7 +66,11 @@ export async function inspectBackup(folder: string) {
   const db = new DatabaseSync(pathToFileURL(file).href + "?immutable=1", {
     readOnly: true,
   });
-  let resources: number, accounts: number, drafts: number, required: string[];
+  let resources: number,
+    accounts: number,
+    drafts: number,
+    required: string[],
+    requiredMedia: string[] = [];
   try {
     db.exec("PRAGMA trusted_schema=OFF;");
     if (
@@ -88,6 +93,13 @@ export async function inspectBackup(folder: string) {
       )
       .all()
       .map((r) => String(r.cover_id));
+    if (manifest.schemaVersion >= 9)
+      requiredMedia = db
+        .prepare(
+          "SELECT DISTINCT json_extract(data,'$.asset')||'.'||json_extract(data,'$.extension') name FROM studio_jobs WHERE json_extract(data,'$.status')='completed' AND json_extract(data,'$.asset') IS NOT NULL",
+        )
+        .all()
+        .map((r) => String(r.name));
   } finally {
     db.close();
   }
@@ -119,6 +131,30 @@ export async function inspectBackup(folder: string) {
     )
   )
     throw new AppError("INVALID_BACKUP", "备份缺少资源引用的封面。");
+  let media: string[] = [];
+  try {
+    const info = await lstat(join(folder, "media"));
+    if (!info.isDirectory() || info.isSymbolicLink())
+      throw new AppError("INVALID_BACKUP", "营销素材目录不正确。");
+    media = await readdir(join(folder, "media"));
+    if (media.length > 20000)
+      throw new AppError("INVALID_BACKUP", "一次恢复最多20000份营销素材。");
+    for (const name of media) {
+      if (!/^[a-f0-9]{64}\.(png|mp4)$/.test(name))
+        throw new AppError("INVALID_BACKUP", "营销素材文件名不正确。");
+      const path = join(folder, "media", name);
+      await regularFile(path, 128 * 1024 * 1024);
+      if ((await fileHash(path)) !== name.slice(0, 64))
+        throw new AppError(
+          "BACKUP_HASH_MISMATCH",
+          "营销素材校验失败，未恢复。",
+        );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (requiredMedia.some((name) => !media.includes(name)))
+    throw new AppError("INVALID_BACKUP", "备份缺少已完成的营销素材。");
   return {
     createdAt: manifest.createdAt,
     databaseSha256: manifest.databaseSha256,
@@ -126,6 +162,7 @@ export async function inspectBackup(folder: string) {
     accounts,
     drafts,
     covers,
+    media,
   };
 }
 
@@ -156,17 +193,59 @@ export async function stageRestore(
           "复制期间封面发生变化，未启用恢复副本。",
         );
     }
+    await mkdir(join(destination, "media"), { mode: 0o700 });
+    for (const name of source.media) {
+      await copyFile(
+        join(folder, "media", name),
+        join(destination, "media", name),
+      );
+      if (
+        (await fileHash(join(destination, "media", name))) !== name.slice(0, 64)
+      )
+        throw new AppError(
+          "BACKUP_CHANGED",
+          "复制期间营销素材发生变化，请重新预检。",
+        );
+    }
     const db = new Database(file);
     try {
       db.transaction(() => {
+        // Working text is user content and travels with drafts. Connection
+        // settings are still reset; only validated, associated edits survive.
+        const workingCopies = db.all<{ key: string; value: string }>(
+          "SELECT key,value FROM settings WHERE key LIKE 'studio:working:%'",
+        );
         db.run("DELETE FROM settings");
+        for (const row of workingCopies) {
+          let raw: unknown;
+          try {
+            raw = JSON.parse(row.value);
+          } catch {
+            raw = null;
+          }
+          const parsed = studioWorkingCopy.safeParse(raw);
+          if (
+            !parsed.success ||
+            row.key !== `studio:working:${parsed.data.draftId}` ||
+            !db.get("SELECT id FROM drafts WHERE id=?", parsed.data.draftId)
+          )
+            throw new AppError(
+              "INVALID_BACKUP",
+              "备份中的草稿暂存记录不完整，未启用恢复副本。",
+            );
+          db.setSetting(row.key, parsed.data);
+        }
         db.run("DELETE FROM secrets");
         db.run("DELETE FROM note_exports");
         db.run("DELETE FROM outbox");
         db.run("DELETE FROM share_checks");
         db.run(
+          "UPDATE share_statistics_syncs SET status='failed',error='从备份恢复的历史统计，请重新登录并同步。'",
+        );
+        db.run(
           "UPDATE accounts SET status='disconnected',verified_at=NULL,error=NULL",
         );
+        db.run("UPDATE website_accounts SET status='disconnected'");
         db.run(
           "UPDATE copies SET share_verified_at=NULL,note_status='not_configured',error=NULL",
         );
@@ -180,6 +259,9 @@ export async function stageRestore(
           "UPDATE transfer_batch_items SET state='failed',error='从备份恢复，请重新读取分享。' WHERE state IN ('pending','inspecting','ready')",
         );
         db.run("UPDATE drafts SET reviewed=0");
+        db.run("UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')");
+        db.run("UPDATE operation_runs SET status='paused',message='从备份恢复，请核对账号、费用和远端结果后继续' WHERE status!='completed'");
+        db.run("UPDATE operation_items SET data=json_set(data,'$.reviewed',json('false'))");
         db.run(
           "UPDATE browser_bindings SET link_permission='none',verified_at=NULL,last_checked_at=NULL,last_opened_at=NULL,open_error=NULL",
         );

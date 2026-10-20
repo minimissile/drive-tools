@@ -1,0 +1,348 @@
+{
+  "date": "2026-10-17",
+  "project": "盘序",
+  "mode": "Operate",
+  "theme": "white only",
+  "scope": "用户指出的数据读取提示批量整改：加载、刷新、无结果、读取失败与恢复。",
+  "findings": [
+    {
+      "id": "D01",
+      "priority": "P2",
+      "kind": "视觉与实现一致性",
+      "problem": "资源列表、导出记录、已存分享、更新状态等加载提示使用裸p/small或无区域占位的行内文字",
+      "reproduce": "延迟resource.page、resourceExport.history、search.targets或updater.state读取",
+      "impact": "提示贴边、区域空白，字号、间距和图标不一致",
+      "code": [
+        "src/ui/DataState.tsx",
+        "src/ui/data-state.css",
+        "src/ui/primitives.tsx"
+      ],
+      "resolution": "建立统一DataState、LoadingState和行内Loading；首次列表读取使用静态骨架，面板与紧凑区域各有固定布局。删除旧Empty/Loading/boot-loading样式定义。",
+      "status": "resolved"
+    },
+    {
+      "id": "D02",
+      "priority": "P2",
+      "kind": "交互",
+      "problem": "刷新时清空统计与知识库表格，或者额外插入进度行导致内容移动",
+      "reproduce": "延迟列表筛选或刷新请求，观察既有内容位置",
+      "impact": "用户失去上下文，列表跳动",
+      "code": [
+        "src/ui/primitives.tsx",
+        "src/pages/Library.tsx",
+        "src/pages/SearchOperations.tsx",
+        "src/pages/ShareStatistics.tsx",
+        "src/traffic/TrafficKnowledge.tsx",
+        "src/resource-export/ExportRequest.tsx"
+      ],
+      "resolution": "保留已读内容；进度进入搜索框、既有标题信息区或刷新按钮，资源库使用已有列表元信息区。",
+      "status": "resolved"
+    },
+    {
+      "id": "D03",
+      "priority": "P1",
+      "kind": "状态正确性",
+      "problem": "部分读取失败被当作空库展示；更新初次读取失败后没有恢复入口",
+      "reproduce": "拒绝search.list、traffic.knowledge.list、resourceExport.history和updater.state读取",
+      "impact": "误导用户重新录入或持续等待，缺少恢复路径",
+      "code": [
+        "src/ui/QueryError.tsx",
+        "src/pages/SearchOperations.tsx",
+        "src/traffic/TrafficKnowledge.tsx",
+        "src/updates-state.tsx",
+        "src/UpdatePanel.tsx"
+      ],
+      "resolution": "读取失败与空结果分离，提供原地重试；知识库与更新首读复用useIpcQuery；更新订阅仍按revision处理。",
+      "status": "resolved"
+    },
+    {
+      "id": "D04",
+      "priority": "P2",
+      "kind": "视觉与恢复反馈",
+      "problem": "同一读取失败同时出现浮层与持久提示，恢复后旧错误浮层仍在",
+      "reproduce": "资源列表、导出或snapshot读取失败后重试",
+      "impact": "错误重复、抢占视线，恢复状态不清楚",
+      "code": [
+        "src/state/useSnapshot.ts",
+        "src/state.tsx",
+        "src/pages/Library.tsx",
+        "src/resource-export/useResourceExport.ts",
+        "src/search/Dialogs.tsx"
+      ],
+      "resolution": "由持久读取状态统一呈现错误和重试，移除相同只读错误的重复notify；显式操作失败、已成功但刷新失败的提示保留。",
+      "status": "resolved"
+    },
+    {
+      "id": "D05",
+      "priority": "P2",
+      "kind": "状态与布局",
+      "problem": "首次读取前显示默认页码或0条，资源库无结果状态停在列表上部，导出提前出现首次使用引导",
+      "reproduce": "首次读取冻结、筛选无结果或延迟导出历史恢复",
+      "impact": "元数据与真实状态不一致，大结果区上下失衡",
+      "code": [
+        "src/pages/Library.tsx",
+        "src/pages/Batch.tsx",
+        "src/pages/ShareStatistics.tsx",
+        "src/pages/ResourceExport.tsx",
+        "src/resource-export/ExportRequest.tsx"
+      ],
+      "resolution": "未完成读取时仅显示已知页容量或中性占位；空态填充并居中在结果区域；导出工作区先恢复、失败后显示唯一重试入口。",
+      "status": "resolved"
+    },
+    {
+      "id": "D06",
+      "priority": "P2",
+      "kind": "一致性与可访问性",
+      "problem": "发布验收、目录读取、模型目录等小区域各自显示进度和错误",
+      "reproduce": "打开或延迟对应记录读取",
+      "impact": "同类反馈缺少统一尺寸与恢复规范",
+      "code": [
+        "src/publication/DeliveryCheck.tsx",
+        "src/publication/DeliveryOptions.tsx",
+        "src/pages/Split.tsx",
+        "src/pages/Batch.tsx",
+        "src/ai/ModelSettings.tsx",
+        "src/ui/SearchSelect.tsx"
+      ],
+      "resolution": "小区域复用紧凑状态组件，搜索弹层复用统一错误与加载反馈，保留业务提示、人工确认和费用限制。",
+      "status": "resolved"
+    }
+  ],
+  "architecture": {
+    "commonComponents": [
+      "src/ui/DataState.tsx",
+      "src/ui/QueryError.tsx",
+      "src/ui/primitives.tsx"
+    ],
+    "styles": "src/ui/data-state.css",
+    "readLifecycle": [
+      "src/api/useIpcQuery.ts（复用）",
+      "src/traffic/TrafficKnowledge.tsx",
+      "src/updates-state.tsx",
+      "src/state/useSnapshot.ts（读取反馈与提示解耦）"
+    ],
+    "guidance": [
+      "AGENTS.md",
+      "docs/design-tokens.json"
+    ],
+    "newDependencies": false
+  },
+  "verification": {
+    "runtime": "当前npm run dev、dist-dev与Vite，临时数据库，阻断或模拟外部服务",
+    "unitTests": {
+      "command": "npm test",
+      "passed": 203,
+      "failed": 0
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit --noUnusedLocals --noUnusedParameters",
+      "passed": true
+    },
+    "build": {
+      "passed": true,
+      "output": "/private/tmp/panxu-verified-states-build-XDTdE4"
+    },
+    "e2e": {
+      "e2e-resource-export.mjs": {
+        "passed": true,
+        "checks": [
+          "文字与截图组合输入 → 视觉模型解析 → 表头改名、映射及调序",
+          "33份全库分批 → 暂停 → 页面重载读取检查点 → 完成筛选与匹配依据",
+          "真实保存对话框端口 → XLSX与CSV落盘 → 核对列序、中文与筛选范围",
+          "未匹配资料手工补选 → 选中资源生成短文 → 编辑导出 → 选择变更提示重新生成",
+          "1320px与840px布局、历史离线回看、页面身份、无框架覆盖层及前端异常"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-export-qa-16W3xy",
+        "errors": []
+      },
+      "e2e.mjs": {
+        "passed": true,
+        "checks": [
+          "启动身份与首屏",
+          "14个侧边栏入口均使用不同且对应功能的图标",
+          "同网盘多账号与工作账号切换",
+          "资源、上传及粘贴封面、账号归属与SQLite落库",
+          "中文全文检索与空结果",
+          "编辑同副本不重复创建或转存",
+          "手工写稿、版本、审阅与未核验分享发布拦截",
+          "流量、账单、任务、连接页面无虚假成功记录",
+          "下拉词分析记录持久化、重复提交合并、计费确认、60秒限频与离线结果",
+          "人民币估算与美元实费分列、微小金额精度、未知实费及待核预留",
+          "840px桌面最小窗口布局",
+          "重载后数据持久化",
+          "批量CSV预检、错行与重复拦截、仅落本地草稿",
+          "手工词池去重、资源关联及复制编辑",
+          "十个平台本地模板、初始未审阅、无AI请求及未核验分享导出拦截",
+          "本地说明文件经对话框导入并保存",
+          "超过500份的分类统计、分页、全文检索、准确编辑、历史稿读取及创作绑定",
+          "批量转存只读预检、权利确认、同账号队列、本人建链和完整归档（本地网盘响应）",
+          "三级树状目录、逐项独立勾选、按层保留浅层文件/空目录、父子重叠提示、收起/搜索保留选择及键盘展开",
+          "三级拆分保留浅层文件和空目录、不读取第四层、只为所选文件/目录建本人链接",
+          "拆分结果归属复核导出、默认不导出提取码、840px新页面布局",
+          "一致性备份导出、凭据排除、恢复预检及重启确认门槛",
+          "恢复空间启动、凭据与预算重置、切回原空间及原数据保留（测试器接管重启进程）",
+          "无空白、框架覆盖层或前端异常"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-evidence-cIIGH6",
+        "errors": []
+      },
+      "e2e-updates.mjs": {
+        "passed": true,
+        "checks": [
+          "development build explains its disabled status without a network request",
+          "check, safe notes, skip reminder and persistent auto-check preference",
+          "progress rendering, global banner navigation, cancellation",
+          "network failure retry and corrupt package installation block",
+          "download completion, busy-task install block, explicit install dispatch, compact layout and clean console"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-update-evidence-Dq7A2T",
+        "errors": []
+      },
+      "e2e-search.mjs": {
+        "passed": true,
+        "checks": [
+          "已有词池 → 去重选题 → 已核验子资料关联 → 内容工作室 CSDN 教程",
+          "新草稿版本保留关联 → 人工审阅 → 发布准备展示正确子链接 → 回填文章 → 效果零值与未知值持久化",
+          "原三级目录树保留；本人拆分结果新增用于创作入口",
+          "看板与窄窗口显示、重启后选题与效果仍保留"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-search-evidence-gaRa1Q",
+        "errors": []
+      },
+      "e2e-share-statistics.mjs": {
+        "passed": true,
+        "checks": [
+          "页面身份、首屏、空态及账号入口",
+          "真实IPC与三盘只读适配同步；迅雷认证失败保留历史快照",
+          "四盘过滤与真实0、缺失指标、100+下限分别显示",
+          "整份资料与拆分子链接关联、路径搜索",
+          "分页与全部筛选结果CSV导出，无提取码",
+          "二次同步快照增量、消失分享历史保留",
+          "900px与390px无页面溢出、无框架错误、控制台健康、未打开分享页或写远端数据"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-share-statistics-evidence-uCTNpP",
+        "errors": []
+      },
+      "e2e-visual.mjs": {
+        "passed": true,
+        "checks": [
+          "复合搜索统一外框焦点、筛选等高、缩略图无挤压文字、详情与核心操作首屏可达",
+          "次要操作菜单键盘开关、禁用与焦点恢复，翻页回到列表顶部，筛选空态释放详情列",
+          "1366×768、1920×1080与1024×768原生窗口布局",
+          "录入表单滚动区与底部保存栏物理分离，底部授权和操作可达",
+          "统计首次使用不显示空指标与无效筛选，账号同步进入首屏",
+          "紧凑渠道选择、手工编辑、暂存、保存版本与人工审阅流程",
+          "840 原生窗口档案对话框操作区始终可达",
+          "原生840与200%缩放无页面横向溢出，关闭档案返回选中行"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-visual-raqqee",
+        "errors": []
+      },
+      "e2e-ui-audit.mjs": {
+        "passed": true,
+        "checks": [
+          "录入长文本切页与重载恢复，授权不恢复，保存后清理暂存",
+          "CSV输入切页保留，预检与提交保持显式",
+          "手工词池未保存输入切页保留",
+          "设置输入切页保留、分区保存、备份更新定位",
+          "异常任务默认直达，状态数量准确，完成记录按需展开",
+          "公共可搜索资源选择器查找并选中全库资源",
+          "原生840窗口选择即呈现档案，Esc返回并恢复列表焦点",
+          "14模块原生840窗口无页面溢出，工作室默认紧凑渠道",
+          "原生840窗口200%缩放下设置可滚动且无页面横向溢出",
+          "提示文本不透明且使用校正颜色；系统暗色下仍白色，减少动态效果",
+          "初始化读取失败停止假加载，点击重试恢复而不需重启",
+          "列表读取失败不会冒充空库，显式重试恢复",
+          "慢读取晚于新筛选返回时不会覆盖当前结果",
+          "提交中禁止重复操作，提交成功后的刷新失败不丢返回值，重试只读取视图"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ui-audit-OFNflz",
+        "errors": []
+      },
+      "e2e-studio-media.mjs": {
+        "passed": true,
+        "checks": [
+          "四种形式与自定义模板 → AI方案 → 实际PNG生成、显示、导出及审阅门槛",
+          "文案另存版本保留已有图片，不重新生成或增加素材费用",
+          "图文组图按所选页数生成独立图片并保留页面文案与画面要求",
+          "真实动态视频接口任务 → 重载保留ID → 查询下载MP4 → 本地播放器实际播放、导出且无重复提交",
+          "发布准备显示当前已审阅版本的视频成品",
+          "1320px与840px布局、页面身份、无前端异常、无真实外部调用"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-studio-qa-miHFp6",
+        "errors": []
+      },
+      "e2e-controls.mjs": {
+        "passed": true,
+        "checks": [
+          "下拉初始标签、空值约定、真实鼠标选择、方向键/Home/End、Enter、Esc焦点恢复、外部关闭",
+          "42项长列表滚动与超长文案、筛选生效、搜索下拉远程读取、数字值迁移",
+          "空值与禁用占位、分类建议选择与自由输入、模型/窗口ID离线手填、普通/密码/多行/复合/下拉统一单层焦点",
+          "表单隐式标签仍可访问；模态弹窗内选择、字母匹配与焦点约束",
+          "减少动态效果保留焦点且关闭过渡；840px/200%实际捕获；14模块无可见系统下拉与页面横向溢出"
+        ],
+        "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-controls-0bg2ry",
+        "errors": []
+      },
+      "e2e-ui.mjs": {
+        "passed": true,
+        "checks": [
+          "当前源码启动、非空首屏、无框架错误遮罩",
+          "统一弹窗：初始焦点、Tab/Shift+Tab 边界、Esc、关闭后焦点恢复、长标题",
+          "统一 Tabs：左右方向键、Home/End、单一 Tab 停靠点；手工词池本地保存",
+          "搜索视图语义与共用弹窗输入、退出",
+          "仅白色主题；设置保存；资源导出切页恢复；未调用任何生成接口",
+          "5 个页面的 1024px 布局无页面级横向溢出"
+        ],
+        "errors": []
+      },
+      "e2e-data-states.mjs": {
+        "passed": true,
+        "checks": [
+          "首次资源读取使用有内边距的列表占位，无假空态、假0条或可用批量操作",
+          "筛选慢响应保留已有内容和列表高度，刷新提示归入工具栏，禁止旧列表的批量检查",
+          "无结果状态使用列表区域的居中布局；下一次请求未完成时不提前显示无结果",
+          "读取失败完整占据结果区、不冒充空库；唯一重试入口恢复查询并保留筛选",
+          "批量草稿加载有统一占位，失败与真实无结果分离；未执行转存预检或远端操作",
+          "导出历史的局部加载、空态和读取失败统一，失败可原地恢复",
+          "搜索运营慢读取使用区域占位，失败不显示引导空态且可重试",
+          "知识库复用读取生命周期，失败不再冒充空库，支持本地重试",
+          "更新状态首读失败停止持续加载，重试只读取本地状态，不检查或下载远端更新",
+          "应用启动使用同一加载/失败组件，错误后原地恢复而不需重启",
+          "840px与200%下长提示和操作可达；减少动态效果保留文字反馈并停止转动",
+          "缺少桌面桥接时显示既有打开方式提示，不启动本地读取或产生异常"
+        ],
+        "evidence": "/Users/nuke/Desktop/drive-tools/.impeccable/critique/evidence/2026-10-17-data-states",
+        "errors": []
+      }
+    },
+    "uniqueSuites": 11,
+    "checkGroups": 96,
+    "stateScenarios": 12,
+    "viewports": [
+      "1320×900原生窗口",
+      "840×900原生窗口",
+      "840px窗口200%缩放"
+    ],
+    "reducedMotion": "静态骨架，减少动态效果时进度图标停止转动，文字反馈保留",
+    "screenshots": [
+      ".impeccable/critique/evidence/2026-10-17-data-states/boot-loading-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/export-history-loading-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/export-workspace-loading-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/knowledge-error-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-empty-840.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-empty-centered-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-error-840-zoom200.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-error-840.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-initial-loading-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-loading-840-zoom200.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-read-error-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/library-refresh-retains-content-1320.png",
+      ".impeccable/critique/evidence/2026-10-17-data-states/update-state-loading-1320.png"
+    ]
+  },
+  "limits": [
+    "外部网盘、AI、收费查询、转存、建链、发布及系统安装按要求使用模拟验证，没有使用真实账号执行这些操作。",
+    "未生成安装包或提升版本，构建输出位于临时目录。"
+  ]
+}

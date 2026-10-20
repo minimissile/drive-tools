@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-17",
+  "project": "盘序",
+  "mode": "Operate",
+  "scope": "Toast 状态语义、公共实现、层级、可访问性与阅读反馈",
+  "theme": "white only",
+  "findings": [
+    {
+      "id": "T01",
+      "priority": "P2",
+      "kind": "交互与视觉",
+      "problem": "普通 Toast 固定使用主题蓝色，成功、限制提醒、下一步指引无法区分",
+      "reproduce": "保存账号或导出资料后观察完成提示；超出图片数量限制时观察提示",
+      "code": [
+        "src/state/feedback.tsx",
+        "src/lib/feedback.ts",
+        "src/ui/Toast.tsx",
+        "src/ui/toast.css"
+      ],
+      "resolution": "改为显式 success/error/warning/info 契约；成功绿色、错误红色、警告琥珀色、信息蓝色。批量迁移所有 notify 调用，命令成功默认绿色并支持显式消息状态。",
+      "status": "resolved"
+    },
+    {
+      "id": "T02",
+      "priority": "P2",
+      "kind": "交互",
+      "problem": "提交已完成但快照读取失败使用错误颜色，局部失败与整体失败的表达不准确",
+      "reproduce": "account.add 完成后模拟下一次 snapshot 读取失败；分享统计同步部分账号失败",
+      "code": [
+        "src/state.tsx",
+        "src/pages/ShareStatistics.tsx",
+        "src/pages/Accounts.tsx",
+        "src/pages/Studio.tsx"
+      ],
+      "resolution": "提交成功后读取失败、部分成功、保存后清理暂存失败归为警告；全部同步失败为错误、全部跳过为信息。保留禁止重复提交的事实性指引。",
+      "status": "resolved"
+    },
+    {
+      "id": "T03",
+      "priority": "P2",
+      "kind": "视觉与可访问性",
+      "problem": "Toast 与通用按钮样式混用，关闭按钮颜色与状态不一致；页面内部挂载受工作区或弹窗层级与焦点范围影响",
+      "reproduce": "在录入页触发附件限制；在管理账号弹窗内模拟保存失败并尝试键盘关闭提示",
+      "code": [
+        "src/ui/ToastLayer.tsx",
+        "src/ui/Dialog.tsx",
+        "src/ui/Toast.tsx",
+        "src/ui/toast.css"
+      ],
+      "resolution": "通用 ToastPortal 默认挂到 body；弹窗通过公共 host 注册将 Toast 放入当前弹窗焦点边界。关闭按钮复用 Button，所属样式统一使用语义颜色。各状态有对应图标和可读状态标签。",
+      "status": "resolved"
+    },
+    {
+      "id": "T04",
+      "priority": "P2",
+      "kind": "边界与反馈",
+      "problem": "普通提示没有悬停或聚焦阅读保护，长文本没有受控滚动区",
+      "reproduce": "将鼠标悬停提示或使用键盘聚焦关闭按钮；在 840px 窗口与 200% 下显示超长中文和路径",
+      "code": [
+        "src/ui/Toast.tsx",
+        "src/ui/toast.css"
+      ],
+      "resolution": "成功/信息 6500ms 后关闭，悬停/聚焦暂停；警告/错误持续到手动关闭。长文本换行并在限定高度滚动，关闭按钮始终可达；180ms 入场兼容减少动态效果。",
+      "status": "resolved"
+    }
+  ],
+  "architecture": {
+    "types": "src/lib/feedback.ts",
+    "presentation": "src/ui/Toast.tsx",
+    "styleOwner": "src/ui/toast.css",
+    "layerAndFocus": "src/ui/ToastLayer.tsx",
+    "state": "src/state/feedback.tsx",
+    "removedStyles": [
+      "src/styles/controls.css 中两套 Toast 定义",
+      "src/styles/responsive.css 中 Toast 局部覆盖"
+    ],
+    "guidance": [
+      "AGENTS.md",
+      "docs/design-tokens.json"
+    ]
+  },
+  "validation": {
+    "typescript": "npx tsc --noEmit: passed",
+    "unit": "npm test: 203 passed",
+    "toast": "npm run test:e2e:toasts: 8 groups passed",
+    "interaction": "npm run test:e2e:ui-audit: 14 groups passed",
+    "ui": "npm run test:e2e:ui: 6 groups passed after final dialog/layer changes",
+    "build": "Vite production renderer build to temporary panxu-toast-build-r90AEL passed; no installer/version change",
+    "visual": "Viewed current-source native captures: success, warning, info, modal error, 840px/200% long content. All foreground/background contrast >= 4.5:1.",
+    "environment": "existing npm run dev at localhost:5173; all tests used disposable databases, local mock outcomes and blocked external requests",
+    "evidence": ".impeccable/critique/evidence/2026-10-17-toast-feedback",
+    "external": "真实付费查询、远端网盘、发布及 Windows 实机未执行；不属于本轮 Toast 颜色与交互验证范围。"
+  }
+}

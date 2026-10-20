@@ -1,0 +1,28 @@
+/* CSV is an import surface, not the long-form content editor. */
+.bulk-input-panel > .field {
+  margin-top: 16px;
+}
+.bulk-input-panel > .field-pair {
+  row-gap: 16px;
+  margin: 16px 0;
+}
+.bulk-csv-input {
+  min-height: 220px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.restore-preview {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.operation-item {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.operation-item:last-of-type {
+  border-bottom: 0;
+}
+
+/* Directory explorer: one checked node equals one independent share. */

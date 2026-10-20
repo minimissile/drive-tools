@@ -13,7 +13,30 @@ export const file: RemoteFile = {
   isDirectory: false,
   size: 120,
 };
+export const currentSchemaVersion = 15;
+export const removeV15 = "DROP TABLE website_accounts;";
+export const removeV14 =
+  removeV15 + "ALTER TABLE resources DROP COLUMN source_kind; DROP TABLE drive_share_intents; DROP TABLE mining_history; DROP TABLE operation_items; DROP TABLE operation_runs; DROP TABLE zhidao_accounts;";
+export const removeV13 =
+  removeV14 + "DROP TABLE insertion_runs; DROP TABLE insertion_materials;";
+export const removeV12 = removeV13 + "DROP TABLE publication_targets;";
+export const removeV11 = removeV12 + "DROP TABLE publication_delivery_checks;";
+export const removeV10 =
+  removeV11 +
+  "ALTER TABLE drafts DROP COLUMN content_format; ALTER TABLE browser_bindings DROP COLUMN capabilities;";
+export const removeV9 =
+  removeV10 +
+  "DROP TABLE studio_jobs; DROP TABLE studio_packages; DROP TABLE studio_templates;";
+export const removeV8 =
+  removeV9 +
+  "DROP TABLE traffic_items; DROP TABLE traffic_queries; DROP TABLE traffic_knowledge_meta;";
+export const removeV7 =
+  removeV8 + "DROP TABLE share_statistics; DROP TABLE share_statistics_syncs;";
+export const removeV6 =
+  removeV7 +
+  "DROP TABLE effect_records; DROP INDEX drafts_topic; ALTER TABLE drafts DROP COLUMN topic_id; ALTER TABLE drafts DROP COLUMN split_item_id; ALTER TABLE drafts DROP COLUMN split_share_version; DROP TABLE search_topics;";
 export const removeV5 =
+  removeV6 +
   "DROP TABLE split_run_items; DROP TABLE split_items; DROP TABLE split_runs; DROP TABLE transfer_batch_items; DROP TABLE transfer_batches; DROP INDEX jobs_kind_target; ALTER TABLE jobs DROP COLUMN kind; ALTER TABLE jobs DROP COLUMN target_id; ALTER TABLE jobs DROP COLUMN batch_id;";
 export class TestProvider implements DriveProvider {
   readonly id = "quark" as const;
@@ -80,7 +103,11 @@ export class TestProvider implements DriveProvider {
     };
   }
 }
-export async function fixture() {
+export async function fixture(
+  overrides: Partial<
+    Record<import("../shared/types").Provider, DriveProvider>
+  > = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "panxu-test-")),
     provider = new TestProvider(),
     key = randomBytes(32);
@@ -120,7 +147,15 @@ export async function fixture() {
   const app = new AppService(
     dir,
     codec,
-    { quark: provider, baidu: provider },
+    {
+      quark: provider,
+      baidu: provider,
+      uc: provider,
+      xunlei: provider,
+      guangya: provider,
+      pikpak: provider,
+      ...overrides,
+    },
     ports,
     () => {},
   );

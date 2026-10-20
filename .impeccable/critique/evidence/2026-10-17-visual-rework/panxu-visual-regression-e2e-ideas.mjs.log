@@ -1,0 +1,12 @@
+{
+  "passed": 4,
+  "checks": [
+    "local references → bounded SEO/GEO request → grouped ideas → explicit selection → append-only 5118 handoff without query",
+    "saving retains original resource binding, unverified provenance and empty metrics after resource changes",
+    "840px no overflow; reload/history reads offline; type filter and visible selection stay accurate",
+    "invalid AI citation rejected with fee retained, previous history intact, no blank renderer or console errors"
+  ],
+  "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ideas-qa-FkS3OF",
+  "dataPath": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-ideas-e2e-WSKK88",
+  "errors": []
+}

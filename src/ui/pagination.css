@@ -1,0 +1,8 @@
+.pagination {
+  padding: 12px 16px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pagination[data-single-page] {
+  justify-content: flex-end;
+}

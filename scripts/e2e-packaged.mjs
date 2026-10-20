@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-const root = resolve(process.env.PANXU_RELEASE_DIR ?? "release");
+import { readFileSync } from "node:fs";
+const version = JSON.parse(readFileSync("package.json", "utf8")).version;
+const root = resolve(process.env.PANXU_RELEASE_DIR ?? `release/${version}`);
 const candidates =
   process.platform === "win32"
     ? [join(root, "win-unpacked", "盘序.exe")]

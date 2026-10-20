@@ -339,13 +339,16 @@ export class Operations {
       );
     const files: RemoteFile[] = [];
     let completed = false;
+    let cursor: string | undefined;
     for (let page = 1; page <= 100; page++) {
       const inspected = await provider.inspect(
         account,
         source,
         parents[0] ?? "0",
         page,
+        cursor,
       );
+      cursor = inspected.nextCursor;
       files.push(...inspected.files);
       if (!prior.length && files.length > 100)
         throw new AppError(
@@ -822,7 +825,7 @@ export class Operations {
       share.ownerUid !== account.uid ||
       parsed.provider !== account.provider ||
       parsed.url === resource.sourceUrl ||
-      !(await provider.verifyShare(account, share.id, [item.file]))
+      !(await provider.verifyShare(account, share.id, [item.file], share.code))
     )
       throw new AppError(
         "OWNERSHIP_UNVERIFIED",

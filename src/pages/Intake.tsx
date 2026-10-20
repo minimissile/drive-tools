@@ -1,44 +1,46 @@
+import { IntakeOptionField } from "../resources/IntakeOptionField";
+import { useIntakeShare } from "../resources/useIntakeShare";
+import { chooseIntakeAccount } from "../resources/intake-share";
+import { useIpcQuery } from "../api/useIpcQuery";
+import { QueryError } from "../ui/QueryError";
+import { defaultResourceCategories } from "../../shared/intake";
+import { Select } from "../ui/Select";
+import { Workspace } from "../ui/Workspace";
+import { ActionBar } from "../ui/ActionBar";
+import { useAttachmentDraft } from "../hooks/useAttachmentDraft";
+import { z } from "zod";
+import { useLocalDraft } from "../hooks/useLocalDraft";
+import { updateSelection } from "../lib/selection";
+import { ipc } from "../api/client";
+import { providerIds, providerSpecs } from "../../shared/providers";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
-  ArrowLeft,
   ArrowUp,
+  ExternalLink,
   File as FileIcon,
   Folder,
   ImagePlus,
   Upload,
   X,
 } from "lucide-react";
-import { useApp } from "../state";
 import {
-  Button,
-  Empty,
-  Field,
-  Header,
-  Notice,
-  Panel,
-  formatSize,
-  providerName,
-} from "../components";
-import type {
-  Provider,
-  RemoteFile,
-  ShareInput,
-  ShareInspection,
-} from "../../shared/types";
+  useAppActions,
+  useAppActivity,
+  useAppData,
+  useAppNavigation,
+  useAppSelection,
+} from "../state";
+import { Button, Empty, Field, Header, Notice, Panel } from "../ui/primitives";
+import { providerName } from "../resources/labels";
+import { formatSize } from "../lib/format";
+import type { Provider, ShareInspection } from "../../shared/types";
 export default function Intake() {
-  const {
-    data,
-    command,
-    activeAccounts,
-    editResourceId,
-    editCopyId,
-    navigate,
-    select,
-    busy,
-    notify,
-    resource,
-  } = useApp();
+  const { data } = useAppData(),
+    { activeAccounts, select, resource } = useAppSelection(),
+    { editResourceId, editCopyId, navigate } = useAppNavigation(),
+    { command, notify } = useAppActions(),
+    { busy } = useAppActivity();
   const existing =
       data!.resources.find((r) => r.id === editResourceId) ??
       (resource?.id === editResourceId ? resource : undefined),
@@ -48,45 +50,73 @@ export default function Intake() {
         : (existing?.copies.find((c) => c.id === editCopyId) ??
           existing?.copies[0]);
   const chooseAccount = (p: Provider) =>
-    data!.accounts.find(
-      (a) => a.id === activeAccounts[p] && a.provider === p && a.enabled,
-    )?.id ??
-    data!.accounts.find((a) => a.provider === p && a.enabled && a.isDefault)
-      ?.id ??
-    data!.accounts.find((a) => a.provider === p && a.enabled)?.id ??
-    "";
-  const [provider, setProvider] = useState<Provider>(
-      existing?.provider ?? "quark",
-    ),
-    [accountId, setAccountId] = useState(
-      priorCopy?.accountId ?? chooseAccount(existing?.provider ?? "quark"),
-    ),
-    [sourceText, setSourceText] = useState(existing?.sourceUrl ?? ""),
-    [code, setCode] = useState(""),
-    [title, setTitle] = useState(existing?.title ?? ""),
-    [category, setCategory] = useState(existing?.category ?? "效率办公"),
-    [tags, setTags] = useState(existing?.tags.join("，") ?? ""),
-    [summary, setSummary] = useState(existing?.summary ?? ""),
-    [directory, setDirectory] = useState(
-      priorCopy?.directory.slice(0, priorCopy.directory.lastIndexOf("/")) ??
+    chooseIntakeAccount(data!.accounts, activeAccounts, p);
+  const draft = useLocalDraft(
+    `panxu-intake-v1:${data!.dataPath}:${editResourceId ?? "new"}:${editCopyId ?? "new"}`,
+    {
+      provider: existing?.provider ?? "quark",
+      accountId:
+        priorCopy?.accountId ?? chooseAccount(existing?.provider ?? "quark"),
+      sourceText: existing?.sourceUrl ?? "",
+      code: "",
+      title: existing?.title ?? "",
+      category: existing?.category ?? "效率办公",
+      tags: existing?.tags.join("，") ?? "",
+      summary: existing?.summary ?? "",
+      directory:
+        priorCopy?.directory.slice(0, priorCopy.directory.lastIndexOf("/")) ??
+        data!.accounts.find(
+          (a) => a.id === chooseAccount(existing?.provider ?? "quark"),
+        )?.defaultDirectory ??
         "/盘序资源",
-    ),
-    [rightsConfirmed, setRights] = useState(false),
-    [cover, setCover] = useState<string | null | undefined>(undefined),
-    [inspection, setInspection] = useState<ShareInspection | null>(null),
+    },
+    parseIntakeDraft,
+  );
+  const {
+    provider,
+    accountId,
+    sourceText,
+    code,
+    title,
+    category,
+    tags,
+    summary,
+    directory,
+  } = draft.value;
+  const setProvider = (provider: Provider) => draft.update({ provider });
+  const setAccountId = (accountId: string) => draft.update({ accountId });
+  const setCode = (code: string) => draft.update({ code });
+  const setTitle = (title: string) => draft.update({ title });
+  const setCategory = (category: string) => draft.update({ category });
+  const setTags = (tags: string) => draft.update({ tags });
+  const setSummary = (summary: string) => draft.update({ summary });
+  const setDirectory = (directory: string) => draft.update({ directory });
+  const imageDraft = useAttachmentDraft(
+    `panxu-intake-cover:${data!.dataPath}:${editResourceId ?? "new"}:${editCopyId ?? "new"}`,
+  );
+  const cover = imageDraft.value;
+  const setCover = imageDraft.update;
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const [inspection, setInspection] = useState<ShareInspection | null>(null),
     [selected, setSelected] = useState<string[]>([]),
     [parents, setParents] = useState<{ id: string; name: string }[]>([
       { id: "0", name: "分享根目录" },
     ]);
+  const inspectionRevision = useRef(0);
   const account = data!.accounts.find((a) => a.id === accountId);
   const imageInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (existing?.coverId)
-      void window.panxu
-        .invoke<string>("cover.get", { id: existing.coverId })
-        .then(setCover)
+    if (existing?.coverId && cover === undefined && !imageDraft.loading)
+      void ipc("cover.get", { id: existing.coverId })
+        .then(imageDraft.restore)
         .catch(() => {});
-  }, [existing?.coverId]);
+  }, [existing?.coverId, imageDraft.loading]);
   const changeProvider = (value: Provider) => {
     setProvider(value);
     setAccountId(chooseAccount(value));
@@ -98,37 +128,50 @@ export default function Intake() {
     setSelected([]);
     setParents([{ id: "0", name: "分享根目录" }]);
   };
-  const parse = async () => {
-    const result = await command<ShareInput>("share.parse", {
-      text: sourceText,
-      code,
-    });
-    if (!result) return;
-    setSourceText(result.url);
-    setCode(result.code);
-    if (result.provider !== provider) changeProvider(result.provider);
-    return result;
-  };
-  const inspect = async (parentId = "0", page = 1) => {
-    const parsed = await parse();
-    if (!parsed) return;
-    const targetAccount =
-      parsed.provider === provider
-        ? accountId
-        : (activeAccounts[parsed.provider] ??
-          data!.accounts.find(
-            (a) => a.provider === parsed.provider && a.enabled && a.isDefault,
-          )?.id ??
-          "");
-    const result = await command<ShareInspection>("share.inspect", {
+  const options = useIpcQuery("resource.intakeOptions", { accountId });
+  const link = useIntakeShare({
+    sourceText,
+    code,
+    provider,
+    accountId,
+    directory,
+    accounts: data!.accounts,
+    activeAccounts,
+    onParsed: (result) => {
+      draft.update({
+        sourceText: result.share.url,
+        code: result.share.code,
+        provider: result.provider,
+        accountId: result.accountId,
+        directory: result.directory,
+      });
+      if (result.provider !== provider || result.accountId !== accountId) {
+        inspectionRevision.current++;
+        setInspection(null);
+        setSelected([]);
+        setParents([{ id: "0", name: "分享根目录" }]);
+      }
+    },
+  });
+  const inspect = async (parentId = "0", page = 1, cursor?: string) => {
+    const parsed = await link.parse();
+    if (!parsed || !mounted.current) return;
+    const targetAccount = parsed.accountId;
+    const requestRevision = inspectionRevision.current;
+    const result = await command("share.inspect", {
       accountId: targetAccount,
-      sourceText: parsed.url,
-      code: parsed.code,
+      sourceText: parsed.share.url,
+      code: parsed.share.code,
       resourceId: existing?.id,
       parentId,
       page,
+      cursor,
     });
-    if (result) {
+    if (
+      result &&
+      mounted.current &&
+      requestRevision === inspectionRevision.current
+    ) {
       setInspection(
         page > 1 && inspection?.parentId === parentId
           ? { ...result, files: [...inspection.files, ...result.files] }
@@ -143,48 +186,60 @@ export default function Intake() {
       !["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
       file.size > 8 * 1024 * 1024
     ) {
-      notify("请选择8MB以内的PNG、JPEG或WebP图片。", true);
+      notify("请选择8MB以内的PNG、JPEG或WebP图片。", "warning");
       return;
     }
     const reader = new FileReader();
     reader.onload = () => setCover(String(reader.result));
     reader.readAsDataURL(file);
   };
+  const saveInFlight = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const save = async (enqueue: boolean) => {
-    const result = await command<{
-      resourceId: string;
-      copyId: string;
-      jobId: string | null;
-    }>(
-      "resource.save",
-      {
-        id: existing?.id,
-        copyId: priorCopy?.id,
-        title,
-        sourceText,
-        extractionCode: code || undefined,
-        category,
-        tags: tags
-          .split(/[,，]/)
-          .map((t) => t.trim())
-          .filter(Boolean),
-        summary,
-        coverData: cover,
-        accountId,
-        directory,
-        rightsConfirmed,
-        selectedFiles: inspection?.files.filter((f) => selected.includes(f.id)),
-        enqueue,
-      },
-      enqueue ? "转存任务已创建，目标账号已锁定。" : "资源信息已保存在本地。",
-    );
-    if (result) {
-      select(result.resourceId, result.copyId);
-      navigate(enqueue ? "tasks" : "library");
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSubmitting(true);
+    try {
+      const parsed = await link.parse();
+      if (!parsed || !mounted.current) return;
+      const result = await command(
+        "resource.save",
+        {
+          id: existing?.id,
+          copyId: priorCopy?.id,
+          title,
+          sourceText: parsed.share.url,
+          extractionCode: parsed.share.code || undefined,
+          category,
+          tags: tags
+            .split(/[,，]/)
+            .map((t) => t.trim())
+            .filter(Boolean),
+          summary,
+          coverData: cover,
+          accountId: parsed.accountId,
+          directory: parsed.directory,
+          selectedFiles: inspection?.files.filter((f) =>
+            selected.includes(f.id),
+          ),
+          enqueue,
+        },
+        enqueue ? "转存任务已创建，目标账号已锁定。" : "资源信息已保存在本地。",
+      );
+      if (result) {
+        draft.clear();
+        imageDraft.clear();
+        if (!mounted.current) return;
+        select(result.resourceId, result.copyId);
+        navigate(enqueue ? "tasks" : "library");
+      }
+    } finally {
+      saveInFlight.current = false;
+      if (mounted.current) setSubmitting(false);
     }
   };
   return (
-    <div
+    <Workspace
       onPaste={(e) => {
         const image = [...e.clipboardData.items]
           .find((i) => i.kind === "file" && i.type.startsWith("image/"))
@@ -194,11 +249,65 @@ export default function Intake() {
           readImage(image);
         }
       }}
+      footer={
+        data!.accounts.some((a) => a.enabled) ? (
+          <ActionBar
+            label="资源保存操作"
+            status={
+              <>
+                {!title.trim() || !sourceText.trim() || !accountId
+                  ? "保存前请填写资源标题、分享链接并选择账号。"
+                  : selected.length
+                    ? `已选 ${selected.length} / 100 项，可创建转存任务。`
+                    : "资料可先保存为草稿；开始转存前请读取并选择文件。"}
+              </>
+            }
+          >
+            <Button
+              disabled={
+                submitting ||
+                imageDraft.loading ||
+                busy > 0 ||
+                !title ||
+                !accountId ||
+                !sourceText
+              }
+              onClick={() => void save(false)}
+            >
+              保存资料{!existing ? "草稿" : ""}
+            </Button>
+            {priorCopy?.status !== "ready" ? (
+              <Button
+                primary
+                disabled={
+                  submitting ||
+                  imageDraft.loading ||
+                  busy > 0 ||
+                  !selected.length ||
+                  !title ||
+                  !accountId
+                }
+                onClick={() => void save(true)}
+              >
+                保存并开始转存 <ArrowDownToLine size={15} />
+              </Button>
+            ) : null}
+          </ActionBar>
+        ) : null
+      }
     >
       <Header
         title={existing ? "继续整理这份资源。" : "录入一份资源。"}
         description="先保存信息，再选择文件并转存；封面支持上传、拖放和直接粘贴。"
       />
+      {imageDraft.error ? <Notice danger>{imageDraft.error}</Notice> : null}
+      {draft.error ? (
+        <Notice danger>{draft.error}</Notice>
+      ) : draft.restored ? (
+        <Notice>
+          已恢复本页未保存的输入。开始转存前请重新读取并选择文件。
+        </Notice>
+      ) : null}
       {!data!.accounts.some((a) => a.enabled) ? (
         <Empty
           title="先添加一个本人网盘账号"
@@ -212,7 +321,11 @@ export default function Intake() {
         </Empty>
       ) : (
         <>
-          <div className="stepper">
+          <small>
+            归档流程：填写资料 → 核验与转存 → 本人分享 →
+            本地归档。下方先保存资料或读取文件。
+          </small>
+          <div className="stepper" aria-label="资源归档流程">
             {["资源信息", "校验与转存", "本人分享", "本地归档"].map((x, i) => (
               <div key={x} className={i === 0 ? "active" : ""}>
                 <b>{i + 1}</b>
@@ -226,11 +339,16 @@ export default function Intake() {
                 <Field label="网盘分享链接" required hint="支持整段分享文案">
                   <textarea
                     aria-label="网盘分享链接"
+                    aria-required="true"
                     value={sourceText}
                     disabled={!!existing}
-                    placeholder="粘贴百度或夸克网盘链接，也可以粘贴带提取码的整段文案"
+                    placeholder="粘贴百度、夸克、UC、迅雷、光鸭或 PikPak 分享文案"
+                    onBlur={() => void link.parse()}
                     onChange={(e) => {
-                      setSourceText(e.target.value);
+                      link.invalidate();
+                      inspectionRevision.current++;
+                      draft.update({ sourceText: e.target.value, code: "" });
+                      setParents([{ id: "0", name: "分享根目录" }]);
                       setInspection(null);
                       setSelected([]);
                     }}
@@ -238,17 +356,17 @@ export default function Intake() {
                 </Field>
                 <div className="row">
                   <span className="tag">{providerName(provider)}网盘</span>
-                  <Button
-                    quiet
-                    disabled={!sourceText || busy > 0}
-                    onClick={() => void parse()}
-                  >
-                    解析链接与提取码
-                  </Button>
+                  <small>
+                    {link.parsing
+                      ? "正在识别链接与提取码…"
+                      : "离开输入框后自动识别，并选择对应网盘的保存位置。"}
+                  </small>
                 </div>
+                {link.error ? <Notice danger>{link.error}</Notice> : null}
                 <Field label="资源标题" required>
                   <input
                     aria-label="资源标题"
+                    aria-required="true"
                     maxLength={200}
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
@@ -256,24 +374,18 @@ export default function Intake() {
                   />
                 </Field>
                 <div className="field-pair">
-                  <Field label="分类" required>
-                    <input
-                      list="category-options"
+                  <Field as="div" label="分类" required>
+                    <IntakeOptionField
+                      kind="category"
+                      label="分类"
                       value={category}
-                      onChange={(e) => setCategory(e.target.value)}
+                      items={
+                        options.data?.categories ?? defaultResourceCategories
+                      }
+                      accountId={accountId}
+                      onValueChange={setCategory}
+                      onAdded={options.reload}
                     />
-                    <datalist id="category-options">
-                      {[
-                        "效率办公",
-                        "技能学习",
-                        "学习资料",
-                        "设计素材",
-                        "技术开发",
-                        "其他",
-                      ].map((c) => (
-                        <option key={c}>{c}</option>
-                      ))}
-                    </datalist>
                   </Field>
                   <Field label="提取码" hint="如有">
                     <input
@@ -281,7 +393,10 @@ export default function Intake() {
                       value={code}
                       maxLength={30}
                       onChange={(e) => {
+                        link.invalidate();
+                        inspectionRevision.current++;
                         setCode(e.target.value);
+                        setSelected([]);
                         setInspection(null);
                       }}
                     />
@@ -305,16 +420,19 @@ export default function Intake() {
                 <Button
                   disabled={busy > 0}
                   onClick={async () => {
-                    const file = await command<{
-                      name: string;
-                      text: string;
-                    } | null>("resource.summaryFile");
+                    const file = await command("resource.summaryFile");
                     if (file) {
                       if (file.text.length > 30000)
-                        notify("说明文件超过30000字，请整理后再导入。", true);
+                        notify(
+                          "说明文件超过30000字，请整理后再导入。",
+                          "warning",
+                        );
                       else {
                         setSummary(file.text);
-                        notify(`已载入 ${file.name}，保存资料后生效。`);
+                        notify(
+                          `已载入 ${file.name}，保存资料后生效。`,
+                          "success",
+                        );
                       }
                     }
                   }}
@@ -367,53 +485,77 @@ export default function Intake() {
               <Panel title="保存位置">
                 <div className="fields">
                   <Field label="网盘类型">
-                    <select
+                    <Select
                       value={provider}
                       disabled={!!priorCopy}
-                      onChange={(e) =>
-                        changeProvider(e.target.value as Provider)
-                      }
-                    >
-                      <option value="quark">夸克</option>
-                      <option value="baidu">百度</option>
-                    </select>
+                      onValueChange={(nextValue) => {
+                        link.invalidate();
+                        inspectionRevision.current++;
+                        changeProvider(nextValue as Provider);
+                      }}
+                      items={[
+                        ...providerIds.map((id) => ({
+                          value: id,
+                          label: <>{providerSpecs[id].name}网盘</>,
+                        })),
+                      ]}
+                    />
                   </Field>
                   <Field label="转存与分享账号">
-                    <select
+                    <Select
                       aria-label="转存与分享账号"
                       value={accountId}
                       disabled={!!priorCopy}
-                      onChange={(e) => {
-                        setAccountId(e.target.value);
+                      onValueChange={(nextValue) => {
+                        link.invalidate();
+                        inspectionRevision.current++;
+                        setAccountId(nextValue);
                         setDirectory(
-                          data!.accounts.find((a) => a.id === e.target.value)
+                          data!.accounts.find((a) => a.id === nextValue)
                             ?.defaultDirectory ?? "/盘序资源",
                         );
                         setInspection(null);
                         setSelected([]);
                       }}
-                    >
-                      <option value="" disabled>
-                        选择本人账号
-                      </option>
-                      {data!.accounts
-                        .filter((a) => a.provider === provider && a.enabled)
-                        .map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.alias}
-                            {a.status !== "connected" ? " · 需登录" : ""}
-                            {a.isDefault ? " · 默认" : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </Field>
-                  <Field label="目标目录" hint="自动创建资源专用子目录">
-                    <input
-                      value={directory}
-                      disabled={!!priorCopy}
-                      onChange={(e) => setDirectory(e.target.value)}
+                      items={[
+                        { value: "", label: "选择本人账号", disabled: true },
+                        ...data!.accounts
+                          .filter((a) => a.provider === provider && a.enabled)
+                          .map((a) => ({
+                            value: a.id,
+                            label: (
+                              <>
+                                {a.alias}
+                                {a.status !== "connected" ? " · 需登录" : ""}
+                                {a.isDefault ? " · 默认" : ""}
+                              </>
+                            ),
+                          })),
+                      ]}
                     />
                   </Field>
+                  <Field
+                    as="div"
+                    label="目标目录"
+                    hint="可新增选项，转存时创建资源专用子目录"
+                  >
+                    <IntakeOptionField
+                      key={accountId}
+                      kind="directory"
+                      label="目标目录"
+                      value={directory}
+                      disabled={!!priorCopy}
+                      accountId={accountId}
+                      items={
+                        options.data?.directories ?? [
+                          account?.defaultDirectory ?? "/盘序资源",
+                        ]
+                      }
+                      onValueChange={setDirectory}
+                      onAdded={options.reload}
+                    />
+                  </Field>
+                  <QueryError error={options.error} onRetry={options.reload} />
                 </div>
                 <small>
                   转存和创建分享都使用此账号。已有副本不能通过编辑资料改绑。
@@ -450,15 +592,37 @@ export default function Intake() {
             <Panel
               title="选择需要转存的文件"
               extra={
-                <Button
-                  disabled={busy > 0 || !accountId || !sourceText}
-                  onClick={() => void inspect()}
-                >
-                  <ArrowDownToLine size={14} />
-                  读取分享内容
-                </Button>
+                <div className="row">
+                  <Button
+                    quiet
+                    disabled={busy > 0 || !accountId || !sourceText}
+                    onClick={() =>
+                      void command("share.open", {
+                        accountId,
+                        sourceText,
+                        code,
+                        resourceId: existing?.id,
+                      })
+                    }
+                  >
+                    <ExternalLink size={14} />
+                    在本人窗口打开分享
+                  </Button>
+                  <Button
+                    disabled={busy > 0 || !accountId || !sourceText}
+                    onClick={() => void inspect()}
+                  >
+                    <ArrowDownToLine size={14} />
+                    读取分享内容
+                  </Button>
+                </div>
               }
             >
+              {["xunlei", "guangya", "pikpak"].includes(provider) ? (
+                <small>
+                  若读取要求验证，请在本人窗口打开此分享，完成官方验证后关闭窗口，再读取内容。
+                </small>
+              ) : null}
               {inspection ? (
                 <>
                   <div className="row folder-breadcrumb">
@@ -485,11 +649,17 @@ export default function Intake() {
                             aria-label={`选择${f.name}`}
                             type="checkbox"
                             checked={selected.includes(f.id)}
+                            disabled={
+                              !selected.includes(f.id) && selected.length >= 100
+                            }
                             onChange={(e) =>
                               setSelected((ids) =>
-                                e.target.checked
-                                  ? [...ids, f.id]
-                                  : ids.filter((id) => id !== f.id),
+                                updateSelection(
+                                  ids,
+                                  [f.id],
+                                  e.target.checked,
+                                  100,
+                                ),
                               )
                             }
                           />
@@ -527,7 +697,11 @@ export default function Intake() {
                   {inspection.hasMore ? (
                     <Button
                       onClick={() =>
-                        void inspect(inspection.parentId, inspection.page + 1)
+                        void inspect(
+                          inspection.parentId,
+                          inspection.page + 1,
+                          inspection.nextCursor,
+                        )
                       }
                       disabled={busy > 0}
                     >
@@ -546,39 +720,23 @@ export default function Intake() {
               此副本已完成归档。本页只更新资源资料，不重复转存或替换已有分享。
             </Notice>
           )}
-          <label className="checkbox rights-check">
-            <input
-              type="checkbox"
-              checked={rightsConfirmed}
-              onChange={(e) => setRights(e.target.checked)}
-            />
-            我有权保存和分享该资源
-          </label>
-          <div className="actions">
-            <Button
-              disabled={busy > 0 || !title || !accountId || !sourceText}
-              onClick={() => void save(false)}
-            >
-              保存资料{!existing ? "草稿" : ""}
-            </Button>
-            {priorCopy?.status !== "ready" ? (
-              <Button
-                primary
-                disabled={
-                  busy > 0 ||
-                  !rightsConfirmed ||
-                  !selected.length ||
-                  !title ||
-                  !accountId
-                }
-                onClick={() => void save(true)}
-              >
-                保存并开始转存 <ArrowDownToLine size={15} />
-              </Button>
-            ) : null}
-          </div>
         </>
       )}
-    </div>
+    </Workspace>
   );
 }
+
+const parseIntakeDraft = (value: unknown) =>
+  z
+    .object({
+      provider: z.enum(providerIds),
+      accountId: z.string(),
+      sourceText: z.string(),
+      code: z.string(),
+      title: z.string(),
+      category: z.string(),
+      tags: z.string(),
+      summary: z.string(),
+      directory: z.string(),
+    })
+    .parse(value);

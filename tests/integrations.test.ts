@@ -278,6 +278,34 @@ test("比特实名、客户端拦截及平台登录页不会误报编辑器就�
   );
 });
 
+test("CSDN入口支持官方创作中心跳转，HTTP错误和其他账号域名仍阻止交付", () => {
+  assert.doesNotThrow(() =>
+    assertEditorPage(
+      "https://editor.csdn.net/",
+      "https://mp.csdn.net/mp_blog/creation/editor",
+    ),
+  );
+  assert.throws(
+    () =>
+      assertEditorPage(
+        "https://editor.csdn.net/",
+        "https://editor.csdn.net/",
+        "",
+        403,
+      ),
+    { code: "EDITOR_HTTP_ERROR" },
+  );
+  for (const current of [
+    "https://passport.csdn.net/login",
+    "https://mp.csdn.net.attacker.test/edit",
+    "https://user:pass@mp.csdn.net/edit",
+    "https://mp.csdn.net:444/edit",
+  ])
+    assert.throws(() => assertEditorPage("https://mp.csdn.net/edit", current), {
+      code: "EDITOR_REDIRECTED",
+    });
+});
+
 test("比特导航失败会持久显示原因，重试成功清除错误，均不标记为已发布", async () => {
   const f = await fixture();
   try {

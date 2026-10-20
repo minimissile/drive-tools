@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { readFile, readdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { fixture, file, removeV5 } from "./helpers";
+import { fixture, file, removeV5, currentSchemaVersion } from "./helpers";
 import { Database } from "../core/database";
 import { AppError } from "../core/errors";
 import type { DriveProvider, OwnShare } from "../core/providers/provider";
@@ -40,7 +40,7 @@ async function setup() {
     listed.push(parent);
     return folders.get(parent) ?? [];
   };
-  p.transfer = async (a, _s, selected, parent, path) => {
+  p.transfer = async (_a, _s, selected, parent, path) => {
     f.provider.transfers++;
     folders.set(
       parent,
@@ -639,7 +639,10 @@ test("v4升级前创建v5快照且保留原任务种类，重开不重复备份"
     old.exec(removeV5 + "PRAGMA user_version=4");
     old.close();
     const db = new Database(path);
-    assert.equal(db.get<any>("PRAGMA user_version").user_version, 5);
+    assert.equal(
+      db.get<any>("PRAGMA user_version").user_version,
+      currentSchemaVersion,
+    );
     db.close();
     new Database(path).close();
     const snapshots = (await readdir(f.dir)).filter((name) =>

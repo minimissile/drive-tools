@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-17",
+  "scope": "侧栏删除冗余入口与工作空间身份块，并精修导航细节",
+  "mode": "Operate",
+  "changes": [
+    "删除顶部页面下拉按钮、展开状态及失效响应式样式",
+    "删除底部头像和工作空间身份块，保留版本与紧凑开发调试入口",
+    "统一导航尺寸、图标、文字和任务计数排列，调整分组间距和选中态",
+    "侧栏导航独立滚动，底部信息不遮挡入口；缩放后的紧凑导航直接展示"
+  ],
+  "code": [
+    "src/App.tsx",
+    "src/styles/shell.css",
+    "src/styles/responsive.css",
+    "src/styles/knowledge.css"
+  ],
+  "validation": {
+    "checks": [
+      "删除页面下拉入口与工作空间身份块，保留全部 13 个导航入口和四个分组",
+      "1320px 与 840px/760px、600px 高度下导航可滚动，底部不遮挡，键盘切页和唯一选中态正确",
+      "导航复用公共键盘焦点及减少动态效果设置",
+      "200% 缩放进入紧凑布局后导航仍可直接使用，不依赖已删除下拉按钮"
+    ],
+    "errors": []
+  },
+  "typecheck": "npx tsc --noEmit passed",
+  "screenshots": ".impeccable/critique/evidence/2026-10-17-sidebar",
+  "scope_limit": "仅验证侧栏与资源库/设置的导航切换，不执行各业务页面功能回归。"
+}

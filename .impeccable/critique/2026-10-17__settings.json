@@ -1,0 +1,182 @@
+{
+  "date": "2026-10-17",
+  "project": "盘序",
+  "mode": "Operate",
+  "theme": "white only",
+  "scope": "仅设置页六分区与直接关联的版本更新面板；未执行其他业务页全量回归。",
+  "findings": [
+    {
+      "id": "S01",
+      "priority": "P2",
+      "kind": "布局与交互",
+      "problem": "长设置页顶部导航滚出视野，缺少当前分区位置",
+      "reproduction": "逐个点击六个设置分区并滚动，原导航消失。",
+      "resolution": "SettingsNav 统一吸附导航、滚动高亮和按实际导航高度计算锚点间距；窄窗口横排。",
+      "code": [
+        "src/settings/SettingsNav.tsx",
+        "src/settings/settings.css"
+      ],
+      "evidence": "before-traffic-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S02",
+      "priority": "P2",
+      "kind": "保存反馈",
+      "problem": "知识库和比特保存按钮位于面板外，范围与编辑状态不直观",
+      "reproduction": "编辑 AI 预算及知识库选项，分别查看保存入口和提示。",
+      "resolution": "SettingsActions 统一面板内保存区及分区状态；useSettingsEditor 保持部分字段保存并保留其他草稿，避免保存期间新编辑被清除。",
+      "code": [
+        "src/settings/SettingsActions.tsx",
+        "src/settings/useSettingsEditor.ts",
+        "src/pages/Settings.tsx"
+      ],
+      "evidence": "before-notes-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S03",
+      "priority": "P2",
+      "kind": "样式依赖与维护",
+      "problem": "发布映射 fieldset、联调操作的样式依赖工作室样式加载",
+      "reproduction": "全新窗口直接打开设置，核对发布映射边框和排布。",
+      "resolution": "把设置专属规则从 studio.css 和全局样式移到 settings.css，使用分隔线分组，修复表格状态排布。",
+      "code": [
+        "src/settings/settings.css",
+        "src/styles/workspaces.css",
+        "src/styles/responsive.css",
+        "src/studio/studio.css"
+      ],
+      "evidence": "before-bindings-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S04",
+      "priority": "P2",
+      "kind": "密钥交互",
+      "problem": "密钥移除无确认，不能查看本次输入，移除后焦点可能丢失",
+      "reproduction": "已配置 Key 后直接点击移除。",
+      "resolution": "统一 SecretField；仅显示本次输入，保存后清空并遮蔽；移除前行内确认，取消和成功后恢复焦点。",
+      "code": [
+        "src/settings/SecretField.tsx"
+      ],
+      "evidence": "secret-removal-confirmation-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S05",
+      "priority": "P2",
+      "kind": "表单与校验",
+      "problem": "套餐单价和每日单位数输入未对齐，直接点击保存不触发数值约束",
+      "reproduction": "在单价输入 -1 后点击保存配置。",
+      "resolution": "统一提示块与字段间距，接口配置用 form 提交触发 min/max/step 校验；AI 负预算内联错误并定位。",
+      "code": [
+        "src/settings/ApiPlanForm.tsx",
+        "src/settings/useSettingsEditor.ts",
+        "src/settings/settings.css"
+      ],
+      "evidence": "before-traffic-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S06",
+      "priority": "P2",
+      "kind": "读取与恢复",
+      "problem": "本地模型目录首次读取缺少完整加载和失败重试状态",
+      "reproduction": "模拟 ai.modelCatalog 延迟或失败。",
+      "resolution": "复用 useIpcQuery、LoadingState、QueryError；保留原模型选择，仅显式刷新官方模型。",
+      "code": [
+        "src/ai/ModelSettings.tsx"
+      ],
+      "evidence": "model-catalog-error-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S07",
+      "priority": "P2",
+      "kind": "连接反馈",
+      "problem": "读取指纹窗口后没有结果数量、空列表下一步，地址变更可能残留旧列表",
+      "reproduction": "模拟空窗口列表，再读取一条，修改接口地址。",
+      "resolution": "补齐结果和恢复提示，地址或密钥变更后清空旧窗口结果。",
+      "code": [
+        "src/pages/Settings.tsx"
+      ],
+      "evidence": "after-browser-840.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S08",
+      "priority": "P2",
+      "kind": "编辑焦点",
+      "problem": "从映射表点击编辑不会定位上方表单",
+      "reproduction": "滚动至既有映射，点击编辑。",
+      "resolution": "定位并聚焦账号别名；明确添加/编辑状态，保持核验确认不自动勾选。",
+      "code": [
+        "src/settings/BrowserBindings.tsx"
+      ],
+      "evidence": "after-bindings-840.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S09",
+      "priority": "P2",
+      "kind": "备份操作层级",
+      "problem": "打开目录、导出和预检聚集，恢复信息缺少清晰分组",
+      "reproduction": "打开备份与更新，选择备份预检。",
+      "resolution": "按当前目录、导出、恢复分组；预检计数统一 dl；保留重启和新工作空间确认及所有业务限制。",
+      "code": [
+        "src/settings/WorkspaceBackup.tsx",
+        "src/settings/settings.css"
+      ],
+      "evidence": "before-maintenance-1320.png",
+      "status": "resolved"
+    },
+    {
+      "id": "S10",
+      "priority": "P3",
+      "kind": "视觉一致性",
+      "problem": "版本发布信息使用嵌套卡片，设置表单长内容的断点依赖窗口而非可用区域",
+      "reproduction": "查看更新面板，缩小窗口并检查长路径、表格。",
+      "resolution": "更新发布信息改分隔线；模型、套餐和字段按内容容器重排，表格局部滚动；840px/200% 实际截图核对。",
+      "code": [
+        "src/updates.css",
+        "src/ai/models.css",
+        "src/settings/settings.css"
+      ],
+      "evidence": "browser-200-percent.png",
+      "status": "resolved"
+    }
+  ],
+  "validation": {
+    "runtime": "现有 npm run dev / Vite 5173 + dist-dev Electron；临时数据库，外部请求阻止，服务操作模拟。",
+    "settings": [
+      "首次直达设置页，发布映射样式完整，不依赖工作室；使用自定义下拉框",
+      "负预算阻止提交并定位错误；分区保存只提交所属字段，保留其他未保存编辑",
+      "刷新后恢复非敏感设置草稿，保存状态准确",
+      "密钥默认遮蔽、按需显示，保存后清空；移除可取消，确认后返回输入焦点",
+      "模型目录慢读取、失败、重试有统一状态，保留选择且不重复弹错误提示",
+      "接口价格与调用上限原生表单校验有效，保存配置不自动启用或查询付费接口",
+      "模拟比特连接及窗口列表：空列表给出恢复路径，重新读取后可在映射中使用",
+      "编辑既有映射自动定位表单，账号能力确认不自动勾选，取消可回到添加状态",
+      "模拟备份导出与预检，恢复必须显式确认；重新预检清除旧确认，不触发真实恢复",
+      "840px 下六个分区导航可达、表单按内容宽度重排，长路径和映射表格不撑破页面",
+      "200% 缩放无页面横向溢出；减少动态效果设置下输入焦点动画关闭"
+    ],
+    "updates": {
+      "passed_groups": 5,
+      "evidence": "/var/folders/wh/x6t1yf457k37rhq9d89k9jm80000gn/T/panxu-update-evidence-b1lhat"
+    },
+    "unit_tests": {
+      "command": "node --import tsx --test tests/ai-models.test.ts tests/ui-state.test.ts tests/updates.test.ts",
+      "passed": 24
+    },
+    "typecheck": "npx tsc --noEmit: passed",
+    "build": "npx vite build --outDir /tmp/panxu-settings-build-5VoHBT: passed",
+    "renderer_errors": []
+  },
+  "limits": [
+    "未用真实 OpenRouter/5118/比特服务验证远端账号、权限、价格或窗口状态；没有触发付费接口。",
+    "备份导出/预检使用模拟返回；未执行真实工作空间恢复或操作系统更新安装。"
+  ],
+  "evidence_directory": ".impeccable/critique/evidence/2026-10-17-settings"
+}

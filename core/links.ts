@@ -1,11 +1,19 @@
-import type { Platform, ShareInput } from "../shared/types";
+import type { Platform, Provider, ShareInput } from "../shared/types";
+import { providerSpecs } from "../shared/providers";
 import { platformSpecs } from "../shared/platforms";
 import { AppError } from "./errors";
 
-const hosts: Record<string, "quark" | "baidu"> = {
+const hosts: Record<string, Provider> = {
   "pan.quark.cn": "quark",
   "pan.baidu.com": "baidu",
   "yun.baidu.com": "baidu",
+  "drive.uc.cn": "uc",
+  "pan.uc.cn": "uc",
+  "fast.uc.cn": "uc",
+  "pan.xunlei.com": "xunlei",
+  "guangyapan.com": "guangya",
+  "www.guangyapan.com": "guangya",
+  "mypikpak.com": "pikpak",
 };
 export function parseShare(text: string, explicitCode = ""): ShareInput {
   const candidates = text.match(/https?:\/\/[^\s<>"'，。；）)]+/gi) ?? [];
@@ -43,16 +51,20 @@ export function parseShare(text: string, explicitCode = ""): ShareInput {
     const code =
       explicitCode.trim() ||
       url.searchParams.get("pwd") ||
+      (provider === "guangya" ? url.searchParams.get("code") : "") ||
       text.match(/(?:提取码|访问码|密码)\s*[:：]?\s*([a-zA-Z0-9]{4,8})/)?.[1] ||
       "";
     return {
       provider,
       shareKey,
-      url: `https://${provider === "quark" ? "pan.quark.cn" : "pan.baidu.com"}/s/${shareKey}`,
+      url: `https://${providerSpecs[provider].shareHost}/s/${shareKey}`,
       code,
     };
   }
-  throw new AppError("INVALID_LINK", "首版支持百度和夸克网盘分享链接。");
+  throw new AppError(
+    "INVALID_LINK",
+    "支持百度、夸克、UC、迅雷、光鸭和 PikPak 分享链接。",
+  );
 }
 export function validateEditorUrl(platform: Platform, text: string): string {
   const spec = platformSpecs.find((p) => p.id === platform);
@@ -139,6 +151,17 @@ export function validatePublicationUrl(
     x: ["x.com", "twitter.com"],
     zhihu: ["www.zhihu.com", "zhuanlan.zhihu.com"],
     csdn: ["blog.csdn.net"],
+    bilibili: ["www.bilibili.com", "bilibili.com", "b23.tv"],
+    toutiao: ["www.toutiao.com", "toutiao.com", "m.toutiao.com"],
+    baijiahao: ["baijiahao.baidu.com"],
+    juejin: ["juejin.cn"],
+    "51cto": ["blog.51cto.com"],
+    cnblogs: ["www.cnblogs.com", "cnblogs.com"],
+    segmentfault: ["segmentfault.com"],
+    oschina: ["my.oschina.net", "www.oschina.net"],
+    tencent: ["cloud.tencent.com", "developer.cloud.tencent.com"],
+    aliyun: ["developer.aliyun.com"],
+    jianshu: ["www.jianshu.com", "jianshu.com"],
   };
   const url = new URL(text);
   if (

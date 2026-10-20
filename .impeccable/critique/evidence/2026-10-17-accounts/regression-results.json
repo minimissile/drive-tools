@@ -1,0 +1,18 @@
+[
+  {
+    "suite": "e2e-ui-audit",
+    "exitCode": 0
+  },
+  {
+    "suite": "e2e-controls",
+    "exitCode": 0
+  },
+  {
+    "suite": "e2e-toasts",
+    "exitCode": 0
+  },
+  {
+    "suite": "e2e",
+    "exitCode": 0
+  }
+]

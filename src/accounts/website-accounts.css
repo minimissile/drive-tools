@@ -1,0 +1,72 @@
+.website-accounts-workspace {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.website-account-add {
+  display: grid;
+  grid-template-columns: minmax(180px, 320px) auto;
+  justify-content: start;
+  gap: var(--space-4);
+  align-items: end;
+  margin-top: var(--space-4);
+}
+.website-account-list {
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+}
+.website-account-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 1fr) auto;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  align-items: center;
+}
+.website-account-row + .website-account-row {
+  border-top: 1px solid var(--line);
+}
+.website-account-identity {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+}
+.website-account-identity > svg {
+  color: var(--blue);
+  flex-shrink: 0;
+}
+.website-account-identity > div,
+.website-account-state {
+  display: grid;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.website-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  max-width: 300px;
+}
+@media (max-width: 1100px) {
+  .website-account-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .website-account-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
+@media (max-width: 900px) {
+  .website-account-row {
+    grid-template-columns: 1fr;
+  }
+  .website-account-add {
+    grid-template-columns: 1fr;
+  }
+  .website-account-add > .button {
+    justify-self: start;
+  }
+}

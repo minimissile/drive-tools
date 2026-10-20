@@ -1,0 +1,22 @@
+.workspace-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.workspace-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+.workspace-frame > .page-actions {
+  flex: none;
+}
+@media (max-width: 700px) {
+  .workspace-scroll {
+    overflow: visible;
+    padding: 0;
+  }
+}

@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { AppProvider } from "./state";
+import { UpdatesProvider } from "./updates-state";
 import "./styles.css";
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -27,7 +28,9 @@ createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <AppProvider>
-        <App />
+        <UpdatesProvider>
+          <App />
+        </UpdatesProvider>
       </AppProvider>
     </ErrorBoundary>
   </React.StrictMode>,
