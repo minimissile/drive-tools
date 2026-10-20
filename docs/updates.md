@@ -75,6 +75,8 @@ Apple 会员和 Windows 证书是两项独立资质。申请审核通过后仍�
 
 ## 发布流程
 
+0.0.1 例外：用户明确要求不等待 Apple 公证，当前发布使用同一 Developer ID 签名的 DMG/ZIP，并在说明中标注未公证、首次打开可能出现系统安全提示。`verify-release.mjs --allow-unnotarized` 仅跳过公证票据及 Gatekeeper 验收，仍强制验证签名和包内容；更新签名与哈希检查不变。默认发布入口及 CI 继续要求公证，不将本次交付选择默认为后续版本配置。
+
 1. 同步修改 `package.json` / `package-lock.json` 的版本，编写 `docs/releases/<version>.md`。只使用稳定 `x.y.z`。
 2. 完成检查并提交，推送与源码一致的 `v<version>` 标签。需要云端构建时手动触发 `.github/workflows/release-desktop.yml` 并选择对应标签，选择分支会被阻止；推送标签不会自动上传私钥或触发未配置凭据的构建。
 3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。0.0.1 仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。

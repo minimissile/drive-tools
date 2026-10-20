@@ -16,6 +16,12 @@ const require = createRequire(import.meta.url),
   );
 const pkg = JSON.parse(await readFile("package.json", "utf8"));
 const expectedUpdate = updateConfig.getUpdateConfig();
+const allowUnnotarized = process.argv.includes("--allow-unnotarized");
+if (allowUnnotarized)
+  assert.ok(
+    process.platform === "darwin" && expectedUpdate.signed,
+    "未公证交付选项仅适用于已启用签名的 macOS 构建；不会跳过签名校验",
+  );
 const sources = [];
 async function walk(folder) {
   for (const entry of await readdir(folder, { withFileTypes: true })) {
@@ -121,12 +127,14 @@ for (const path of archives) {
       /Identifier=com\.panxu\.studio\n/,
       "正式应用标识不正确",
     );
-    execFileSync("xcrun", ["stapler", "validate", appPath], { stdio: "pipe" });
-    execFileSync(
-      "spctl",
-      ["--assess", "--type", "execute", "--verbose=2", appPath],
-      { stdio: "pipe" },
-    );
+    if (!allowUnnotarized) {
+      execFileSync("xcrun", ["stapler", "validate", appPath], { stdio: "pipe" });
+      execFileSync(
+        "spctl",
+        ["--assess", "--type", "execute", "--verbose=2", appPath],
+        { stdio: "pipe" },
+      );
+    }
   }
   for (const source of sources)
     assert.deepEqual(
@@ -174,6 +182,9 @@ console.log(
       artifacts,
       checksums: join(root, "SHA256SUMS.txt"),
       userDataIncluded: false,
+      notarization: allowUnnotarized
+        ? "未公证交付：显式跳过票据及 Gatekeeper 验收，签名校验仍强制执行"
+        : "默认要求签名的 macOS 应用通过公证票据及 Gatekeeper 验收",
     },
     null,
     2,
