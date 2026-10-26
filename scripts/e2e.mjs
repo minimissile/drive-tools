@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { openAccountForm } from "./e2e-account-form.mjs";
 import { chooseOption } from "./e2e-select.mjs";
 import { _electron as electron } from "playwright-core";
@@ -20,7 +21,7 @@ const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
   ...(dev
-    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    ? { PANXU_DEV_URL: "http://127.0.0.1:8070", PANXU_DEV_ROOT: process.cwd() }
     : {}),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -49,7 +50,7 @@ try {
   );
   assert.match(await page.title(), /盘序/);
   if (dev) {
-    assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+    assert.equal(new URL(page.url()).origin, "http://127.0.0.1:8070");
     assert.equal(
       (await page.evaluate(() => window.panxu.invoke("dev.status"))).mode,
       "development",
@@ -65,7 +66,7 @@ try {
   const navIcons = await page
     .locator('nav[aria-label="主导航"] button > svg')
     .evaluateAll((icons) => icons.map((icon) => icon.getAttribute("class")));
-  assert.ok(navIcons.length >= 11);
+  assert.equal(navIcons.length, 7);
   assert.equal(new Set(navIcons).size, navIcons.length);
   checks.push(`${navIcons.length}个侧边栏入口均使用不同且对应功能的图标`);
   await nav("账号管理").click();
@@ -92,7 +93,7 @@ try {
   await primary.getByText("当前使用", { exact: true }).waitFor();
   checks.push("同网盘多账号与工作账号切换");
   await page.screenshot({ path: join(evidence, "02-accounts.png") });
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   await page
     .getByRole("textbox", { name: "网盘分享链接", exact: true })
     .fill("https://pan.quark.cn/s/e2e-local-draft");
@@ -168,7 +169,7 @@ try {
   assert.equal(snapshot.jobs.length, 0);
   assert.ok(snapshot.resources[0].coverId);
   checks.push("编辑同副本不重复创建或转存");
-  await nav("内容工作室").click();
+  await navigateTo(page, "内容工作室");
   await page.getByRole("button", { name: "新建手工草稿", exact: true }).click();
   await page
     .getByRole("textbox", { name: "内容正文", exact: true })
@@ -189,7 +190,7 @@ try {
   await page.getByRole("tab", { name: "调用与费用" }).click();
   await page.getByRole("heading", { name: "最近500笔调用记录" }).waitFor();
   await page.getByText("还没有调用记录", { exact: true }).waitFor();
-  await nav("转存任务").click();
+  await navigateTo(page, "转存任务");
   await page.getByRole("heading", { name: "暂时没有转存任务" }).waitFor();
   await nav("连接与设置").click();
   await page
@@ -394,7 +395,7 @@ try {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(1280, 900),
   );
-  await nav("批量处理").click();
+  await navigateTo(page, "批量处理");
   await page.getByRole("tab", { name: "1 · 添加资料", exact: true }).click();
   await page
     .getByLabel("批量资源CSV")
@@ -439,7 +440,7 @@ try {
     "本地整理词池 副本",
   );
   checks.push("手工词池去重、资源关联及复制编辑");
-  await nav("内容工作室").click();
+  await navigateTo(page, "内容工作室");
   await page.getByRole("button", { name: /浏览全部渠道/ }).click();
   for (const [name, platform] of [
     ["抖音", "douyin"],
@@ -610,7 +611,7 @@ try {
       .inputValue(),
     "历史资料0",
   );
-  await nav("内容工作室").click();
+  await navigateTo(page, "内容工作室");
   await page.waitForFunction(
     () =>
       document.querySelector('[aria-label="内容正文"]')?.value ===
@@ -748,7 +749,7 @@ try {
     (id) => window.panxu.invoke("account.check", { id }),
     qaAccount,
   );
-  await nav("批量处理").click();
+  await navigateTo(page, "批量处理");
   await page.getByRole("tab", { name: "2 · 检查并转存", exact: true }).click();
   await page.getByRole("searchbox").fill("批量夸克资料");
   await page

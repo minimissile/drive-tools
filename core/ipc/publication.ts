@@ -8,6 +8,7 @@ import { AppError } from "../errors";
 import { validatePublicationUrl } from "../links";
 import { platformSpecs } from "../../shared/platforms";
 import { linkPositionSchema } from "../../shared/schemas";
+import { recordEditorOpened } from "../publications";
 
 import type { HandlerServices, HandlerMap } from "./types";
 
@@ -50,15 +51,7 @@ export function createPublicationHandlers(
       const binding = services.repo.bindings().find((b) => b.id === bindingId)!;
       const draft = services.repo.draft(draftId);
       const result = await services.openBinding(binding, draft.contentFormat);
-      services.db.run(
-        "INSERT INTO publications(id,draft_id,draft_version,binding_id,status,created_at) VALUES(?,?,?,?,?,?)",
-        id("pub"),
-        draftId,
-        draft.version,
-        bindingId,
-        "opened",
-        now(),
-      );
+      recordEditorOpened(services.db, draft, bindingId);
       services.changed();
       return result;
     },

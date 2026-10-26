@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { chooseOption } from "./e2e-select.mjs";
 // Current-source Electron visual QA. Browser plugin unavailable; isolated profile, blocked external requests.
 import { _electron as electron } from "playwright-core";
@@ -14,7 +15,7 @@ await mkdir(dataPath);
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -41,7 +42,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -325,7 +326,7 @@ try {
     "连接与设置",
     "AI 资源导出",
   ]) {
-    await nav(name).click();
+    await navigateTo(page, name);
     await page.locator("main h1").waitFor();
     await shot("desktop-" + name);
     await sample(name);
@@ -412,7 +413,7 @@ try {
     "账号管理",
     "连接与设置",
   ]) {
-    await nav(name).click();
+    await navigateTo(page, name);
     await page.locator("main h1").waitFor();
     await shot("compact-" + name);
     await sample("840-" + name);

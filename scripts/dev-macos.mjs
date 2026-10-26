@@ -86,7 +86,7 @@ export async function syncMacDevIdentity({
     CFBundleIdentifier: `${appId}.dev`,
     CFBundleIconFile: "panxu-dev.icns",
   };
-  const iconPath = join(root, "build", "icon.icns");
+  const iconPath = join(root, "build", "icon-dev.icns");
   await copyFile(
     iconPath,
     join(bundle, "Contents", "Resources", expected.CFBundleIconFile),

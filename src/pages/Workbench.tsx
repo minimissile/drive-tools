@@ -1,16 +1,4 @@
-import {
-  ArrowRight,
-  FolderOpen,
-  Library,
-  Files,
-  FolderTree,
-  NotebookPen,
-  Workflow,
-  ChartNoAxesCombined,
-  Plug,
-  CircleCheck,
-  CircleAlert,
-} from "lucide-react";
+import { ArrowRight, Plug, CircleCheck, CircleAlert } from "lucide-react";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
 import {
@@ -23,92 +11,87 @@ import {
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { operationEntries, operationPage } from "../zhidao/navigation";
+import { discoveryEntries } from "../resources/navigation";
 import { operationLabels } from "../../shared/zhidao";
 import { formatTime } from "../lib/format";
-import "../zhidao/zhidao.css";
+import {
+  contentOperations,
+  csdnOperations,
+  weiboOperations,
+  resourceOperations,
+  type WorkbenchEntry,
+} from "../navigation";
+import "../workbench/workbench.css";
+import { useWorkbenchPosition } from "../workbench/useWorkbenchPosition";
 
-const tools = [
-  { page: "library", title: "资源库", Icon: Library },
-  { page: "batch", title: "批量处理", Icon: Files },
-  { page: "split", title: "资料拆分", Icon: FolderTree },
-  { page: "studio", title: "内容工作室", Icon: NotebookPen },
-  { page: "search", title: "搜索运营", Icon: Workflow },
-  { page: "share-statistics", title: "分享统计", Icon: ChartNoAxesCombined },
-] as const;
 export default function Workbench() {
   const { data } = useAppData(),
-    { navigate, openSettings } = useAppNavigation();
+    { navigate, edit, openSettings } = useAppNavigation();
   const summary = useIpcQuery("zhidao.summary", undefined, {
     refreshInterval: 3000,
     keepPrevious: true,
   });
   const accounts = summary.data?.accounts ?? [];
+  const position = useWorkbenchPosition(data!.dataPath);
   return (
-    <div className="workbench">
+    <div
+      className="workbench"
+      ref={position.root}
+      onClickCapture={position.remember}
+    >
       <Header
         title="工作台"
-        description="找资源、整理分享、创作问答，从这里开始。"
-        action={
-          <Button onClick={() => navigate("tasks")}>
-            <FolderOpen size={15} />
-            查看转存任务
-          </Button>
-        }
+        description="按功能组选择工具，开始处理项目任务。"
       />
-      <section className="workbench-flow" aria-label="资源运营流程">
-        <div>
-          <h2>把资源变成可用的内容</h2>
-          <p>发现名称 → 采集链接 → 转存分享 → 生成问答 → 审核发布</p>
-        </div>
-        <Button primary onClick={() => navigate("zhidao-collect")}>
-          开始采集
-          <ArrowRight size={15} />
-        </Button>
-      </section>
       <div className="workbench-layout">
         <div className="workbench-primary">
+          <Panel title="资源发现与采集">
+            <EntryList entries={discoveryEntries} onOpen={navigate} />
+          </Panel>
           <Panel
-            title="百度知道运营"
+            title="百度知道答题"
             extra={
               <Button
                 quiet
                 size="compact"
                 onClick={() => navigate("zhidao-accounts")}
               >
-                管理账号
+                管理知道账号
                 <ArrowRight size={13} />
               </Button>
             }
           >
-            <div className="workbench-entry-list">
-              {operationEntries
-                .slice(0, 6)
-                .map(({ page, title, description, Icon }) => (
-                  <button
-                    className="workbench-entry"
-                    key={page}
-                    onClick={() => navigate(page)}
-                  >
-                    <Icon size={19} />
-                    <span>
-                      <strong>{title}</strong>
-                      <small>{description}</small>
-                    </span>
-                    <ArrowRight size={16} />
-                  </button>
-                ))}
-            </div>
+            <EntryList entries={operationEntries} onOpen={navigate} />
           </Panel>
-          <Panel title="常用工具">
-            <div className="workbench-tools">
-              {tools.map(({ page, title, Icon }) => (
-                <Button quiet key={page} onClick={() => navigate(page)}>
-                  <Icon size={17} />
-                  {title}
-                  <ArrowRight size={13} />
-                </Button>
-              ))}
-            </div>
+          <Panel
+            title="CSDN 内容操作"
+            extra={
+              <Button
+                quiet
+                size="compact"
+                onClick={() => openSettings("bindings")}
+              >
+                发布窗口设置
+                <ArrowRight size={13} />
+              </Button>
+            }
+          >
+            <EntryList entries={csdnOperations} onOpen={navigate} />
+          </Panel>
+          <Panel title="微博内容操作" extra={<Button quiet size="compact" onClick={() => navigate("website-accounts")}>管理微博账号<ArrowRight size={13} /></Button>}>
+            <EntryList entries={weiboOperations} onOpen={navigate} />
+          </Panel>
+          <Panel title="资源与网盘操作">
+            <EntryList
+              entries={resourceOperations}
+              onOpen={(page) => {
+                if (page === "intake") edit(null);
+                else navigate(page);
+              }}
+            />
+          </Panel>
+          <Panel title="通用内容操作">
+            <EntryList entries={contentOperations} onOpen={navigate} />
           </Panel>
           <Panel
             title="最近运营任务"
@@ -238,6 +221,35 @@ export default function Workbench() {
           </Button>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function EntryList({
+  entries,
+  onOpen,
+}: {
+  entries: readonly WorkbenchEntry[];
+  onOpen(page: WorkbenchEntry["page"]): void;
+}) {
+  return (
+    <div className="workbench-entry-list">
+      {entries.map(({ page, title, description, Icon }) => (
+        <button
+          className="workbench-entry"
+          key={page}
+          aria-label={title}
+          data-workbench-entry={page}
+          onClick={() => onOpen(page)}
+        >
+          <Icon size={19} aria-hidden="true" />
+          <span>
+            <strong>{title}</strong>
+            <small>{description}</small>
+          </span>
+          <ArrowRight size={16} aria-hidden="true" />
+        </button>
+      ))}
     </div>
   );
 }

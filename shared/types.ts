@@ -262,6 +262,7 @@ export interface Draft {
   updatedAt: string;
 }
 export interface BrowserBinding {
+  websiteAccountId?: string | null;
   capabilities: ChannelCapabilities;
   id: string;
   platform: Platform;
@@ -363,6 +364,8 @@ export interface ResourceInput {
   rightsConfirmed?: boolean;
   selectedFiles?: RemoteFile[];
   enqueue: boolean;
+  /** Records an existing own share locally without transferring or creating a share. */
+  isOwnResource?: boolean;
 }
 export interface TrafficQuery {
   endpoint: Endpoint;

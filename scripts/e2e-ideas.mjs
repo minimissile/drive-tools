@@ -18,7 +18,7 @@ const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
   ...(dev
-    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    ? { PANXU_DEV_URL: "http://127.0.0.1:8070", PANXU_DEV_ROOT: process.cwd() }
     : {}),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -297,7 +297,7 @@ try {
     1,
   );
   assert.equal(await app.evaluate(() => globalThis.__ideasQa.requests), 2);
-  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:8070");
   else assert.match(page.url(), /dist\/index.html/);
   assert.match(await page.title(), /盘序/);
   assert.equal(await page.locator("vite-error-overlay").count(), 0);

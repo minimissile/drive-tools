@@ -23,7 +23,9 @@ npm run build:icons
 
 导出使用项目已有的 Electron 离线渲染，不需要额外依赖，也不生成安装包。ICNS 包含 16–1024 像素及 Retina 表示；ICO 包含 16、24、32、48、64、128、256 像素。生成后重启开发窗口即可更新程序坞图标。
 
-开发窗口从 `build/icon.png` 读取运行图标。发行配置将它复制至 `resources/brand/icon.png`；macOS 包图标使用 `build/icon.icns`，Windows 安装与程序图标使用 `build/icon.ico`。现有已安装程序需在以后正常打包更新时获得新图标。
+开发窗口从 `build/icon-dev.png` 读取运行图标，在品牌图形右下角叠加深蓝底、白色字的小型 DEV 标签，标签宽度约为图标主体的 42%，保留主图形的辨识度；开发运行时的 macOS 包图标使用 `build/icon-dev.icns`。标识直接绘入图标，不依赖系统通知权限。开发专用资源仍从同一矢量主稿导出，维护时运行 `npm run build:icons -- --dev`，生成独立的 `icon-dev.svg` / PNG / ICNS / ICO。
+
+发行配置继续将 `build/icon.png` 复制至 `resources/brand/icon.png`；macOS 正式包图标使用 `build/icon.icns`，Windows 安装与程序图标使用 `build/icon.ico`。DEV 变体不替换这些正式资源，现有已安装程序不受影响。
 
 macOS 的程序坞悬停名称读取应用包的 `CFBundleName` / `CFBundleDisplayName`；`app.setName()` 只改变 Electron 内部名称。`npm run dev` 通过 `scripts/dev-macos.mjs` 将本项目依赖内的开发运行时同步为“盘序”，并使用 `com.panxu.studio.dev` 标识及刷新该应用的系统注册。重装依赖后再次启动会自动恢复；不会改动安装版或项目外的运行时。已运行的旧进程需在空闲时重启后使用新名称。
 

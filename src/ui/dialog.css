@@ -1,0 +1,38 @@
+.modal--structured {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal--structured .dialog-heading {
+  position: static;
+  flex: none;
+  align-items: center;
+  padding-bottom: 0;
+  margin-bottom: var(--space-5);
+}
+.dialog-body {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+.dialog-body > .field + .field {
+  margin-top: 0;
+}
+.dialog-body > .notice {
+  margin: 0;
+}
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex: none;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}

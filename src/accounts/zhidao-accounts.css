@@ -1,0 +1,65 @@
+.zhidao-accounts-workspace {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.zhidao-accounts-workspace > .panel {
+  margin-bottom: 0;
+}
+.zhidao-account-add {
+  display: grid;
+  grid-template-columns: minmax(180px, 320px) auto;
+  justify-content: start;
+  align-items: end;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.zhidao-account-add .field {
+  margin-bottom: 0;
+}
+.zhidao-accounts-workspace details {
+  margin-top: var(--space-5);
+}
+.zhidao-accounts-workspace details .field {
+  margin-top: var(--space-4);
+}
+.zhidao-account-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: var(--space-4);
+  padding: var(--space-5) 0;
+  border-bottom: 1px solid var(--line);
+}
+.zhidao-account-list article:last-child {
+  border-bottom: 0;
+}
+.zhidao-account-list article > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+.zhidao-account-list small,
+.zhidao-account-list span:not(.status) {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.zhidao-account-list strong {
+  overflow-wrap: anywhere;
+}
+.zhidao-account-list .zhidao-account-actions {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+@media (max-width: 700px) {
+  .zhidao-account-add {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .zhidao-account-add > .button {
+    justify-self: start;
+  }
+}

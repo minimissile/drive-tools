@@ -2,6 +2,7 @@ import { chooseOption } from "./e2e-select.mjs";
 // Browser plugin not available; use the project's isolated Electron/Playwright workflow.
 // AI and external network calls are mocked. Save dialogs write only to this temporary QA directory.
 import { _electron as electron } from "playwright-core";
+import { navigateTo } from "./e2e-navigation.mjs";
 import { createRequire } from "node:module";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
   ...(dev
-    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    ? { PANXU_DEV_URL: "http://127.0.0.1:8070", PANXU_DEV_ROOT: process.cwd() }
     : {}),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -154,10 +155,7 @@ try {
       dailyAiBudgetMicros: 100000,
     });
   });
-  await page
-    .getByRole("navigation", { name: "主导航" })
-    .getByRole("button", { name: "AI 资源导出", exact: true })
-    .click();
+  await navigateTo(page, "AI 资源导出");
   await page.getByRole("heading", { name: "先说你想整理什么" }).waitFor();
   await page
     .getByLabel("导出需求", { exact: true })
@@ -309,7 +307,7 @@ try {
   );
   assert.equal(await app.evaluate(() => globalThis.__exportQa.calls), 4);
   assert.equal(await app.evaluate(() => globalThis.__exportQa.external), 0);
-  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:8070");
   else assert.match(page.url(), /dist\/index.html/);
   assert.match(await page.title(), /盘序/);
   assert.equal(await page.locator("vite-error-overlay").count(), 0);

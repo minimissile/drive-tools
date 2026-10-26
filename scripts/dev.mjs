@@ -7,9 +7,10 @@ import { context } from "esbuild";
 import { createServer } from "vite";
 import updateConfig from "./update-config.cjs";
 import { syncMacDevIdentity } from "./dev-macos.mjs";
+import { acquireDevLock, stopDevChild } from "./dev-lifecycle.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const devPort = Number(process.env.PANXU_DEV_PORT || 5173);
+const devPort = Number(process.env.PANXU_DEV_PORT || 8070);
 if (!Number.isInteger(devPort) || devPort < 1024 || devPort > 65535)
   throw new Error("开发端口需为1024–65535之间的整数。");
 const devUrl = `http://127.0.0.1:${devPort}`;
@@ -20,6 +21,8 @@ const states = new Map(),
 let devExecutable = require("electron");
 let child,
   server,
+  releaseDevLock,
+  starting,
   debounce,
   retry,
   stopping = false,
@@ -32,11 +35,20 @@ async function stop(code = 0) {
   stopping = true;
   clearTimeout(debounce);
   clearTimeout(retry);
-  if (child && child.exitCode == null) child.kill("SIGTERM");
+  // Let in-flight startup finish assigning resources before disposing them.
+  // launch() checks stopping, so cancellation cannot open another desktop.
+  await starting?.catch(() => {});
+  await stopDevChild(child);
   await Promise.allSettled([
     ...builds.map((b) => b.dispose()),
     server?.close(),
   ]);
+  try {
+    await releaseDevLock?.();
+  } catch (error) {
+    if (error.code !== "ERELEASED") throw error;
+  }
+  releaseDevLock = undefined;
   process.exitCode = code;
 }
 process.on("SIGINT", () => void stop());
@@ -131,7 +143,11 @@ function watchPlugin(name) {
     },
   };
 }
-try {
+async function start() {
+  releaseDevLock = await acquireDevLock(root, (error) => {
+    console.error(`开发启动锁失效：${error.message}`);
+    void stop(1);
+  });
   await mkdir(output, { recursive: true });
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const productName = pkg.productName ?? pkg.build.productName;
@@ -161,7 +177,7 @@ try {
   );
   server = await createServer({
     root,
-    server: { port: devPort },
+    server: { host: "127.0.0.1", port: devPort, strictPort: true },
     configFile: join(root, "vite.config.ts"),
     plugins: [
       {
@@ -221,7 +237,9 @@ try {
     "开发输出使用 dist-dev，生产 build 不会覆盖当前调试后端。Ctrl+C停止开发服务。",
   );
   await Promise.all(builds.map((b) => b.watch()));
-} catch (error) {
-  console.error(`开发环境启动失败：${error.message}`);
-  await stop(1);
 }
+starting = start();
+void starting.catch((error) => {
+  console.error(`开发环境启动失败：${error.message}`);
+  void stop(1);
+});

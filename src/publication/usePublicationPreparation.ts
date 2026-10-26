@@ -19,9 +19,9 @@ import {
   canUseLinkPosition,
   includesOwnShareLink,
 } from "../../shared/publication";
-import type { Draft } from "../../shared/types";
+import type { Draft, Platform } from "../../shared/types";
 
-export function usePublicationPreparation() {
+export function usePublicationPreparation(platform?: Platform) {
   const { data } = useAppData(),
     { copy, resource } = useAppSelection(),
     { navigate, openSettings, openSearch, openDraft } = useAppNavigation(),
@@ -34,7 +34,9 @@ export function usePublicationPreparation() {
     [includeLink, setIncludeLink] = useState(false),
     [publishedUrl, setPublishedUrl] = useState("");
   const [linkPosition, setLinkPosition] = useState<LinkPosition>("body");
-  const drafts = data!.drafts.filter((d) => d.copyId === copy?.id),
+  const drafts = data!.drafts.filter(
+      (d) => d.copyId === copy?.id && (!platform || d.platform === platform),
+    ),
     draft = drafts.find((d) => d.id === draftId) ?? drafts[0],
     spec = platformSpecs.find((p) => p.id === draft?.platform);
   const bindings = data!.bindings.filter((b) => b.platform === draft?.platform),

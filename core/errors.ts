@@ -27,6 +27,7 @@ export class ServiceHttpError extends AppError {
     public status: number,
     message: string,
     code = "HTTP_ERROR",
+    public retryAfterMs: number | null = null,
   ) {
     super(code, message);
   }

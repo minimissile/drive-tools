@@ -37,6 +37,12 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  environments: import("../browser-environments").BrowserEnvironments;
+  environmentQueue: import("../browser-environment-queue").BrowserEnvironmentQueue;
+  resourceAnswers: import("../resource-answers").ResourceAnswers;
+  weiboPosts: import("../weibo/posts").WeiboPosts;
+  weibo: import("../weibo/marketing").WeiboMarketing;
+  csdn: import("../csdn/workflow").CsdnWorkflows;
   websiteAccounts: import("../website-accounts").WebsiteAccounts;
   driveFiles: import("../drive-files").DriveFiles;
   zhidao: import("../zhidao/service").ZhidaoOperations;

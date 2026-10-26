@@ -1,0 +1,26 @@
+.workspace-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.workspace-breadcrumb > span,
+.workspace-breadcrumb > .button,
+.workspace-breadcrumb > svg {
+  flex-shrink: 0;
+}
+.workspace-breadcrumb > svg {
+  color: var(--muted);
+}
+.workbench-tool-select {
+  width: 210px;
+}
+
+.active-task-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.active-task-select { width: 220px; }
+.topbar > .topbar-task-actions { flex-shrink: 0; }

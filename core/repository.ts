@@ -340,6 +340,7 @@ export class Repository {
           linkPositions: [],
         }),
         windowId: r.window_id,
+        websiteAccountId: r.website_account_id ?? null,
         editorUrl: r.editor_url,
         linkPermission: r.link_permission,
         ruleNote: r.rule_note,

@@ -1,6 +1,7 @@
 import { Button, Notice } from "../ui/primitives";
 import { Download, Film, ImagePlus, RefreshCw } from "lucide-react";
 
+import "./studio-asset.css";
 import { MediaPreview } from "./MediaPreview";
 import { useAppActions, useAppActivity } from "../state";
 import type { StudioJob } from "../../shared/studio";
@@ -23,6 +24,7 @@ export function StudioAsset({
   allowRepeat,
   submit,
   reload,
+  embedded = false,
 }: {
   jobs: StudioJob[];
   kind: StudioJob["kind"];
@@ -32,6 +34,7 @@ export function StudioAsset({
   allowRepeat: boolean;
   submit(slot: number): Promise<StudioJob | undefined>;
   reload(): void;
+  embedded?: boolean;
 }) {
   const { command } = useAppActions(),
     { busy } = useAppActivity();
@@ -48,7 +51,9 @@ export function StudioAsset({
     pending =
       job && ["submitting", "pending", "in_progress"].includes(job.status);
   return (
-    <div className="creative-asset">
+    <div
+      className={`creative-asset ${embedded ? "creative-asset--embedded" : ""}`}
+    >
       <div className="row spread">
         <strong>
           {kind === "video" ? "动态视频" : `第 ${slot + 1} 张图片`}
@@ -78,6 +83,20 @@ export function StudioAsset({
         </div>
       )}
       {job?.error ? <Notice warning>{job.error}</Notice> : null}
+      {ready?.kind === "image" ? (
+        <Button
+          quiet
+          onClick={() =>
+            void command(
+              "studio.assetCopy",
+              { name: `${ready.asset}.png` },
+              "图片已复制",
+            )
+          }
+        >
+          复制图片
+        </Button>
+      ) : null}
       <div className="row">
         <Button
           primary

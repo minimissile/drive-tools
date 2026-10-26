@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { CircleCheck, CircleAlert, TriangleAlert, Info, X } from "lucide-react";
 import type { FeedbackMessage } from "../lib/feedback";
 import { Button } from "./primitives";
@@ -18,31 +18,21 @@ export function Toast({
   tone,
   onDismiss,
 }: FeedbackMessage & { onDismiss(): void }) {
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
   const { icon: Icon, label } = appearances[tone];
-  const persistent = tone === "error" || tone === "warning";
+  const urgent = tone === "error" || tone === "warning";
   useEffect(() => {
-    if (persistent || hovered || focused) return;
-    const timer = setTimeout(onDismiss, 6500);
+    const timer = setTimeout(onDismiss, 5000);
     return () => clearTimeout(timer);
-  }, [persistent, hovered, focused, text, onDismiss]);
+  }, [text, onDismiss]);
 
   return (
     <ToastPortal>
       <div
         className="toast"
         data-tone={tone}
-        role={persistent ? "alert" : "status"}
+        role={urgent ? "alert" : "status"}
         aria-atomic="true"
-        aria-live={persistent ? "assertive" : "polite"}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onFocusCapture={() => setFocused(true)}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget))
-            setFocused(false);
-        }}
+        aria-live={urgent ? "assertive" : "polite"}
       >
         <Icon className="toast-icon" size={19} aria-hidden="true" />
         <span className="toast-message">

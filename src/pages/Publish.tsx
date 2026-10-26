@@ -9,10 +9,11 @@ import { PublicationContent } from "../publication/PublicationContent";
 import { DeliveryOptions } from "../publication/DeliveryOptions";
 import { PublicationWindow } from "../publication/PublicationWindow";
 import { PublicationHistory } from "../publication/PublicationHistory";
+import type { Platform } from "../../shared/types";
 import "../studio/studio.css";
 
-export default function Publish() {
-  const model = usePublicationPreparation();
+export default function Publish({ platform }: { platform?: Platform }) {
+  const model = usePublicationPreparation(platform);
   const {
     draft,
     drafts,
@@ -26,7 +27,11 @@ export default function Publish() {
   return (
     <>
       <Header
-        title="准备好内容，再打开正确的窗口。"
+        title={
+          platform === "csdn"
+            ? "CSDN 发布准备"
+            : "准备好内容，再打开正确的窗口。"
+        }
         description="复制素材 → 打开比特指定窗口 → 人工发布 → 回填内容链接。"
       />
       <ResourceRequired>
@@ -114,13 +119,19 @@ export default function Publish() {
           </>
         ) : (
           <Empty
-            title="此资源副本还没有草稿"
+            title={
+              platform === "csdn"
+                ? "此资源副本还没有 CSDN 草稿"
+                : "此资源副本还没有草稿"
+            }
             action={
               <Button
                 primary
-                onClick={() => (draft ? openDraft(draft) : navigate("studio"))}
+                onClick={() =>
+                  navigate(platform === "csdn" ? "csdn-studio" : "studio")
+                }
               >
-                去内容工作室
+                {platform === "csdn" ? "去创作 CSDN 教程" : "去内容工作室"}
               </Button>
             }
           >

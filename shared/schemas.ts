@@ -34,6 +34,7 @@ export const resourceInputSchema = z.object({
   rightsConfirmed: z.boolean().optional(),
   selectedFiles: z.array(fileSchema).max(100).optional(),
   enqueue: z.boolean(),
+  isOwnResource: z.boolean().optional(),
 });
 export const querySchema = z.object({
   endpoint: endpointSchema,

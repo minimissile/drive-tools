@@ -172,10 +172,12 @@ export function ResourceDetail({
             <Button
               quiet
               size="compact"
-              disabled={copy.status !== "ready" || busy > 0}
+              disabled={
+                !["ready", "recorded"].includes(copy.status) || busy > 0
+              }
               onClick={() => void inspectShare()}
             >
-              检查此本人分享
+              {copy.status === "recorded" ? "核验自有分享" : "检查此本人分享"}
             </Button>
           </div>
           <div className="link-box">
@@ -189,7 +191,9 @@ export function ResourceDetail({
               <ExternalLink size={14} />
               网盘
             </Button>
-            <RecoverShare copy={copy} />
+            {copy.status !== "recorded" && copy.folderId ? (
+              <RecoverShare copy={copy} />
+            ) : null}
           </div>
           {copy.error ? <Notice warning>{copy.error}</Notice> : null}
           {shareCheck ? (
@@ -203,6 +207,11 @@ export function ResourceDetail({
           ) : null}
           {copy.status === "ready" && !copy.shareVerifiedAt ? (
             <Notice warning>本人分享待复核，请检查分享后再分发。</Notice>
+          ) : null}
+          {copy.status === "recorded" && !shareCheck ? (
+            <Notice>
+              自有资源已直接入库。点击“核验自有分享”确认账号归属后，可复用此链接进行内容交付，不会转存或新建分享。
+            </Notice>
           ) : null}
         </section>
         <section className="resource-copy-section" aria-label="资源说明">
@@ -228,17 +237,25 @@ export function ResourceDetail({
         </section>
         <details className="private-source">
           <summary>内部追溯信息</summary>
-          <small>来源链接仅作内部记录，禁止用于对外分发。</small>
+          <small>
+            {resource.sourceKind === "owned"
+              ? "已录入的自有资源链接；对外交付前核验所属账号。"
+              : "来源链接仅作内部记录，禁止用于对外分发。"}
+          </small>
           <p>{resource.sourceUrl}</p>
           <small>保存目录</small>
-          <p>{copy.directory}</p>
+          <p>
+            {resource.sourceKind === "owned" && !copy.folderId
+              ? "未记录原网盘目录；直接入库不创建目录。"
+              : copy.directory}
+          </p>
         </details>
       </div>
       <div className="resource-detail-footer">
         <Button
           className="resource-copy-action"
           primary={copy.status === "ready"}
-          disabled={!copy.shareUrl || busy > 0}
+          disabled={!copy.shareUrl || copy.status !== "ready" || busy > 0}
           onClick={async () => {
             const result = await command("copy.link", { copyId: copy.id });
             if (result)

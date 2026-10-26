@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 // Browser plugin unavailable. Exercise source Electron with disposable data and controlled local reads.
 import { _electron as electron } from "playwright-core";
 import { createRequire } from "node:module";
@@ -9,14 +10,14 @@ const require = createRequire(import.meta.url);
 const evidence = await mkdtemp(join(tmpdir(), "panxu-data-states-"));
 const dataPath = join(evidence, "data");
 await mkdir(dataPath);
-const identity = await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) =>
+const identity = await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) =>
   r.json(),
 );
 assert.equal(identity.root, process.cwd());
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -45,7 +46,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -77,7 +78,7 @@ try {
     window.__stateCalls = {};
   });
   const clientSource = await fetch(
-    "http://127.0.0.1:5173/src/api/client.ts",
+    "http://127.0.0.1:8070/src/api/client.ts",
   ).then((r) => r.text());
   const instrumented = clientSource.replace(
     "return window.panxu.invoke",
@@ -248,7 +249,7 @@ try {
     "批量草稿加载有统一占位，失败与真实无结果分离；未执行转存预检或远端操作",
   );
   await mode("resourceExport.history", "hold");
-  await nav("AI 资源导出").click();
+  await navigateTo(page, "AI 资源导出");
   await pending("resourceExport.history");
   await page
     .getByRole("heading", { name: "正在读取导出记录…", exact: true })
@@ -269,7 +270,7 @@ try {
   await page.getByRole("heading", { name: "还没有导出记录" }).waitFor();
   await nav("资源库").click();
   await mode("resourceExport.history", "fail");
-  await nav("AI 资源导出").click();
+  await navigateTo(page, "AI 资源导出");
   await page
     .getByRole("alert")
     .filter({ hasText: "resourceExport.history" })
@@ -428,11 +429,11 @@ try {
       height: 900,
       webPreferences: { contextIsolation: true, nodeIntegration: false },
     });
-    void browserWindow.loadURL("http://127.0.0.1:5173/");
+    void browserWindow.loadURL("http://127.0.0.1:8070/");
   });
   const withoutBridge = await nextWindow;
   withoutBridge.on("pageerror", (error) => bridgeErrors.push(error.message));
-  await withoutBridge.goto("http://127.0.0.1:5173/");
+  await withoutBridge.goto("http://127.0.0.1:8070/");
   await withoutBridge
     .getByRole("heading", { name: "请在盘序桌面程序中打开", exact: true })
     .waitFor();

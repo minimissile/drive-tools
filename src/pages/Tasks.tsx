@@ -2,7 +2,8 @@ import { Select } from "../ui/Select";
 import { Tabs, TabList } from "../ui/Tabs";
 import { TaskSection } from "../tasks/TaskSection";
 import { taskGroup, type TaskFilter } from "../tasks/task-state";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useTaskFocus } from "../tasks/TaskFocus";
 import { FileText, LogIn, RefreshCw, Square } from "lucide-react";
 import {
   useAppActions,
@@ -27,6 +28,13 @@ export default function Tasks() {
       ? "attention"
       : "all",
   );
+  const { focus } = useTaskFocus();
+  useEffect(() => {
+    if (focus?.kind !== "job") return;
+    setFilter("all");
+    setAccountFilter("all");
+    setLogs(focus.id);
+  }, [focus]);
   const accountJobs = data!.jobs.filter(
     (j) => accountFilter === "all" || j.accountId === accountFilter,
   );

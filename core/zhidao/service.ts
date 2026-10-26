@@ -1,5 +1,8 @@
 import { runPublish } from "./workers/publish";
+import type { BrowserEnvironments } from "../browser-environments";
+import { createHash } from "node:crypto";
 import { runTemplates } from "./workers/templates";
+import { templateUsesAi } from "../../shared/zhidao-generation";
 import { runAnswers } from "./workers/answers";
 import { runCollect } from "./workers/collect";
 import { runMine } from "./workers/mine";
@@ -13,8 +16,8 @@ import type { Repository } from "../repository";
 import type { AiService } from "../ai";
 import type { SecretStore } from "../secrets";
 import {
-  publishInput,
   operationItemEdit,
+  operationItemReview,
   operationLabels,
   runStartInput,
   type OperationItem,
@@ -27,6 +30,12 @@ import { OperationsStore } from "./store";
 import { ZhidaoClient, sourceFetch, type SourceFetch } from "./client";
 import { extractBaiduShares } from "./parsers";
 import { Pansou, pansouUrl } from "./pansou";
+import { answerInstruction } from "./answer-prompt";
+import { publicationFingerprint } from "./publishing";
+import {
+  zhidaoContentIssue,
+  type ZhidaoPublishReceipt,
+} from "../../shared/zhidao-publishing";
 
 const qaResponse = z.object({ answer: z.string().trim().min(1).max(20000) });
 
@@ -55,16 +64,25 @@ export class ZhidaoOperations {
       fetcher?: SourceFetch;
       pace?: number;
       verifyCopy?: (copyId: string) => Promise<void>;
+      environments?: BrowserEnvironments;
+      schedule?<T>(refs: import("../../shared/browser-environments").EnvironmentAccountRef[], label: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T>;
     } = {},
   ) {
     this.fetcher = options.fetcher ?? sourceFetch;
     this.pace = options.pace ?? 2500;
     this.verifyCopy = options.verifyCopy;
-    this.store = new OperationsStore(repo.db);
+    this.environments = options.environments;
+    this.schedule = options.schedule;
+    this.store = new OperationsStore(repo.db, (account) => {
+      if (!this.environments || this.environments.identityCurrent({ kind: "zhidao", id: account.id })) return account;
+      return { ...account, status: "disconnected", bulkPermission: null, publishingRights: null, message: "环境登录或配置已变化，请重新检查知道身份和业务权益。" };
+    });
     this.store.recover();
     this.client = new ZhidaoClient(ports.zhidaoSession);
     this.pansou = new Pansou(dataPath, ports.pansouBinary);
   }
+  private environments?: BrowserEnvironments;
+  private schedule?: <T>(refs: import("../../shared/browser-environments").EnvironmentAccountRef[], label: string, action: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
   get isBusy() {
     return this.active.size > 0 || this.accountPending.size > 0;
   }
@@ -98,7 +116,7 @@ export class ZhidaoOperations {
     this.repo.db.setSetting("zhidao:pansouUrl", url ? pansouUrl(url) : "");
     return this.settings();
   }
-  async addAccount(alias: string, cookie = "") {
+  async addAccount(alias: string, cookie = "", environmentId?: string) {
     const account = {
       id: id("zd"),
       alias,
@@ -109,17 +127,17 @@ export class ZhidaoOperations {
       checkedAt: null,
       message: "请登录后检查账号",
     };
+    this.repo.db.transaction(() => { this.store.saveAccount(account); this.environments?.registerAccount({ kind: "zhidao", id: account.id }, environmentId); });
     if (cookie) {
       if (!this.ports.zhidaoSession)
         throw new AppError("SESSION_UNAVAILABLE", "当前环境不支持账号会话。");
       try {
-        await this.ports.zhidaoSession.setCookie(account.id, cookie);
+        const action = async () => { this.environments?.invalidateIdentity({ kind: "zhidao", id: account.id }); await this.ports.zhidaoSession!.setCookie(account.id, cookie); };
+        if (this.environments) await this.environments.run({ kind: "zhidao", id: account.id }, action); else await action();
       } catch {
-        await this.ports.zhidaoSession.clear(account.id).catch(() => {});
-        throw new AppError(
-          "COOKIE_IMPORT_FAILED",
-          "Cookie未保存，请检查格式或使用本人登录窗口。",
-        );
+        // Imported cookies may share a realm with other platforms; never clear the environment.
+        this.changed();
+        return this.store.saveAccount({ ...account, message: "账号已添加；Cookie 导入未完成，请使用官方登录窗口后检查身份。" });
       }
     }
     this.store.saveAccount(account);
@@ -144,20 +162,28 @@ export class ZhidaoOperations {
         );
     }
   }
-  async login(accountId: string) {
+  async login(
+    accountId: string,
+    page?: import("../../shared/zhidao-rights").ZhidaoAccountPage,
+  ) {
     this.store.account(accountId);
     this.assertAccountIdle(accountId);
     if (!this.ports.zhidaoSession)
       throw new AppError("SESSION_UNAVAILABLE", "当前环境不支持登录窗口。");
     this.accountPending.add(accountId);
     try {
-      await this.ports.zhidaoSession.login(accountId);
+      const action = async () => { this.environments?.invalidateIdentity({ kind: "zhidao", id: accountId }); await this.ports.zhidaoSession!.login(accountId, page); };
+      if (this.environments) await this.environments.run({ kind: "zhidao", id: accountId }, action); else await action();
       return true;
     } finally {
       this.accountPending.delete(accountId);
     }
   }
-  async check(accountId: string) {
+  check(accountId: string) {
+    const action = () => this.checkWithinEnvironment(accountId);
+    return this.environments ? this.environments.run({ kind: "zhidao", id: accountId }, action) : action();
+  }
+  private async checkWithinEnvironment(accountId: string) {
     const old = this.store.account(accountId);
     this.assertAccountIdle(accountId);
     this.accountPending.add(accountId);
@@ -177,14 +203,30 @@ export class ZhidaoOperations {
           "DUPLICATE_ACCOUNT",
           "此身份已在其他知道账号中，请使用原账号记录。",
         );
+      this.environments?.confirm({ kind: "zhidao", id: accountId }, identity.uid);
       let bulkPermission: boolean | null = null;
+      let publishingRights:
+        import("../../shared/zhidao-publishing").ZhidaoPublishingRights | null =
+        null;
       let message = "登录有效";
       try {
-        bulkPermission = await this.client.permission(accountId);
-        message = bulkPermission
-          ? "登录有效，可使用快捷答题"
-          : "登录有效，暂无快捷答题资格";
+        const rights = await this.client.publishingRights(accountId);
+        if (rights.uid && rights.uid !== identity.uid)
+          throw new AppError(
+            "ACCOUNT_UID_MISMATCH",
+            "答主工作台身份与登录账号不一致，请重新登录检查。",
+          );
+        const { uid: _uid, ...safeRights } = rights;
+        publishingRights = safeRights;
+        bulkPermission = rights.hasPermission && !rights.isBanned;
+        message = rights.isBanned
+          ? "登录有效，批量上传权益受限"
+          : bulkPermission
+            ? `登录有效，具有批量上传权限${rights.remainingQuota === null ? "；额度暂未读取" : `，剩余额度${rights.remainingQuota}条`}`
+            : "登录有效，暂无批量上传权限";
       } catch (error) {
+        if (error instanceof AppError && error.code === "ACCOUNT_UID_MISMATCH")
+          throw error;
         message = `登录有效；${safeMessage(error)}`;
       }
       const result = this.store.saveAccount({
@@ -193,10 +235,11 @@ export class ZhidaoOperations {
         nickname: identity.nickname,
         status: "connected",
         bulkPermission,
+        publishingRights,
         checkedAt: now(),
         message,
       });
-      await this.ports.zhidaoSession?.close(accountId);
+      // Keep the user's page and other platform tabs open after a read-only check.
       this.changed();
       return result;
     } catch (error) {
@@ -213,14 +256,20 @@ export class ZhidaoOperations {
       this.accountPending.delete(accountId);
     }
   }
-  async removeAccount(accountId: string) {
+  removeAccount(accountId: string) {
+    const action = () => this.removeWithinEnvironment(accountId);
+    return this.environments ? this.environments.run({ kind: "zhidao", id: accountId }, action) : action();
+  }
+  private async removeWithinEnvironment(accountId: string) {
     this.store.account(accountId);
     this.assertAccountIdle(accountId);
     this.accountPending.add(accountId);
     try {
-      await this.ports.zhidaoSession?.clear(accountId);
       if (this.closed) return false;
-      this.repo.db.run("DELETE FROM zhidao_accounts WHERE id=?", accountId);
+      this.repo.db.transaction(() => {
+        this.environments?.detach({ kind: "zhidao", id: accountId });
+        this.repo.db.run("DELETE FROM zhidao_accounts WHERE id=?", accountId);
+      });
       this.changed();
       return true;
     } finally {
@@ -270,14 +319,36 @@ export class ZhidaoOperations {
     const config = { ...v.input };
     this.assertAvailable(v.kind, config);
     if (v.kind === "publish") {
+      if (
+        v.input.selectionRevision &&
+        v.input.selectionRevision !==
+          this.publicationPreview(v.input.itemIds, v.input.accountId).revision
+      )
+        throw new AppError(
+          "SELECTION_CHANGED",
+          "所选问答已变化，请刷新并重新确认后上传。",
+        );
       this.validatePublication(v.input.itemIds);
       this.assertNoDuplicatePublication(v.input.itemIds, v.input.accountId);
+      if (this.store.account(v.input.accountId).status !== "connected")
+        throw new AppError("AUTH_EXPIRED", "请先登录并检查发布账号。");
+      Object.assign(config, { uploadMode: "batch-v1" });
     }
     if (v.kind === "template")
       for (const copyId of v.input.copyIds) this.ownTarget(copyId);
+    if (
+      v.kind === "answer" &&
+      v.input.mode === "auto" &&
+      this.store.account(v.input.accountId).status !== "connected"
+    )
+      throw new AppError(
+        "AUTH_EXPIRED",
+        "请先登录并检查百度知道账号，再开始自动答题。",
+      );
+    if (v.kind === "answer" || (v.kind === "template" && templateUsesAi(v.input))) this.ai.assertTextConfigured("copy");
     const total =
-      "copyIds" in v.input
-        ? v.input.copyIds.length
+      v.kind === "template"
+        ? v.input.copyIds.length + v.input.resources.length
         : "itemIds" in v.input
           ? v.input.itemIds.length
           : "count" in v.input
@@ -320,16 +391,151 @@ export class ZhidaoOperations {
     if (run.status === "completed")
       throw new AppError("RUN_COMPLETED", "任务已完成，请新建任务。");
     this.assertAvailable(run.kind, run.config);
-    if (run.kind === "publish")
-      this.validatePublication(publishInput.parse(run.config).itemIds);
+    if (run.kind === "answer") this.ai.assertTextConfigured("copy");
+    if (run.kind === "template" && templateUsesAi(run.config)) this.ai.assertTextConfigured("copy");
+    if (run.kind === "publish") {
+      const submitted = new Set(
+        this.store
+          .items(run.id)
+          .filter((item) => ["submitted", "uncertain"].includes(item.status))
+          .map((item) => item.key),
+      );
+      this.validatePublication(
+        (run.config.itemIds as string[]).filter(
+          (itemId) => !submitted.has(itemId),
+        ),
+      );
+    }
     this.launch(run);
     return this.store.run(runId);
+  }
+  async openPublication(runId: string) {
+    const run = this.store.run(runId);
+    if (run.kind !== "publish" || typeof run.config.accountId !== "string")
+      throw new AppError("INVALID_STATE", "此任务不是发布任务。");
+    return this.login(run.config.accountId, "quota");
+  }
+  publicationPreview(itemIds: string[], accountId: string) {
+    const errors: string[] = [];
+    const contents: unknown[] = [];
+    for (const itemId of itemIds) {
+      try {
+        this.validatePublication([itemId]);
+        const item = this.store.item(itemId);
+        contents.push([
+          item.id,
+          item.question,
+          item.answer,
+          item.reviewed,
+          item.shareVersion,
+        ]);
+      } catch (error) {
+        errors.push(safeMessage(error));
+      }
+    }
+    if (!errors.length && accountId) {
+      try {
+        this.assertNoDuplicatePublication(itemIds, accountId);
+      } catch (error) {
+        errors.push(safeMessage(error));
+      }
+    }
+    return {
+      count: itemIds.length,
+      errors: [...new Set(errors)],
+      revision: createHash("sha256")
+        .update(JSON.stringify(contents))
+        .digest("hex"),
+    };
+  }
+  async syncPublication(runId: string) {
+    const run = this.store.run(runId);
+    if (run.kind !== "publish" || typeof run.config.accountId !== "string")
+      throw new AppError("INVALID_STATE", "此任务不是发布任务。");
+    const accountId = run.config.accountId;
+    this.assertAccountIdle(accountId);
+    const taskIds = new Set(
+      this.store
+        .items(runId)
+        .filter((item) => item.status === "submitted" && item.taskId)
+        .map((item) => item.taskId),
+    );
+    if (!taskIds.size)
+      throw new AppError(
+        "NO_UPLOAD_RECEIPT",
+        "尚无已确认的上传任务ID，请先核对上传结果。",
+      );
+    this.accountPending.add(accountId);
+    try {
+      await this.identity(accountId);
+      const receipts = new Map<string, ZhidaoPublishReceipt>();
+      // Search uses the original name; identity is checked before reading another account's records.
+      for (let page = 1; page <= 20 && receipts.size < taskIds.size; page++) {
+        const result = await this.client.uploadTasks(
+          accountId,
+          page,
+          run.config.uploadMode === "batch-v1"
+            ? String(run.config.taskName)
+            : undefined,
+        );
+        for (const task of result.list)
+          if (taskIds.has(task.id))
+            receipts.set(task.id, { ...task, checkedAt: now() });
+        if (page * 50 >= result.total || !result.list.length) break;
+      }
+      if (this.closed)
+        throw new AppError(
+          "SERVICE_CLOSED",
+          "工作空间已关闭，请重新打开记录。",
+        );
+      // A read failure never clears the last confirmed audit status or changes upload checkpoints.
+      const current = this.store.run(runId);
+      const previous = Array.isArray(current.config.platformTasks)
+        ? (current.config.platformTasks as ZhidaoPublishReceipt[])
+        : [];
+      const merged = new Map(
+        previous
+          .filter((task) => taskIds.has(task.id))
+          .map((task) => [task.id, task]),
+      );
+      for (const [taskId, task] of receipts) merged.set(taskId, task);
+      this.repo.db.transaction(() => {
+        for (const item of this.store.items(runId)) {
+          const task = receipts.get(item.taskId);
+          if (task)
+            this.store.put(runId, item.key, {
+              message:
+                task.status === "finished"
+                  ? `本批审核完成：通过${task.successCount ?? "待确认"}条、失败${task.failCount ?? "待确认"}条；逐条结果请在答主工作台核对`
+                  : task.status === "running"
+                    ? "平台任务审核处理中"
+                    : task.status === "pending"
+                      ? "平台任务待执行"
+                      : "平台审核状态待核对",
+            });
+        }
+        this.store.config(runId, {
+          ...current.config,
+          platformTasks: [...merged.values()],
+          platformCheckedAt: now(),
+          platformMissingCount: taskIds.size - receipts.size,
+          platformCheckMessage:
+            receipts.size === taskIds.size
+              ? "已更新平台审核记录。"
+              : `有${taskIds.size - receipts.size}个平台任务暂未找到，已有记录已保留；请打开绑定账号的答主工作台核对。`,
+        });
+      });
+      this.changed();
+      return this.store.run(runId);
+    } finally {
+      this.accountPending.delete(accountId);
+    }
   }
   private launch(run: OperationRun) {
     const controller = new AbortController();
     this.store.state(run.id, "running", "正在准备…");
     const promise = Promise.resolve()
-      .then(() => this.execute(run, controller.signal))
+      .then(() => this.executeInEnvironments(run, controller.signal))
       .catch((error) => {
         if (this.closed) return;
         const paused =
@@ -339,6 +545,15 @@ export class ZhidaoOperations {
               "SOURCE_VERIFICATION",
               "AUTH_EXPIRED",
               "ACCOUNT_UID_MISMATCH",
+              "ANSWER_STOPPED",
+              "ANSWER_FAILURES",
+              "ANSWER_RESULT_UNCERTAIN",
+              "AI_RATE_LIMITED",
+              "AI_GENERATION_UNCERTAIN",
+              "PUBLISH_RESULT_UNCERTAIN",
+              "PUBLISH_QUOTA",
+              "PUBLISH_BANNED",
+              "NO_BULK_PERMISSION",
             ].includes(error.code));
         this.store.state(
           run.id,
@@ -383,9 +598,25 @@ export class ZhidaoOperations {
       generateAnswer: (question, style, evidence) =>
         this.generateAnswer(question, style, evidence),
       validatePublication: (ids) => this.validatePublication(ids),
-      assertNoDuplicatePublication: (ids, accountId, exceptRunId) =>
-        this.assertNoDuplicatePublication(ids, accountId, exceptRunId),
+      assertNoDuplicatePublication: (ids, accountId) =>
+        this.assertNoDuplicatePublication(ids, accountId),
     };
+  }
+  private async executeInEnvironments(run: OperationRun, signal: AbortSignal) {
+    const ids = [...new Set([typeof run.config.accountId === "string" ? run.config.accountId : "", ...(Array.isArray(run.config.accountIds) ? run.config.accountIds.map(String) : [])].filter(Boolean))].sort();
+    const execute = (index: number): Promise<void> => {
+      if (index < ids.length && this.environments) return this.environments.run({ kind: "zhidao", id: ids[index] }, () => execute(index + 1));
+      if (this.environments) {
+        const stamps = run.config.environmentStamps as Record<string, import("../../shared/browser-environments").EnvironmentStamp> | undefined;
+        if (stamps) for (const accountId of ids) this.environments.assertStamp({ kind: "zhidao", id: accountId }, stamps[accountId]);
+        else {
+          run.config.environmentStamps = Object.fromEntries(ids.map((accountId) => [accountId, this.environments!.stamp({ kind: "zhidao", id: accountId })]));
+          this.store.config(run.id, run.config);
+        }
+      }
+      return this.execute(run, signal);
+    };
+    return this.schedule && ids.length ? this.schedule(ids.map((id) => ({ kind: "zhidao", id })), "百度知道运营任务", () => execute(ids.length), signal) : execute(0);
   }
   private async execute(run: OperationRun, signal: AbortSignal) {
     if (run.kind === "mine") await runMine(this.workerContext(), run, signal);
@@ -401,6 +632,30 @@ export class ZhidaoOperations {
     const failed = items.filter((i) =>
       ["failed", "uncertain"].includes(i.status),
     ).length;
+    if (run.kind === "answer" && run.config.mode === "auto") {
+      const submitted = items.filter((i) => i.status === "submitted").length;
+      this.store.state(
+        run.id,
+        failed ? "paused" : "completed",
+        `${submitted >= run.total ? "已达到本次目标" : "本轮随机取题已结束"}，已提交${submitted}/${run.total}条${failed ? `，${failed}条需要核对或重试` : ""}。提交不等于审核通过，请在官方活动页查看审核进度和发布权益。`,
+        submitted,
+      );
+      return;
+    }
+    if (run.kind === "publish") {
+      const submitted = items.filter(
+        (item) => item.status === "submitted",
+      ).length;
+      this.store.state(
+        run.id,
+        failed ? "paused" : "completed",
+        failed
+          ? "部分上传结果需要核对，请处理后继续。"
+          : `已提交${submitted}/${run.total}条问答；上传任务已创建，平台审核与发布结果请点击“查询平台审核”。`,
+        submitted,
+      );
+      return;
+    }
     this.store.state(
       run.id,
       failed ? "paused" : "completed",
@@ -418,7 +673,7 @@ export class ZhidaoOperations {
     return this.ai.resourceExport(
       "zhidao_answer",
       qaResponse,
-      `用中文${style}回答用户问题。第一段直接回答，提供具体依据、步骤和适用限制。仅使用输入中的事实，不伪称已经读过附件，不编造体验、数据或外链；资料不足明确说明。返回纯文本answer。`,
+      answerInstruction(style, evidence),
       { question, evidence },
     );
   }
@@ -450,10 +705,9 @@ export class ZhidaoOperations {
       const item = this.store.item(itemId);
       if (
         !["template", "answer"].includes(this.store.run(item.runId).kind) ||
+        item.status !== "ready" ||
         !item.reviewed ||
-        !item.question.trim() ||
-        !item.answer.trim() ||
-        item.question.length > 49
+        zhidaoContentIssue(item)
       )
         throw new AppError(
           "REVIEW_REQUIRED",
@@ -472,27 +726,31 @@ export class ZhidaoOperations {
       }
     }
   }
-  private assertNoDuplicatePublication(
-    ids: string[],
-    accountId: string,
-    exceptRunId = "",
-  ) {
+  private assertNoDuplicatePublication(ids: string[], accountId: string) {
+    const selected = new Set<string>();
+    const rows = this.repo.db.all<{ data: string }>(
+      "SELECT i.data FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE r.kind='publish' AND json_extract(r.config,'$.accountId')=? AND i.status IN ('submitted','uncertain','submitting')",
+      accountId,
+    );
+    const history = new Set(
+      rows.map((row) => {
+        const item = JSON.parse(row.data) as OperationItem;
+        return publicationFingerprint(item.question, item.answer);
+      }),
+    );
     for (const itemId of ids) {
       const source = this.store.item(itemId);
-      const rows = this.repo.db.all<{ data: string }>(
-        "SELECT i.data FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE r.kind='publish' AND r.id<>? AND json_extract(r.config,'$.accountId')=? AND i.item_key=? AND i.status IN ('submitted','uncertain','submitting')",
-        exceptRunId,
-        accountId,
-        itemId,
+      const fingerprint = publicationFingerprint(
+        source.question,
+        source.answer,
       );
-      if (
-        rows.some((row) => {
-          const old = JSON.parse(row.data) as OperationItem;
-          return (
-            old.question === source.question && old.answer === source.answer
-          );
-        })
-      )
+      if (selected.has(fingerprint))
+        throw new AppError(
+          "DUPLICATE_CONTENT",
+          "所选问答包含重复内容，请保留一条后上传。",
+        );
+      selected.add(fingerprint);
+      if (history.has(fingerprint))
         throw new AppError(
           "ALREADY_SUBMITTED",
           "所选问答已有提交或待核对记录，请打开原发布任务处理，避免重复上传。",
@@ -531,6 +789,45 @@ export class ZhidaoOperations {
       status: item.answer || input.answer ? "ready" : item.status,
     });
   }
+  reviewItem(raw: unknown) {
+    const input = operationItemReview.parse(raw);
+    const issue = zhidaoContentIssue(input);
+    if (issue) throw new AppError("REVIEW_REQUIRED", `${issue}，再确认审核。`);
+    // One explicit review saves the edited content and its fresh confirmation
+    // atomically. Ordinary edits still revoke the previous review.
+    return this.repo.db.transaction(() => {
+      const saved = this.saveItem({ ...input, reviewed: false });
+      const reviewed = this.store.put(saved.runId, saved.key, {
+        reviewed: true,
+      });
+      this.validatePublication([saved.id]);
+      return reviewed;
+    });
+  }
+  async openAnswer(itemId: string) {
+    const item = this.store.item(itemId);
+    const run = this.store.run(item.runId);
+    const accountId = run.config.accountId;
+    if (
+      typeof accountId !== "string" ||
+      !/^[\w-]{1,100}$/.test(item.questionId)
+    )
+      throw new AppError("INVALID_ANSWER", "此结果没有可打开的知道问题。");
+    this.store.account(accountId);
+    this.assertAccountIdle(accountId);
+    if (!this.ports.zhidaoSession?.openQuestion)
+      throw new AppError(
+        "SESSION_UNAVAILABLE",
+        "当前环境不支持打开账号问题页。",
+      );
+    this.accountPending.add(accountId);
+    try {
+      await this.ports.zhidaoSession.openQuestion(accountId, item.questionId);
+      return true;
+    } finally {
+      this.accountPending.delete(accountId);
+    }
+  }
   resolve(itemId: string, outcome: "submitted" | "retry", remoteId = "") {
     const item = this.store.item(itemId);
     if (this.active.has(item.runId) || item.status !== "uncertain")
@@ -541,14 +838,56 @@ export class ZhidaoOperations {
         "请填写平台返回的回答ID或上传任务ID。",
       );
     const kind = this.store.run(item.runId).kind;
-    return this.store.put(item.runId, item.key, {
-      status: outcome === "submitted" ? "submitted" : "ready",
-      ...(kind === "publish" ? { taskId: remoteId } : { answerId: remoteId }),
-      message:
-        outcome === "submitted"
-          ? "用户已核对平台结果并登记ID"
-          : "用户确认平台未提交，下次继续时可重试",
+    const group =
+      kind === "publish" && item.uploadBatchId
+        ? this.store
+            .items(item.runId)
+            .filter((entry) => entry.uploadBatchId === item.uploadBatchId)
+        : [item];
+    if (group.some((entry) => entry.status !== "uncertain"))
+      throw new AppError("INVALID_STATE", "本批状态已变化，请刷新记录后核对。");
+    this.repo.db.transaction(() => {
+      for (const entry of group)
+        this.store.put(entry.runId, entry.key, {
+          status: outcome === "submitted" ? "submitted" : "ready",
+          ...(kind === "publish"
+            ? { taskId: remoteId.trim() }
+            : { answerId: remoteId.trim() }),
+          message:
+            outcome === "submitted"
+              ? "用户已核对平台结果并登记ID"
+              : "用户确认平台未提交，下次继续时可重试",
+        });
     });
+    const resolved = this.store.item(item.id);
+    const run = this.store.run(item.runId);
+    if (kind === "publish") {
+      const items = this.store.items(run.id);
+      const submitted = items.filter(
+        (entry) => entry.status === "submitted",
+      ).length;
+      this.store.state(
+        run.id,
+        submitted === run.total ? "completed" : "paused",
+        submitted === run.total
+          ? `已登记${submitted}条问答的上传任务ID；请查询平台审核结果。`
+          : "已保存整批核对结果，可继续原发布任务。",
+        submitted,
+      );
+    }
+    if (run.kind === "answer" && run.config.mode === "auto") {
+      const items = this.store.items(run.id);
+      const submitted = items.filter((i) => i.status === "submitted").length;
+      const completed =
+        submitted >= run.total && !items.some((i) => i.status === "uncertain");
+      this.store.state(
+        run.id,
+        completed ? "completed" : "paused",
+        `${completed ? "已达到本次目标" : "已保存核对结果"}，已提交${submitted}/${run.total}条。审核通过情况以平台记录为准。`,
+        submitted,
+      );
+    }
+    return resolved;
   }
   removeItems(ids: string[]) {
     for (const itemId of ids) {
@@ -641,6 +980,12 @@ export class ZhidaoOperations {
         query,
       )!.n,
     };
+  }
+  async templateSources(copyIds: string[]) {
+    return Promise.all(copyIds.map(async (copyId) => {
+      const { copy, resource } = this.ownTarget(copyId);
+      return { title: resource.title, link: copy.shareUrl!, code: (await this.secrets.get(`share:${copyId}`)) ?? "", summary: resource.summary, image: "" };
+    }));
   }
   templatesPage(page = 1) {
     return {

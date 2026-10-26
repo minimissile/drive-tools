@@ -1,0 +1,235 @@
+.generation-workbench {
+  display: grid;
+  grid-template-columns: minmax(380px, 0.9fr) minmax(0, 1.1fr);
+  gap: 20px;
+  align-items: start;
+  min-width: 0;
+}
+.generation-config {
+  position: sticky;
+  top: 16px;
+  padding: 0;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 280px);
+}
+.generation-config > .panel-heading {
+  margin: 0;
+  padding: 18px 20px 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.generation-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.generation-config-body {
+  overflow-y: auto;
+  min-height: 100px;
+  padding: 4px 20px 18px;
+  scrollbar-gutter: stable;
+}
+.generation-drop {
+  position: relative;
+  border: 1px dashed var(--line);
+  border-radius: var(--control-radius);
+  background: var(--bg);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 8px;
+}
+.generation-drop[data-dragging] {
+  border-color: var(--blue);
+}
+.generation-drop > svg {
+  color: var(--blue);
+  flex-shrink: 0;
+}
+.generation-drop > div {
+  flex: 1;
+  min-width: 150px;
+}
+.generation-drop strong {
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.generation-drop p,
+.generation-caption {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.generation-file-input {
+  display: none;
+}
+.generation-pair,
+.generation-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.generation-pair > .field + .field,
+.generation-mapping-grid > .field + .field {
+  margin-top: 0;
+}
+.generation-mapping-grid .field:last-child {
+  grid-column: 1 / -1;
+}
+.generation-mapping {
+  margin-top: 12px;
+}
+.generation-mapping > details {
+  margin-top: 8px;
+}
+.generation-row-issues {
+  max-height: 160px;
+  overflow-y: auto;
+  padding-left: 18px;
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.generation-owned-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.generation-rule-section {
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.generation-rule-section h3,
+.generation-rule-section > summary {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.generation-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.generation-keywords > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.generation-keywords .button {
+  display: inline-flex;
+  padding: 2px;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  cursor: pointer;
+}
+.generation-keyword-input {
+  display: flex;
+  gap: 8px;
+}
+.generation-keyword-input input {
+  min-width: 0;
+}
+.generation-submit {
+  border-top: 1px solid var(--line);
+  padding: 14px 20px 18px;
+  background: var(--surface);
+  border-radius: 0 0 var(--panel-radius) var(--panel-radius);
+}
+.generation-submit-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.generation-submit-actions > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.generation-results {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.generation-results > .panel {
+  margin: 0;
+  min-width: 0;
+}
+.generation-answer-preview {
+  padding: 18px 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.generation-answer-preview h3 {
+  font-size: 16px;
+  line-height: 1.6;
+  font-weight: 500;
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+.generation-answer-preview p {
+  font-size: 13px;
+  line-height: 1.85;
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.generation-answer-preview .generation-preview-link {
+  color: var(--blue);
+  font-size: 12px;
+}
+.generation-output-help {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.generation-output-help dl {
+  font-size: 12px;
+  margin: 0;
+}
+.generation-output-help dl > div {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  padding: 6px 0;
+  gap: 12px;
+}
+.generation-output-help dd {
+  margin: 0;
+  color: var(--muted);
+}
+.generation-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+.generation-next strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.generation-next p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+@media (max-width: 1200px) {
+  .generation-workbench {
+    grid-template-columns: minmax(350px, 0.9fr) minmax(0, 1fr);
+    gap: 16px;
+  }
+}

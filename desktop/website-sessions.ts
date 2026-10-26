@@ -8,6 +8,8 @@ import { baiduResearchInputSchema } from "../shared/baidu-research";
 import { buildBaiduResearchRequest } from "../core/baidu-research";
 import { AppError } from "../core/errors";
 import { readLimited, readLimitedBytes } from "../core/http";
+import { createWeiboSessions } from "./weibo-session";
+import { browserSessionFetch } from "./browser-session-fetch";
 import {
   baiduKeywordPath,
   buildBaiduKeywordRequest,
@@ -31,12 +33,12 @@ type Context = {
   invalidSignature?: string;
   productOpened: boolean;
 };
-export function createWebsiteSessions(workspace: () => string) {
+export function createWebsiteSessions(workspace: () => string, environmentProfile?: (account: WebsiteAccount) => Session) {
   const contexts = new Map<string, Context>();
   const key = (account: WebsiteAccount) =>
     createHash("sha256")
       .update(
-        `${workspace()}\0${account.provider}\0${websiteAccountIdSchema.parse(account.id)}`,
+        `${workspace()}\0${account.provider}\0${websiteAccountIdSchema.parse(account.id)}${environmentProfile ? `\0${environmentProfile(account).getStoragePath()}` : ""}`,
       )
       .digest("hex")
       .slice(0, 24);
@@ -44,7 +46,7 @@ export function createWebsiteSessions(workspace: () => string) {
     const id = key(account),
       old = contexts.get(id);
     if (old) return old;
-    const profile = session.fromPartition(`persist:panxu-website-${id}`);
+    const profile = environmentProfile?.(account) ?? session.fromPartition(`persist:panxu-website-${id}`);
     const value: Context = {
       profile,
       uid: account.uid,
@@ -121,7 +123,7 @@ export function createWebsiteSessions(workspace: () => string) {
       .digest("hex");
     return { token, uid: ctx.uid, signature };
   };
-  const sessions: NonNullable<AppPorts["websiteSessions"]> = {
+  const baiduSessions: NonNullable<AppPorts["websiteSessions"]> = {
     isOpen: () =>
       [...contexts.values()].some(
         (ctx) => ctx.window && !ctx.window.isDestroyed(),
@@ -302,7 +304,7 @@ export function createWebsiteSessions(workspace: () => string) {
           file.name,
         );
       }
-      const response = await ctx.profile.fetch(url.toString(), {
+      const response = await browserSessionFetch(ctx.profile, url.toString(), {
         method: "POST",
         redirect: "error",
         credentials: "include",
@@ -378,7 +380,7 @@ export function createWebsiteSessions(workspace: () => string) {
           "BAIDU_DOWNLOAD_HOST",
           "百度返回了未受信任的下载地址，请在官方窗口核对。",
         );
-      const r = await fetch(url, {
+      const r = await browserSessionFetch(context(_account).profile, url.toString(), {
         redirect: "error",
         credentials: "omit",
         signal: AbortSignal.timeout(45000),
@@ -391,7 +393,7 @@ export function createWebsiteSessions(workspace: () => string) {
       return readLimitedBytes(r, 50_000_000);
     },
     async open(account, tool) {
-      await sessions.login(account);
+      await baiduSessions.login(account);
       const ctx = context(account),
         win = ctx.window;
       if (!win || win.isDestroyed()) return;
@@ -444,5 +446,23 @@ export function createWebsiteSessions(workspace: () => string) {
       }
     },
   };
-  return { sessions, baiduKeywords };
+  const weiboSessions = createWeiboSessions(workspace, environmentProfile);
+  const adapter = (account: WebsiteAccount) => account.provider === "weibo" ? weiboSessions : baiduSessions;
+  const sessions: NonNullable<AppPorts["websiteSessions"]> = {
+    isOpen: () => baiduSessions.isOpen() || weiboSessions.isOpen(),
+    login: (account) => adapter(account).login(account),
+    status: (account) => adapter(account).status(account),
+    clear: (account) => adapter(account).clear(account),
+    invalidate: (account) => adapter(account).invalidate(account),
+    verify: (account) => account.provider === "weibo" ? weiboSessions.verify(account) : baiduSessions.status(account),
+    open: async (account, expectedUid) => {
+      if (account.provider !== "weibo") throw new AppError("WEBSITE_PUBLISH_UNSUPPORTED", "此平台暂未接入网站发布窗口。");
+      await weiboSessions.open(account, expectedUid);
+    },
+    openPost: async (account, url) => {
+      if (account.provider !== "weibo") throw new AppError("WEBSITE_PUBLISH_UNSUPPORTED", "此账号不支持微博回执。");
+      await weiboSessions.openPost(account, url);
+    },
+  };
+  return { sessions, baiduKeywords, weiboPublisher: weiboSessions.publisher };
 }

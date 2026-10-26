@@ -1,4 +1,15 @@
 import { z } from "zod";
+import { answerStyle } from "./answer-styles";
+import {
+  generationResource,
+  generationRules,
+  generationResourceKey,
+} from "./zhidao-generation";
+import {
+  zhidaoPublishLimit,
+  zhidaoTaskNameLimit,
+  type ZhidaoPublishingRights,
+} from "./zhidao-publishing";
 
 export const miningCategories = [
   "小说",
@@ -34,6 +45,7 @@ export interface ZhidaoAccount {
   nickname: string;
   status: "disconnected" | "connected" | "expired";
   bulkPermission: boolean | null;
+  publishingRights?: ZhidaoPublishingRights | null;
   checkedAt: string | null;
   message: string;
 }
@@ -63,8 +75,12 @@ export interface OperationItem {
   question: string;
   answer: string;
   questionId: string;
+  questionBase?: number;
+  questionCategory?: "emotion" | "general" | "education";
   answerId: string;
   taskId: string;
+  uploadBatchId?: string;
+  uploadBatchSize?: number;
   copyId: string;
   shareVersion: number;
   reviewed: boolean;
@@ -114,22 +130,68 @@ export const answerInput = z
   .object({
     mode: z.enum(["manual", "auto"]),
     question: text.max(5000).default(""),
-    style: z.enum(["清晰实用", "步骤详解", "简洁回答"]).default("清晰实用"),
+    style: answerStyle.default("清晰实用"),
     accountId: text.max(100).default(""),
     count: z.number().int().min(1).max(200).default(1),
+    categories: z
+      .array(z.enum(["emotion", "general", "education"]))
+      .min(1)
+      .max(3)
+      .default(["emotion", "general", "education"]),
+    intervalSeconds: z.number().int().min(18).max(600).default(18),
+    instructions: text.max(2000).default(""),
   })
   .refine(
     (v) => (v.mode === "manual" ? !!v.question : !!v.accountId),
     "请填写问题或选择答题账号",
   );
-export const templateInput = z.object({
-  copyIds: z.array(text.min(1).max(100)).min(1).max(100),
-  verifyFacts: z.boolean().default(false),
-});
+export const templateInput = z
+  .object({
+    copyIds: z.array(text.min(1).max(100)).max(100).default([]),
+    resources: z.array(generationResource).max(100).default([]),
+    rules: generationRules.optional(),
+    confirmedResources: z.boolean().default(false),
+    verifyFacts: z.boolean().default(false),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.copyIds.length && !v.resources.length)
+      ctx.addIssue({ code: "custom", message: "请导入或选择资料" });
+    if (
+      v.copyIds.length + v.resources.length > 100 ||
+      (v.copyIds.length && v.resources.length)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "请选择一种资料来源，单次最多100份",
+      });
+    if (new Set(v.copyIds).size !== v.copyIds.length)
+      ctx.addIssue({ code: "custom", message: "请勿重复选择资料" });
+    if (
+      new Set(v.resources.map(generationResourceKey)).size !==
+      v.resources.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "导入资料包含同名同链接的重复行，请先合并",
+      });
+    if (v.resources.length && !v.confirmedResources)
+      ctx.addIssue({
+        code: "custom",
+        message: "请先确认导入资料的内容和使用权限",
+      });
+  });
 export const publishInput = z.object({
-  itemIds: z.array(text.min(1).max(100)).min(1).max(100),
+  itemIds: z
+    .array(text.min(1).max(100))
+    .min(1)
+    .max(zhidaoPublishLimit)
+    .refine(
+      (ids) => new Set(ids).size === ids.length,
+      "请勿重复选择同一条问答",
+    ),
   accountId: text.min(1).max(100),
-  taskName: text.min(1).max(100),
+  taskName: text.min(1).max(zhidaoTaskNameLimit),
+  selectionRevision: text.length(64).optional(),
 });
 export const runStartInput = z.discriminatedUnion("kind", [
   z.object({
@@ -166,6 +228,9 @@ export const operationItemEdit = z.object({
   answer: text.max(25000),
   reviewed: z.boolean(),
 });
+export const operationItemReview = operationItemEdit
+  .omit({ reviewed: true })
+  .extend({ confirmed: z.literal(true) });
 export interface ZhidaoSettings {
   pansouUrl: string;
 }

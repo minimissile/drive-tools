@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { openAccountForm } from "./e2e-account-form.mjs";
 // Browser plugin unavailable. Current-source Electron, temporary DB, no remote writes.
 import { _electron as electron } from "playwright-core";
@@ -11,14 +12,14 @@ const require = createRequire(import.meta.url);
 const evidence = await mkdtemp(join(tmpdir(), "panxu-controls-"));
 const dataPath = join(evidence, "data");
 await mkdir(dataPath);
-const identity = await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) =>
+const identity = await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) =>
   r.json(),
 );
 assert.equal(identity.root, process.cwd());
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -46,7 +47,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -251,7 +252,7 @@ try {
   checks.push(
     "42项长列表滚动与超长文案、筛选生效、搜索下拉远程读取、数字值迁移",
   );
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   const categoryText = page.getByLabel("分类", { exact: true });
   await categoryText.fill("设计");
   await page.getByRole("option", { name: "设计素材", exact: true }).click();
@@ -383,7 +384,7 @@ try {
     "账号管理",
     "连接与设置",
   ]) {
-    await nav(name).click();
+    await navigateTo(page, name);
     await page.locator("main h1").waitFor();
     assert.equal(
       await page.locator("select:visible,datalist").count(),

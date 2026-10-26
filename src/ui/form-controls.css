@@ -70,6 +70,41 @@ textarea:disabled,
   height: var(--control-height);
   color: var(--text);
 }
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--control-compact-height);
+  font-size: 13px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.checkbox-field > input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--blue);
+}
+.checkbox-field > input:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+.checkbox-field-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.checkbox-field-copy small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: 12px;
+}
+.checkbox-field[data-disabled] {
+  cursor: not-allowed;
+  color: var(--disabled-text);
+}
 .input-frame > svg {
   flex: none;
   color: var(--muted);

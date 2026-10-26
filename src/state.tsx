@@ -1,3 +1,5 @@
+import { TaskFocusProvider } from "./tasks/TaskFocus";
+import { stableContext } from "./lib/stable-context";
 import type { IpcMethod, IpcArguments, IpcValue } from "../shared/ipc";
 import { ipc } from "./api/client";
 import {
@@ -13,7 +15,6 @@ import {
   type CommandArguments,
 } from "./api/client";
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -28,17 +29,30 @@ import type {
   Draft,
 } from "../shared/types";
 export type Page =
-  | "workbench" | "zhidao-mine" | "zhidao-collect" | "zhidao-qa" | "zhidao-templates" | "zhidao-publish" | "zhidao-accounts" | "drive-files"
+  | "workbench"
+  | "zhidao-mine"
+  | "zhidao-collect"
+  | "zhidao-qa"
+  | "zhidao-templates"
+  | "zhidao-publish"
+  | "zhidao-accounts"
+  | "drive-files"
+  | "resource-answers"
   | "resource-export"
   | "library"
   | "accounts"
   | "website-accounts"
+  | "browser-environments"
   | "intake"
   | "tasks"
   | "traffic"
   | "share-statistics"
   | "studio"
   | "publish"
+  | "csdn-studio"
+  | "csdn-publish"
+  | "csdn-workflow"
+  | "weibo-marketing"
   | "settings"
   | "bulk"
   | "batch"
@@ -101,10 +115,16 @@ type NavigationStore = Pick<
   | "edit"
 >;
 type ActionStore = Pick<Store, "command" | "refresh" | "notify">;
-const DataContext = createContext<DataStore | null>(null);
-const SelectionContext = createContext<SelectionStore | null>(null);
-const NavigationContext = createContext<NavigationStore | null>(null);
-const ActionContext = createContext<ActionStore | null>(null);
+const DataContext = stableContext<DataStore | null>("AppData", null);
+const SelectionContext = stableContext<SelectionStore | null>(
+  "AppSelection",
+  null,
+);
+const NavigationContext = stableContext<NavigationStore | null>(
+  "AppNavigation",
+  null,
+);
+const ActionContext = stableContext<ActionStore | null>("AppActions", null);
 function useRequired<T>(context: import("react").Context<T | null>): T {
   const value = useContext(context);
   if (!value) throw new Error("AppProvider missing");
@@ -127,17 +147,30 @@ export function useApp(): Store {
   };
 }
 const pages: Page[] = [
-  "workbench", "zhidao-mine", "zhidao-collect", "zhidao-qa", "zhidao-templates", "zhidao-publish", "zhidao-accounts", "drive-files",
+  "workbench",
+  "zhidao-mine",
+  "zhidao-collect",
+  "zhidao-qa",
+  "zhidao-templates",
+  "zhidao-publish",
+  "zhidao-accounts",
+  "drive-files",
+  "resource-answers",
   "resource-export",
   "library",
   "accounts",
   "website-accounts",
+  "browser-environments",
   "intake",
   "tasks",
   "traffic",
   "share-statistics",
   "studio",
   "publish",
+  "csdn-studio",
+  "csdn-publish",
+  "csdn-workflow",
+  "weibo-marketing",
   "settings",
   "bulk",
   "batch",
@@ -146,7 +179,10 @@ const pages: Page[] = [
 ];
 export type SettingsSection =
   "ai" | "traffic" | "notes" | "browser" | "bindings" | "maintenance";
-const WorkspaceStatus = createContext({ loading: true, error: "" });
+const WorkspaceStatus = stableContext("WorkspaceStatus", {
+  loading: true,
+  error: "",
+});
 export const useWorkspaceStatus = () => useContext(WorkspaceStatus);
 function savedUi(): {
   page?: Page;
@@ -177,7 +213,9 @@ function savedUi(): {
 export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <FeedbackProvider>
-      <WorkspaceProvider>{children}</WorkspaceProvider>
+      <TaskFocusProvider>
+        <WorkspaceProvider>{children}</WorkspaceProvider>
+      </TaskFocusProvider>
     </FeedbackProvider>
   );
 }

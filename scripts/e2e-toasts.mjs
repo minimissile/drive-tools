@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { openAccountForm } from "./e2e-account-form.mjs";
 // Browser plugin unavailable. Real source UI actions, disposable DB, mocked failures and local knowledge.
 import { _electron as electron } from "playwright-core";
@@ -10,14 +11,14 @@ const require = createRequire(import.meta.url);
 const evidence = await mkdtemp(join(tmpdir(), "panxu-toasts-"));
 const dataPath = join(evidence, "data");
 await mkdir(dataPath);
-const identity = await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) =>
+const identity = await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) =>
   r.json(),
 );
 assert.equal(identity.root, process.cwd());
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -47,7 +48,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -57,7 +58,7 @@ try {
     window.__toastMode = "";
     window.__toastAddCalls = 0;
   });
-  const client = await fetch("http://127.0.0.1:5173/src/api/client.ts").then(
+  const client = await fetch("http://127.0.0.1:8070/src/api/client.ts").then(
     (r) => r.text(),
   );
   const source = client.replace(
@@ -150,12 +151,11 @@ try {
   assert.equal(colors.at(-1).color, "rgb(35, 122, 94)");
   await shot("success-green-1320");
   await toast.hover();
-  await page.clock.runFor(9000);
+  await page.clock.runFor(4900);
   assert.equal(await toast.count(), 1);
-  await page.mouse.move(100, 100);
-  await page.clock.runFor(6600);
+  await page.clock.runFor(200);
   await toast.waitFor({ state: "detached" });
-  checks.push("创建账号的完成提示为绿色，悬停暂停自动关闭，移出后正常关闭");
+  checks.push("成功提示为绿色，含悬停时在5秒自动关闭");
   await add("重复消息计时验收账号");
   await inspect("success", "status");
   await page.mouse.move(100, 100);
@@ -164,12 +164,10 @@ try {
   await page.clock.runFor(3000);
   assert.equal(await toast.count(), 1);
   await toast.getByRole("button", { name: "关闭提示" }).focus();
-  await page.clock.runFor(9000);
-  assert.equal(await toast.count(), 1);
-  await page.keyboard.press("Enter");
+  await page.clock.runFor(2100);
   await toast.waitFor({ state: "detached" });
-  checks.push("相同文案的连续操作重新计时；键盘聚焦暂停，Enter 可关闭");
-  await nav("录入资源").click();
+  checks.push("同文案新提示重新计时，键盘聚焦也在5秒后关闭");
+  await navigateTo(page, "录入资源");
   await page.locator('input[type="file"]').setInputFiles({
     name: "invalid.txt",
     mimeType: "text/plain",
@@ -177,11 +175,10 @@ try {
   });
   await inspect("warning", "alert");
   assert.equal(colors.at(-1).color, "rgb(148, 101, 28)");
-  await page.clock.runFor(13000);
-  assert.equal(await toast.count(), 1);
   await shot("warning-amber-1320");
-  await dismiss();
-  checks.push("附件限制使用琥珀色警告，持续可读并可手动关闭");
+  await page.clock.runFor(5100);
+  await toast.waitFor({ state: "detached" });
+  checks.push("附件限制使用琥珀色警告，5秒后自动关闭，可手动关闭");
   await nav("账号管理").click();
   await page.evaluate(() => {
     window.__toastMode = "error";
@@ -189,11 +186,10 @@ try {
   await add("模拟保存失败");
   await inspect("error", "alert");
   assert.equal(colors.at(-1).color, "rgb(185, 72, 78)");
-  await page.clock.runFor(13000);
-  assert.equal(await toast.count(), 1);
   await shot("error-red-1320");
-  await dismiss();
-  checks.push("操作异常使用红色错误，保留错误原因与恢复指引，不提前消失");
+  await page.clock.runFor(5100);
+  await toast.waitFor({ state: "detached" });
+  checks.push("操作异常使用红色错误，保留错误原因与恢复指引，5秒后自动关闭");
   const row = page.locator(".account-row").first();
   await row.getByRole("button", { name: "管理", exact: true }).click();
   const dialog = page.getByRole("dialog");

@@ -12,14 +12,14 @@ const require = createRequire(import.meta.url);
 const evidence = await mkdtemp(join(tmpdir(), "panxu-accounts-"));
 const dataPath = join(evidence, "data");
 await mkdir(dataPath);
-const identity = await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) =>
+const identity = await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) =>
   r.json(),
 );
 assert.equal(identity.root, process.cwd());
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -48,7 +48,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -114,7 +114,7 @@ try {
     window.__holdCapacity = false;
     window.__holdAdd = false;
   });
-  const client = await fetch("http://127.0.0.1:5173/src/api/client.ts").then(
+  const client = await fetch("http://127.0.0.1:8070/src/api/client.ts").then(
     (r) => r.text(),
   );
   const instrumented = client.replace(
@@ -225,7 +225,7 @@ try {
       icons.every(
         (i) =>
           i.loaded &&
-          (i.url.startsWith("http://127.0.0.1:5173/") ||
+          (i.url.startsWith("http://127.0.0.1:8070/") ||
             i.url.startsWith("data:")),
       ),
     );

@@ -1,8 +1,8 @@
 import { Toast } from "../ui/Toast";
 import { ToastLayerProvider } from "../ui/ToastLayer";
+import { stableContext } from "../lib/stable-context";
 import type { FeedbackMessage, Notify } from "../lib/feedback";
 import {
-  createContext,
   useCallback,
   useContext,
   useMemo,
@@ -18,9 +18,9 @@ interface FeedbackActions {
   begin(): void;
   end(): void;
 }
-const Actions = createContext<FeedbackActions | null>(null);
-const Activity = createContext(0);
-const ToastState = createContext<ToastEntry>(null);
+const Actions = stableContext<FeedbackActions | null>("FeedbackActions", null);
+const Activity = stableContext("AppActivity", 0);
+const ToastState = stableContext<ToastEntry>("AppToast", null);
 
 export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastEntry>(null);

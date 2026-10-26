@@ -5,6 +5,7 @@ import { useIpcQuery } from "../api/useIpcQuery";
 import { QueryError } from "../ui/QueryError";
 import { defaultResourceCategories } from "../../shared/intake";
 import { Select } from "../ui/Select";
+import { Switch } from "../ui/Switch";
 import { Workspace } from "../ui/Workspace";
 import { ActionBar } from "../ui/ActionBar";
 import { useAttachmentDraft } from "../hooks/useAttachmentDraft";
@@ -49,6 +50,11 @@ export default function Intake() {
         ? undefined
         : (existing?.copies.find((c) => c.id === editCopyId) ??
           existing?.copies[0]);
+  const priorOwnResource =
+    priorCopy?.status === "recorded" ||
+    (!!priorCopy &&
+      existing?.sourceKind === "owned" &&
+      priorCopy.shareUrl === existing.sourceUrl);
   const chooseAccount = (p: Provider) =>
     chooseIntakeAccount(data!.accounts, activeAccounts, p);
   const draft = useLocalDraft(
@@ -69,6 +75,7 @@ export default function Intake() {
           (a) => a.id === chooseAccount(existing?.provider ?? "quark"),
         )?.defaultDirectory ??
         "/盘序资源",
+      isOwnResource: priorOwnResource,
     },
     parseIntakeDraft,
   );
@@ -82,7 +89,10 @@ export default function Intake() {
     tags,
     summary,
     directory,
+    isOwnResource: draftOwnResource,
   } = draft.value;
+  const intakeModeLocked = !!priorCopy && priorCopy.status !== "draft";
+  const isOwnResource = intakeModeLocked ? priorOwnResource : draftOwnResource;
   const setProvider = (provider: Provider) => draft.update({ provider });
   const setAccountId = (accountId: string) => draft.update({ accountId });
   const setCode = (code: string) => draft.update({ code });
@@ -196,6 +206,7 @@ export default function Intake() {
   const saveInFlight = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const save = async (enqueue: boolean) => {
+    if (isOwnResource && enqueue) return;
     if (saveInFlight.current) return;
     saveInFlight.current = true;
     setSubmitting(true);
@@ -218,13 +229,20 @@ export default function Intake() {
           summary,
           coverData: cover,
           accountId: parsed.accountId,
-          directory: parsed.directory,
-          selectedFiles: inspection?.files.filter((f) =>
-            selected.includes(f.id),
-          ),
+          directory: isOwnResource
+            ? (priorCopy?.directory ?? "/")
+            : parsed.directory,
+          isOwnResource,
+          selectedFiles: !isOwnResource
+            ? inspection?.files.filter((f) => selected.includes(f.id))
+            : undefined,
           enqueue,
         },
-        enqueue ? "转存任务已创建，目标账号已锁定。" : "资源信息已保存在本地。",
+        isOwnResource
+          ? "自有资源已直接入库，未创建转存任务。"
+          : enqueue
+            ? "转存任务已创建，目标账号已锁定。"
+            : "资源信息已保存在本地。",
       );
       if (result) {
         draft.clear();
@@ -257,26 +275,33 @@ export default function Intake() {
               <>
                 {!title.trim() || !sourceText.trim() || !accountId
                   ? "保存前请填写资源标题、分享链接并选择账号。"
-                  : selected.length
-                    ? `已选 ${selected.length} / 100 项，可创建转存任务。`
-                    : "资料可先保存为草稿；开始转存前请读取并选择文件。"}
+                  : isOwnResource
+                    ? "自有资源直接入库，保留已有分享链接，不转存、不创建目录。"
+                    : selected.length
+                      ? `已选 ${selected.length} / 100 项，可创建转存任务。`
+                      : "资料可先保存为草稿；开始转存前请读取并选择文件。"}
               </>
             }
           >
             <Button
+              primary={isOwnResource}
               disabled={
                 submitting ||
                 imageDraft.loading ||
                 busy > 0 ||
-                !title ||
+                !title.trim() ||
                 !accountId ||
                 !sourceText
               }
               onClick={() => void save(false)}
             >
-              保存资料{!existing ? "草稿" : ""}
+              {submitting
+                ? "正在保存…"
+                : isOwnResource
+                  ? "直接入库"
+                  : `保存资料${!existing ? "草稿" : ""}`}
             </Button>
-            {priorCopy?.status !== "ready" ? (
+            {!isOwnResource && priorCopy?.status !== "ready" ? (
               <Button
                 primary
                 disabled={
@@ -298,14 +323,21 @@ export default function Intake() {
     >
       <Header
         title={existing ? "继续整理这份资源。" : "录入一份资源。"}
-        description="先保存信息，再选择文件并转存；封面支持上传、拖放和直接粘贴。"
+        description={
+          isOwnResource
+            ? "录入自己的资源，直接保存到资源库；封面支持上传、拖放和直接粘贴。"
+            : "先保存信息，再选择文件并转存；封面支持上传、拖放和直接粘贴。"
+        }
       />
       {imageDraft.error ? <Notice danger>{imageDraft.error}</Notice> : null}
       {draft.error ? (
         <Notice danger>{draft.error}</Notice>
       ) : draft.restored ? (
         <Notice>
-          已恢复本页未保存的输入。开始转存前请重新读取并选择文件。
+          已恢复本页未保存的输入。
+          {isOwnResource
+            ? "当前为自有资源模式，保存时直接入库。"
+            : "开始转存前请重新读取并选择文件。"}
         </Notice>
       ) : null}
       {!data!.accounts.some((a) => a.enabled) ? (
@@ -321,21 +353,58 @@ export default function Intake() {
         </Empty>
       ) : (
         <>
-          <small>
-            归档流程：填写资料 → 核验与转存 → 本人分享 →
-            本地归档。下方先保存资料或读取文件。
-          </small>
-          <div className="stepper" aria-label="资源归档流程">
-            {["资源信息", "校验与转存", "本人分享", "本地归档"].map((x, i) => (
-              <div key={x} className={i === 0 ? "active" : ""}>
-                <b>{i + 1}</b>
-                {x}
+          {!isOwnResource ? (
+            <>
+              <small>
+                归档流程：填写资料 → 核验与转存 → 本人分享 →
+                本地归档。下方先保存资料或读取文件。
+              </small>
+              <div className="stepper" aria-label="资源归档流程">
+                {["资源信息", "校验与转存", "本人分享", "本地归档"].map(
+                  (x, i) => (
+                    <div key={x} className={i === 0 ? "active" : ""}>
+                      <b>{i + 1}</b>
+                      {x}
+                    </div>
+                  ),
+                )}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <small>
+              自有资源流程：填写资料 →
+              直接入库。已有分享链接会保留，不进行转存或重新建链。
+            </small>
+          )}
           <div className="form-layout">
             <Panel title="基本信息">
               <div className="fields">
+                <div className="intake-own-resource">
+                  <div>
+                    <label id="intake-own-label" htmlFor="intake-own-switch">
+                      自有资源
+                    </label>
+                    <p id="intake-own-description">
+                      {isOwnResource
+                        ? "已保存在自己的网盘，录入时跳过转存。"
+                        : "开启后直接入库，适用于已经在自己网盘中的资源。"}
+                    </p>
+                  </div>
+                  <Switch
+                    id="intake-own-switch"
+                    aria-labelledby="intake-own-label"
+                    aria-describedby="intake-own-description"
+                    checked={isOwnResource}
+                    disabled={submitting || busy > 0 || intakeModeLocked}
+                    onCheckedChange={(checked) => {
+                      inspectionRevision.current++;
+                      setInspection(null);
+                      setSelected([]);
+                      setParents([{ id: "0", name: "分享根目录" }]);
+                      draft.update({ isOwnResource: checked });
+                    }}
+                  />
+                </div>
                 <Field label="网盘分享链接" required hint="支持整段分享文案">
                   <textarea
                     aria-label="网盘分享链接"
@@ -359,7 +428,9 @@ export default function Intake() {
                   <small>
                     {link.parsing
                       ? "正在识别链接与提取码…"
-                      : "离开输入框后自动识别，并选择对应网盘的保存位置。"}
+                      : isOwnResource
+                        ? "离开输入框后自动识别链接，关联资源所属的本人账号。"
+                        : "离开输入框后自动识别，并选择对应网盘的保存位置。"}
                   </small>
                 </div>
                 {link.error ? <Notice danger>{link.error}</Notice> : null}
@@ -482,7 +553,7 @@ export default function Intake() {
                 />
                 <small>JPG / PNG / WebP · 最大8MB</small>
               </Panel>
-              <Panel title="保存位置">
+              <Panel title={isOwnResource ? "资源归属" : "保存位置"}>
                 <div className="fields">
                   <Field label="网盘类型">
                     <Select
@@ -501,9 +572,13 @@ export default function Intake() {
                       ]}
                     />
                   </Field>
-                  <Field label="转存与分享账号">
+                  <Field
+                    label={isOwnResource ? "资源所属账号" : "转存与分享账号"}
+                  >
                     <Select
-                      aria-label="转存与分享账号"
+                      aria-label={
+                        isOwnResource ? "资源所属账号" : "转存与分享账号"
+                      }
                       value={accountId}
                       disabled={!!priorCopy}
                       onValueChange={(nextValue) => {
@@ -526,7 +601,11 @@ export default function Intake() {
                             label: (
                               <>
                                 {a.alias}
-                                {a.status !== "connected" ? " · 需登录" : ""}
+                                {a.status !== "connected"
+                                  ? isOwnResource
+                                    ? " · 待核验"
+                                    : " · 需登录"
+                                  : ""}
                                 {a.isDefault ? " · 默认" : ""}
                               </>
                             ),
@@ -534,33 +613,37 @@ export default function Intake() {
                       ]}
                     />
                   </Field>
-                  <Field
-                    as="div"
-                    label="目标目录"
-                    hint="可新增选项，转存时创建资源专用子目录"
-                  >
-                    <IntakeOptionField
-                      key={accountId}
-                      kind="directory"
+                  {!isOwnResource ? (
+                    <Field
+                      as="div"
                       label="目标目录"
-                      value={directory}
-                      disabled={!!priorCopy}
-                      accountId={accountId}
-                      items={
-                        options.data?.directories ?? [
-                          account?.defaultDirectory ?? "/盘序资源",
-                        ]
-                      }
-                      onValueChange={setDirectory}
-                      onAdded={options.reload}
-                    />
-                  </Field>
+                      hint="可新增选项，转存时创建资源专用子目录"
+                    >
+                      <IntakeOptionField
+                        key={accountId}
+                        kind="directory"
+                        label="目标目录"
+                        value={directory}
+                        disabled={!!priorCopy}
+                        accountId={accountId}
+                        items={
+                          options.data?.directories ?? [
+                            account?.defaultDirectory ?? "/盘序资源",
+                          ]
+                        }
+                        onValueChange={setDirectory}
+                        onAdded={options.reload}
+                      />
+                    </Field>
+                  ) : null}
                   <QueryError error={options.error} onRetry={options.reload} />
                 </div>
                 <small>
-                  转存和创建分享都使用此账号。已有副本不能通过编辑资料改绑。
+                  {isOwnResource
+                    ? "选择保存这份资源的本人账号。直接入库无需读取文件或转存，分享归属可在资源库中手动核验。"
+                    : "转存和创建分享都使用此账号。已有副本不能通过编辑资料改绑。"}
                 </small>
-                {account?.status !== "connected" ? (
+                {!isOwnResource && account?.status !== "connected" ? (
                   <div className="row" style={{ marginTop: 10 }}>
                     <Button
                       disabled={!accountId || busy > 0}
@@ -588,7 +671,7 @@ export default function Intake() {
               </Panel>
             </div>
           </div>
-          {priorCopy?.status !== "ready" ? (
+          {isOwnResource ? null : priorCopy?.status !== "ready" ? (
             <Panel
               title="选择需要转存的文件"
               extra={
@@ -738,5 +821,6 @@ const parseIntakeDraft = (value: unknown) =>
       tags: z.string(),
       summary: z.string(),
       directory: z.string(),
+      isOwnResource: z.boolean().default(false),
     })
     .parse(value);

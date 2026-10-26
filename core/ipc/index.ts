@@ -1,3 +1,5 @@
+import { createResourceAnswerHandlers } from "./resource-answers";
+import { createBrowserEnvironmentHandlers } from "./browser-environments";
 import { createInsertionHandlers } from "./insertion";
 import { createZhidaoHandlers } from "./zhidao";
 import { createIpcRegistry } from "./registry";
@@ -19,9 +21,17 @@ import { createSearchHandlers } from "./search";
 import { createStudioHandlers } from "./studio";
 import { createBindingsHandlers } from "./bindings";
 import { createPublicationHandlers } from "./publication";
+import { createCsdnHandlers } from "./csdn";
+import { createWeiboHandlers } from "./weibo";
+import { createWeiboPostHandlers } from "./weibo-posts";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createBrowserEnvironmentHandlers(services),
+    createResourceAnswerHandlers(services),
+    createWeiboPostHandlers(services),
+    createWeiboHandlers(services),
+    createCsdnHandlers(services),
     createZhidaoHandlers(services),
     createWorkspaceHandlers(services),
     createResourcesHandlers(services),

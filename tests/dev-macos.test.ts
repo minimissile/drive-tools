@@ -32,6 +32,7 @@ test(
       await mkdir(join(contents, "Resources"), { recursive: true });
       await mkdir(join(root, "build"));
       await writeFile(join(root, "build", "icon.icns"), "test-icon");
+      await writeFile(join(root, "build", "icon-dev.icns"), "test-dev-icon");
       let path = join(contents, "Info.plist");
       await writeFile(
         path,
@@ -64,7 +65,7 @@ test(
           join(identity.bundle, "Contents/Resources/panxu-dev.icns"),
           "utf8",
         ),
-        "test-icon",
+        "test-dev-icon",
       );
       const plist = JSON.parse(
         execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", path], {

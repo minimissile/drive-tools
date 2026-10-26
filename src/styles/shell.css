@@ -201,6 +201,10 @@
 .page-heading h1 {
   overflow-wrap: anywhere;
 }
+/* Headings receive programmatic focus for announcements, not an interactive ring. */
+.page-heading h1[tabindex="-1"]:focus {
+  outline: none;
+}
 .page-heading p {
   font-size: 12px;
   color: var(--muted);

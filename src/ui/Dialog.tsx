@@ -2,10 +2,12 @@ import { useRef, type ReactNode } from "react";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import { Button } from "./primitives";
 import { useToastHost } from "./ToastLayer";
+import "./dialog.css";
 
 export interface DialogProps {
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
   onClose(): void;
   busy?: boolean;
   className?: string;
@@ -16,6 +18,7 @@ export interface DialogProps {
 export function Dialog({
   title,
   children,
+  footer,
   onClose,
   busy = false,
   className = "",
@@ -37,7 +40,8 @@ export function Dialog({
         <BaseDialog.Viewport className="modal-viewport">
           <BaseDialog.Popup
             ref={setPopup}
-            className={`modal ${className}`}
+            className={`modal ${footer != null ? "modal--structured" : ""} ${className}`}
+            aria-busy={busy || undefined}
             initialFocus={(interaction) =>
               focus === "container" || interaction === "touch"
                 ? popup.current
@@ -52,7 +56,14 @@ export function Dialog({
                 关闭
               </BaseDialog.Close>
             </div>
-            {children}
+            {footer != null ? (
+              <>
+                <div className="dialog-body">{children}</div>
+                <div className="dialog-actions">{footer}</div>
+              </>
+            ) : (
+              children
+            )}
           </BaseDialog.Popup>
         </BaseDialog.Viewport>
       </BaseDialog.Portal>

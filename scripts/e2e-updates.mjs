@@ -32,7 +32,7 @@ const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
   ...(dev
-    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    ? { PANXU_DEV_URL: "http://127.0.0.1:8070", PANXU_DEV_ROOT: process.cwd() }
     : {}),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -53,7 +53,7 @@ try {
   await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "资源库", exact: true }).click();
   await page.locator(".resource-list").waitFor();
   assert.match(await page.title(), /盘序/);
-  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:8070");
   else assert.match(page.url(), /dist\/index.html/);
   await page.evaluate(() =>
     window.panxu.invoke("updater.configure", { autoCheck: false }),

@@ -1,0 +1,192 @@
+.answer-composer .panel-heading {
+  align-items: center;
+  margin-bottom: var(--space-5);
+}
+.answer-composer .tabs {
+  margin: 0;
+  padding-bottom: 0;
+}
+.answer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--space-8);
+}
+.answer-source,
+.answer-expression {
+  min-width: 0;
+}
+.answer-section-heading {
+  margin-bottom: var(--space-4);
+}
+.answer-section-heading h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+.answer-section-heading p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: var(--space-1) 0 0;
+}
+.answer-layout .field {
+  margin: 0;
+}
+.answer-layout .field + .field {
+  margin-top: var(--space-4);
+}
+.answer-layout .field > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: baseline;
+}
+.answer-layout .field > span small {
+  margin: 0;
+}
+.answer-quantity-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  margin: var(--space-5) 0 var(--space-4);
+}
+.answer-quantity-grid > .field + .field {
+  margin: 0;
+}
+.answer-account-state {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.answer-account-state > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.answer-account-state span:not(.status) {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.answer-account-state p {
+  font-size: 12px;
+  color: var(--amber);
+  margin: 0;
+}
+.answer-account-actions .button {
+  padding-inline: 0;
+  margin-right: var(--space-3);
+}
+.answer-category-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.answer-composer .answer-category-picks .check {
+  min-height: var(--control-height);
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  margin: 0;
+  cursor: pointer;
+  transition:
+    background-color var(--control-focus-duration) var(--control-focus-ease),
+    border-color var(--control-focus-duration) var(--control-focus-ease);
+}
+.answer-category-picks .check:hover {
+  background: var(--bg);
+}
+.answer-category-picks .check[data-selected="true"] {
+  background: var(--blue-bg);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.answer-sampling-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
+  font-size: 12px;
+  color: var(--muted);
+}
+.answer-sampling-note span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.answer-sampling-note p {
+  width: 100%;
+  margin: 0;
+}
+.answer-style-preview {
+  margin: var(--space-3) 0 var(--space-4);
+}
+.answer-style-preview > p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 var(--space-2);
+}
+.answer-style-preview blockquote {
+  background: var(--bg);
+  padding: var(--space-3) var(--space-4);
+  margin: 0;
+  line-height: 1.8;
+  font-size: 13px;
+  border-radius: var(--control-radius);
+}
+.answer-style-preview small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: var(--space-1);
+}
+.answer-expression-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: var(--space-2) 0 0;
+}
+.answer-launch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.answer-launch-context {
+  min-width: 0;
+}
+.answer-composer .answer-launch .checkbox-field {
+  margin: 0 0 var(--space-1);
+  font-size: 13px;
+}
+.answer-launch small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.answer-launch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: var(--space-2);
+}
+@media (max-width: 1200px) {
+  .answer-layout {
+    gap: var(--space-5);
+  }
+  .answer-launch {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .answer-launch-actions {
+    margin-left: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .answer-composer .answer-category-picks .check {
+    transition: none;
+  }
+}

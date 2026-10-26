@@ -141,39 +141,6 @@
 .creative-media-settings .select-control {
   max-width: 100%;
 }
-.creative-asset {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-  padding: 14px;
-  display: grid;
-  gap: 12px;
-}
-.creative-asset-empty {
-  min-height: 170px;
-  background: var(--bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
-}
-.creative-asset-preview {
-  background: #edf0f5;
-  text-align: center;
-  border-radius: 5px;
-  overflow: hidden;
-}
-.creative-asset-preview img,
-.creative-asset-preview video {
-  display: block;
-  max-width: 100%;
-  max-height: 520px;
-  margin: auto;
-}
 .creative-gallery {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

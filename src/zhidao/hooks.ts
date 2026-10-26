@@ -1,3 +1,4 @@
+import { useTaskFocus } from "../tasks/TaskFocus";
 import { useEffect, useRef, useState } from "react";
 import { useAppActions, useAppData } from "../state";
 import { ipc } from "../api/client";
@@ -67,6 +68,16 @@ export function useOperation(kind: OperationKind) {
       return { id: typeof v?.id === "string" ? v.id : "" };
     },
   );
+  const { focus, consume } = useTaskFocus();
+  const [focusRunId, setFocusRunId] = useState("");
+  useEffect(() => {
+    if (focus?.kind !== kind) return;
+    draft.update({ id: focus.id });
+    setFocusRunId(focus.id);
+    setPage(1);
+    setRevision((value) => value + 1);
+    consume();
+  }, [focus, kind, draft.update, consume]);
   const [page, setPage] = useState(1),
     [historyPage, setHistoryPage] = useState(1),
     [revision, setRevision] = useState(0);
@@ -95,6 +106,8 @@ export function useOperation(kind: OperationKind) {
   };
   return {
     kind,
+    focusRunId,
+    clearFocus: () => setFocusRunId(""),
     id: draft.value.id,
     pick,
     history,

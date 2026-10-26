@@ -1,0 +1,101 @@
+/* Also loaded by index.html so the first paint has the same brand and geometry. */
+.startup-screen {
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #1d2b42;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+.startup-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 40px;
+  flex: none;
+}
+.startup-brand img {
+  flex: none;
+}
+.startup-brand > span {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 3px;
+}
+.startup-brand small {
+  display: block;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 2px;
+  color: #5d6c84;
+  margin-top: 5px;
+}
+.startup-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 40px 28px;
+}
+.startup-art {
+  display: block;
+  width: 420px;
+  height: 300px;
+  max-width: 100%;
+  object-fit: contain;
+}
+.startup-content h1 {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 4px 0 10px;
+  letter-spacing: -0.02em;
+}
+.startup-description {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #5d6c84;
+  margin: 0;
+}
+.startup-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 30px 0 0;
+  font-size: 13px;
+  color: #2e61d5;
+  min-height: 24px;
+}
+.startup-footer {
+  flex: none;
+  padding: 22px 40px 28px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #5d6c84;
+  text-align: center;
+}
+.startup-error {
+  max-width: 560px;
+  padding: 18px 24px;
+  margin-top: 24px;
+  border-radius: 10px;
+  background: #fff0f1;
+  color: #b9484e;
+  font-size: 13px;
+}
+.startup-error strong {
+  font-weight: 600;
+}
+.startup-error p {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  margin: 8px 0 14px;
+}

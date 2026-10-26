@@ -64,14 +64,15 @@ export function Panel({
   extra,
   children,
   className = "",
+  ...props
 }: {
   title?: string;
   extra?: ReactNode;
   children: ReactNode;
   className?: string;
-}) {
+} & Omit<ComponentProps<"section">, "title">) {
   return (
-    <section className={`panel ${className}`}>
+    <section {...props} className={`panel ${className}`}>
       {title || extra ? (
         <div className="panel-heading">
           {title ? <h2>{title}</h2> : null}

@@ -1,10 +1,15 @@
 import { z } from "zod";
+import { environmentIdSchema } from "../../shared/browser-environments";
 import { id, now } from "../database";
 import { AppError } from "../errors";
 import { parseShare } from "../links";
 import { normalizedDirectory } from "../providers/provider";
-import { operationKinds, runStartInput } from "../../shared/zhidao";
-import { keywordRows } from "../table-files";
+import {
+  operationKinds,
+  runStartInput,
+  operationItemReview,
+} from "../../shared/zhidao";
+import { keywordRows, readTableBytes } from "../table-files";
 import type { HandlerServices, HandlerMap } from "./types";
 
 const identifier = z.string().min(1).max(100),
@@ -35,15 +40,17 @@ export function createZhidaoHandlers(
         z.object({ pansouUrl: z.string().trim().max(300) }).parse(input)
           .pansouUrl,
       ),
+    "zhidao.activeRuns": () => s.zhidao.store.activeRuns(),
     "zhidao.accounts": () => s.zhidao.store.accounts(),
     "zhidao.account.add": async (input) => {
       const v = z
         .object({
           alias: z.string().trim().min(1).max(60),
           cookie: z.string().trim().max(20000).optional(),
+          environmentId: environmentIdSchema.optional(),
         })
         .parse(input);
-      return s.zhidao.addAccount(v.alias, v.cookie);
+      return s.zhidao.addAccount(v.alias, v.cookie, v.environmentId);
     },
     "zhidao.account.update": (input) => {
       const v = z
@@ -56,6 +63,12 @@ export function createZhidaoHandlers(
       });
     },
     "zhidao.account.login": (input) => s.zhidao.login(objectId.parse(input).id),
+    "zhidao.account.openRights": (input) => {
+      const v = z
+        .object({ id: identifier, page: z.enum(["answer", "quota"]) })
+        .parse(input);
+      return s.zhidao.login(v.id, v.page);
+    },
     "zhidao.account.check": (input) => s.zhidao.check(objectId.parse(input).id),
     "zhidao.account.remove": (input) =>
       s.zhidao.removeAccount(
@@ -74,12 +87,63 @@ export function createZhidaoHandlers(
     },
     "zhidao.start": (input) => s.zhidao.start(runStartInput.parse(input)),
     "zhidao.pause": (input) => s.zhidao.pause(objectId.parse(input).id),
+    "zhidao.publish.open": (input) =>
+      s.zhidao.openPublication(objectId.parse(input).id),
+    "zhidao.publish.sync": (input) =>
+      s.zhidao.syncPublication(objectId.parse(input).id),
+    "zhidao.publish.preview": (input) => {
+      const value = z
+        .object({
+          itemIds: z.array(identifier).max(100),
+          accountId: z.string().max(100),
+        })
+        .parse(input);
+      return s.zhidao.publicationPreview(value.itemIds, value.accountId);
+    },
     "zhidao.resume": (input) =>
       s.zhidao.resume(
         z.object({ id: identifier, authorized: z.literal(true) }).parse(input)
           .id,
       ),
     "zhidao.item.save": (input) => s.zhidao.saveItem(input),
+    "zhidao.template.sources": (input) =>
+      s.zhidao.templateSources(
+        z.object({ copyIds: z.array(identifier).max(100) }).parse(input)
+          .copyIds,
+      ),
+    "zhidao.template.read": (input) => {
+      const value = z
+        .object({
+          name: z
+            .string()
+            .min(1)
+            .max(250)
+            .regex(/\.(xlsx|csv)$/i),
+          base64: z
+            .string()
+            .max(10_700_000)
+            .regex(/^[a-z\d+/]*={0,2}$/i),
+        })
+        .parse(input);
+      const bytes = Buffer.from(value.base64, "base64");
+      if (bytes.length > 8_000_000)
+        throw new AppError("FILE_TOO_LARGE", "导入文件不能超过8MB。");
+      const rows = readTableBytes(value.name, bytes);
+      if (
+        !rows.length ||
+        rows.length > 501 ||
+        rows.some((row) => row.length > 30)
+      )
+        throw new AppError(
+          "INVALID_TABLE",
+          "请导入1–500行、最多30列的资源表格（另加一行表头）。",
+        );
+      return { name: value.name, rows };
+    },
+    "zhidao.item.review": (input) =>
+      s.zhidao.reviewItem(operationItemReview.parse(input)),
+    "zhidao.answer.open": (input) =>
+      s.zhidao.openAnswer(objectId.parse(input).id),
     "zhidao.item.remove": (input) =>
       s.zhidao.removeItems(
         z.object({ ids: z.array(identifier).min(1).max(100) }).parse(input).ids,

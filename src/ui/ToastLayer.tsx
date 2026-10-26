@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useContext,
   useMemo,
@@ -8,12 +7,13 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { stableContext } from "../lib/stable-context";
 
 type Layer = {
   host: HTMLElement | null;
   register(host: HTMLElement): () => void;
 };
-const ToastLayerContext = createContext<Layer | null>(null);
+const ToastLayerContext = stableContext<Layer | null>("ToastLayer", null);
 
 /** Toasts live above the workspace, or inside the active dialog's focus boundary. */
 export function ToastLayerProvider({ children }: { children: ReactNode }) {

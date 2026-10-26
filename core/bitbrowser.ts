@@ -1,9 +1,11 @@
-import { chromium } from "playwright-core";
+import { chromium, type BrowserContext } from "playwright-core";
 import type { BrowserBinding } from "../shared/types";
 import { validateEditorUrl, validateLoopback } from "./links";
 import { AppError } from "./errors";
 import { fetchJson } from "./http";
 import { platformSpecs } from "../shared/platforms";
+import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 export function assertEditorPage(
   editor: string,
   current: string,
@@ -53,6 +55,7 @@ export class BitBrowser {
   constructor(
     private config: () => Promise<{ url: string; key: string | null }>,
     private requestJson = fetchJson,
+    private lease?: <T>(binding: BrowserBinding, action: () => Promise<T>) => Promise<T>,
   ) {}
   private async call(path: string, data: unknown = {}) {
     const config = await this.config();
@@ -84,6 +87,34 @@ export class BitBrowser {
   async health() {
     await this.call("/health");
     return { connected: true };
+  }
+  async environmentConfiguration(profileId: string) {
+    const response = await this.call("/browser/detail", { id: profileId });
+    const data = response.data;
+    if (!data || data.id !== profileId || !data.browserFingerPrint || typeof data.browserFingerPrint !== "object") throw new AppError("BIT_PROFILE_INVALID", "比特未返回完整环境配置，请确认配置仍存在且具有访问权限。");
+    if (data.isDynamicIpChangeIp === true) throw new AppError("BIT_ROTATING_PROXY", "此环境会在打开时更换代理 IP，请在比特客户端关闭自动换 IP 后重试。");
+    // Whitelist configuration only: never retain or return profile cookies or saved website credentials.
+    const fingerprint = Object.fromEntries(Object.entries(data.browserFingerPrint).filter(([key]) => !["id", "seq", "browserId", "createdBy", "createdTime", "updateBy", "updateTime"].includes(key)).sort(([a], [b]) => a.localeCompare(b)));
+    const config = { proxyMethod: data.proxyMethod, proxyType: data.proxyType, host: data.host, port: data.port, proxyUserName: data.proxyUserName, proxyPassword: data.proxyPassword, dynamicIpUrl: data.dynamicIpUrl, isGlobalProxyInfo: data.isGlobalProxyInfo, fingerprint };
+    return { signature: createHash("sha256").update(JSON.stringify(config)).digest("hex"), proxy: data.proxyType === "noproxy" ? "direct" as const : "configured" as const, stopWhileNetError: data.stopWhileNetError === true };
+  }
+  async environmentExitIp(profileId: string) {
+    return this.withProfile(profileId, async (context) => {
+      const page = await context.newPage();
+      try {
+        const response = await page.goto("https://api.ipify.org?format=json", { waitUntil: "domcontentloaded", timeout: 15000 });
+        const text = await response?.text();
+        if (!response?.ok() || !text || text.length > 200) throw new AppError("ENVIRONMENT_NETWORK_UNKNOWN", "指纹环境出口检查失败，请在客户端检查代理。");
+        const ip = JSON.parse(text).ip;
+        if (typeof ip !== "string" || !isIP(ip)) throw new AppError("ENVIRONMENT_NETWORK_UNKNOWN", "指纹环境未返回有效出口 IP。");
+        return ip;
+      } finally { await page.close().catch(() => {}); }
+    });
+  }
+  async assertProfileIdle(profileId: string) {
+    const response = await this.call("/browser/pids", { ids: [profileId] });
+    if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "无法确认指纹环境是否已关闭，请检查比特连接后重试。");
+    if (Number(response.data[profileId]) > 0) throw new AppError("ENVIRONMENT_WINDOW_OPEN", "请先关闭此指纹环境的浏览器窗口，再修改配置或迁移账号；登录状态会保留。");
   }
   async windows() {
     const windows: { id: string; name: string; seq: number | null }[] = [];
@@ -118,8 +149,31 @@ export class BitBrowser {
   }
   async open(binding: BrowserBinding) {
     const editor = validateEditorUrl(binding.platform, binding.editorUrl);
+    await this.withContext(binding, async (context) => {
+      // Leave existing editors and unsaved drafts untouched.
+      const page = await context.newPage();
+      const navigation = await page.goto(editor, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await page.bringToFront();
+      const current = page.url();
+      const extensionText =
+        new URL(current).protocol === "chrome-extension:"
+          ? await page.locator("body").innerText({ timeout: 3000 }).catch(() => "")
+          : "";
+      assertEditorPage(editor, current, extensionText.slice(0, 12000), navigation?.status());
+    });
+    return { opened: true, url: editor };
+  }
+  async withContext<T>(binding: BrowserBinding, action: (context: BrowserContext) => Promise<T>): Promise<T> {
+    validateEditorUrl(binding.platform, binding.editorUrl);
+    const run = () => this.withProfile(binding.windowId, action);
+    return this.lease ? this.lease(binding, run) : run();
+  }
+  async withProfile<T>(profileId: string, action: (context: BrowserContext) => Promise<T>): Promise<T> {
     const response = await this.call("/browser/open", {
-      id: binding.windowId,
+      id: profileId,
       loadExtensions: true,
     });
     const endpoint = String(response.data?.ws ?? "");
@@ -136,30 +190,9 @@ export class BitBrowser {
       const context = browser.contexts()[0];
       if (!context)
         throw new AppError("BIT_CONTEXT_MISSING", "未连接到指定指纹窗口。");
-      // Leave existing editors and unsaved drafts untouched.
-      const page = await context.newPage();
-      const navigation = await page.goto(editor, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
-      await page.bringToFront();
-      const current = page.url();
-      const extensionText =
-        new URL(current).protocol === "chrome-extension:"
-          ? await page
-              .locator("body")
-              .innerText({ timeout: 3000 })
-              .catch(() => "")
-          : "";
-      assertEditorPage(
-        editor,
-        current,
-        extensionText.slice(0, 12000),
-        navigation?.status(),
-      );
+      return await action(context);
     } finally {
       await browser.close();
     } // CDP disconnects the client; the existing BitBrowser window is not closed.
-    return { opened: true, url: editor };
   }
 }

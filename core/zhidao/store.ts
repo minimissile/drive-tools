@@ -9,7 +9,7 @@ import type {
 } from "../../shared/zhidao";
 
 export class OperationsStore {
-  constructor(readonly db: Database) {}
+  constructor(readonly db: Database, private accountView?: (account: ZhidaoAccount) => ZhidaoAccount) {}
   recover() {
     this.db.run(
       "UPDATE operation_runs SET status='paused',message='上次运行已中断，已保留结果；请核对后继续。',updated_at=? WHERE status='running'",
@@ -24,7 +24,8 @@ export class OperationsStore {
       .all<{ data: string }>(
         "SELECT data FROM zhidao_accounts ORDER BY created_at DESC",
       )
-      .map((r) => parseJson<ZhidaoAccount>(r.data, {} as ZhidaoAccount));
+      .map((r) => parseJson<ZhidaoAccount>(r.data, {} as ZhidaoAccount))
+      .map((account) => this.accountView ? this.accountView(account) : account);
   }
   account(accountId: string) {
     const a = this.accounts().find((a) => a.id === accountId);
@@ -101,6 +102,16 @@ export class OperationsStore {
         ...args,
       )!.n,
     };
+  }
+  activeRuns() {
+    return this.db
+      .all<{ id: string }>(
+        "SELECT id FROM operation_runs WHERE status='running' ORDER BY created_at DESC,rowid DESC",
+      )
+      .map(({ id }) => {
+        const { config, ...run } = this.run(id);
+        return run;
+      });
   }
   state(
     runId: string,

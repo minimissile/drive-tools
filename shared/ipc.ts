@@ -1,10 +1,16 @@
+import type { ResourceAnswerContract } from "./resource-answers";
+import type { BrowserEnvironmentContract } from "./browser-environments";
 import type { IpcCommands } from "./ipc-commands";
 import type { ZhidaoContract } from "./zhidao-ipc";
 import type { BaiduKeywordContract } from "./baidu-keywords";
 import type { BaiduResearchContract } from "./baidu-research";
 import type { WebsiteAccountContract } from "./website-accounts";
+import type { CsdnWorkflowContract } from "./csdn-workflow";
+import type { WeiboMarketingContract } from "./weibo-marketing";
+import type { WeiboPostsContract } from "./weibo-posts";
 import type {
   AppSnapshot,
+  BrowserBinding,
   Resource,
   ResourcePage,
   SplitRun,
@@ -56,7 +62,19 @@ export type SplitSummary = {
 };
 
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
-export interface IpcContract extends IpcCommands, ZhidaoContract, BaiduKeywordContract, BaiduResearchContract, WebsiteAccountContract {
+export interface IpcContract
+  extends
+    BrowserEnvironmentContract,
+    ResourceAnswerContract,
+    IpcCommands,
+    ZhidaoContract,
+    BaiduKeywordContract,
+    BaiduResearchContract,
+    WebsiteAccountContract,
+    CsdnWorkflowContract,
+    WeiboMarketingContract,
+    WeiboPostsContract {
+  "binding.list": Contract<undefined, BrowserBinding[]>;
   snapshot: Contract<{ resourceId?: string } | undefined, AppSnapshot>;
   "resource.get": Contract<{ id: string }, Resource>;
   "resource.search": Contract<{ query: string }, Resource[]>;
@@ -148,8 +166,32 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
-  "websiteAccounts.list", "baiduKeywords.latest", "baiduResearch.latest",
-  "zhidao.summary", "zhidao.accounts", "zhidao.settings", "zhidao.runs", "zhidao.run", "zhidao.targets", "zhidao.templates",
+  "environments.list",
+  "environments.jobs",
+  "binding.list",
+  "resourceAnswers.list",
+  "weibo.words",
+  "weibo.matches",
+  "weibo.history",
+  "weibo.get",
+  "weiboPosts.list",
+  "csdn.words",
+  "csdn.matches",
+  "csdn.history",
+  "csdn.get",
+  "websiteAccounts.list",
+  "baiduKeywords.latest",
+  "baiduResearch.latest",
+  "zhidao.activeRuns",
+  "zhidao.summary",
+  "zhidao.accounts",
+  "zhidao.settings",
+  "zhidao.runs",
+  "zhidao.run",
+  "zhidao.targets",
+  "zhidao.templates",
+  "zhidao.publish.preview",
+  "zhidao.template.sources",
   "snapshot",
   "insertion.materials",
   "insertion.materialDetail",
@@ -175,6 +217,7 @@ export const queryMethods = [
   "search.get",
   "search.targets",
   "shareStats.list",
+  "draft.get",
   "studio.templates",
   "studio.modelCatalog",
   "studio.jobs",

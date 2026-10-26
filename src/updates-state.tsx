@@ -1,21 +1,16 @@
 import { useIpcQuery } from "./api/useIpcQuery";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { useContext, useEffect, useState, type ReactNode } from "react";
 import type { UpdateState } from "../shared/updates";
+import { stableContext } from "./lib/stable-context";
 
-const UpdateReadContext = createContext({
+const UpdateReadContext = stableContext("UpdateRead", {
   loading: true,
   error: "",
   reload: () => {},
 });
 export const useUpdateRead = () => useContext(UpdateReadContext);
 
-const UpdatesContext = createContext<UpdateState | null>(null);
+const UpdatesContext = stableContext<UpdateState | null>("Updates", null);
 export const useUpdates = () => useContext(UpdatesContext);
 
 // Progress events update only the update controls, without refreshing or

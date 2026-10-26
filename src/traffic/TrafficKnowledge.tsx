@@ -1,6 +1,6 @@
 import { Select } from "../ui/Select";
 import { updateSelection } from "../lib/selection";
-import { keywordMetrics } from "./knowledge";
+import { keywordMetrics, keywordMetricNames as metricName } from "./knowledge";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { QueryError } from "../ui/QueryError";
 import { Tabs, TabList, TabPanel } from "../ui/Tabs";
@@ -19,7 +19,6 @@ import { formatTime } from "../lib/format";
 import { useAppActions, useAppActivity } from "../state";
 import { endpointSpecs } from "../../shared/platforms";
 import type { Endpoint } from "../../shared/types";
-import { baiduKeywordColumns } from "../../shared/baidu-keywords";
 import type {
   KnowledgeDetail,
   KnowledgeFilter,
@@ -30,23 +29,7 @@ const phaseName: Record<string, string> = {
   poll: "获取分析结果",
   legacy: "历史恢复",
 };
-const metricName: Record<string, string> = {
-  ...Object.fromEntries(baiduKeywordColumns),
-  index: "百度PC指数",
-  mobile_index: "百度移动指数",
-  douyin_index: "抖音指数",
-  toutiao_index: "头条指数",
-  kuaishou_index: "快手指数",
-  weibo_index: "微博指数",
-  haosou_index: "360指数",
-  bidword_pcpv: "百度PC搜索量",
-  bidword_wisepv: "百度移动搜索量",
-  long_keyword_count: "长尾词数",
-  sem_price: "竞价参考",
-  event_hot_exp: "事件热度",
-  baidu_pc_exp: "百度PC热度",
-  baidu_move_exp: "百度移动热度",
-};
+
 const statusName: Record<string, string> = {
   requested: "请求中 / 尚未确认",
   received: "响应已归档",

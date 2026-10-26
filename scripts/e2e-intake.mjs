@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 // Browser plugin not available. Current source in an isolated Electron window; all remote services blocked.
 import { _electron as electron } from "playwright-core";
 import { createRequire } from "node:module";
@@ -11,13 +12,13 @@ const require = createRequire(import.meta.url),
   dataPath = join(evidence, "data");
 await mkdir(dataPath);
 assert.equal(
-  (await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) => r.json())).root,
+  (await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) => r.json())).root,
   root,
 );
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: root,
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -43,7 +44,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -66,7 +67,7 @@ try {
     }
     return result;
   });
-  const client = await fetch("http://127.0.0.1:5173/src/api/client.ts").then(
+  const client = await fetch("http://127.0.0.1:8070/src/api/client.ts").then(
     (r) => r.text(),
   );
   const instrumented = client.replace(
@@ -80,11 +81,7 @@ try {
     r.fulfill({ contentType: "application/javascript", body: instrumented }),
   );
   await page.reload();
-  const nav = (name) =>
-    page
-      .getByRole("navigation", { name: "主导航" })
-      .getByRole("button", { name, exact: true });
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   const link = page.getByLabel("网盘分享链接", { exact: true });
   await link.fill(
     "这是百度资料 https://pan.baidu.com/s/1source123?pwd=1234 提取码：1234",
@@ -132,7 +129,7 @@ try {
       "/营销资源/课程资料",
   );
   await page.reload();
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   assert.equal(
     await page.getByLabel("分类", { exact: true }).inputValue(),
     "SEO 与内容营销素材",

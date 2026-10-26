@@ -20,10 +20,11 @@ import type { HandlerServices, HandlerMap } from "./types";
 export function createBindingsHandlers(
   services: Pick<
     HandlerServices,
-    "bit" | "changed" | "db" | "openBinding" | "repo"
+    "bit" | "changed" | "db" | "openBinding" | "repo" | "environments"
   >,
 ) {
   return {
+    "binding.list": () => services.repo.bindings(),
     "bit.health": async () => {
       return services.bit.health();
     },
@@ -74,7 +75,10 @@ export function createBindingsHandlers(
         .parse(object);
       const spec = platformSpecs.find((p) => p.id === input.platform)!;
       if (input.id) {
+        services.environments.assertAccountIdle({ kind: "binding", id: input.id });
         const prior = services.repo.bindings().find((b) => b.id === input.id);
+        if (prior?.websiteAccountId)
+          throw new AppError("WEBSITE_BINDING_MANAGED", "此连接由其他账号管理，请前往账号管理修改发布能力。");
         if (!prior || prior.platform !== input.platform)
           throw new AppError(
             "BINDING_MISMATCH",
@@ -190,6 +194,7 @@ export function createBindingsHandlers(
           JSON.stringify(capabilities),
           bindingId,
         );
+        services.environments.syncBinding(bindingId);
       });
       services.changed();
       return services.repo.bindings().find((b) => b.id === bindingId);

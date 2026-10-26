@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 // Browser plugin unavailable: test only this script's isolated Electron + temporary workspace.
 import { _electron as electron } from "playwright-core";
 import { createRequire } from "node:module";
@@ -12,13 +13,13 @@ const require = createRequire(import.meta.url),
   dataPath = join(evidence, "data");
 await mkdir(dataPath);
 assert.equal(
-  (await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) => r.json())).root,
+  (await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) => r.json())).root,
   root,
 );
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: root,
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -44,7 +45,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -135,7 +136,7 @@ try {
   );
   await page.reload();
   const nav = page.getByRole("navigation", { name: "主导航" });
-  await nav.getByRole("button", { name: "批量处理", exact: true }).click();
+  await navigateTo(page, "批量处理");
   assert.equal(
     await nav.getByRole("button", { name: "批量录入", exact: true }).count(),
     0,
@@ -290,7 +291,7 @@ try {
     fullPage: true,
   });
   await page.reload();
-  await nav.getByRole("button", { name: "批量处理", exact: true }).click();
+  await navigateTo(page, "批量处理");
   await page.getByRole("tab", { name: "批量插入", exact: true }).click();
   await page.getByText("处理已结束", { exact: true }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.__batchQa.writes), 6);

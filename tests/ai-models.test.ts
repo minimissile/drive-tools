@@ -177,6 +177,49 @@ test("settings validate capabilities atomically and route actual requests by pur
     await f.cleanup();
   }
 });
+test("local AI preflight validates saved configuration without decrypting or requesting", async () => {
+  const f = await fixture();
+  try {
+    f.app.secrets.get = async () => {
+      throw Error("preflight must not decrypt");
+    };
+    let requests = 0;
+    const ai = new AiService(
+      f.app.repo,
+      f.app.secrets,
+      () => {},
+      async () => {
+        requests++;
+        throw Error("preflight must not request");
+      },
+    );
+    assert.throws(() => ai.assertTextConfigured("copy"), {
+      code: "API_KEY_REQUIRED",
+    });
+    await f.app.secrets.set("openrouter", "preflight-test-key");
+    assert.throws(() => ai.assertTextConfigured("copy"), {
+      code: "MODEL_REQUIRED",
+    });
+    f.app.db.setSetting("model", "legacy");
+    assert.equal(ai.assertTextConfigured("copy").model, "legacy");
+    f.app.db.setSetting("modelCatalog", [
+      { ...text("legacy"), structured: false },
+    ]);
+    assert.throws(() => ai.assertTextConfigured("copy"), {
+      code: "MODEL_UNSUPPORTED",
+    });
+    f.app.db.setSetting("modelCatalog", [text("legacy")]);
+    assert.throws(() => ai.assertTextConfigured("vision"), {
+      code: "VISION_MODEL_REQUIRED",
+    });
+    f.app.db.setSetting("modelCatalog", [text("legacy", true)]);
+    assert.equal(ai.assertTextConfigured("vision").model, "legacy");
+    assert.equal(requests, 0);
+    assert.equal(f.app.repo.calls().length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
 test("known provider rejections are retained and excluded from recommendations without automatic retries", async () => {
   const f = await fixture();
   try {

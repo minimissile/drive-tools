@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { Database, id } from "./database";
+import { Database, databaseSchemaVersion, id, now } from "./database";
 import { AppError } from "./errors";
 import { studioWorkingCopy } from "../shared/studio";
 
@@ -52,7 +52,7 @@ export async function inspectBackup(folder: string) {
   const manifest = z
     .object({
       product: z.literal("panxu-studio"),
-      schemaVersion: z.number().int().min(1).max(15),
+      schemaVersion: z.number().int().min(1).max(databaseSchemaVersion),
       createdAt: z.string(),
       credentialsIncluded: z.literal(false),
       databaseSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -236,6 +236,28 @@ export async function stageRestore(
           db.setSetting(row.key, parsed.data);
         }
         db.run("DELETE FROM secrets");
+        db.run("UPDATE browser_environment_identities SET revision=revision+1");
+        db.run("UPDATE browser_environment_accounts SET verified_revision=0");
+        db.run(
+          "UPDATE browser_environments SET data=json_remove(json_set(data,'$.revision',json_extract(data,'$.revision')+1),'$.network')",
+        );
+        for (const row of db.all<{ data: string }>(
+          "SELECT data FROM browser_environment_jobs WHERE status IN ('queued','running')",
+        )) {
+          const job = {
+            ...JSON.parse(row.data),
+            status: "attention",
+            message:
+              "从备份恢复，请先核对原平台结果，再手动继续；不会自动重发。",
+            updatedAt: now(),
+          };
+          db.run(
+            "UPDATE browser_environment_jobs SET status='attention',data=?,updated_at=? WHERE id=?",
+            JSON.stringify(job),
+            job.updatedAt,
+            job.id,
+          );
+        }
         db.run("DELETE FROM note_exports");
         db.run("DELETE FROM outbox");
         db.run("DELETE FROM share_checks");
@@ -259,9 +281,15 @@ export async function stageRestore(
           "UPDATE transfer_batch_items SET state='failed',error='从备份恢复，请重新读取分享。' WHERE state IN ('pending','inspecting','ready')",
         );
         db.run("UPDATE drafts SET reviewed=0");
-        db.run("UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')");
-        db.run("UPDATE operation_runs SET status='paused',message='从备份恢复，请核对账号、费用和远端结果后继续' WHERE status!='completed'");
-        db.run("UPDATE operation_items SET data=json_set(data,'$.reviewed',json('false'))");
+        db.run(
+          "UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.publishingRights',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')",
+        );
+        db.run(
+          "UPDATE operation_runs SET status='paused',message='从备份恢复，请核对账号、费用和远端结果后继续' WHERE status!='completed'",
+        );
+        db.run(
+          "UPDATE operation_items SET data=json_set(data,'$.reviewed',json('false'))",
+        );
         db.run(
           "UPDATE browser_bindings SET link_permission='none',verified_at=NULL,last_checked_at=NULL,last_opened_at=NULL,open_error=NULL",
         );

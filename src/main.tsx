@@ -1,5 +1,5 @@
 import React from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import App from "./App";
 import { AppProvider } from "./state";
 import { UpdatesProvider } from "./updates-state";
@@ -24,9 +24,20 @@ class ErrorBoundary extends React.Component<
     );
   }
 }
-createRoot(document.getElementById("root")!).render(
+// Entry modules can run again when Fast Refresh invalidates a dependency.
+// Keep one owner of the container so old and new React trees cannot coexist.
+const container = document.getElementById("root")! as HTMLElement & {
+  __panxuReactRoot?: Root;
+  __panxuEntryRevision?: number;
+};
+const root = (container.__panxuReactRoot ??= createRoot(container));
+// An invalidated entry gets a fresh boundary instead of retaining an HMR error.
+const entryRevision = import.meta.hot
+  ? (container.__panxuEntryRevision = (container.__panxuEntryRevision ?? 0) + 1)
+  : 0;
+root.render(
   <React.StrictMode>
-    <ErrorBoundary>
+    <ErrorBoundary key={entryRevision}>
       <AppProvider>
         <UpdatesProvider>
           <App />

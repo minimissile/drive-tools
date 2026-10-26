@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
+export const databaseSchemaVersion = 18;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -71,8 +72,58 @@ export class Database {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()?.user_version ?? 0,
     );
-    if (version > 15) throw new Error("数据库来自更新版本，请升级盘序后打开。");
-    if (version === 15) return;
+    if (version > databaseSchemaVersion) throw new Error("数据库来自更新版本，请升级盘序后打开。");
+    if (version === databaseSchemaVersion) return;
+    if (version === 17) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v18-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        ALTER TABLE browser_environment_accounts RENAME TO browser_environment_accounts_v17;
+        CREATE TABLE browser_environment_accounts(kind TEXT NOT NULL,account_id TEXT NOT NULL,environment_id TEXT NOT NULL REFERENCES browser_environments(id),identity_id TEXT NOT NULL REFERENCES browser_environment_identities(id),realm TEXT NOT NULL,platform TEXT NOT NULL,uid TEXT,verified_revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(kind,account_id));
+        INSERT INTO browser_environment_accounts SELECT * FROM browser_environment_accounts_v17;
+        DROP TABLE browser_environment_accounts_v17;
+        CREATE INDEX environment_account_identity ON browser_environment_accounts(identity_id);
+        CREATE TABLE browser_environment_jobs(id TEXT PRIMARY KEY,status TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE INDEX environment_jobs_history ON browser_environment_jobs(created_at DESC);
+        PRAGMA user_version=18;
+      `));
+      return;
+    }
+    if (version === 16) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v17-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE browser_environments(id TEXT PRIMARY KEY,engine TEXT NOT NULL,profile_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(engine,profile_id));
+        CREATE TABLE browser_environment_identities(id TEXT PRIMARY KEY,environment_id TEXT NOT NULL REFERENCES browser_environments(id),realm TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,UNIQUE(environment_id,realm));
+        CREATE TABLE browser_environment_accounts(kind TEXT NOT NULL,account_id TEXT NOT NULL,environment_id TEXT NOT NULL REFERENCES browser_environments(id),identity_id TEXT NOT NULL REFERENCES browser_environment_identities(id),realm TEXT NOT NULL,platform TEXT NOT NULL,uid TEXT,verified_revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(kind,account_id));
+        CREATE INDEX environment_account_identity ON browser_environment_accounts(identity_id);
+        PRAGMA user_version=17;
+      `));
+      this.migrate(false);
+      return;
+    }
+    if (version === 15) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v16-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        ALTER TABLE website_accounts ADD COLUMN nickname TEXT;
+        ALTER TABLE website_accounts ADD COLUMN checked_at TEXT;
+        ALTER TABLE browser_bindings ADD COLUMN website_account_id TEXT;
+        CREATE UNIQUE INDEX binding_website_account ON browser_bindings(website_account_id) WHERE website_account_id IS NOT NULL;
+        PRAGMA user_version=16;
+      `));
+      this.migrate(false);
+      return;
+    }
     if (version === 14) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v15-${randomUUID()}.bak`;
@@ -83,6 +134,7 @@ export class Database {
         CREATE TABLE website_accounts(id TEXT PRIMARY KEY,provider TEXT NOT NULL,alias TEXT NOT NULL,uid TEXT,status TEXT NOT NULL DEFAULT 'disconnected',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
         PRAGMA user_version=15;
       `));
+      this.migrate(false);
       return;
     }
     if (version === 13) {

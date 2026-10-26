@@ -27,3 +27,5 @@ playwright-report/
 /release-archive/
 /release-candidates/
 /release-evidence/
+
+/.panxu-dev.lock/

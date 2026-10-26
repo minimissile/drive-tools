@@ -1,0 +1,78 @@
+.publish-upload-workspace {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.publish-upload-workspace > .panel {
+  margin: 0;
+}
+.publish-account-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  margin: 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.publish-account-status > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.publish-account-status strong {
+  font-weight: 500;
+}
+.publish-account-status small {
+  color: var(--muted);
+}
+.publish-account-status > .button {
+  flex-shrink: 0;
+}
+.publish-actions {
+  margin-top: 16px;
+}
+.publish-selection-help,
+.publish-audit > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0;
+}
+.operations-table.publish-review-table th:last-child {
+  width: 180px;
+}
+.publish-audit {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.publish-audit-toolbar,
+.publish-audit-record {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 12px;
+}
+.publish-audit-toolbar {
+  margin-bottom: 10px;
+}
+.publish-audit-toolbar strong {
+  font-size: 13px;
+  font-weight: 500;
+  margin-right: auto;
+}
+.publish-audit-record {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.publish-audit-record small {
+  color: var(--muted);
+}

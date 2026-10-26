@@ -7,16 +7,18 @@ import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const evidence = await mkdtemp(join(tmpdir(), "panxu-sidebar-"));
+const devPort = process.env.PANXU_DEV_PORT ?? "8070";
+const devUrl = `http://127.0.0.1:${devPort}`;
 const dataPath = join(evidence, "data");
 await mkdir(dataPath);
-const identity = await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) =>
+const identity = await fetch(`${devUrl}/__panxu_dev`).then((r) =>
   r.json(),
 );
 assert.equal(identity.root, process.cwd());
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: devUrl,
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -32,7 +34,7 @@ let page;
 try {
   page = await app.firstWindow();
   page.on("pageerror", (e) => errors.push(e.message));
-  await app.evaluate(({ session }) => {
+  await app.evaluate(({ session }, devUrl) => {
     globalThis.fetch = async () => {
       throw Error("Sidebar QA: external services blocked");
     };
@@ -41,10 +43,10 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== devUrl,
       });
     });
-  });
+  }, devUrl);
   await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "资源库", exact: true }).click();
   await page.locator(".resource-list").waitFor();
   const nav = page.getByRole("navigation", { name: "主导航" });
@@ -72,10 +74,10 @@ try {
     await page.locator(".sidebar .workspace, .sidebar .avatar").count(),
     0,
   );
-  assert.equal(await nav.getByRole("button").count(), 14);
+  assert.equal(await nav.getByRole("button").count(), 7);
   assert.equal(await page.locator(".nav-group").count(), 4);
   checks.push(
-    "删除页面下拉入口与工作空间身份块，保留全部 14 个导航入口和四个分组",
+    "侧边栏保留七个规划、复盘及工作空间入口和四个分组，操作统一收拢到工作台",
   );
   for (const [w, h] of [
     [1320, 900],

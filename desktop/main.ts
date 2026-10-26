@@ -1,8 +1,10 @@
 import { runtimeDataPath } from "./runtime-paths";
+import { watchDevParent } from "./dev-parent";
 import {
   app,
   BrowserWindow,
   clipboard,
+  ClipboardItem,
   dialog,
   ipcMain,
   nativeImage,
@@ -13,12 +15,13 @@ import {
 } from "electron";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { stat, readFile } from "node:fs/promises";
 import { Readable } from "node:stream";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, basename } from "node:path";
 import { AppService, type AppPorts } from "../core/service";
 import { createZhidaoSession } from "./zhidao-session";
 import { createWebsiteSessions } from "./website-sessions";
+import { createEnvironmentSessions } from "./browser-environment-session";
 import { readTableBytes } from "../core/table-files";
 import { QuarkProvider } from "../core/providers/quark";
 import { UcProvider } from "../core/providers/uc";
@@ -58,6 +61,9 @@ const defaultDataPath = runtimeDataPath(app.getPath("appData"), app.isPackaged);
 mkdirSync(defaultDataPath, { recursive: true, mode: 0o700 });
 app.setPath("userData", defaultDataPath);
 app.setPath("sessionData", defaultDataPath);
+// Lock the application environment before selecting a workspace. Temporary data
+// directories must not bypass the desktop single-instance policy.
+const locked = app.requestSingleInstanceLock();
 const workspaceLocation = join(defaultDataPath, "workspace-location.json");
 let startupError: Error | null = null;
 let selectedDataPath: string | undefined;
@@ -105,12 +111,24 @@ let activeOperations = 0;
 let installingUpdate = false;
 let quitting = false;
 let devRestarting = false;
-const developmentUrl = `http://127.0.0.1:${Number(process.env.PANXU_DEV_PORT || 5173)}`;
+const developmentUrl = `http://127.0.0.1:${Number(process.env.PANXU_DEV_PORT || 8070)}`;
 const development =
   !app.isPackaged && process.env.PANXU_DEV_URL === developmentUrl;
+// A crashed/killed dev supervisor must not leave an orphan Dock application.
+if (development) {
+  watchDevParent(process, () => {
+    quitting = true;
+    app.quit();
+  });
+}
+// The source runtime has its own DEV artwork; packaged resources keep the brand icon.
 const appIconPath = app.isPackaged
   ? join(process.resourcesPath, "brand", "icon.png")
-  : join(import.meta.dirname, "../build/icon.png");
+  : join(
+      import.meta.dirname,
+      "../build",
+      development ? "icon-dev.png" : "icon.png",
+    );
 const loginWindows = new Map<string, BrowserWindow>();
 const clearingSessions = new Set<string>();
 const partition = (accountId: string) =>
@@ -379,11 +397,30 @@ function changed() {
       window.webContents.send("panxu:changed");
   }, 80);
 }
-const websiteSessions = createWebsiteSessions(() => service.dataPath);
+const environmentSessions = createEnvironmentSessions((ref) => service.environments.forAccount(ref));
+const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
 const ports: AppPorts = {
-  zhidaoSession: createZhidaoSession(),
+  browserEnvironments: environmentSessions,
+  zhidaoSession: createZhidaoSession((id) => environmentSessions.profile({ kind: "zhidao", id })),
   baiduKeywords: websiteSessions.baiduKeywords,
   websiteSessions: websiteSessions.sessions,
+  weiboPublisher: websiteSessions.weiboPublisher,
+  async readWeiboImages() {
+    const result = await dialog.showOpenDialog(window!, {
+      title: "选择微博配图（最多 9 张）",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "微博图片", extensions: ["png", "jpg", "jpeg", "gif"] }],
+    });
+    if (result.canceled) return null;
+    if (result.filePaths.length > 9) throw new AppError("WEIBO_IMAGE_LIMIT", "一次最多选择 9 张图片。");
+    const images = [];
+    for (const path of result.filePaths) {
+      const info = await stat(path);
+      if (!info.isFile() || info.size <= 0 || info.size >= 20 * 1024 * 1024) throw new AppError("WEIBO_IMAGE_INVALID", "每张图片必须为小于 20MB 的本地文件。");
+      images.push({ name: basename(path), bytes: await readFile(path) });
+    }
+    return images;
+  },
   pansouBinary: join(
     app.isPackaged
       ? process.resourcesPath
@@ -550,8 +587,14 @@ const ports: AppPorts = {
   async openExternal(url) {
     await shell.openExternal(url);
   },
+  async copyImage(bytes) {
+    const image = nativeImage.createFromBuffer(bytes);
+    if (image.isEmpty()) throw new AppError("IMAGE_INVALID", "图片读取失败，未复制。");
+    await clipboard.write([new ClipboardItem({"image/png": new Blob([new Uint8Array(image.toPNG())], {type:"image/png"})})]);
+  },
+  async copyRichText(html, text) { await clipboard.write([new ClipboardItem({"text/html":html,"text/plain":text})]); },
   async copyText(text) {
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
   },
   async saveFile(name, bytes) {
     const extension =
@@ -637,6 +680,9 @@ function createWindow() {
     if (
       running.length ||
       service.studio.isBusy ||
+      service.websiteAccounts.isBusy ||
+      service.weibo.isBusy ||
+      service.csdn.isBusy ||
       service.zhidao.isBusy ||
       service.driveFiles.isBusy
     ) {
@@ -662,7 +708,6 @@ function createWindow() {
     void window.loadURL(devUrl);
   } else void window.loadFile(join(import.meta.dirname, "../dist/index.html"));
 }
-const locked = app.requestSingleInstanceLock();
 if (!locked) app.quit();
 else {
   app.on("second-instance", () => {

@@ -1,0 +1,17 @@
+{
+  "scope": "标题程序化焦点外框修复与品牌启动页",
+  "cause": "Header mount focuses h1; global [tabindex=-1]:focus-visible draws interactive outline.",
+  "resolution": "Preserve heading focus/announcement, suppress outline only for page heading focus. Interactive focus rings unchanged.",
+  "startup": "Static first paint plus snapshot-driven React screen; local SVG; loading, error/retry, reduced motion; no minimum delay or fake percentage.",
+  "verification": {
+    "checks": [
+      "React 加载前的首屏 HTML 已展示品牌与本地插图，避免空白首屏",
+      "真实快照未返回时展示完整品牌启动页，本地插图正常加载，1440×900 与 1366×768 无溢出",
+      "读取失败提供重试；数据就绪立即进入页面，无人工延迟；标题聚焦无外框，导航键盘焦点仍可见"
+    ],
+    "errors": []
+  },
+  "runtime": "Existing npm run dev at 5187, browser mock IPC; no extra Electron instance or remote calls.",
+  "build": "tsc --noEmit passed; vite build to /tmp/panxu-startup-build-20261021 passed.",
+  "limits": "Native process before the renderer first paint was not simulated; splash begins when the main window paints."
+}

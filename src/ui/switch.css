@@ -1,0 +1,49 @@
+.switch-control {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 24px;
+  padding: 3px;
+  border: 1px solid var(--control-line);
+  border-radius: 12px;
+  background: var(--control-line);
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  transition:
+    background-color var(--control-focus-duration) var(--control-focus-ease),
+    border-color var(--control-focus-duration) var(--control-focus-ease);
+}
+.switch-control[data-checked] {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+.switch-control:focus-visible {
+  outline-color: var(--blue);
+}
+.switch-control[data-disabled] {
+  background: var(--disabled-bg);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+.switch-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  transform: translateX(0);
+  transition: transform var(--control-focus-duration) var(--control-focus-ease);
+}
+.switch-thumb[data-checked] {
+  transform: translateX(14px);
+}
+.switch-thumb[data-disabled] {
+  background: var(--disabled-text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch-control,
+  .switch-thumb {
+    transition: none;
+  }
+}

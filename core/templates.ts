@@ -17,6 +17,13 @@ export function localTemplate(
 ) {
   const facts =
     clean(resource.summary) || "【请填写可核实的资源内容、适合人群与使用条件】";
+  if (platform === "weibo")
+    return {
+      title: clean(resource.title),
+      body: `${facts}\n\n适合人群：【请填写适合使用这份资料的人群】\n使用建议：【请填写一个具体用途与限制】`,
+      tags: resource.tags.filter((t) => /^[^#\s<>:/]{1,30}$/.test(t)).slice(0, 3),
+      coverText: "",
+    };
   const sections = channelProfiles[platform].technical
     ? [
         "核心问题与结论",

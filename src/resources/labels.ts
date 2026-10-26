@@ -7,6 +7,7 @@ export function stageName(value: string) {
     (
       {
         draft: "草稿",
+        recorded: "自有资源已入库",
         ready: "已归档",
         queued: "等待执行",
         preflight: "预检中",

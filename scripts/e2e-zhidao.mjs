@@ -7,13 +7,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { chooseOption } from "./e2e-select.mjs";
+import { navigateTo } from "./e2e-navigation.mjs";
+import { verifyZhidaoSubmissions } from "./e2e-zhidao-submissions.mjs";
 const require = createRequire(import.meta.url);
 const dataPath = await mkdtemp(join(tmpdir(), "panxu-zhidao-ui-"));
 const evidence =
   process.env.PANXU_QA_DIR ??
   (await mkdtemp(join(tmpdir(), "panxu-zhidao-evidence-")));
 await mkdir(evidence, { recursive: true });
-const port = process.env.PANXU_DEV_PORT ?? "5173";
+const port = process.env.PANXU_DEV_PORT ?? "8070";
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
@@ -37,12 +39,41 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
+  await page
+    .getByText("按功能组选择工具，开始处理项目任务。", { exact: true })
+    .waitFor();
+  assert.equal(
+    await page.locator(".workbench .page-heading .button").count(),
+    0,
+  );
+  await page
+    .getByRole("heading", { name: "百度知道答题", exact: true })
+    .waitFor();
   await page.evaluate(() =>
     window.panxu.invoke("updater.configure", { autoCheck: false }),
   );
   assert.equal(new URL(page.url()).origin, `http://127.0.0.1:${port}`);
   const identity = await page.evaluate(() => window.panxu.invoke("dev.status"));
   assert.equal(identity.root, process.cwd());
+  // Fast Refresh can re-evaluate the entry without reloading the document.
+  // It must retain one shell and one React owner of the root container.
+  for (let revision = 0; revision < 3; revision++) {
+    await page.evaluate(async (revision) => {
+      await import(`/src/main.tsx?qa-root-reentry=${revision}`);
+    }, revision);
+    await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
+    assert.equal(await page.locator(".app-shell").count(), 1);
+    assert.equal(
+      await page
+        .getByRole("navigation", { name: "主导航", exact: true })
+        .count(),
+      1,
+    );
+    assert.equal(await page.locator("main").count(), 1);
+  }
+  checks.push(
+    "入口连续重执行仍只有一套界面、侧边栏与主内容，未重复创建 React 根节点",
+  );
   await app.evaluate(() => {
     globalThis.__zhidaoQA = { requests: 0, sources: 0, external: 0 };
     globalThis.fetch = async (url, init) => {
@@ -97,21 +128,30 @@ try {
   });
   checks.push("源码开发窗口身份、默认工作台与外部调用隔离");
   await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(1440, 1000),
+    BrowserWindow.getAllWindows()[0].setSize(1440, 900),
   );
   await page.evaluate(() => document.activeElement?.blur());
   await page.screenshot({ path: join(evidence, "workbench-1440.png") });
-  const nav = (name) =>
-    page
-      .getByRole("navigation", { name: "百度知道运营", exact: true })
-      .getByRole("button", { name, exact: true });
-  await page.getByRole("button", { name: /资源采集.*按关键词/ }).click();
+  const openAccounts = async () => {
+    await navigateTo(page, "账号管理");
+    await page.getByRole("tab", { name: "百度知道", exact: true }).click();
+    await page
+      .getByRole("heading", { name: "添加知道账号", exact: true })
+      .waitFor();
+  };
+  await page.getByRole("button", { name: "资源采集", exact: true }).click();
   await page.getByRole("heading", { name: "资源采集", exact: true }).waitFor();
   await page
     .getByRole("textbox", { name: "关键词列表" })
     .fill("测试软件A\n测试软件B");
-  await nav("智能问答").click();
-  await nav("资源采集").click();
+  const toolSwitcher = page.getByRole("combobox", {
+    name: "切换工作台工具",
+    exact: true,
+  });
+  await chooseOption(toolSwitcher, "zhidao-qa");
+  await page.getByRole("heading", { name: "智能问答", exact: true }).waitFor();
+  await chooseOption(toolSwitcher, "zhidao-collect");
+  await page.getByRole("heading", { name: "资源采集", exact: true }).waitFor();
   assert.equal(
     await page.getByRole("textbox", { name: "关键词列表" }).inputValue(),
     "测试软件A\n测试软件B",
@@ -123,7 +163,42 @@ try {
     "测试软件A\n测试软件B",
   );
   checks.push("采集表单切页和刷新恢复，未触发采集请求");
-  await nav("热门挖词").click();
+  await navigateTo(page, "工作台");
+  const contentEntry = page.getByRole("button", {
+    name: "内容工作室",
+    exact: true,
+  });
+  await contentEntry.scrollIntoViewIfNeeded();
+  const launcherScroll = await page
+    .locator("main")
+    .evaluate((el) => el.scrollTop);
+  assert.ok(launcherScroll > 0);
+  await contentEntry.click();
+  await page.locator('main[data-page="studio"] h1').waitFor();
+  await page.getByRole("button", { name: "返回工作台", exact: true }).click();
+  await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
+  assert.ok(
+    Math.abs(
+      (await page.locator("main").evaluate((el) => el.scrollTop)) -
+        launcherScroll,
+    ) < 2,
+  );
+  assert.equal(
+    await contentEntry.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.getByRole("button", { name: "智能问答", exact: true }).click();
+  await page.getByRole("heading", { name: "智能问答", exact: true }).waitFor();
+  await page.getByRole("button", { name: "返回工作台", exact: true }).click();
+  await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "智能问答", exact: true })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  checks.push("二级页可直接切换工具，返回恢复工作台滚动位置与原入口焦点");
+  await navigateTo(page, "热门挖词");
   await chooseOption(
     page.getByRole("combobox", { name: "资源领域", exact: true }),
     "电影",
@@ -141,6 +216,7 @@ try {
   await resultPages
     .getByRole("button", { name: "下一页", exact: true })
     .click();
+  await page.getByText("隔离电影作品26", { exact: true }).waitFor();
   await page
     .getByRole("checkbox", { name: "选择本页结果", exact: true })
     .check();
@@ -167,31 +243,64 @@ try {
     ["问答模板", "问答模板"],
     ["发布任务", "发布任务"],
     ["网盘文件", "网盘文件"],
-    ["知道账号", "知道账号"],
   ]) {
-    await nav(entry).click();
+    await navigateTo(page, entry);
     await page.getByRole("heading", { name: heading, exact: true }).waitFor();
+    assert.equal(await page.locator(".app-shell").count(), 1);
+    assert.equal(await page.locator(".workbench").count(), 0);
+    assert.equal(
+      await page
+        .getByRole("button", { name: "返回工作台", exact: true })
+        .isVisible(),
+      true,
+    );
+    assert.equal(
+      await page.locator(".operations-breadcrumb, .operations-nav").count(),
+      0,
+    );
     assert.equal(await page.locator("vite-error-overlay").count(), 0);
   }
+  await openAccounts();
+  assert.equal(
+    await page
+      .getByRole("navigation", { name: "百度知道运营", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page
+      .getByRole("tab", { name: "百度知道", exact: true })
+      .getAttribute("aria-selected"),
+    "true",
+  );
+  assert.equal(
+    await page
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: "账号管理", exact: true })
+      .getAttribute("aria-current"),
+    "page",
+  );
   await page
     .getByRole("textbox", { name: "账号备注", exact: true })
     .fill("隔离知道账号");
   await page.getByRole("button", { name: "添加账号", exact: true }).click();
   await page.getByText("隔离知道账号", { exact: true }).waitFor();
-  checks.push("全部运营入口可达，知道账号本地添加和权限空态");
+  checks.push(
+    "全部运营入口可达，百度知道登录并入账号管理，账号添加与权限空态保留",
+  );
   await page.locator("summary").filter({ hasText: "使用已有 Cookie" }).click();
   await page
     .getByLabel("百度知道 Cookie", { exact: false })
     .fill("QA_SECRET_DO_NOT_PERSIST");
-  await nav("热门挖词").click();
+  await navigateTo(page, "热门挖词");
   await page.getByRole("checkbox", { name: /补充公开搜索候选/ }).check();
-  await nav("知道账号").click();
+  await openAccounts();
   await page.locator("summary").filter({ hasText: "使用已有 Cookie" }).click();
   assert.equal(
     await page.getByLabel("百度知道 Cookie", { exact: false }).inputValue(),
     "",
   );
-  await nav("热门挖词").click();
+  await navigateTo(page, "热门挖词");
   assert.equal(
     await page.getByRole("checkbox", { name: /补充公开搜索候选/ }).isChecked(),
     false,
@@ -211,7 +320,7 @@ try {
       dailyAiBudgetMicros: 1000000,
     });
   });
-  await nav("智能问答").click();
+  await navigateTo(page, "智能问答");
   await page
     .getByRole("textbox", { name: "你的问题" })
     .fill("如何整理本人学习资料？");
@@ -249,15 +358,15 @@ try {
       .isDisabled(),
     true,
   );
-  await nav("发布任务").click();
+  await navigateTo(page, "发布任务");
   const selectedAnswer = page.getByRole("checkbox", {
     name: "选择 如何整理本人学习资料？",
     exact: true,
   });
   await selectedAnswer.check();
   await page.getByRole("checkbox", { name: /我已审核所选1条问答/ }).check();
-  await nav("问答模板").click();
-  await nav("发布任务").click();
+  await navigateTo(page, "问答模板");
+  await navigateTo(page, "发布任务");
   assert.equal(await selectedAnswer.isChecked(), true);
   assert.equal(
     await page
@@ -289,7 +398,7 @@ try {
       JSON.stringify({ id }),
     );
   }, importedRun.id);
-  await nav("资源采集").click();
+  await navigateTo(page, "资源采集");
   const rights = page.getByRole("checkbox", {
     name: "我有权保存和分享所选资源",
     exact: true,
@@ -310,7 +419,8 @@ try {
     .uncheck();
   assert.equal(await rights.isChecked(), false);
   checks.push("资源选择和转存目录变更均撤销先前权利确认");
-  await nav("发布任务").click();
+  await navigateTo(page, "发布任务");
+  checks.push(...(await verifyZhidaoSubmissions(app, page, evidence)));
   const closeToasts = async () => {
     while (
       await page.getByRole("button", { name: "关闭提示", exact: true }).count()
@@ -323,18 +433,20 @@ try {
   };
   await closeToasts();
   await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(1440, 1000),
+    BrowserWindow.getAllWindows()[0].setSize(1440, 900),
   );
   await page.screenshot({ path: join(evidence, "publishing-1440.png") });
   await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(840, 650),
+    BrowserWindow.getAllWindows()[0].setSize(1366, 768),
   );
-  await page.screenshot({ path: join(evidence, "publishing-840.png") });
+  await page.screenshot({ path: join(evidence, "publishing-1366.png") });
   await page
     .getByRole("button", { name: "上传所选问答", exact: true })
     .scrollIntoViewIfNeeded();
-  await page.screenshot({ path: join(evidence, "publishing-actions-840.png") });
-  await nav("资源采集").click();
+  await page.screenshot({
+    path: join(evidence, "publishing-actions-1366.png"),
+  });
+  await navigateTo(page, "资源采集");
   await page
     .getByRole("textbox", { name: "关键词列表" })
     .scrollIntoViewIfNeeded();
@@ -342,22 +454,21 @@ try {
     .getByRole("textbox", { name: "关键词列表" })
     .fill("测试软件A\n测试软件B");
   await closeToasts();
-  await page.screenshot({ path: join(evidence, "collection-840.png") });
+  await page.screenshot({ path: join(evidence, "collection-1366.png") });
   await page
     .getByRole("button", { name: "开始采集", exact: true })
     .scrollIntoViewIfNeeded();
-  await page.screenshot({ path: join(evidence, "collection-actions-840.png") });
-  await nav("网盘文件").click();
+  await page.screenshot({
+    path: join(evidence, "collection-actions-1366.png"),
+  });
+  await navigateTo(page, "网盘文件");
   await page.getByRole("heading", { name: "网盘文件", exact: true }).waitFor();
   await closeToasts();
-  await page.screenshot({ path: join(evidence, "drive-files-840.png") });
-  await page
-    .getByRole("button", { name: "工作台", exact: true })
-    .first()
-    .click();
+  await page.screenshot({ path: join(evidence, "drive-files-1366.png") });
+  await page.getByRole("button", { name: "返回工作台", exact: true }).click();
   await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
   await closeToasts();
-  await page.screenshot({ path: join(evidence, "workbench-840.png") });
+  await page.screenshot({ path: join(evidence, "workbench-1366.png") });
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   );
@@ -365,7 +476,7 @@ try {
   assert.equal(await app.evaluate(() => globalThis.__zhidaoQA.external), 0);
   assert.deepEqual(errors, []);
   checks.push(
-    "1440×1000和840×650布局、主操作可滚动到达、无控制台错误、无真实远端请求",
+    "1440×900和1366×768桌面布局、二级页面统一返回与工具切换、主操作可达、无控制台错误、无真实远端请求",
   );
   console.log(JSON.stringify({ checks, evidence, dataPath, errors }, null, 2));
 } catch (error) {

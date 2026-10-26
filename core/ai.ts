@@ -60,6 +60,30 @@ export class AiService {
       this.repo.db.setting("model", ""),
     )[purpose];
   }
+  /** Local readiness check only; does not decrypt credentials or call a provider. */
+  assertTextConfigured(purpose: "copy" | "analysis" | "vision") {
+    if (!this.secrets.has("openrouter"))
+      throw new AppError("API_KEY_REQUIRED", "请先配置OpenRouter API Key。");
+    const model = this.modelFor(purpose);
+    if (!model)
+      throw new AppError(
+        "MODEL_REQUIRED",
+        `请到连接与设置选择${aiPurposeDetails[purpose].label}模型。`,
+      );
+    const catalog = this.repo.db.setting<AiModel[]>("modelCatalog", []),
+      selected = catalog.find((m) => m.id === model);
+    if (selected && (!selected.structured || selected.textOutput === false))
+      throw new AppError(
+        "MODEL_UNSUPPORTED",
+        "所选模型未标注支持文字与结构化输出，请刷新列表并更换模型。",
+      );
+    if (purpose === "vision" && !selected?.imageInput)
+      throw new AppError(
+        "VISION_MODEL_REQUIRED",
+        "截图识别需要支持图片输入和结构化输出的模型，请到连接与设置刷新模型列表后选择。 ",
+      );
+    return { model, selected, catalog };
+  }
   constructor(
     private repo: Repository,
     private secrets: SecretStore,
@@ -316,24 +340,7 @@ export class AiService {
     if (!key)
       throw new AppError("API_KEY_REQUIRED", "请先配置OpenRouter API Key。");
     const purpose = purposeForCall(name, images.length > 0),
-      model = this.modelFor(purpose);
-    if (!model)
-      throw new AppError(
-        "MODEL_REQUIRED",
-        `请到连接与设置选择${aiPurposeDetails[purpose].label}模型。`,
-      );
-    const catalog = this.repo.db.setting<AiModel[]>("modelCatalog", []),
-      selected = catalog.find((m) => m.id === model);
-    if (selected && (!selected.structured || selected.textOutput === false))
-      throw new AppError(
-        "MODEL_UNSUPPORTED",
-        "所选模型未标注支持文字与结构化输出，请刷新列表并更换模型。",
-      );
-    if (images.length && !selected?.imageInput)
-      throw new AppError(
-        "VISION_MODEL_REQUIRED",
-        "截图识别需要支持图片输入和结构化输出的模型，请到连接与设置刷新模型列表后选择。 ",
-      );
+      { model, selected, catalog } = this.assertTextConfigured(purpose);
     const safeInput = JSON.stringify(redactPromptInput(input));
     const effort =
       purpose !== "copy" && selected?.reasoningEfforts?.includes("medium")

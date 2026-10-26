@@ -29,11 +29,7 @@ export interface WorkerContext {
     evidence?: unknown,
   ): Promise<{ answer: string }>;
   validatePublication(ids: string[]): void;
-  assertNoDuplicatePublication(
-    ids: string[],
-    accountId: string,
-    exceptRunId?: string,
-  ): void;
+  assertNoDuplicatePublication(ids: string[], accountId: string): void;
 }
 export const wait = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {

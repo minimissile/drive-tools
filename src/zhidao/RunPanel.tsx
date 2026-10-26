@@ -1,20 +1,13 @@
-import { useState, type ReactNode } from "react";
-import {
-  Button,
-  Empty,
-  Field,
-  LoadingState,
-  Notice,
-  Panel,
-  Status,
-} from "../ui/primitives";
+import { useState, useRef, useEffect, type ReactNode } from "react";
+import { Button, Empty, LoadingState, Panel, Status } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { Pagination } from "../ui/Pagination";
-import { Dialog } from "../ui/Dialog";
+import { ResumeRunDialog } from "./ResumeRunDialog";
 import { useOperationAction, type OperationModel } from "./hooks";
-import type { OperationItem } from "../../shared/zhidao";
+import type { OperationItem, OperationRun } from "../../shared/zhidao";
 import { formatTime } from "../lib/format";
+import { PublishAudit } from "./PublishAudit";
 
 export function RunPanel({
   model,
@@ -24,12 +17,26 @@ export function RunPanel({
   children?: (items: OperationItem[]) => ReactNode;
 }) {
   const action = useOperationAction();
-  const [resume, setResume] = useState(false),
-    [consent, setConsent] = useState(false);
+  const [resume, setResume] = useState<OperationRun | null>(null);
+  const [stopping, setStopping] = useState("");
   const detail = model.detail.data;
   const history = model.history.data;
+  const focusHost = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (detail?.run.id === stopping && detail.run.status !== "running")
+      setStopping("");
+  }, [detail?.run.id, detail?.run.status, stopping]);
+  useEffect(() => {
+    if (!model.focusRunId || detail?.run.id !== model.focusRunId) return;
+    focusHost.current?.scrollIntoView({ block: "start" });
+    focusHost.current?.focus({ preventScroll: true });
+    model.clearFocus();
+  }, [model.focusRunId, detail?.run.id, model.clearFocus]);
   return (
     <Panel
+      ref={focusHost}
+      tabIndex={-1}
+      aria-label="任务与结果"
       title="任务与结果"
       extra={
         <Button quiet size="compact" onClick={model.refresh}>
@@ -115,26 +122,39 @@ export function RunPanel({
             <div>
               {model.running ? (
                 <Button
-                  disabled={!!action.pending}
+                  disabled={!!action.pending || stopping === model.id}
                   onClick={() =>
-                    void action.run(
-                      "zhidao.pause",
-                      { id: model.id },
-                      model.refresh,
-                    )
+                    void action.run("zhidao.pause", { id: model.id }, (run) => {
+                      setStopping(run.status === "running" ? run.id : "");
+                      model.refresh();
+                    })
                   }
                 >
-                  停止并保留结果
+                  {stopping === model.id ? "正在停止…" : "停止并保留结果"}
                 </Button>
               ) : detail.run.status !== "completed" ? (
                 <Button
                   disabled={!!action.pending}
                   onClick={() => {
-                    setConsent(false);
-                    setResume(true);
+                    setResume(detail.run);
                   }}
                 >
-                  继续任务
+                  {model.kind === "template" ? "重试未完成项" : "继续任务"}
+                </Button>
+              ) : null}
+              {model.kind === "answer" &&
+              typeof detail.run.config.accountId === "string" &&
+              detail.run.config.accountId ? (
+                <Button
+                  quiet
+                  disabled={!!action.pending || model.running}
+                  onClick={() =>
+                    void action.run("zhidao.account.login", {
+                      id: detail.run.config.accountId as string,
+                    })
+                  }
+                >
+                  打开账号窗口
                 </Button>
               ) : null}
               <Button
@@ -168,13 +188,33 @@ export function RunPanel({
           <p className="operation-run-message" role="status">
             {detail.run.message || "等待处理"}
           </p>
+          {model.kind === "publish" && detail.total > 0 ? (
+            <PublishAudit
+              key={detail.run.id}
+              run={detail.run}
+              onChanged={model.refresh}
+            />
+          ) : null}
           {detail.total ? (
             children?.(detail.items)
           ) : model.running ? (
             <LoadingState label="任务正在运行，结果将逐条显示…" />
           ) : (
-            <Empty title="本次任务没有结果" compact>
-              可查看上方任务状态，检查配置后重新开始。
+            <Empty
+              title={
+                detail.run.status === "completed"
+                  ? detail.run.done > 0
+                    ? "当前结果列表为空"
+                    : "本轮没有新增结果"
+                  : "本次任务暂无结果"
+              }
+              compact
+            >
+              {detail.run.status === "completed"
+                ? detail.run.done > 0
+                  ? "任务已结束，当前没有可展示的本地结果。"
+                  : "本轮已结束，未找到可新增的结果。具体原因可查看上方任务说明。"
+                : "已保留任务配置，处理上方提示后可继续原任务。"}
             </Empty>
           )}
           <Pagination
@@ -187,46 +227,11 @@ export function RunPanel({
         </>
       ) : null}
       {resume ? (
-        <Dialog
-          title="继续运营任务"
-          onClose={() => setResume(false)}
-          busy={!!action.pending}
-        >
-          <Notice>
-            将从已保存进度继续。AI
-            任务可能产生新的费用；答题和发布任务可能提交内容，结果未知的条目会等待人工核对。
-          </Notice>
-          <Field label="继续授权">
-            <span className="check">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-              />
-              我已核对账号、任务内容和已提交结果
-            </span>
-          </Field>
-          <div className="dialog-actions">
-            <Button onClick={() => setResume(false)}>取消</Button>
-            <Button
-              primary
-              disabled={!consent || !!action.pending}
-              onClick={() =>
-                void action.run(
-                  "zhidao.resume",
-                  { id: model.id, authorized: true },
-                  () => {
-                    setResume(false);
-                    model.refresh();
-                  },
-                  "任务已继续",
-                )
-              }
-            >
-              确认继续
-            </Button>
-          </div>
-        </Dialog>
+        <ResumeRunDialog
+          run={resume}
+          onClose={() => setResume(null)}
+          onResumed={model.refresh}
+        />
       ) : null}
     </Panel>
   );

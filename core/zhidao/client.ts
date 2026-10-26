@@ -2,16 +2,31 @@ import type { AppPorts } from "../ports";
 import { AppError } from "../errors";
 import { readLimited } from "../http";
 import { assertSourcePage } from "./parsers";
+import { bulkData, publishingRights, quotaNumber } from "./publishing";
+import type { ZhidaoUploadTask } from "../../shared/zhidao-publishing";
 
 export type SourceFetch = (
   url: string,
   signal?: AbortSignal,
 ) => Promise<string>;
+export const zhidaoQuestionPageSize = 8;
+export interface ZhidaoQuestion {
+  qid: string | number;
+  question: string;
+  answered?: boolean;
+  sourceBase?: number;
+}
+export interface ZhidaoQuestionPage {
+  items: ZhidaoQuestion[];
+  nextBase: number;
+  hasMore: boolean;
+  total?: number;
+}
 export function parseZhidaoJson(body: string) {
   // Question IDs exceed Number.MAX_SAFE_INTEGER; keep their original digits.
   return JSON.parse(
     body.replace(
-      /(?<!\\)("(?:qid|aid|taskId|userId|uid)"\s*:\s*)(\d{16,})(?=\s*[,}])/g,
+      /(?<!\\)("(?:id|qid|aid|taskId|userId|uid)"\s*:\s*)(\d{16,})(?=\s*[,}])/g,
       '$1"$2"',
     ),
   );
@@ -79,31 +94,79 @@ export class ZhidaoClient {
     return this.request(accountId, path, { signal });
   }
   async identity(accountId: string) {
-    const value = await this.json(accountId, "/api/loginInfo");
-    if (!value.isLogin || !value.stoken)
+    const value = await this.json(accountId, "/api/logininfo");
+    const uid = String(value.userId ?? value.uid ?? value.userName ?? "");
+    if (![true, 1, "1"].includes(value.isLogin) || !value.stoken || !uid)
       throw new AppError(
         "AUTH_EXPIRED",
         "百度知道登录已失效，请登录后重新检查。",
       );
     return {
-      uid: String(value.userId ?? value.uid ?? value.userName ?? ""),
+      uid,
       nickname: String(value.userName ?? "百度知道用户"),
       stoken: String(value.stoken),
     };
   }
   async permission(accountId: string) {
-    const value = await this.json(accountId, "/qa/api/bulkqa/userinfo");
-    if (value.code !== 200 || !value.data)
-      throw new AppError(
-        "ZHIDAO_PERMISSION",
-        "无法读取快捷答题资格，请检查登录状态。",
-      );
-    return value.data.hasPermission === true || value.data.hasPermission === 1;
+    const rights = await this.publishingRights(accountId);
+    return rights.hasPermission && !rights.isBanned;
   }
-  async questions(accountId: string, category: string, base: number) {
+  async publishingRights(accountId: string) {
+    return publishingRights(
+      await this.json(accountId, "/qa/api/bulkqa/userinfo", {
+        cache: "no-store",
+      }),
+    );
+  }
+  async uploadTasks(accountId: string, page: number, taskName?: string) {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: "50",
+      ...(taskName ? { taskName } : {}),
+    });
+    const data = bulkData(
+      await this.json(accountId, `/qa/api/bulkqa/tasks?${params}`, {
+        cache: "no-store",
+      }),
+    );
+    if (!data || !Array.isArray(data.list) || quotaNumber(data.total) === null)
+      throw new AppError(
+        "ZHIDAO_RESPONSE",
+        "无法读取平台上传记录，请在答主工作台核对。",
+      );
+    const list: ZhidaoUploadTask[] = data.list.map((item: any) => {
+      if (
+        !item ||
+        item.id == null ||
+        !["string", "number"].includes(typeof item.id)
+      )
+        throw new AppError(
+          "ZHIDAO_RESPONSE",
+          "平台上传记录缺少任务ID，请在答主工作台核对。",
+        );
+      return {
+        id: String(item.id),
+        taskName: String(item.taskName ?? ""),
+        status:
+          ({ "0": "pending", "1": "running", "2": "finished" } as const)[
+            String(item.status) as "0" | "1" | "2"
+          ] ?? "unknown",
+        successCount: quotaNumber(item.successCount),
+        failCount: quotaNumber(item.failCount),
+        usedQuota: quotaNumber(item.usedTotal),
+      };
+    });
+    return { list, total: quotaNumber(data.total)! };
+  }
+  async questions(
+    accountId: string,
+    category: string,
+    base: number,
+  ): Promise<ZhidaoQuestionPage> {
     const value = await this.json(
       accountId,
-      `/qa/api/query/result/category?${new URLSearchParams({ category, rn: "8", base: String(base) })}`,
+      `/qa/api/query/result/category?${new URLSearchParams({ category, rn: String(zhidaoQuestionPageSize), base: String(base) })}`,
+      { cache: "no-store" },
     );
     if (value.code !== 200 || !Array.isArray(value.data?.list))
       throw new AppError(
@@ -111,13 +174,15 @@ export class ZhidaoClient {
         "题库读取失败或结构已变化，已保留现有回答。",
       );
     return {
-      items: value.data.list as {
-        qid: string | number;
-        question: string;
-        answered?: boolean;
-      }[],
-      nextBase: Number(value.data.base ?? base),
-      hasMore: Boolean(value.data.hasMore),
+      items: value.data.list as ZhidaoQuestion[],
+      ...(Number.isSafeInteger(value.data.total) && value.data.total >= 0
+        ? { total: value.data.total as number }
+        : {}),
+      nextBase: Number(value.data.base ?? base + value.data.list.length),
+      hasMore:
+        value.data.hasMore == null
+          ? base + value.data.list.length < Number(value.data.total ?? 0)
+          : [true, 1, "1"].includes(value.data.hasMore),
     };
   }
   async answer(
@@ -131,7 +196,7 @@ export class ZhidaoClient {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "X-ik-token": stoken,
-        Referer: `https://zhidao.baidu.com/question/hx/${qid}`,
+        Referer: `https://zhidao.baidu.com/question/hx/${qid}?activity=21th&qpi=21th_activity`,
       },
       body: new URLSearchParams({
         qid,
@@ -142,6 +207,8 @@ export class ZhidaoClient {
         rich: "0",
         feedback: "0",
         feedback_rid: "0",
+        activity: "21th",
+        qpi: "21th_activity",
       }).toString(),
     });
   }

@@ -1,14 +1,16 @@
 import { BrowserWindow, session } from "electron";
+import { zhidaoAccountPages } from "../shared/zhidao-rights";
 import { AppError } from "../core/errors";
 import { readLimited } from "../core/http";
+import { browserSessionFetch } from "./browser-session-fetch";
 import type { AppPorts } from "../core/ports";
 
-export function createZhidaoSession(): NonNullable<AppPorts["zhidaoSession"]> {
+export function createZhidaoSession(environmentProfile?: (id: string) => Electron.Session): NonNullable<AppPorts["zhidaoSession"]> {
   const windows = new Map<string, BrowserWindow>();
   const profile = (id: string) => {
     if (!/^zd_[\w-]+$/.test(id))
       throw new AppError("INVALID_ACCOUNT", "知道账号ID不正确。");
-    return session.fromPartition(`persist:panxu-zhidao-${id}`);
+    return environmentProfile?.(id) ?? session.fromPartition(`persist:panxu-zhidao-${id}`);
   };
   const close = async (id: string) => {
     const win = windows.get(id);
@@ -17,9 +19,25 @@ export function createZhidaoSession(): NonNullable<AppPorts["zhidaoSession"]> {
   };
   return {
     isOpen: () => windows.size > 0,
-    async login(id) {
+    async openQuestion(id, questionId) {
+      if (!/^[\w-]{1,100}$/.test(questionId))
+        throw new AppError("INVALID_QUESTION", "知道问题ID不正确。");
+      await this.login(id);
+      const win = windows.get(id);
+      if (!win || win.isDestroyed())
+        throw new AppError("SESSION_UNAVAILABLE", "账号窗口已关闭，请重试。");
+      await win.loadURL(
+        `https://zhidao.baidu.com/question/hx/${questionId}?activity=21th&qpi=21th_activity`,
+      );
+      win.show();
+      win.focus();
+    },
+    async login(id, page) {
+      const target = zhidaoAccountPages[page ?? "home"];
+      if (!target) throw new AppError("INVALID_URL", "知道页面不正确。");
       const old = windows.get(id);
       if (old && !old.isDestroyed()) {
+        if (page) await old.loadURL(target);
         old.show();
         old.focus();
         return;
@@ -62,7 +80,7 @@ export function createZhidaoSession(): NonNullable<AppPorts["zhidaoSession"]> {
         callback(false),
       );
       win.on("closed", () => windows.delete(id));
-      await win.loadURL("https://zhidao.baidu.com/");
+      await win.loadURL(target);
     },
     close,
     async clear(id) {
@@ -97,7 +115,7 @@ export function createZhidaoSession(): NonNullable<AppPorts["zhidaoSession"]> {
         u.hash
       )
         throw new AppError("ZHIDAO_URL_BLOCKED", "知道请求不属于允许的地址。");
-      const response = await profile(id).fetch(url, {
+      const response = await browserSessionFetch(profile(id), url, {
         ...init,
         redirect: "error",
         credentials: "include",

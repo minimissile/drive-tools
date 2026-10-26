@@ -1,0 +1,199 @@
+.resource-answers-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.78fr) minmax(440px, 1.22fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.resource-answer-source,
+.resource-answer-result,
+.resource-answer-media {
+  min-width: 0;
+}
+.resource-answers-form {
+  display: grid;
+  gap: var(--space-5);
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.resource-answers-results,
+.resource-answer-result-stack {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.resource-answer-resource-picker,
+.resource-answer-output-settings {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.resource-answer-resource-picker .search-select {
+  width: 100%;
+  max-width: 100%;
+}
+.resource-answer-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.resource-answer-section-heading h3,
+.resource-answer-media-plan h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.resource-answer-section-heading small {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.resource-answers-options {
+  gap: var(--space-3);
+}
+.resource-answers-selected {
+  display: grid;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.resource-answers-selected > li {
+  display: flex;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+.resource-answers-selected > li:last-child {
+  border: 0;
+  padding-bottom: 0;
+}
+.resource-answers-selected span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  font-size: 13px;
+}
+.resource-answers-selected .button {
+  flex-shrink: 0;
+}
+.resource-answer-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.resource-answer-form-footer {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}
+.resource-answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.resource-answer-preview {
+  min-width: 0;
+}
+.resource-answer-preview-heading {
+  display: grid;
+  gap: var(--space-2);
+}
+.resource-answer-preview-heading h3 {
+  font-size: 17px;
+  line-height: 1.55;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.resource-answer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+}
+.resource-answer-meta time {
+  font-variant-numeric: tabular-nums;
+}
+.resource-answer-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.85;
+  font-size: 14px;
+  margin-block: var(--space-5);
+  max-width: 75ch;
+}
+.resource-answer-copybar {
+  display: grid;
+  gap: var(--space-2);
+}
+.resource-answer-references {
+  margin-top: var(--space-4);
+}
+.resource-answer-calibration {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-5);
+}
+.resource-answer-media-controls {
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 160px) auto;
+  align-items: end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.resource-answer-field-error {
+  color: var(--red);
+  margin-bottom: var(--space-2);
+}
+.resource-answer-pricing {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+.resource-answer-pricing summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.resource-answer-pricing[open] .resource-answer-help {
+  margin-top: var(--space-2);
+}
+.resource-answer-media-plans {
+  display: grid;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+.resource-answer-media-plan {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+  min-width: 0;
+}
+.resource-answer-media-plan h3 {
+  overflow-wrap: anywhere;
+}
+.resource-answer-media-copy {
+  margin: var(--space-1) 0 var(--space-4);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 1200px) and (max-width: 1400px) {
+  .resource-answer-media-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(130px, 160px);
+  }
+  .resource-answer-media-controls > .button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}

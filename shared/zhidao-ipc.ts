@@ -13,9 +13,10 @@ import type { RemoteFile } from "./types";
 type Contract<A, V> = { args: A; value: V };
 export interface ZhidaoContract {
   "zhidao.summary": Contract<undefined, OperationsSummary>;
+  "zhidao.activeRuns": Contract<undefined, Omit<OperationRun, "config">[]>;
   "zhidao.accounts": Contract<undefined, ZhidaoAccount[]>;
   "zhidao.account.add": Contract<
-    { alias: string; cookie?: string },
+    { alias: string; cookie?: string; environmentId?: string },
     ZhidaoAccount
   >;
   "zhidao.account.update": Contract<
@@ -23,6 +24,10 @@ export interface ZhidaoContract {
     ZhidaoAccount
   >;
   "zhidao.account.login": Contract<{ id: string }, boolean>;
+  "zhidao.account.openRights": Contract<
+    { id: string; page: "answer" | "quota" },
+    boolean
+  >;
   "zhidao.account.check": Contract<{ id: string }, ZhidaoAccount>;
   "zhidao.account.remove": Contract<{ id: string; confirmed: true }, boolean>;
   "zhidao.settings": Contract<undefined, ZhidaoSettings>;
@@ -35,6 +40,12 @@ export interface ZhidaoContract {
   "zhidao.start": Contract<RunStartInput, OperationRun>;
   "zhidao.pause": Contract<{ id: string }, OperationRun>;
   "zhidao.resume": Contract<{ id: string; authorized: true }, OperationRun>;
+  "zhidao.publish.open": Contract<{ id: string }, boolean>;
+  "zhidao.publish.sync": Contract<{ id: string }, OperationRun>;
+  "zhidao.publish.preview": Contract<
+    { itemIds: string[]; accountId: string },
+    { count: number; errors: string[]; revision: string }
+  >;
   "zhidao.item.save": Contract<
     {
       id: string;
@@ -45,7 +56,26 @@ export interface ZhidaoContract {
     },
     OperationItem
   >;
+  "zhidao.item.review": Contract<
+    {
+      id: string;
+      name: string;
+      question: string;
+      answer: string;
+      confirmed: true;
+    },
+    OperationItem
+  >;
+  "zhidao.answer.open": Contract<{ id: string }, boolean>;
   "zhidao.item.remove": Contract<{ ids: string[] }, boolean>;
+  "zhidao.template.read": Contract<
+    { name: string; base64: string },
+    { name: string; rows: string[][] }
+  >;
+  "zhidao.template.sources": Contract<
+    { copyIds: string[] },
+    import("./zhidao-generation").GenerationResource[]
+  >;
   "zhidao.export": Contract<
     { id: string; format: "txt" | "csv" | "xlsx" },
     string | null

@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { _electron as electron } from "playwright-core";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
@@ -11,14 +12,14 @@ const evidence = await mkdtemp(join(tmpdir(), "panxu-ui-"));
 console.log(`UI evidence: ${evidence}`);
 const dataPath = join(evidence, "database");
 await mkdir(dataPath);
-const identity = await fetch("http://127.0.0.1:5173/__panxu_dev").then((r) =>
+const identity = await fetch("http://127.0.0.1:8070/__panxu_dev").then((r) =>
   r.json(),
 );
 assert.equal(identity.root, process.cwd());
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -46,13 +47,13 @@ try {
       callback({
         cancel:
           ["http:", "https:"].includes(url.protocol) &&
-          url.origin !== "http://127.0.0.1:5173",
+          url.origin !== "http://127.0.0.1:8070",
       });
     });
   });
   await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "资源库", exact: true }).click();
   await page.locator(".resource-list").waitFor();
-  assert.equal(page.url(), "http://127.0.0.1:5173/");
+  assert.equal(page.url(), "http://127.0.0.1:8070/");
   assert.match(await page.title(), /盘序/);
   assert.equal(await page.locator("vite-error-overlay").count(), 0);
   checks.push("当前源码启动、非空首屏、无框架错误遮罩");
@@ -144,7 +145,7 @@ try {
   await page.keyboard.press("Escape");
   await searchDialog.waitFor({ state: "detached" });
   checks.push("搜索视图语义与共用弹窗输入、退出");
-  await nav("AI 资源导出").click();
+  await navigateTo(page, "AI 资源导出");
   const input = page.getByRole("textbox", { name: "导出需求", exact: true });
   await input.fill("筛选英语教学资源，验证拆分后的输入恢复");
   await nav("连接与设置").click();
@@ -169,7 +170,7 @@ try {
   await page.getByLabel("比特接口地址").fill("http://127.0.0.1:9999");
   await page.getByRole("button", { name: "保存设置", exact: true }).click();
   await page.locator(".toast").filter({ hasText: "设置已保存" }).waitFor();
-  await nav("AI 资源导出").click();
+  await navigateTo(page, "AI 资源导出");
   assert.equal(
     await input.inputValue(),
     "筛选英语教学资源，验证拆分后的输入恢复",
@@ -185,7 +186,7 @@ try {
     "分享统计",
     "连接与设置",
   ]) {
-    await nav(name).click();
+    await navigateTo(page, name);
     await page.locator("h1").waitFor();
     assert.ok(
       await page.evaluate(
@@ -200,7 +201,7 @@ try {
       name,
     );
   }
-  await nav("AI 资源导出").click();
+  await navigateTo(page, "AI 资源导出");
   await page.screenshot({ path: join(evidence, "export-white-1024.png") });
   checks.push("5 个页面的 1024px 布局无页面级横向溢出");
   assert.deepEqual(errors, []);

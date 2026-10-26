@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { environmentIdSchema } from "../../shared/browser-environments";
 import {
   websiteAccountIdSchema,
   websiteProviderSchema,
+  weiboPublishingSchema,
 } from "../../shared/website-accounts";
 import type { HandlerServices, HandlerMap } from "./types";
 export function createWebsiteAccountHandlers(
@@ -13,9 +15,9 @@ export function createWebsiteAccountHandlers(
     "websiteAccounts.list": () => services.websiteAccounts.list(),
     "websiteAccounts.add": (object) => {
       const value = z
-        .object({ provider: websiteProviderSchema, alias: alias.optional() })
+        .object({ provider: websiteProviderSchema, alias: alias.optional(), environmentId: environmentIdSchema.optional() })
         .parse(object);
-      return services.websiteAccounts.add(value.provider, value.alias);
+      return services.websiteAccounts.add(value.provider, value.alias, value.environmentId);
     },
     "websiteAccounts.rename": (object) => {
       const value = id.extend({ alias }).parse(object);
@@ -26,7 +28,11 @@ export function createWebsiteAccountHandlers(
       return true;
     },
     "websiteAccounts.check": (object) =>
-      services.websiteAccounts.check(id.parse(object).id),
+      services.websiteAccounts.verify(id.parse(object).id),
+    "websiteAccounts.weiboPublishing": (object) =>
+      services.websiteAccounts.weiboPublishing(
+        weiboPublishingSchema.parse(object),
+      ),
     "websiteAccounts.remove": async (object) => {
       const value = id.extend({ confirmed: z.literal(true) }).parse(object);
       await services.websiteAccounts.remove(value.id);

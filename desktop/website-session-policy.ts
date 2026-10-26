@@ -4,6 +4,11 @@ export const websiteLoginSpecs: Record<
   WebsiteProvider,
   { home: string; title: string; hosts: readonly string[] }
 > = {
+  weibo: {
+    home: "https://weibo.com/",
+    title: "微博 · 官方登录",
+    hosts: ["weibo.com", "www.weibo.com", "passport.weibo.com", "login.sina.com.cn", "passport.sina.cn", "passport.weibo.cn", "m.weibo.cn", "weibo.cn", "security.weibo.com"],
+  },
   "baidu-marketing": {
     home: "https://qingge.baidu.com/login",
     title: "百度营销 · 官方登录",
@@ -28,6 +33,7 @@ export function websiteNavigationAllowed(
       url.protocol === "https:" &&
       !url.username &&
       !url.password &&
+      !url.port &&
       websiteLoginSpecs[provider].hosts.includes(url.hostname)
     );
   } catch {

@@ -4,6 +4,7 @@ import { AppError } from "./errors";
 import { Repository, type Row } from "./repository";
 import { Operations } from "./operations";
 import { localTemplate } from "./templates";
+import { defaultContentFormat } from "../shared/channels";
 import {
   effectInput,
   topicFacts,
@@ -231,7 +232,8 @@ export class SearchOperations {
         "整份资料的本人分享尚未核验。",
       );
     const url = split?.shareUrl ?? copy.shareUrl;
-    if (url === this.repo.getResource(copy.resourceId).sourceUrl)
+    const resource = this.repo.getResource(copy.resourceId);
+    if (url === resource.sourceUrl && resource.sourceKind !== "owned")
       throw new AppError(
         "FOREIGN_SHARE_BLOCKED",
         "来源链接不能作为配套本人资料。",
@@ -449,7 +451,8 @@ export class SearchOperations {
       draftId = id("draft"),
       time = now();
     content.title = topic.keyword;
-    content.body = `目标问题：${topic.keyword}\n搜索意图：${topic.intent || "待补充"}\n软件版本：${topic.softwareVersion || "待核对"}\n适用系统：${topic.operatingSystem || "待核对"}\n配套资料：${split?.path ?? resource.title}\n\n${topic.evidence ? `本人补充依据：\n${topic.evidence}\n\n` : ""}${content.body}`;
+    if (topic.platform !== "weibo")
+      content.body = `目标问题：${topic.keyword}\n搜索意图：${topic.intent || "待补充"}\n软件版本：${topic.softwareVersion || "待核对"}\n适用系统：${topic.operatingSystem || "待核对"}\n配套资料：${split?.path ?? resource.title}\n\n${topic.evidence ? `本人补充依据：\n${topic.evidence}\n\n` : ""}${content.body}`;
     if (content.body.length > 30000)
       throw new AppError(
         "SOURCE_TOO_LARGE",
@@ -474,6 +477,7 @@ export class SearchOperations {
       time,
       time,
     );
+    this.db.run("UPDATE drafts SET content_format=? WHERE id=?", defaultContentFormat(topic.platform), draftId);
     this.db.run(
       "UPDATE search_topics SET updated_at=? WHERE id=?",
       time,

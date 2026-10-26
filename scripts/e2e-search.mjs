@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 // Browser plugin not available. Validate the real Electron renderer with the
 // repository's existing Playwright workflow and an isolated, offline workspace.
 import { _electron as electron } from "playwright-core";
@@ -14,11 +15,13 @@ const evidence =
   (await mkdtemp(join(tmpdir(), "panxu-search-evidence-")));
 await mkdir(evidence, { recursive: true });
 const dev = process.env.PANXU_E2E_DEV === "1";
+const devPort = process.env.PANXU_DEV_PORT ?? "8070";
+const devUrl = `http://127.0.0.1:${devPort}`;
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
   ...(dev
-    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    ? { PANXU_DEV_URL: devUrl, PANXU_DEV_ROOT: process.cwd() }
     : {}),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -48,7 +51,7 @@ try {
     };
   });
   assert.match(await page.title(), /盘序/);
-  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+  if (dev) assert.equal(new URL(page.url()).origin, devUrl);
   else assert.match(page.url(), /dist\/index.html/);
   const initial = await page.evaluate(async () => {
     const account = await window.panxu.invoke("account.add", {
@@ -247,7 +250,7 @@ try {
     path: join(evidence, "search-board-desktop.png"),
     fullPage: true,
   });
-  await nav("资料拆分").click();
+  await navigateTo(page, "资料拆分");
   await page.getByRole("treeitem").first().waitFor();
   await page.getByRole("treeitem").first().click();
   await page.getByRole("button", { name: "用于创作 →", exact: true }).click();

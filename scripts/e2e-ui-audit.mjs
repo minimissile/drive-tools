@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { openAccountForm } from "./e2e-account-form.mjs";
 // Browser plugin unavailable. Current-source Electron, disposable DB and blocked external services.
 import { _electron as electron } from "playwright-core";
@@ -14,7 +15,7 @@ await mkdir(dataPath);
 const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
-  PANXU_DEV_URL: "http://127.0.0.1:5173",
+  PANXU_DEV_URL: "http://127.0.0.1:8070",
   PANXU_DEV_ROOT: process.cwd(),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -45,7 +46,7 @@ try {
       cb({
         cancel:
           ["http:", "https:"].includes(u.protocol) &&
-          u.origin !== "http://127.0.0.1:5173",
+          u.origin !== "http://127.0.0.1:8070",
       });
     });
   });
@@ -103,7 +104,7 @@ try {
   db.close();
   await page.reload();
   await page.locator(".resource-row").first().waitFor();
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   const title = page.getByLabel("资源标题", { exact: true });
   await title.fill("审核切页暂存标题");
   await page
@@ -127,7 +128,7 @@ try {
   });
   await page.getByAltText("待保存封面").waitFor();
   await nav("账号管理").click();
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   assert.equal(await title.inputValue(), "审核切页暂存标题");
   await page.getByAltText("待保存封面").waitFor();
   await page.reload();
@@ -140,7 +141,7 @@ try {
   );
   await page.getByRole("button", { name: "保存资料草稿", exact: true }).click();
   await page.locator(".resource-row").first().waitFor();
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   assert.equal(await title.inputValue(), "");
   checks.push("录入长文本切页与重载恢复，已移除权利勾选，保存后清理暂存");
   await nav("批量录入").click();
@@ -179,7 +180,7 @@ try {
   await page.getByRole("link", { name: "备份与更新", exact: true }).click();
   await page.screenshot({ path: join(evidence, "settings-maintenance.png") });
   checks.push("设置输入切页保留、分区保存、备份更新定位");
-  await nav("转存任务").click();
+  await navigateTo(page, "转存任务");
   await page.getByRole("tab", { name: /需要处理 1/, selected: true }).waitFor();
   assert.equal(await page.locator(".task-panel").count(), 1);
   await page.getByRole("tab", { name: /已完成 6/ }).click();
@@ -241,7 +242,7 @@ try {
     "账号管理",
     "连接与设置",
   ]) {
-    await nav(name).click();
+    await navigateTo(page, name);
     await page.locator("main h1").waitFor();
     assert.ok(
       await page
@@ -256,7 +257,7 @@ try {
       name,
     );
   }
-  await nav("内容工作室").click();
+  await navigateTo(page, "内容工作室");
   assert.equal(
     await page.getByRole("combobox", { name: "创作渠道", exact: true }).count(),
     1,
@@ -279,7 +280,7 @@ try {
     BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1),
   );
   checks.push("原生840窗口200%缩放下设置可滚动且无页面横向溢出");
-  await nav("录入资源").click();
+  await navigateTo(page, "录入资源");
   const placeholder = await title.evaluate((el) => {
     const x = getComputedStyle(el, "::placeholder");
     return { color: x.color, opacity: x.opacity };

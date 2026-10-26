@@ -3,8 +3,9 @@
   --toast-surface: var(--blue-bg);
   position: fixed;
   z-index: 30;
-  right: var(--space-6);
-  bottom: var(--space-6);
+  left: 50%;
+  top: var(--space-6);
+  translate: -50% 0;
   display: grid;
   grid-template-columns: 19px minmax(0, 1fr) 28px;
   align-items: start;
@@ -72,18 +73,11 @@
 @keyframes toast-enter {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-@media (max-width: 1000px) {
-  .toast {
-    right: var(--space-4);
-    bottom: var(--space-4);
-    max-width: min(480px, calc(100vw - 32px));
   }
 }
 @media (prefers-reduced-motion: reduce) {

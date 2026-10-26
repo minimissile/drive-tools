@@ -1,4 +1,4 @@
-import { TextSuggestions } from "../ui/TextSuggestions";
+import { useIpcQuery } from "../api/useIpcQuery";
 import { Select } from "../ui/Select";
 import {
   bindingVerificationState,
@@ -10,8 +10,22 @@ import {
 } from "../../shared/channels";
 import { useEffect, useRef, useState } from "react";
 import { Save } from "lucide-react";
-import { useAppActions, useAppActivity, useAppData } from "../state";
-import { Button, Empty, Field, Notice, Panel, Status } from "../ui/primitives";
+import {
+  useAppActions,
+  useAppActivity,
+  useAppData,
+  useAppNavigation,
+} from "../state";
+import {
+  Button,
+  Empty,
+  Field,
+  LoadingState,
+  Notice,
+  Panel,
+  Status,
+} from "../ui/primitives";
+import { QueryError } from "../ui/QueryError";
 import { formatTime } from "../lib/format";
 import type { Platform } from "../../shared/types";
 import { platformSpecs } from "../../shared/platforms";
@@ -23,8 +37,12 @@ export function BrowserBindings({
   windows: { id: string; name: string; seq: number | null }[];
 }) {
   const { data } = useAppData();
+  const environments = useIpcQuery("environments.list", undefined, {
+    keepPrevious: true,
+  });
   const { command } = useAppActions();
   const { busy } = useAppActivity();
+  const { navigate } = useAppNavigation();
   const [bindingId, setBindingId] = useState<string | undefined>(),
     [bindingPlatform, setBindingPlatform] = useState<Platform>("xiaohongshu"),
     [alias, setAlias] = useState(""),
@@ -59,8 +77,30 @@ export function BrowserBindings({
     }
   }, [bindingId]);
   const bindingSpec = platformSpecs.find((p) => p.id === bindingPlatform)!;
+  const fingerprintEnvironments = (environments.data ?? []).filter(
+    (env) => env.engine === "bitbrowser",
+  );
   return (
     <Panel title="平台账号与指纹窗口映射" className="settings-bindings-panel">
+      <QueryError
+        error={environments.error}
+        loading={environments.loading}
+        onRetry={environments.reload}
+        title="暂时无法读取浏览器环境"
+      />
+      {!environments.data && !environments.error ? (
+        <LoadingState compact label="正在读取可用浏览器环境…" />
+      ) : null}
+      {environments.data &&
+      !environments.error &&
+      !fingerprintEnvironments.length ? (
+        <Empty compact title="尚未接入指纹浏览器环境">
+          先在账号管理中登记比特浏览器配置，再添加平台映射。
+          <Button onClick={() => navigate("browser-environments")}>
+            管理浏览器环境
+          </Button>
+        </Empty>
+      ) : null}
       <h3 className="settings-form-title">
         {bindingId ? "编辑账号映射" : "添加账号映射"}
       </h3>
@@ -96,16 +136,19 @@ export function BrowserBindings({
             placeholder="例如：效率分享小红书账号"
           />
         </Field>
-        <Field label="比特窗口ID">
-          <TextSuggestions
-            aria-label="比特窗口ID"
+        <Field label="浏览器环境" hint="在账号管理 → 浏览器环境中接入比特配置">
+          <Select
+            aria-label="发布浏览器环境"
             value={windowId}
             onValueChange={setWindowId}
-            placeholder="读取窗口列表后选择，也可以手填ID"
-            items={windows.map((w) => ({
-              value: w.id,
-              label: `${w.name}${w.seq == null ? "" : ` · ${w.seq}`}`,
-            }))}
+            disabled={!environments.data || !fingerprintEnvironments.length}
+            items={[
+              { value: "", label: "请选择浏览器环境", disabled: true },
+              ...fingerprintEnvironments.map((env) => ({
+                value: env.profileId,
+                label: env.name,
+              })),
+            ]}
           />
         </Field>
         <Field label="编辑器入口">
@@ -324,7 +367,7 @@ export function BrowserBindings({
             <thead>
               <tr>
                 <th>平台账号</th>
-                <th>指纹窗口</th>
+                <th>浏览器环境</th>
                 <th>链接策略</th>
                 <th>编辑器入口</th>
                 <th>操作</th>
@@ -344,7 +387,16 @@ export function BrowserBindings({
                         .join("、") || "内容形式待核验"}
                     </small>
                   </td>
-                  <td>{b.windowId}</td>
+                  <td>
+                    {environments.data?.find((env) =>
+                      env.accounts.some((ref) =>
+                        b.websiteAccountId
+                          ? ref.kind === "website" &&
+                            ref.id === b.websiteAccountId
+                          : ref.kind === "binding" && ref.id === b.id,
+                      ),
+                    )?.name ?? "关联环境待读取"}
+                  </td>
                   <td>
                     <Status
                       kind={
@@ -397,6 +449,10 @@ export function BrowserBindings({
                     <Button
                       quiet
                       onClick={() => {
+                        if (b.websiteAccountId) {
+                          navigate("website-accounts");
+                          return;
+                        }
                         setBindingId(b.id);
                         setBindingPlatform(b.platform);
                         setAlias(b.alias);
@@ -410,7 +466,7 @@ export function BrowserBindings({
                         setConfirmCapabilities(false);
                       }}
                     >
-                      编辑
+                      {b.websiteAccountId ? "管理账号" : "编辑"}
                     </Button>
                   </td>
                 </tr>

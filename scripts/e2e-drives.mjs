@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { openAccountForm } from "./e2e-account-form.mjs";
 import { chooseOption } from "./e2e-select.mjs";
 import { _electron as electron } from "playwright-core";
@@ -19,7 +20,7 @@ const env = {
   ...process.env,
   PANXU_DATA_DIR: dataPath,
   ...(dev
-    ? { PANXU_DEV_URL: "http://127.0.0.1:5173", PANXU_DEV_ROOT: process.cwd() }
+    ? { PANXU_DEV_URL: "http://127.0.0.1:8070", PANXU_DEV_ROOT: process.cwd() }
     : {}),
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -41,7 +42,7 @@ try {
   await page.getByRole("navigation", { name: "主导航" }).waitFor();
   await page.emulateMedia({ colorScheme: "light" });
   assert.match(await page.title(), /盘序/);
-  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:8070");
   else assert.match(page.url(), /dist\/index.html/);
   const nav = (name) =>
     page
@@ -320,7 +321,7 @@ try {
     checks.push(
       `${kind}: official-window session isolation and UID binding (mock HTTPS)`,
     );
-    await nav("录入资源").click();
+    await navigateTo(page, "录入资源");
     await page
       .getByLabel("网盘分享链接", { exact: true })
       .fill(

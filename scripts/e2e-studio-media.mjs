@@ -1,3 +1,4 @@
+import { navigateTo } from "./e2e-navigation.mjs";
 import { chooseOption } from "./e2e-select.mjs";
 // Browser plugin not available; use the existing isolated Electron/Playwright workflow.
 // External model calls are mocked; ffmpeg only creates a local moving-video QA fixture.
@@ -37,7 +38,7 @@ const videoBase64 = (await readFile(videoPath)).toString("base64"),
     PANXU_DATA_DIR: dataPath,
     ...(dev
       ? {
-          PANXU_DEV_URL: "http://127.0.0.1:5173",
+          PANXU_DEV_URL: "http://127.0.0.1:8070",
           PANXU_DEV_ROOT: process.cwd(),
         }
       : {}),
@@ -291,11 +292,7 @@ try {
     );
     db.close();
   }, saved);
-  const nav = (name) =>
-    page
-      .getByRole("navigation", { name: "主导航" })
-      .getByRole("button", { name, exact: true });
-  await nav("内容工作室").click();
+  await navigateTo(page, "内容工作室");
   await page.getByRole("button", { name: "AI 图片", exact: true }).click();
   await page
     .getByRole("button", { name: "保存自定义模板", exact: true })
@@ -439,7 +436,7 @@ try {
     () => document.querySelector(".creative-gallery video")?.duration > 1,
   );
   checks.push("发布准备显示当前已审阅版本的视频成品");
-  await nav("内容工作室").click();
+  await navigateTo(page, "内容工作室");
   await page.getByLabel("AI营销视频", { exact: true }).waitFor();
   await page
     .locator(".creative-asset")
@@ -459,7 +456,7 @@ try {
     false,
   );
   assert.equal(await app.evaluate(() => globalThis.__studioQa.external), 0);
-  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:5173");
+  if (dev) assert.equal(new URL(page.url()).origin, "http://127.0.0.1:8070");
   else assert.match(page.url(), /dist\/index.html/);
   assert.match(await page.title(), /盘序/);
   assert.equal(await page.locator("vite-error-overlay").count(), 0);

@@ -1,3 +1,8 @@
+import { createBrowserPlatformPorts } from "./browser-platform-ports";
+import { BrowserEnvironments } from "./browser-environments";
+import { BrowserEnvironmentQueue } from "./browser-environment-queue";
+import { ResourceAnswers } from "./resource-answers";
+import { verifyRecordedOwnShare } from "./owned-resource-intake";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
 import { WebsiteAccounts } from "./website-accounts";
@@ -34,6 +39,10 @@ import { ResourceExports } from "./resource-export";
 import { StudioService, studioAssetPattern } from "./studio";
 import { TrafficService } from "./traffic";
 import { BitBrowser } from "./bitbrowser";
+import { CsdnWorkflows } from "./csdn/workflow";
+import { CsdnBrowserEditor } from "./csdn/editor";
+import { WeiboMarketing } from "./weibo/marketing";
+import { WeiboPosts } from "./weibo/posts";
 import {
   canUseLinkPosition,
   includesOwnShareLink,
@@ -56,7 +65,13 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly weiboPosts: WeiboPosts;
+  readonly weibo: WeiboMarketing;
+  readonly csdn: CsdnWorkflows;
+  readonly csdnEditor: CsdnBrowserEditor;
   readonly websiteAccounts: WebsiteAccounts;
+  readonly environments: BrowserEnvironments;
+  readonly environmentQueue: BrowserEnvironmentQueue;
   readonly driveFiles: DriveFiles;
   readonly zhidao: ZhidaoOperations;
   readonly db: Database;
@@ -68,6 +83,7 @@ export class AppService {
   readonly ideas: KeywordIdeas;
   readonly resourceExports: ResourceExports;
   readonly studio: StudioService;
+  readonly resourceAnswers: ResourceAnswers;
   readonly traffic: TrafficService;
   readonly bit: BitBrowser;
   readonly importer: BulkImporter;
@@ -90,8 +106,13 @@ export class AppService {
   ) {
     this.db = new Database(dbPath);
     this.repo = new Repository(this.db);
-    this.websiteAccounts = new WebsiteAccounts(this.db, ports);
     this.secrets = new SecretStore(this.db, codec);
+    this.environments = new BrowserEnvironments(this.db, this.secrets, ports, dataPath, changed);
+    this.environmentQueue = new BrowserEnvironmentQueue(this.db, this.environments, changed);
+    const browserPorts = createBrowserPlatformPorts(ports, this.environments, () => this.bit);
+    this.ports = browserPorts;
+    this.websiteAccounts = new WebsiteAccounts(this.db, browserPorts, changed, this.environments, this.environmentQueue);
+    this.weiboPosts = new WeiboPosts({ db: this.db, accounts: this.websiteAccounts, dataPath: this.dataPath, ports: browserPorts, changed });
     this.notes = new NoteExporter(this.repo, this.secrets, dataPath);
     this.queue = new TransferQueue(
       this.repo,
@@ -110,6 +131,8 @@ export class AppService {
       dataPath,
       changed,
       {
+        environments: this.environments,
+        schedule: (refs, label, action, signal) => this.environmentQueue.schedule(refs, label, action, signal),
         verifyCopy: async (copyId) => {
           const check = await this.checkShare(copyId);
           if (check.status !== "valid")
@@ -130,11 +153,18 @@ export class AppService {
       (bytes) => ports.normalizeCover(bytes),
       changed,
     );
+    this.resourceAnswers = new ResourceAnswers(this.repo,this.ai,this.studio,ports,changed);
     this.traffic = new TrafficService(this.db, this.secrets, changed);
     this.bit = new BitBrowser(async () => ({
       url: this.db.setting("bitUrl", ""),
       key: await this.secrets.get("bit"),
-    }));
+    }), undefined, (binding, action) => {
+      this.environments.syncBinding(binding.id);
+      return this.environments.run({ kind: "binding", id: binding.id }, action);
+    });
+    this.environments.setExternalConfigurationReader((profileId) => this.bit.environmentConfiguration(profileId));
+    this.environments.setExternalNetworkChecker((profileId) => this.bit.environmentExitIp(profileId));
+    this.environments.setExternalIdleGuard((profileId) => this.bit.assertProfileIdle(profileId));
     this.importer = new BulkImporter(this.repo, (input) =>
       this.saveResource(input),
     );
@@ -159,6 +189,41 @@ export class AppService {
       this.search,
       changed,
     );
+    this.csdnEditor = new CsdnBrowserEditor(this.bit);
+    this.csdn = new CsdnWorkflows({
+      environmentStamp: (bindingId) => this.environments.stamp({ kind: "binding", id: bindingId }),
+      withEnvironment: (bindingId, action) => {
+        this.environments.syncBinding(bindingId);
+        return this.environmentQueue.schedule([{ kind: "binding", id: bindingId }], "CSDN 内容操作", action);
+      },
+      repo: this.repo,
+      search: this.search,
+      ai: this.ai,
+      editor: this.csdnEditor,
+      verifyTarget: async (topicId) => {
+        const result = await this.invoke("search.check", { id: topicId }) as ShareCheck;
+        if (result.status && result.status !== "valid") throw new AppError("SHARE_INVALID", result.message || "配套本人分享未通过实时核验，请先恢复分享。");
+      },
+      contentPackage: (draftId, bindingId, includeLink) => this.contentPackage(draftId, bindingId, includeLink),
+      record: (input) => this.invoke("publication.mark", input),
+      changed,
+    });
+    this.weibo = new WeiboMarketing({
+      repo: this.repo,
+      search: this.search,
+      ai: this.ai,
+      studio: this.studio,
+      websiteAccounts: this.websiteAccounts,
+      dataPath: this.dataPath,
+      ports: this.ports,
+      verifyTarget: async (topicId) => {
+        const result = await this.invoke("search.check", { id: topicId }) as ShareCheck;
+        if (result.status !== "valid") throw new AppError("SHARE_INVALID", result.message || "配套本人分享未通过实时核验。");
+      },
+      contentPackage: (draftId, bindingId, includeLink) => this.contentPackage(draftId, bindingId, includeLink),
+      record: (input) => this.invoke("publication.mark", input),
+      changed,
+    });
     this.shareStatistics = new ShareStatisticsService(
       this.repo,
       (id, fn) => this.authenticated(id, fn),
@@ -180,7 +245,19 @@ export class AppService {
       authenticated: (id, action) => this.authenticated(id, action),
       assertNoActiveJobs: (id) => this.assertNoActiveJobs(id),
     });
+    this.environments.addGuard((refs) => {
+      for (const ref of refs) {
+        if (ref.kind === "zhidao") this.zhidao.assertAccountIdle(ref.id);
+        if (ref.kind === "website" && (this.websiteAccounts.isBusy || this.weiboPosts.isBusy || this.weibo.isBusy)) throw new AppError("ENVIRONMENT_BUSY", "此环境的平台任务正在执行，请完成后再修改。");
+        if (ref.kind === "binding" && this.csdn.isBusy) throw new AppError("ENVIRONMENT_BUSY", "发布任务正在执行，请完成后再修改环境。");
+      }
+    });
     this.handlers = createApplicationHandlers({
+      environments: this.environments,
+      environmentQueue: this.environmentQueue,
+      weibo: this.weibo,
+      weiboPosts: this.weiboPosts,
+      csdn: this.csdn,
       websiteAccounts: this.websiteAccounts,
       driveFiles: this.driveFiles,
       zhidao: this.zhidao,
@@ -193,6 +270,7 @@ export class AppService {
       ideas: this.ideas,
       resourceExports: this.resourceExports,
       studio: this.studio,
+      resourceAnswers: this.resourceAnswers,
       traffic: this.traffic,
       bit: this.bit,
       importer: this.importer,
@@ -409,6 +487,11 @@ export class AppService {
       );
   }
   async saveResource(input: ResourceInput) {
+    if (input.isOwnResource && input.enqueue)
+      throw new AppError(
+        "OWNED_TRANSFER_BLOCKED",
+        "自有资源直接入库，不创建转存任务。",
+      );
     const source = parseShare(input.sourceText, input.extractionCode),
       account = this.account(input.accountId);
     if (source.provider !== account.provider)
@@ -454,18 +537,18 @@ export class AppService {
         { mode: 0o600 },
       );
     }
-    if (source.code)
-      await this.secrets.set(`source:${resourceId}`, source.code);
+    if (source.code) await this.secrets.set(`source:${resourceId}`, source.code);
     const resourceExists = !!existing || !!input.id;
-    let directory =
-      normalizedDirectory(input.directory || account.defaultDirectory) +
-      "/" +
-      input.title
-        .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
-        .trim()
-        .slice(0, 40) +
-      "__" +
-      resourceId.slice(-8);
+    let directory = input.isOwnResource
+      ? normalizedDirectory(input.directory || "/")
+      : normalizedDirectory(input.directory || account.defaultDirectory) +
+        "/" +
+        input.title
+          .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
+          .trim()
+          .slice(0, 40) +
+        "__" +
+        resourceId.slice(-8);
     if (input.copyId) {
       const editedCopy = this.repo.getCopy(input.copyId);
       if (
@@ -478,12 +561,64 @@ export class AppService {
         );
       directory = editedCopy.directory;
     }
-    const priorCopy = this.db.get<{ id: string; status: string }>(
-      "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? AND directory=?",
-      resourceId,
-      account.id,
-      directory,
-    );
+    const priorCopy =
+      input.isOwnResource && !input.copyId
+        ? this.db.get<{ id: string; status: string }>(
+            "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? ORDER BY created_at LIMIT 1",
+            resourceId,
+            account.id,
+          )
+        : this.db.get<{ id: string; status: string }>(
+            "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? AND directory=?",
+            resourceId,
+            account.id,
+            directory,
+          );
+    if (
+      input.isOwnResource &&
+      priorCopy &&
+      !["draft", "recorded"].includes(priorCopy.status) &&
+      this.repo.getResource(resourceId).sourceKind !== "owned"
+    )
+      throw new AppError(
+        "COPY_EXISTS",
+        "该资源已有转存副本，请保留其原有归档方式，勿改写正在执行或已完成的记录。",
+      );
+    if (
+      input.isOwnResource &&
+      priorCopy &&
+      !["draft", "recorded", "ready"].includes(priorCopy.status)
+    )
+      throw new AppError(
+        "COPY_EXISTS",
+        "该资源仍有转存进度，请先到转存任务中核对。",
+      );
+    if (
+      input.isOwnResource &&
+      priorCopy?.status === "ready" &&
+      this.repo.getCopy(priorCopy.id).shareUrl !== source.url
+    )
+      throw new AppError(
+        "COPY_EXISTS",
+        "此副本使用的是另一条本人分享，请按原有归档方式编辑，不改写已有链接。",
+      );
+    if (
+      input.isOwnResource &&
+      priorCopy?.status === "draft" &&
+      this.db.get(
+        "SELECT id FROM jobs WHERE copy_id=? AND kind='transfer' LIMIT 1",
+        priorCopy.id,
+      )
+    )
+      throw new AppError(
+        "COPY_EXISTS",
+        "该副本已有转存记录，请先核对原任务，不能改为自有资源入库。",
+      );
+    if (!input.isOwnResource && priorCopy?.status === "recorded")
+      throw new AppError(
+        "OWNED_TRANSFER_BLOCKED",
+        "此记录为已入库的自有资源，请使用自有资源方式编辑。",
+      );
     if (input.enqueue && priorCopy && priorCopy.status !== "draft")
       throw new AppError(
         "COPY_EXISTS",
@@ -491,6 +626,14 @@ export class AppService {
       );
     const copyId = priorCopy?.id ?? id("copy"),
       time = now();
+    const ownedCodeChanged = !!(
+      input.isOwnResource &&
+      priorCopy?.status === "ready" &&
+      source.code &&
+      (await this.secrets.get(`share:${copyId}`)) !== source.code
+    );
+    if (input.isOwnResource && source.code)
+      await this.secrets.set(`share:${copyId}`, source.code);
     let jobId: string | null = null;
     this.db.transaction(() => {
       if (!resourceExists)
@@ -523,21 +666,35 @@ export class AppService {
         );
       if (!priorCopy)
         this.db.run(
-          "INSERT INTO copies(id,resource_id,account_id,directory,selected_files,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+          "INSERT INTO copies(id,resource_id,account_id,directory,selected_files,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
           copyId,
           resourceId,
           account.id,
           directory,
           JSON.stringify(input.selectedFiles ?? []),
+          input.isOwnResource ? "recorded" : "draft",
           time,
           time,
         );
-      else if (input.selectedFiles?.length)
+      else if (!input.isOwnResource && input.selectedFiles?.length)
         this.db.run(
           "UPDATE copies SET selected_files=? WHERE id=?",
           JSON.stringify(input.selectedFiles),
           copyId,
         );
+      if (input.isOwnResource) {
+        this.db.run(
+          "UPDATE resources SET source_kind='owned' WHERE id=?",
+          resourceId,
+        );
+        if (!priorCopy || priorCopy.status !== "ready" || ownedCodeChanged)
+          this.db.run(
+            "UPDATE copies SET status='recorded',share_url=?,share_verified_at=NULL,selected_files='[]',error=NULL,updated_at=? WHERE id=?",
+            source.url,
+            time,
+            copyId,
+          );
+      }
       if (input.enqueue) {
         jobId = id("job");
         this.db.run(
@@ -564,12 +721,13 @@ export class AppService {
     }
     return { resourceId, copyId, jobId };
   }
+
   private async openBinding(
     binding: BrowserBinding,
     contentFormat?: ContentFormat,
   ) {
     try {
-      const result = await this.bit.open({
+      const result = binding.websiteAccountId ? await this.websiteAccounts.open(binding.websiteAccountId) : await this.bit.open({
         ...binding,
         editorUrl: bindingEditorUrl(binding, contentFormat),
       });
@@ -594,10 +752,17 @@ export class AppService {
   }
   private hasRunningJobs() {
     return (
+      this.environmentQueue.isBusy ||
+      this.environments.isBusy ||
       this.driveFiles.isBusy ||
+      this.websiteAccounts.isBusy ||
+      this.weibo.isBusy ||
+      this.weiboPosts.isBusy ||
+      this.csdn.isBusy ||
       this.zhidao.isBusy ||
       this.insertion.isBusy ||
       this.studio.isBusy ||
+      this.resourceAnswers.isBusy ||
       this.shareStatistics.isBusy ||
       !!this.db.get(
         "SELECT id FROM jobs WHERE stage IN ('queued','preflight','transferring','verifying','sharing','archiving') LIMIT 1",
@@ -613,11 +778,25 @@ export class AppService {
       const valid = await this.authenticated(
         copy.accountId,
         async (account, provider) => {
+          if (copy.status === "recorded" && resource.sourceKind === "owned") {
+            await verifyRecordedOwnShare(
+              this.repo,
+              this.secrets,
+              account,
+              provider,
+              resource,
+              copy,
+            );
+            this.notes.enqueue(copy.id);
+            await this.notes.flush();
+            return true;
+          }
           if (
             copy.status !== "ready" ||
             !copy.shareId ||
             !copy.shareUrl ||
-            (copy.shareUrl === resource.sourceUrl && resource.sourceKind !== "owned") ||
+            (copy.shareUrl === resource.sourceUrl &&
+              resource.sourceKind !== "owned") ||
             !copy.files.length ||
             !copy.verifiedAt ||
             copy.ownerUid !== account.uid ||
@@ -653,6 +832,7 @@ export class AppService {
     this.changed();
     return { copyId, status, checkedAt, message };
   }
+
   private assertOwnCopy(copy: ResourceCopy) {
     const account = this.account(copy.accountId);
     if (
@@ -812,7 +992,7 @@ export class AppService {
     copy.run("UPDATE accounts SET status=?,verified_at=NULL", "disconnected");
     copy.run("UPDATE website_accounts SET status='disconnected'");
     copy.run(
-      "UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')",
+      "UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.publishingRights',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')",
     );
     copy.run("VACUUM");
     copy.run("PRAGMA journal_mode=DELETE");
@@ -861,8 +1041,11 @@ export class AppService {
     return folder;
   }
   close() {
+    this.weibo.close();
+    this.csdn.close();
     this.zhidao.close();
     this.queue.stop();
+    this.environmentQueue.close();
     this.db.close();
   }
 }
