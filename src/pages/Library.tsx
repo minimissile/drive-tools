@@ -199,44 +199,47 @@ export default function LibraryPage() {
                 setPage(1);
               }}
             />
-            <Select
-              aria-label="分类筛选"
-              value={category}
-              onValueChange={(nextValue) => {
-                setCategory(nextValue);
-                setChecked([]);
-                setPage(1);
-              }}
-              items={[
-                { value: "all", label: "全部分类" },
-                ...data!.resourceTotals.categories.map((c) => ({
-                  value: c,
-                  label: c,
-                })),
-              ]}
-            />
-            <Select
-              aria-label="资源账号筛选"
-              value={accountId}
-              onValueChange={(nextValue) => {
-                setAccountId(nextValue);
-                setChecked([]);
-                setPage(1);
-              }}
-              items={[
-                { value: "all", label: "全部账号" },
-                ...data!.accounts.map((a) => ({ value: a.id, label: a.alias })),
-              ]}
-            />
-            {hasFilters ? (
-              <Button
-                quiet
-                onClick={clearFilters}
-                className="library-filter-reset"
-              >
-                清除筛选
-              </Button>
-            ) : null}
+            <div className="library-filter-options">
+              {hasFilters ? (
+                <Button
+                  quiet
+                  onClick={clearFilters}
+                  className="library-filter-reset"
+                >
+                  清除筛选
+                </Button>
+              ) : null}
+              <Select
+                aria-label="分类筛选"
+                className="library-category-filter"
+                value={category}
+                onValueChange={(nextValue) => {
+                  setCategory(nextValue);
+                  setChecked([]);
+                  setPage(1);
+                }}
+                items={[
+                  { value: "all", label: "全部分类" },
+                  ...data!.resourceTotals.categories.map((c) => ({
+                    value: c,
+                    label: c,
+                  })),
+                ]}
+              />
+              <Select
+                aria-label="资源账号筛选"
+                value={accountId}
+                onValueChange={(nextValue) => {
+                  setAccountId(nextValue);
+                  setChecked([]);
+                  setPage(1);
+                }}
+                items={[
+                  { value: "all", label: "全部账号" },
+                  ...data!.accounts.map((a) => ({ value: a.id, label: a.alias })),
+                ]}
+              />
+            </div>
           </div>
           <div className="list-heading">
             <label className="checkbox">

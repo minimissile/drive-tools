@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { Database, databaseSchemaVersion, id, now } from "./database";
 import { AppError } from "./errors";
+import { coverFilePattern } from "./cover-assets";
 import { sourceWeiboPostBackup } from "../shared/weibo-posts";
 import { studioWorkingCopy } from "../shared/studio";
 
@@ -131,18 +132,21 @@ export async function inspectBackup(folder: string) {
   if (entries.length > 10000)
     throw new AppError("INVALID_BACKUP", "一次恢复最多10000张封面。");
   for (const name of entries) {
-    if (!/^[a-f0-9]{64}\.png$/.test(name))
+    if (!coverFilePattern.test(name))
       throw new AppError("INVALID_BACKUP", "备份封面文件名不正确。");
     const path = join(folder, "covers", name);
     await regularFile(path, 16 * 1024 * 1024);
-    if ((await fileHash(path)) !== name.slice(0, -4))
+    if ((await fileHash(path)) !== name.slice(0, 64))
       throw new AppError("BACKUP_HASH_MISMATCH", "封面校验失败，未恢复。");
     covers.push(name);
   }
   if (
     required.some(
       (cover) =>
-        !/^[a-f0-9]{64}$/.test(cover) || !covers.includes(`${cover}.png`),
+        !/^[a-f0-9]{64}$/.test(cover) ||
+        !["webp", "png"].some((extension) =>
+          covers.includes(`${cover}.${extension}`),
+        ),
     )
   )
     throw new AppError("INVALID_BACKUP", "备份缺少资源引用的封面。");
@@ -208,7 +212,7 @@ export async function stageRestore(
     for (const cover of source.covers) {
       const target = join(destination, "covers", cover);
       await copyFile(join(folder, "covers", cover), target);
-      if ((await fileHash(target)) !== cover.slice(0, -4))
+      if ((await fileHash(target)) !== cover.slice(0, 64))
         throw new AppError(
           "BACKUP_CHANGED",
           "复制期间封面发生变化，未启用恢复副本。",

@@ -9,6 +9,7 @@ import { validatePublicationUrl } from "../links";
 import { platformSpecs } from "../../shared/platforms";
 import { linkPositionSchema } from "../../shared/schemas";
 import { recordEditorOpened } from "../publications";
+import { readResourceCover } from "../cover-assets";
 
 import type { HandlerServices, HandlerMap } from "./types";
 
@@ -171,11 +172,13 @@ export function createPublicationHandlers(
           ),
           { mode: 0o600 },
         );
-        if (result.coverId)
+        if (result.coverId) {
+          const cover = await readResourceCover(services.dataPath, result.coverId);
           await copyFile(
-            join(services.dataPath, "covers", `${result.coverId}.png`),
-            join(folder, "封面.png"),
+            cover.path,
+            join(folder, `封面.${cover.extension}`),
           );
+        }
         services.db.setSetting("lastContentExportDirectory", selected);
         return { folder };
       } catch (error) {

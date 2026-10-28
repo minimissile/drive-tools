@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { id, now } from "../database";
 import { AppError, safeMessage } from "../errors";
 import { ContentSources, sameContentWord } from "../content-sources";
+import { readResourceCover } from "../cover-assets";
 import { recordEditorOpened } from "../publications";
 import { includesOwnShareLink } from "../../shared/publication";
 import { bindingEditorUrl } from "../../shared/channels";
@@ -40,7 +41,10 @@ interface Dependencies {
   studio: StudioService;
   websiteAccounts: WebsiteAccounts;
   dataPath: string;
-  ports: Pick<AppPorts, "chooseDirectory" | "copyText" | "openPath">;
+  ports: Pick<
+    AppPorts,
+    "chooseDirectory" | "copyText" | "openPath" | "normalizeCover"
+  >;
   verifyTarget(topicId: string): Promise<void>;
   contentPackage(
     draftId: string,
@@ -440,7 +444,7 @@ export class WeiboMarketing {
     const text = weiboPostText(draft, pack.body),
       issue = weiboContentIssue(draft, text);
     if (issue) throw new AppError("WEIBO_CONTENT_REQUIRED", issue);
-    const files: { name: string; path: string }[] = [];
+    const files: { name: string; path: string; bytes?: Buffer }[] = [];
     if (run.options.artwork === "cover") {
       const resource = this.deps.repo.getResource(draft.resourceId);
       if (!resource.coverId || !/^[a-f0-9]{64}$/.test(resource.coverId))
@@ -448,9 +452,15 @@ export class WeiboMarketing {
           "WEIBO_COVER_REQUIRED",
           "此资源还没有封面。请在资源库补充封面，或生成实际 AI 配图后选择稿件图片。",
         );
+      const cover = await readResourceCover(this.deps.dataPath, resource.coverId);
       files.push({
         name: "01-资源封面.png",
-        path: join(this.deps.dataPath, "covers", `${resource.coverId}.png`),
+        path: cover.path,
+        // The platform still receives PNG; the resource library retains WebP.
+        bytes:
+          cover.extension === "webp"
+            ? await this.deps.ports.normalizeCover(cover.bytes)
+            : undefined,
       });
     } else {
       if (
@@ -495,7 +505,9 @@ export class WeiboMarketing {
         !stat.isFile() ||
         stat.isSymbolicLink() ||
         stat.size <= 0 ||
-        stat.size >= 20 * 1024 * 1024
+        stat.size >= 20 * 1024 * 1024 ||
+        (file.bytes !== undefined &&
+          (!file.bytes.length || file.bytes.length >= 20 * 1024 * 1024))
       )
         throw new AppError(
           "WEIBO_IMAGE_FORMAT",
@@ -504,7 +516,7 @@ export class WeiboMarketing {
       hashes.push([
         file.name,
         createHash("sha256")
-          .update(await readFile(file.path))
+          .update(file.bytes ?? (await readFile(file.path)))
           .digest("hex"),
       ]);
     }
@@ -552,7 +564,9 @@ export class WeiboMarketing {
       await mkdir(folder, { mode: 0o700 });
       try {
         for (const file of delivery.files) {
-          await copyFile(file.path, join(folder, file.name));
+          if (file.bytes)
+            await writeFile(join(folder, file.name), file.bytes, { mode: 0o600 });
+          else await copyFile(file.path, join(folder, file.name));
           await chmod(join(folder, file.name), 0o600);
         }
         await writeFile(join(folder, "微博文案.txt"), delivery.text, {

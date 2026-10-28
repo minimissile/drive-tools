@@ -180,6 +180,7 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "secret.preview",
   "smzdm.list",
   "smzdm.get",
   "distribution.overview",

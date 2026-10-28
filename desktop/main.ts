@@ -1,4 +1,5 @@
 import { runtimeDataPath } from "./runtime-paths";
+import { normalizeCover } from "./cover-image";
 import { watchDevParent } from "./dev-parent";
 import {
   app,
@@ -563,25 +564,7 @@ const ports: AppPorts = {
       app.exit(0);
     }, 300);
   },
-  async normalizeCover(bytes) {
-    const image = nativeImage.createFromBuffer(bytes);
-    if (image.isEmpty())
-      throw new AppError("INVALID_COVER", "图片内容无法解码。");
-    const { width, height } = image.getSize();
-    if (width * height > 60_000_000)
-      throw new AppError(
-        "COVER_TOO_LARGE",
-        "图片分辨率过大，请使用封面尺寸的图片。",
-      );
-    return (
-      Math.max(width, height) > 1600
-        ? image.resize({
-            width: width >= height ? 1600 : undefined,
-            height: height > width ? 1600 : undefined,
-          })
-        : image
-    ).toPNG();
-  },
+  normalizeCover,
   async openPath(path) {
     const error = await shell.openPath(path);
     if (error)
@@ -605,7 +588,7 @@ const ports: AppPorts = {
   },
   async saveFile(name, bytes) {
     const extension =
-      name.match(/\.(csv|xlsx|md|json|txt|png|mp4)$/)?.[1] ?? "txt";
+      name.match(/\.(csv|xlsx|md|json|txt|png|webp|mp4)$/)?.[1] ?? "txt";
     const result = await dialog.showSaveDialog(window!, {
       defaultPath: name,
       filters: [
@@ -618,6 +601,7 @@ const ports: AppPorts = {
               json: "JSON档案",
               txt: "文本文件",
               png: "PNG图片",
+              webp: "WebP图片",
               mp4: "MP4视频",
             } as Record<string, string>
           )[extension],

@@ -4,6 +4,7 @@ import { resolve, join, relative } from "node:path";
 import { Repository } from "./repository";
 import { id, now } from "./database";
 import { AppError, safeMessage } from "./errors";
+import { readResourceCover } from "./cover-assets";
 import type { SecretStore } from "./secrets";
 
 const hash = (s: string | Buffer) =>
@@ -100,12 +101,11 @@ export class NoteExporter {
     await mkdir(join(base, "Resources"), { recursive: true });
     let coverLink = "";
     if (resource.coverId) {
+      const cover = await readResourceCover(this.dataPath, resource.coverId);
+      const name = `${resource.coverId}.${cover.extension}`;
       await mkdir(join(base, "Attachments"), { recursive: true });
-      await copyFile(
-        join(this.dataPath, "covers", `${resource.coverId}.png`),
-        join(base, "Attachments", `${resource.coverId}.png`),
-      );
-      coverLink = `![](../Attachments/${resource.coverId}.png)\n`;
+      await copyFile(cover.path, join(base, "Attachments", name));
+      coverLink = `![](../Attachments/${name})\n`;
     }
     const code = this.repo.db.setting("exportCodes", false)
       ? await this.secrets.get(`share:${copyId}`)

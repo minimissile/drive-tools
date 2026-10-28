@@ -1,8 +1,7 @@
 import { intakeOptions, addIntakeOption } from "../intake-options";
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { resourceInputSchema } from "../../shared/schemas";
+import { readResourceCover } from "../cover-assets";
 
 import type { HandlerServices, HandlerMap } from "./types";
 
@@ -83,21 +82,15 @@ export function createResourcesHandlers(
       const { id: coverId } = z
         .object({ id: z.string().regex(/^[a-f0-9]{64}$/) })
         .parse(object);
-      return services.ports.saveFile(
-        "资源封面.png",
-        await readFile(join(services.dataPath, "covers", `${coverId}.png`)),
-      );
+      const cover = await readResourceCover(services.dataPath, coverId);
+      return services.ports.saveFile(`资源封面.${cover.extension}`, cover.bytes);
     },
     "cover.get": async (object) => {
       const { id: coverId } = z
         .object({ id: z.string().regex(/^[a-f0-9]{64}$/) })
         .parse(object);
-      return (
-        "data:image/png;base64," +
-        (
-          await readFile(join(services.dataPath, "covers", `${coverId}.png`))
-        ).toString("base64")
-      );
+      const cover = await readResourceCover(services.dataPath, coverId);
+      return `data:${cover.mime};base64,${cover.bytes.toString("base64")}`;
     },
   } satisfies HandlerMap;
 }

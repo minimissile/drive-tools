@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { settingsSecretKind } from "../../shared/settings";
 import {
   aiModelSelection,
   aiPurposes,
@@ -97,18 +98,19 @@ export function createSettingsHandlers(
       services.changed();
       return true;
     },
+    "secret.preview": async (object) => {
+      const { kind } = z.object({ kind: settingsSecretKind }).parse(object);
+      const value = await services.secrets.get(kind);
+      return {
+        configured: !!value,
+        masked: !value ? "" : value.length >= 16
+          ? `${value.slice(0, 4)}********${value.slice(-4)}` : "********",
+      };
+    },
     "secret.save": async (object) => {
       const input = z
         .object({
-          kind: z.enum([
-            "openrouter",
-            "bit",
-            "pipix:tikhub",
-            "5118:longtail",
-            "5118:suggest",
-            "5118:metrics",
-            "5118:radar",
-          ]),
+          kind: settingsSecretKind,
           value: z.string().max(20000),
         })
         .parse(object);

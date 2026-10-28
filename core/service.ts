@@ -9,6 +9,7 @@ import { BrowserEnvironmentQueue } from "./browser-environment-queue";
 import { ResourceAnswers } from "./resource-answers";
 import { Distribution } from "./distribution";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
+import { coverFilePattern, saveResourceCover } from "./cover-assets";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
 import { WebsiteAccounts } from "./website-accounts";
@@ -589,16 +590,11 @@ export class AppService {
       const bytes = Buffer.from(match[2], "base64");
       if (bytes.length > 8 * 1024 * 1024)
         throw new AppError("COVER_TOO_LARGE", "封面不能超过8MB。");
-      const normalized = await this.ports.normalizeCover(bytes);
-      coverId = createHash("sha256").update(normalized).digest("hex");
-      await mkdir(join(this.dataPath, "covers"), {
-        recursive: true,
-        mode: 0o700,
-      });
-      await writeFile(
-        join(this.dataPath, "covers", `${coverId}.png`),
-        normalized,
-        { mode: 0o600 },
+      const unchangedWebp = match[1] === "webp" && input.id &&
+        this.repo.getResource(input.id).coverId === createHash("sha256").update(bytes).digest("hex");
+      coverId = await saveResourceCover(
+        this.dataPath,
+        unchangedWebp ? bytes : await this.ports.normalizeCover(bytes, "webp"),
       );
     }
     if (source.code) await this.secrets.set(`source:${resourceId}`, source.code);
@@ -1072,7 +1068,7 @@ export class AppService {
     await mkdir(join(folder, "covers"), { mode: 0o700 });
     try {
       for (const entry of await readdir(covers))
-        if (/^[a-f0-9]{64}\.png$/.test(entry))
+        if (coverFilePattern.test(entry))
           await copyFile(join(covers, entry), join(folder, "covers", entry));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

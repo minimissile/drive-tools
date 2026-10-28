@@ -66,7 +66,8 @@ export interface AppPorts {
     kind: "csv" | "summary",
   ): Promise<{ name: string; text: string } | null>;
   activateDataPath(path: string): Promise<void>;
-  normalizeCover(bytes: Buffer): Promise<Buffer>;
+  /** PNG by default for existing content workflows; resource intake requests bounded WebP. */
+  normalizeCover(bytes: Buffer, format?: "png" | "webp"): Promise<Buffer>;
   openPath(path: string): Promise<void>;
   openAccountPage(account: Account, url: string): Promise<void>;
   openExternal(url: string): Promise<void>;

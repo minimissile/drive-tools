@@ -37,6 +37,7 @@ import {
 } from "../shared/studio";
 import type { Draft, Platform } from "../shared/types";
 import { redactPromptText } from "./text-safety";
+import { readResourceCover } from "./cover-assets";
 import { loadMediaModelCatalog } from "./media-model-catalog";
 
 const base = "https://openrouter.ai/api/v1";
@@ -528,13 +529,8 @@ export class StudioService {
           "MEDIA_REFERENCE_REQUIRED",
           "参考封面记录不正确，请重新上传资源封面。",
         );
-      referenceData =
-        "data:image/png;base64," +
-        (
-          await readFile(
-            join(this.dataPath, "covers", `${resource.coverId}.png`),
-          )
-        ).toString("base64");
+      const cover = await readResourceCover(this.dataPath, resource.coverId);
+      referenceData = `data:${cover.mime};base64,${cover.bytes.toString("base64")}`;
     }
     const job: StudioJob = {
       id: id("media"),

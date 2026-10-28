@@ -1,36 +1,31 @@
 import { useRef, useState } from "react";
-import { Eye, EyeOff, KeyRound } from "lucide-react";
-import { useAppActions, useAppActivity } from "../state";
+import { KeyRound } from "lucide-react";
+import type { SettingsSecretKind } from "../../shared/settings";
+import { useAppActivity, useAppData } from "../state";
 import { Button, Field } from "../ui/primitives";
+import { QueryError } from "../ui/QueryError";
+import { useSecretEditor } from "./useSecretEditor";
 
-export function SecretField({
-  kind,
-  configured,
-  label = "API Key",
-  onSaved,
-}: {
-  kind: string;
+type Props = {
+  kind: SettingsSecretKind;
   configured: boolean;
   label?: string;
   onSaved?: () => void;
-}) {
-  const { command } = useAppActions();
+};
+export function SecretField(props: Props) {
+  const { data } = useAppData();
+  return <SecretEditor key={`${data!.dataPath}:${props.kind}`} {...props} />;
+}
+function SecretEditor({ kind, configured, label = "API Key", onSaved }: Props) {
   const { busy } = useAppActivity();
-  const [value, setValue] = useState("");
-  const [visible, setVisible] = useState(false);
+  const editor = useSecretEditor(kind, configured);
+  const { value } = editor;
+  const disabled = busy > 0 || editor.loading || editor.saving;
   const [confirmRemove, setConfirmRemove] = useState(false);
   const remove = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const save = async (next: string) => {
-    if (
-      await command(
-        "secret.save",
-        { kind, value: next },
-        next ? "密钥已加密保存在本机。" : "本地Key已移除。",
-      )
-    ) {
-      setValue("");
-      setVisible(false);
+    if (await editor.save(next)) {
       setConfirmRemove(false);
       onSaved?.();
       if (!next) input.current?.focus();
@@ -41,45 +36,76 @@ export function SecretField({
       <div className="secret-row">
         <Field
           label={label}
-          hint={configured ? "已保存；不回显原值" : "保存到系统加密存储"}
+          hint={
+            editor.loading
+              ? "正在读取已保存的密钥…"
+              : editor.configured
+                ? "已保存；仅回显脱敏值，更换时输入新Key"
+                : "保存到系统加密存储"
+          }
         >
           <div className="input-frame settings-secret-input">
             <input
               ref={input}
-              type={visible ? "text" : "password"}
+              type={editor.editing ? "password" : "text"}
+              readOnly={!editor.editing}
               aria-label={`${kind}密钥`}
               autoComplete="new-password"
               spellCheck={false}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
+              maxLength={20000}
+              disabled={disabled}
+              aria-busy={editor.loading}
+              value={editor.editing ? value : editor.masked}
+              onChange={(e) => editor.update(e.target.value)}
               placeholder={
-                configured ? "输入新Key可替换，留空不修改" : "粘贴你的Key"
+                editor.loading
+                  ? "正在读取…"
+                  : editor.configured
+                    ? editor.editing
+                      ? "粘贴新Key；取消更换可保留原Key"
+                      : editor.masked
+                        ? ""
+                        : "已保存；脱敏信息暂不可用"
+                    : "粘贴你的Key"
               }
             />
-            <button
-              type="button"
-              aria-label={visible ? "隐藏输入的密钥" : "显示输入的密钥"}
-              aria-pressed={visible}
-              disabled={!value}
-              onClick={() => setVisible(!visible)}
-            >
-              {visible ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
           </div>
         </Field>
         <div className="settings-secret-actions">
-          <Button
-            disabled={!value.trim() || busy > 0}
-            onClick={() => void save(value)}
-          >
-            <KeyRound size={14} />
-            保存Key
-          </Button>
-          {configured ? (
+          {editor.editing ? (
+            <Button
+              disabled={!value.trim() || !editor.dirty || disabled}
+              onClick={() => void save(value)}
+            >
+              <KeyRound size={14} />
+              保存Key
+            </Button>
+          ) : (
+            <Button
+              disabled={disabled}
+              onClick={() => {
+                setConfirmRemove(false);
+                editor.startEditing();
+                input.current?.focus();
+              }}
+            >
+              更换Key
+            </Button>
+          )}
+          {editor.configured && editor.editing ? (
+            <Button
+              quiet
+              disabled={disabled}
+              onClick={() => editor.cancelEditing()}
+            >
+              取消更换
+            </Button>
+          ) : null}
+          {editor.configured && !editor.editing ? (
             <Button
               ref={remove}
               quiet
-              disabled={busy > 0}
+              disabled={disabled}
               onClick={() => setConfirmRemove(true)}
             >
               移除
@@ -87,6 +113,12 @@ export function SecretField({
           ) : null}
         </div>
       </div>
+      <QueryError
+        title="密钥脱敏信息读取失败"
+        error={editor.error}
+        loading={editor.loading}
+        onRetry={editor.retry}
+      />
       {confirmRemove ? (
         <div
           className="settings-remove-confirm"
@@ -96,7 +128,7 @@ export function SecretField({
           <p>移除此密钥后，对应连接将不可用。已保存的业务数据会保留。</p>
           <div className="row">
             <Button
-              disabled={busy > 0}
+              disabled={disabled}
               autoFocus
               onClick={() => {
                 setConfirmRemove(false);
@@ -107,7 +139,7 @@ export function SecretField({
             </Button>
             <Button
               className="danger"
-              disabled={busy > 0}
+              disabled={disabled}
               onClick={() => void save("")}
             >
               确认移除密钥

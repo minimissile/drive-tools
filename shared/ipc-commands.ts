@@ -7,6 +7,7 @@ import type {
   InsertionHistory,
 } from "./insertion";
 import type { z } from "zod";
+import type { SettingsSecretKind, SettingsSecretPreview } from "./settings";
 import type {
   Account,
   Provider,
@@ -283,7 +284,11 @@ export interface IpcCommands {
     { created: number; skipped: number }
   >;
   "search.write": Contract<Id, Draft>;
-  "secret.save": Contract<{ kind: string; value: string }>;
+  "secret.preview": Contract<
+    { kind: SettingsSecretKind },
+    SettingsSecretPreview
+  >;
+  "secret.save": Contract<{ kind: SettingsSecretKind; value: string }>;
   "settings.save": Contract<
     Partial<{
       model: string;
