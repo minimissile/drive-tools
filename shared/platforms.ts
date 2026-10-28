@@ -18,6 +18,7 @@ export const platformSpecs: {
   rule: string;
   ruleUrl: string;
 }[] = [
+  {id: "smzdm", name: "什么值得买", glyph: "值", format: "文章", defaultUrl: "https://post.smzdm.com/tougao/", hosts: ["post.smzdm.com"], linkMode: "review", rule: "保留原文来源并核对使用授权；文章事实、图片与网盘外链应符合当前账号和社区要求。", ruleUrl: "https://post.m.smzdm.com/user/info/principles"},
   {
     id: "xiaohongshu",
     name: "小红书",

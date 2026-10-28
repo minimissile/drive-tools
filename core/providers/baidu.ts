@@ -325,6 +325,9 @@ export class BaiduProvider implements DriveProvider {
     }
     return current || "/";
   }
+  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
+    await this.manage(account, input.action, input.action === "mkdir" ? input.path : input.file!.path ?? input.path.replace(/\/$/, "") + "/" + input.file!.name, input.name);
+  }
   async manage(account: Account, action: "mkdir" | "rename" | "delete", path: string, name = "") {
     const target = normalizedDirectory(path);
     if (action !== "mkdir" && target === "/") throw new AppError("ROOT_PROTECTED", "不能修改网盘根目录。");

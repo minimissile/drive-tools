@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { answerStyle } from "./answer-styles";
+import { zhidaoQuestionTitleLimit } from "./zhidao-content";
 
 export const generationTracks = {
   general: {
@@ -233,7 +234,7 @@ export function generationQuestion(
     /\.(?:zip|rar|7z|pdf|docx?|xlsx?|pptx?)$/i,
     "",
   );
-  return `${prefix}${name.slice(0, Math.max(1, 49 - prefix.length - suffix.length))}${suffix}`;
+  return `${prefix}${name.slice(0, Math.max(1, zhidaoQuestionTitleLimit - prefix.length - suffix.length))}${suffix}`;
 }
 export function generationBody(
   resource: GenerationResource,

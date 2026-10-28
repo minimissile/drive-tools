@@ -17,7 +17,7 @@ export const discoveryEntries = [
 export const driveFilesEntry = {
   page: "drive-files",
   title: "网盘文件",
-  description: "浏览、管理与分享本人百度网盘文件",
+  description: "浏览全部本人网盘，管理资源与广告文件",
   Icon: FolderOpen,
 } as const;
 export const resourceToolEntries = [...discoveryEntries, driveFilesEntry];

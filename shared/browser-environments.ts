@@ -30,6 +30,7 @@ export const environmentSaveSchema = z.object({
   proxyPassword: z.string().max(1000).optional(),
   clearProxyCredentials: z.boolean().optional(),
   expectedRevision: z.number().int().positive().optional(),
+  expectedConnectorKey: z.string().max(300).optional(),
   requireProxy: z.boolean().optional(),
 });
 export type EnvironmentSaveInput = z.infer<typeof environmentSaveSchema>;
@@ -89,7 +90,7 @@ export interface BrowserEnvironmentContract {
   "environments.list": Contract<undefined, BrowserEnvironmentView[]>;
   "environments.save": Contract<EnvironmentSaveInput, BrowserEnvironment>;
   "environments.bind": Contract<
-    EnvironmentAccountRef & { environmentId: string; confirmed: true },
+    EnvironmentAccountRef & { environmentId?: string; confirmed: true },
     BrowserEnvironment
   >;
   "environments.remove": Contract<{ id: string; confirmed: true }, boolean>;

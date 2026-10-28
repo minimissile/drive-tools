@@ -1,0 +1,144 @@
+.bit-windows-toolbar {
+  scroll-margin-top: 80px;
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  align-items: end;
+}
+.bit-window-search {
+  gap: var(--space-2);
+  padding-inline: var(--space-3);
+}
+.bit-windows-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+  margin-block: var(--space-4);
+}
+.bit-windows-summary > :nth-child(2) {
+  margin-left: auto;
+}
+.bit-windows-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.bit-windows-table th:nth-child(1) {
+  width: 23%;
+}
+.bit-windows-table th:nth-child(2) {
+  width: 18%;
+}
+.bit-windows-table th:nth-child(3) {
+  width: 12%;
+}
+.bit-windows-table th:nth-child(4) {
+  width: 25%;
+}
+.bit-windows-table th:nth-child(5) {
+  width: 22%;
+}
+.bit-windows-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.bit-windows-table td > strong,
+.bit-windows-table td > small,
+.bit-diagnostic-account small {
+  display: block;
+}
+.bit-windows-table td > small,
+.bit-diagnostic-account small {
+  color: var(--muted);
+  margin-top: var(--space-1);
+}
+.bit-window-sequence {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.bit-profile-id {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.bit-windows-table .bit-profile-id,
+.bit-windows-table td > .bit-window-remark {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.bit-window-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: flex-start;
+}
+.bit-window-actions .button {
+  white-space: nowrap;
+}
+.bit-window-failure {
+  margin-top: var(--space-2);
+  font-size: 12px;
+}
+.bit-window-detail-row > td {
+  background: var(--bg);
+  padding: var(--space-5);
+}
+.bit-diagnostic {
+  display: grid;
+  gap: var(--space-3);
+}
+.bit-diagnostic h3,
+.bit-diagnostic p {
+  margin: 0;
+}
+.bit-diagnostic-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+.bit-diagnostic-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.bit-diagnostic-facts dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.bit-profile-remark {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bit-diagnostic-accounts {
+  border-top: 1px solid var(--line);
+}
+.bit-diagnostic-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.bit-windows-panel .pagination small {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.bit-windows-panel .pagination small .select-control {
+  min-width: 120px;
+}
+@media (max-width: 1250px) {
+  .bit-windows-toolbar {
+    grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr);
+  }
+  .bit-diagnostic-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

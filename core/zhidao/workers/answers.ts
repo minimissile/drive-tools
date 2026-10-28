@@ -7,6 +7,7 @@ import { sampledQuestions, shuffled } from "./answer-questions";
 import { zhidaoQuestionPageSize } from "../client";
 import { answerHistory } from "../answer-history";
 import { generateAutoAnswer } from "./answer-generation";
+import { zhidaoAnswerIssue } from "../../../shared/zhidao-content";
 
 const isAnswered = (value: unknown) =>
   value === true || value === 1 || value === "1" || value === "true";
@@ -139,6 +140,18 @@ export async function runAnswers(
         status: "ready",
       });
       signal.throwIfAborted();
+    }
+    const contentIssue = zhidaoAnswerIssue(item.answer);
+    if (contentIssue) {
+      ctx.store.put(run.id, qid, {
+        ...item,
+        status: "failed",
+        message: `${contentIssue}；内容已保留，请编辑核对后继续`,
+      });
+      throw new AppError(
+        "ANSWER_CONTENT_REVIEW_REQUIRED",
+        `${contentIssue}；任务已暂停，请编辑核对已保存的回答后继续。`,
+      );
     }
     const nextAt = Number(ctx.store.run(run.id).config.nextAnswerAt ?? 0);
     const delay = nextAt - Date.now();

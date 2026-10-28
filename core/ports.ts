@@ -1,6 +1,19 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
+  smzdm?: import("../shared/smzdm").SmzdmPort;
+  collectionWebSession?: {
+    search(source: import("../shared/resource-collection").CollectionWebSource, keyword: string, page: number, signal: AbortSignal): Promise<{ status: number; body: string }>;
+    open(source: import("../shared/resource-collection").CollectionWebSource): Promise<void>;
+    isOpen(): boolean;
+  };
+  distributionSessions?: {
+    open(platformId: import("../shared/distribution").DistributionPlatformId, page: "submit" | "login"): Promise<void>;
+    isOpen(): boolean;
+    inspect(platformId: import("../shared/distribution").DistributionPlatformId): Promise<import("../shared/distribution").DistributionReadiness>;
+    submit(platformId: import("../shared/distribution").DistributionPlatformId, text: string, beforeSubmit: () => Promise<void>, signal: AbortSignal): Promise<import("../shared/distribution").DistributionSubmitResult>;
+  };
+  zhihu?: import("../shared/zhihu").ZhihuBrowserPort;
   browserEnvironments?: {
     prepare(environment: import("../shared/browser-environments").BrowserEnvironmentRuntime): Promise<void>;
     assertIdle(environment: import("../shared/browser-environments").BrowserEnvironment): Promise<void>;
@@ -10,7 +23,10 @@ export interface AppPorts {
     prepare(account: import("../shared/website-accounts").WebsiteAccount, payload: import("../shared/weibo-publishing").WeiboEditorPayload): Promise<import("../shared/weibo-publishing").WeiboEditorState>;
     submit(account: import("../shared/website-accounts").WebsiteAccount, payload: import("../shared/weibo-publishing").WeiboEditorPayload, beforeSubmit: () => Promise<void>): Promise<import("../shared/weibo-publishing").WeiboSubmitReceipt>;
   };
-  readWeiboImages?(): Promise<{ name: string; bytes: Buffer }[] | null>;
+  readWeiboImages?(platform?: "weibo" | "zhihu"): Promise<{ name: string; bytes: Buffer }[] | null>;
+  weiboStatistics?: {
+    read(account: import("../shared/website-accounts").WebsiteAccount, url: string): Promise<import("../shared/weibo-statistics").WeiboStatisticsReading>;
+  };
   baiduKeywords?: {
     run?(account: import("../shared/website-accounts").WebsiteAccount, input: import("../shared/baidu-research").BaiduResearchInput): Promise<import("../shared/baidu-research").BaiduWireResponse>;
     open?(account: import("../shared/website-accounts").WebsiteAccount, tool: import("../shared/baidu-research").BaiduTool): Promise<void>;

@@ -37,10 +37,15 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  smzdm: import("../smzdm/service").SmzdmArticles;
+  distribution: import("../distribution").Distribution;
+  pipix: import("../pipix/service").PipixSources;
+  zhihu: import("../zhihu/service").ZhihuOperations;
   environments: import("../browser-environments").BrowserEnvironments;
   environmentQueue: import("../browser-environment-queue").BrowserEnvironmentQueue;
   resourceAnswers: import("../resource-answers").ResourceAnswers;
   weiboPosts: import("../weibo/posts").WeiboPosts;
+  weiboStatistics: import("../weibo/statistics").WeiboStatistics;
   weibo: import("../weibo/marketing").WeiboMarketing;
   csdn: import("../csdn/workflow").CsdnWorkflows;
   websiteAccounts: import("../website-accounts").WebsiteAccounts;
@@ -57,6 +62,7 @@ export interface HandlerServices {
   studio: StudioService;
   traffic: TrafficService;
   bit: BitBrowser;
+  bitManagement: import("../bitbrowser-management").BitBrowserManagement;
   importer: BulkImporter;
   operations: Operations;
   insertion: import("../insertion").InsertionService;

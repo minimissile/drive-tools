@@ -11,8 +11,10 @@ import {
 } from "./providers/provider";
 import type { Account, RemoteFile } from "../shared/types";
 import type { DriveShareResult } from "../shared/zhidao";
+import { DriveManagement } from "./drive-management";
 
 interface Dependencies {
+  material: import("./insertion").InsertionService["materialDetail"];
   db: Database;
   repo: Repository;
   secrets: SecretStore;
@@ -30,14 +32,15 @@ interface Intent {
   message?: string;
 }
 export class DriveFiles {
+  readonly management: DriveManagement;
   private busy = new Set<string>();
   busyAccount(accountId: string) {
-    return this.busy.has(accountId);
+    return this.busy.has(accountId) || this.management.busyAccount(accountId);
   }
   get isBusy() {
-    return this.busy.size > 0;
+    return this.busy.size > 0 || this.management.isBusy;
   }
-  constructor(private d: Dependencies) {}
+  constructor(private d: Dependencies) { this.management = new DriveManagement(d); }
   list(accountId: string, path: string) {
     return this.d.authenticated(accountId, async (account, provider) =>
       provider.list(
@@ -149,13 +152,7 @@ export class DriveFiles {
     try {
       const result: DriveShareResult = { urls: [], failures: [] };
       await this.d.authenticated(accountId, async (account, provider) => {
-        if (account.provider !== "baidu")
-          throw new AppError(
-            "BAIDU_REQUIRED",
-            "此入口当前支持百度网盘文件分享。",
-          );
-        const parent = normalizedDirectory(path);
-        const files = await provider.list(account, parent);
+        const { folderId: parent, files } = await this.management.resolveDirectory(account, provider, path);
         const selected = files.filter((f) => fileIds.includes(f.id));
         if (selected.length !== new Set(fileIds).size)
           throw new AppError("FILES_CHANGED", "所选文件已变化，请刷新目录。");
@@ -216,7 +213,7 @@ export class DriveFiles {
                 "分享已创建但核验未完成，请稍后重新核对。",
                 true,
               );
-            const copyId = await this.archive(account, file, parent, share);
+            const copyId = await this.archive(account, file, normalizedDirectory(path), parent, share);
             this.saveIntent(accountId, file.id, {
               state: "verified",
               file,
@@ -270,6 +267,7 @@ export class DriveFiles {
     account: Account,
     file: RemoteFile,
     parent: string,
+    folderId: string,
     share: OwnShare,
   ) {
     const prior = this.d.db.get<{ id: string }>(
@@ -279,9 +277,15 @@ export class DriveFiles {
     );
     if (prior) {
       this.d.db.run(
-        "UPDATE copies SET share_verified_at=?,verified_at=?,error=NULL WHERE id=?",
+        "UPDATE copies SET share_verified_at=?,verified_at=?,files=?,directory=?,folder_id=?,owner_uid=?,share_id=?,share_owner_uid=?,error=NULL WHERE id=?",
         now(),
         now(),
+        JSON.stringify([file]),
+        parent,
+        folderId,
+        account.uid,
+        share.id,
+        share.ownerUid,
         prior.id,
       );
       return prior.id;
@@ -303,7 +307,7 @@ export class DriveFiles {
           file.name,
           share.url,
           parseShare(share.url, share.code).shareKey,
-          "baidu",
+          account.provider,
           "本人网盘",
           "[]",
           "本人网盘已有文件",
@@ -320,7 +324,7 @@ export class DriveFiles {
         resourceId,
         account.id,
         parent,
-        parent,
+        folderId,
         JSON.stringify([file]),
         "ready",
         account.uid,

@@ -3,6 +3,11 @@ import { environmentIdSchema } from "../../shared/browser-environments";
 import { id, now } from "../database";
 import { AppError } from "../errors";
 import { parseShare } from "../links";
+import {
+  collectionDriveTypes,
+  collectionDriveType,
+  collectionWebSources,
+} from "../../shared/resource-collection";
 import { normalizedDirectory } from "../providers/provider";
 import {
   operationKinds,
@@ -39,6 +44,10 @@ export function createZhidaoHandlers(
       s.zhidao.saveSettings(
         z.object({ pansouUrl: z.string().trim().max(300) }).parse(input)
           .pansouUrl,
+      ),
+    "zhidao.collection.openSource": (input) =>
+      s.zhidao.openCollectionSource(
+        z.object({ source: z.enum(collectionWebSources) }).parse(input).source,
       ),
     "zhidao.activeRuns": () => s.zhidao.store.activeRuns(),
     "zhidao.accounts": () => s.zhidao.store.accounts(),
@@ -82,8 +91,16 @@ export function createZhidaoHandlers(
       return s.zhidao.store.list(v.kind, v.page);
     },
     "zhidao.run": (input) => {
-      const v = z.object({ id: identifier, page: paging }).parse(input);
-      return s.zhidao.store.detail(v.id, v.page);
+      const v = z
+        .object({
+          id: identifier,
+          page: paging,
+          driveType: z
+            .enum(["all", "unmatched", ...collectionDriveTypes])
+            .default("all"),
+        })
+        .parse(input);
+      return s.zhidao.store.detail(v.id, v.page, v.driveType);
     },
     "zhidao.start": (input) => s.zhidao.start(runStartInput.parse(input)),
     "zhidao.pause": (input) => s.zhidao.pause(objectId.parse(input).id),
@@ -100,11 +117,15 @@ export function createZhidaoHandlers(
         .parse(input);
       return s.zhidao.publicationPreview(value.itemIds, value.accountId);
     },
-    "zhidao.resume": (input) =>
-      s.zhidao.resume(
-        z.object({ id: identifier, authorized: z.literal(true) }).parse(input)
-          .id,
-      ),
+    "zhidao.resume": (input) => {
+      const v = z
+        .object({
+          id: identifier,
+          authorized: z.literal(true),
+        })
+        .parse(input);
+      return s.zhidao.resume(v.id);
+    },
     "zhidao.item.save": (input) => s.zhidao.saveItem(input),
     "zhidao.template.sources": (input) =>
       s.zhidao.templateSources(
@@ -246,10 +267,14 @@ export function createZhidaoHandlers(
         backup: boolean;
       }[] = [];
       await s.authenticated(v.accountId, async (account, provider) => {
-        if (account.provider !== "baidu")
+        if (
+          items.some(
+            (item) => collectionDriveType(item.link) !== account.provider,
+          )
+        )
           throw new AppError(
-            "BAIDU_REQUIRED",
-            "采集到的百度网盘链接需要本人百度网盘账号。",
+            "PROVIDER_MISMATCH",
+            "所选资源的网盘类型必须与目标账号一致，请按网盘类型筛选后重新选择。",
           );
         for (const item of items) {
           if (item.copyId) {
@@ -270,6 +295,7 @@ export function createZhidaoHandlers(
           ]) {
             try {
               const source = parseShare(candidate.link, candidate.code);
+              if (source.provider !== account.provider) continue;
               const inspection = await provider.inspect(account, source);
               if (!inspection.files.length)
                 throw new AppError("EMPTY_SHARE", "分享没有可转存内容");

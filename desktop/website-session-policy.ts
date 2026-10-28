@@ -4,6 +4,8 @@ export const websiteLoginSpecs: Record<
   WebsiteProvider,
   { home: string; title: string; hosts: readonly string[] }
 > = {
+  smzdm: {home: "https://zhiyou.smzdm.com/user/login/", title: "什么值得买 · 官方登录", hosts: ["zhiyou.smzdm.com", "post.smzdm.com", "www.smzdm.com", "smzdm.com"]},
+  zhihu: { home: "https://www.zhihu.com/", title: "知乎 · 官方登录", hosts: ["www.zhihu.com", "zhihu.com", "zhuanlan.zhihu.com"] },
   weibo: {
     home: "https://weibo.com/",
     title: "微博 · 官方登录",

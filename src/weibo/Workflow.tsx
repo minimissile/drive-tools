@@ -31,6 +31,7 @@ import {
 import { formatTime } from "../lib/format";
 import { WeiboSetup } from "./Setup";
 import { WeiboDelivery, WeiboReceipt } from "./Delivery";
+import { WeiboStatistics } from "./Statistics";
 import "../studio/studio.css";
 import "./weibo.css";
 
@@ -74,6 +75,7 @@ export default function WeiboWorkflow() {
         description="从本人资料出发，准备推荐图文，在指定窗口发布，再把微博链接与资料效果关联。"
         action={
           <div className="row">
+            <Button onClick={() => navigate("pipix-sources")}>公共素材采集</Button>
             <Button onClick={() => navigate("website-accounts")}>
               管理微博账号
             </Button>
@@ -332,6 +334,7 @@ function WeiboTask({ detail }: { detail: WeiboMarketingDetail }) {
         <WeiboDelivery detail={detail} />
       </div>
       <WeiboReceipt detail={detail} />
+      {run.url && (run.options?.accountId || run.prepared?.accountId) ? <Panel title="微博数据统计"><WeiboStatistics accountId={(run.options?.accountId || run.prepared?.accountId)!} url={run.url} /></Panel> : null}
       <details className="weibo-events">
         <summary>任务记录 · {run.events.length} 项</summary>
         <ol>

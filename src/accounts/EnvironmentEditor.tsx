@@ -8,21 +8,25 @@ import { Select } from "../ui/Select";
 import { TextSuggestions } from "../ui/TextSuggestions";
 import { CheckboxField } from "../ui/CheckboxField";
 import type { BrowserEnvironment } from "../../shared/browser-environments";
+import type { BitBrowserProfile } from "../../shared/bitbrowser";
 
 const formSchema = z.object({
   name: z.string(),
   engine: z.enum(["electron", "bitbrowser"]),
   profileId: z.string(),
+  connectorKey: z.string().default(""),
   proxyMode: z.enum(["direct", "http", "socks5"]),
   host: z.string(),
   port: z.string(),
 });
 export function EnvironmentEditor({
   environment,
+  initialProfile,
   onSaved,
   onCancel,
 }: {
   environment: BrowserEnvironment | null;
+  initialProfile?: BitBrowserProfile & { connectorKey: string };
   onSaved(): void;
   onCancel(): void;
 }) {
@@ -30,12 +34,18 @@ export function EnvironmentEditor({
     { notify } = useAppActions();
   const proxy = environment?.proxy;
   const draft = useLocalDraft(
-    `browser-environment:${data!.dataPath}:${environment?.id ?? "new"}`,
+    `browser-environment:${data!.dataPath}:${environment?.id ?? (initialProfile ? `${encodeURIComponent(initialProfile.connectorKey)}:${initialProfile.id}` : "new")}`,
     {
-      name: environment?.name ?? "",
+      name: environment?.name ?? initialProfile?.name.slice(0, 80) ?? "",
       engine: environment?.engine ?? "bitbrowser",
+      connectorKey:
+        environment?.connectorKey ??
+        initialProfile?.connectorKey ??
+        data!.settings.bitUrl,
       profileId:
-        environment?.engine === "bitbrowser" ? environment.profileId : "",
+        environment?.engine === "bitbrowser"
+          ? environment.profileId
+          : (initialProfile?.id ?? ""),
       proxyMode: proxy?.mode ?? "direct",
       host: proxy && proxy.mode !== "direct" ? proxy.host : "",
       port: proxy && proxy.mode !== "direct" ? String(proxy.port) : "",
@@ -43,6 +53,15 @@ export function EnvironmentEditor({
     (value) => formSchema.parse(value),
   );
   const form = draft.value;
+  // Existing environments have an authoritative persisted source, including when
+  // restoring an edit draft written before connectorKey was part of the form.
+  const profileConnector = environment
+    ? environment.connectorKey || data!.settings.bitUrl
+    : form.connectorKey;
+  const connectorChanged =
+    form.engine === "bitbrowser" &&
+    !!form.profileId &&
+    (!profileConnector || profileConnector !== data!.settings.bitUrl);
   const [requireProxy, setRequireProxy] = useState(
     environment?.requireProxy ?? true,
   );
@@ -67,6 +86,8 @@ export function EnvironmentEditor({
       await ipc("environments.save", {
         id: environment?.id,
         expectedRevision: environment?.revision,
+        expectedConnectorKey:
+          form.engine === "bitbrowser" ? profileConnector : undefined,
         requireProxy,
         name: form.name,
         engine: form.engine,
@@ -100,7 +121,15 @@ export function EnvironmentEditor({
     }
   };
   return (
-    <Panel title={environment ? "编辑浏览器环境" : "新建浏览器环境"}>
+    <Panel
+      title={
+        environment
+          ? "编辑浏览器环境"
+          : initialProfile
+            ? "接入比特浏览器窗口"
+            : "新建浏览器环境"
+      }
+    >
       <p className="muted">
         同一环境可以登录多个不同平台。代理与浏览器配置由环境统一管理。
       </p>
@@ -118,7 +147,7 @@ export function EnvironmentEditor({
           <Select
             aria-label="浏览器引擎"
             value={form.engine}
-            disabled={!!environment}
+            disabled={!!environment || !!initialProfile}
             onValueChange={(engine) => {
               draft.update({ engine: engine as typeof form.engine });
               setUsername("");
@@ -136,8 +165,13 @@ export function EnvironmentEditor({
               <TextSuggestions
                 aria-label="比特浏览器配置"
                 value={form.profileId}
-                onValueChange={(profileId) => draft.update({ profileId })}
-                disabled={!!environment}
+                onValueChange={(profileId) =>
+                  draft.update({
+                    profileId,
+                    connectorKey: data!.settings.bitUrl,
+                  })
+                }
+                disabled={!!environment || !!initialProfile || !!pending}
                 placeholder="选择或填写已有配置 ID"
                 items={windows.map((item) => ({
                   value: item.id,
@@ -145,19 +179,30 @@ export function EnvironmentEditor({
                 }))}
               />
             </Field>
-            <Button
-              disabled={!!pending}
-              onClick={() => {
-                setPending("windows");
-                setError("");
-                void ipc("bit.windows")
-                  .then(setWindows)
-                  .catch((cause) => setError(cause.message))
-                  .finally(() => setPending(""));
-              }}
-            >
-              {pending === "windows" ? "正在读取…" : "读取比特配置"}
-            </Button>
+            {!environment && !initialProfile ? (
+              <Button
+                disabled={!!pending || !data!.settings.bitUrl}
+                onClick={() => {
+                  setPending("windows");
+                  setError("");
+                  void ipc("bit.profiles")
+                    .then((result) => {
+                      setWindows(result.windows);
+                      draft.update({
+                        connectorKey: result.connectorKey,
+                        profileId:
+                          form.connectorKey === result.connectorKey
+                            ? form.profileId
+                            : "",
+                      });
+                    })
+                    .catch((cause) => setError(cause.message))
+                    .finally(() => setPending(""));
+                }}
+              >
+                {pending === "windows" ? "正在读取…" : "读取比特配置"}
+              </Button>
+            ) : null}
           </>
         ) : (
           <>
@@ -225,6 +270,13 @@ export function EnvironmentEditor({
           </>
         )}
       </div>
+      {connectorChanged ? (
+        <Notice warning>
+          此配置 ID
+          来自其他或未知的比特连接。请恢复原连接，或重新读取配置后选择窗口；也可重新填写当前服务的配置
+          ID。
+        </Notice>
+      ) : null}
       <CheckboxField
         checked={requireProxy}
         onChange={(event) => setRequireProxy(event.target.checked)}
@@ -255,6 +307,7 @@ export function EnvironmentEditor({
           primary
           disabled={
             !!pending ||
+            connectorChanged ||
             !form.name.trim() ||
             (form.engine === "bitbrowser" && !form.profileId.trim())
           }

@@ -143,6 +143,7 @@ test("Successful Baidu query still returns data on archive failure; retrying the
       }),
     };
     const account = f.app.websiteAccounts.add("baidu-marketing");
+    await f.app.websiteAccounts.verify(account.id);
     f.ports.baiduKeywords = {
       query: async () => {
         calls++;

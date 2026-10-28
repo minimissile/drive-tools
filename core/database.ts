@@ -3,11 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { migrateDistribution } from "./distribution/migration";
 
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 18;
+export const databaseSchemaVersion = 26;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -74,6 +75,138 @@ export class Database {
     );
     if (version > databaseSchemaVersion) throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 25) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v26-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        ALTER TABLE distribution_task_sources RENAME TO distribution_task_sources_v1;
+        CREATE TABLE distribution_task_sources(platform_id TEXT NOT NULL,share_record_id TEXT NOT NULL,
+          task_id TEXT NOT NULL REFERENCES distribution_tasks(id),resource_id TEXT NOT NULL,
+          copy_id TEXT NOT NULL,split_item_id TEXT,active INTEGER NOT NULL DEFAULT 1,
+          PRIMARY KEY(task_id,share_record_id));
+        INSERT INTO distribution_task_sources SELECT platform_id,share_record_id,task_id,resource_id,copy_id,split_item_id,1 FROM distribution_task_sources_v1;
+        DROP TABLE distribution_task_sources_v1;
+        CREATE UNIQUE INDEX distribution_current_source ON distribution_task_sources(platform_id,share_record_id) WHERE active=1;
+        CREATE INDEX distribution_source_lookup ON distribution_task_sources(task_id,active,share_record_id);
+        CREATE INDEX distribution_source_resource ON distribution_task_sources(platform_id,resource_id,split_item_id,task_id);
+        UPDATE distribution_tasks SET status='superseded' WHERE status='skipped' AND submitted_at IS NULL AND message='尚未投稿的旧链接已被资源库中的新分享替换。';
+        PRAGMA user_version=26;
+      `));
+      return;
+    }
+    if (version === 24) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v25-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        ALTER TABLE distribution_tasks ADD COLUMN accepted_at TEXT;
+        UPDATE distribution_tasks SET accepted_at=(SELECT MIN(at) FROM distribution_events e WHERE e.task_id=distribution_tasks.id AND e.status IN ('submitted','processing','reviewing','published'));
+        CREATE INDEX distribution_delivery_progress ON distribution_tasks(platform_id,accepted_at);
+        CREATE INDEX distribution_source_lookup ON distribution_task_sources(task_id,share_record_id);
+        PRAGMA user_version=25;
+      `));
+      this.migrate(false);
+      return;
+    }
+    if (version === 23) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v24-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => migrateDistribution(this.db));
+      this.migrate(false);
+      return;
+    }
+    if (version === 22) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v23-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE distribution_tasks(id TEXT PRIMARY KEY,platform_id TEXT NOT NULL,resource_id TEXT NOT NULL,copy_id TEXT NOT NULL,share_key TEXT NOT NULL,status TEXT NOT NULL,submitted_at TEXT,data TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(platform_id,resource_id),UNIQUE(platform_id,share_key));
+        CREATE INDEX distribution_platform_status ON distribution_tasks(platform_id,status,updated_at);
+        PRAGMA user_version=23;
+      `));
+      this.migrate(false);
+      return;
+    }
+    if (version === 21) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v22-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE content_source_responses(id TEXT PRIMARY KEY,provider TEXT NOT NULL,query_key TEXT NOT NULL,cursor TEXT NOT NULL,page INTEGER NOT NULL,generation TEXT NOT NULL,request TEXT NOT NULL,status TEXT NOT NULL,http_status INTEGER,response TEXT,parsed TEXT,message TEXT NOT NULL DEFAULT '',fetched_at TEXT NOT NULL);
+        CREATE INDEX content_responses_query ON content_source_responses(provider,query_key,generation,page);
+        CREATE TABLE content_knowledge_items(provider TEXT NOT NULL,source_id TEXT NOT NULL,text TEXT NOT NULL,author TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,raw TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(provider,source_id));
+        CREATE TABLE content_knowledge_hits(response_id TEXT NOT NULL REFERENCES content_source_responses(id),provider TEXT NOT NULL,source_id TEXT NOT NULL,PRIMARY KEY(response_id,source_id));
+        CREATE INDEX content_knowledge_source ON content_knowledge_hits(provider,source_id);
+        PRAGMA user_version=22;
+      `));
+      this.migrate(false);
+      return;
+    }
+    if (version === 20) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v21-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        this.db.exec("CREATE TABLE content_source_exports(id TEXT PRIMARY KEY,provider TEXT NOT NULL,source_id TEXT NOT NULL,channel TEXT NOT NULL,account_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(provider,source_id,channel,account_id));");
+        for (const row of this.all<{id:string; data:string}>("SELECT id,data FROM pipix_sources")) {
+          const source = JSON.parse(row.data), contentId = source.contentId;
+          delete source.contentId;
+          for (const image of source.images ?? [])
+            if (image.asset && !image.asset.storage) image.asset.storage = "zhihu-assets";
+          if (contentId) {
+            const content = this.get<{data:string}>("SELECT data FROM zhihu_contents WHERE id=?", contentId);
+            const delivery = { id: id("sourceexport"), provider: "pipix", sourceId: row.id, channel: "zhihu", accountId: "", targetId: contentId, title: content ? JSON.parse(content.data).title : source.text?.slice(0,100) || "已有知乎素材", createdAt: source.collectedAt };
+            this.run("INSERT INTO content_source_exports VALUES(?,?,?,?,?,?)", delivery.id, "pipix", row.id, "zhihu", "", JSON.stringify(delivery));
+          }
+          this.run("UPDATE pipix_sources SET data=? WHERE id=?", JSON.stringify(source), row.id);
+        }
+        this.db.exec("PRAGMA user_version=21");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 19) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v20-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE pipix_sources(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+        PRAGMA user_version=20;
+      `));
+      this.migrate(false);
+      return;
+    }
+    if (version === 18) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v19-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE zhihu_contents(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+        CREATE TABLE zhihu_tasks(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+        CREATE TABLE zhihu_plans(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+        PRAGMA user_version=19;
+      `));
+      this.migrate(false);
+      return;
+    }
     if (version === 17) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v18-${randomUUID()}.bak`;
@@ -90,6 +223,7 @@ export class Database {
         CREATE INDEX environment_jobs_history ON browser_environment_jobs(created_at DESC);
         PRAGMA user_version=18;
       `));
+      this.migrate(false);
       return;
     }
     if (version === 16) {

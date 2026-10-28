@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
-import { useAppActions, useAppData, useAppNavigation } from "../state";
+import { useAppData, useAppNavigation } from "../state";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { Button, Field, Notice, Panel } from "../ui/primitives";
@@ -10,26 +10,27 @@ import { updateSelection } from "../lib/selection";
 import { OperationsWorkspace } from "../workbench/OperationsWorkspace";
 import { useOperation, useOperationAction } from "../zhidao/hooks";
 import { RunPanel } from "../zhidao/RunPanel";
-import { ResultTable } from "../zhidao/Results";
+import { CollectionResults } from "../resource-collection/CollectionResults";
+import { WebSourceAccess } from "../resource-collection/WebSourceAccess";
+import "../resource-collection/collection.css";
 const form = z.object({
   mode: z.enum(["precise", "fuzzy"]),
   keywords: z.string(),
   count: z.number(),
   zhidao: z.boolean(),
   pansou: z.boolean(),
+  pansoo: z.boolean().default(false),
+  haisou: z.boolean().default(false),
   accountIds: z.array(z.string()),
   directory: z.string(),
   targetAccount: z.string(),
 });
 export default function Collection() {
   const { data } = useAppData(),
-    { navigate } = useAppNavigation(),
-    { refresh, notify } = useAppActions();
+    { navigate } = useAppNavigation();
   const model = useOperation("collect"),
     action = useOperationAction();
-  const [selected, setSelected] = useState<string[]>([]),
-    [rights, setRights] = useState(false),
-    [url, setUrl] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
   const [handoff] = useState(() => {
     try {
       const key = `panxu-collect-handoff:${data!.dataPath}`,
@@ -50,6 +51,8 @@ export default function Collection() {
       count: 100,
       zhidao: true,
       pansou: true,
+      pansoo: false,
+      haisou: false,
       accountIds: [] as string[],
       directory: "/盘序采集",
       targetAccount: "",
@@ -59,10 +62,6 @@ export default function Collection() {
       return handoff ? { ...parsed, keywords: handoff } : parsed;
     },
   );
-  useEffect(() => {
-    setSelected([]);
-    setRights(false);
-  }, [model.id]);
   const accounts = useIpcQuery("zhidao.accounts", undefined, {}),
     settings = useIpcQuery("zhidao.settings", undefined, {});
   const words = [
@@ -76,7 +75,7 @@ export default function Collection() {
   return (
     <OperationsWorkspace
       title="资源采集"
-      description="百度知道与本地 PanSou 搜索资源，保留来源、提取码和备选链接，再交给现有转存流程。"
+      description="从百度知道、本地 PanSou、97盘搜和海搜采集资源，按网盘类型查看结果，再交给现有转存流程。"
     >
       <Panel title="新建采集任务">
         <div className="operations-form-grid">
@@ -168,7 +167,36 @@ export default function Collection() {
             />
             PanSou 本地搜索与验活
           </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={draft.value.pansoo}
+              onChange={(e) => draft.update({ pansoo: e.target.checked })}
+            />
+            97盘搜 · 多网盘搜索
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={draft.value.haisou}
+              onChange={(event) =>
+                draft.update({ haisou: event.target.checked })
+              }
+            />
+            海搜 · 多网盘搜索
+          </label>
         </div>
+        <QueryError
+          error={settings.error}
+          loading={settings.loading}
+          onRetry={settings.reload}
+        />
+        <WebSourceAccess
+          sources={[
+            ...(draft.value.pansoo ? ["pansoo" as const] : []),
+            ...(draft.value.haisou ? ["haisou" as const] : []),
+          ]}
+        />
         {draft.value.zhidao ? (
           <>
             <QueryError
@@ -210,11 +238,6 @@ export default function Collection() {
         ) : null}
         <details className="operations-settings">
           <summary>PanSou 连接设置</summary>
-          <QueryError
-            error={settings.error}
-            loading={settings.loading}
-            onRetry={settings.reload}
-          />
           {settings.data ? (
             <>
               <Field label="本机服务地址" hint="留空使用随盘序提供的服务">
@@ -244,7 +267,18 @@ export default function Collection() {
         <div className="operations-actions">
           <Button
             primary
-            disabled={!words.length || !!action.pending || model.running}
+            disabled={
+              !words.length ||
+              !!action.pending ||
+              model.running ||
+              !(
+                draft.value.zhidao ||
+                draft.value.pansou ||
+                draft.value.pansoo ||
+                draft.value.haisou
+              ) ||
+              (draft.value.zhidao && !draft.value.accountIds.length)
+            }
             onClick={() =>
               void action.run(
                 "zhidao.start",
@@ -257,14 +291,17 @@ export default function Collection() {
                       draft.value.mode === "precise"
                         ? Math.min(words.length, draft.value.count)
                         : draft.value.count,
-                    accountIds: draft.value.accountIds,
+                    accountIds: draft.value.zhidao
+                      ? draft.value.accountIds
+                      : [],
                     zhidao: draft.value.zhidao,
                     pansou: draft.value.pansou,
+                    pansoo: draft.value.pansoo,
+                    haisou: draft.value.haisou,
                   },
                   authorized: true,
                 },
                 (run) => {
-                  setSelected([]);
                   model.pick(run);
                 },
                 "采集任务已开始",
@@ -277,97 +314,14 @@ export default function Collection() {
         </div>
       </Panel>
       <RunPanel model={model}>
-        {(items) => (
-          <>
-            <div className="operations-transfer">
-              <div className="operations-form-grid">
-                <Field label="转存到本人百度账号">
-                  <Select
-                    value={draft.value.targetAccount}
-                    onValueChange={(targetAccount) => {
-                      draft.update({ targetAccount });
-                      setRights(false);
-                    }}
-                    items={[
-                      { value: "", label: "选择已登录的百度网盘账号" },
-                      ...data!.accounts
-                        .filter(
-                          (a) =>
-                            a.provider === "baidu" &&
-                            a.enabled &&
-                            a.status === "connected",
-                        )
-                        .map((a) => ({ value: a.id, label: a.alias })),
-                    ]}
-                  />
-                </Field>
-                <Field label="目标父目录">
-                  <input
-                    value={draft.value.directory}
-                    onChange={(e) => {
-                      draft.update({ directory: e.target.value });
-                      setRights(false);
-                    }}
-                  />
-                </Field>
-              </div>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={rights}
-                  onChange={(e) => setRights(e.target.checked)}
-                />
-                我有权保存和分享所选资源
-              </label>
-              <div className="operations-actions">
-                <span>已选{selected.length}项 · 跨页保留，最多100项</span>
-                <Button
-                  primary
-                  disabled={
-                    !selected.length ||
-                    !rights ||
-                    !draft.value.targetAccount ||
-                    !!action.pending ||
-                    model.running
-                  }
-                  onClick={() =>
-                    void action.run(
-                      "zhidao.collect.transfer",
-                      {
-                        itemIds: selected,
-                        accountId: draft.value.targetAccount,
-                        directory: draft.value.directory,
-                        rightsConfirmed: true,
-                      },
-                      (result) => {
-                        localStorage.setItem("panxu-batch-id", result.batchId);
-                        void refresh().catch(() =>
-                          notify(
-                            "资料已交给转存预检；列表刷新失败，请稍后刷新。",
-                            "warning",
-                          ),
-                        );
-                        navigate("batch");
-                      },
-                      "已交给现有批量预检",
-                    )
-                  }
-                >
-                  检查并交给转存
-                </Button>
-              </div>
-            </div>
-            <ResultTable
-              items={items}
-              selected={selected}
-              onSelect={(ids) => {
-                setSelected(ids);
-                setRights(false);
-              }}
-              running={model.running}
-              onChanged={model.refresh}
-            />
-          </>
+        {() => (
+          <CollectionResults
+            model={model}
+            targetAccount={draft.value.targetAccount}
+            directory={draft.value.directory}
+            onTargetChange={(targetAccount) => draft.update({ targetAccount })}
+            onDirectoryChange={(directory) => draft.update({ directory })}
+          />
         )}
       </RunPanel>
     </OperationsWorkspace>

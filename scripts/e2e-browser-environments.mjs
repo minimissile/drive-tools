@@ -174,7 +174,7 @@ try {
   });
   await page.goto(url);
   await page
-    .getByRole("heading", { name: "浏览器环境", exact: true })
+    .getByRole("heading", { name: "指纹浏览器", exact: true })
     .waitFor();
   const newEnvironment = async (name) => {
     await page.getByRole("button", { name: "新建环境", exact: true }).click();
@@ -243,7 +243,7 @@ try {
   );
   assert.equal((await f.app.websiteAccounts.list()).length, beforeCount);
   checks.push("同环境同平台重复身份被阻止，失败不会留下半条账号记录");
-  await page.getByRole("tab", { name: "浏览器环境", exact: true }).click();
+  await page.getByRole("button", { name: "指纹浏览器", exact: true }).click();
   await page
     .locator(".environment-row")
     .filter({ hasText: "跨平台运营 A" })
@@ -627,7 +627,7 @@ try {
     false,
   );
   checks.push("重新登录会使该登录体系的核验结果失效");
-  await page.getByRole("tab", { name: "浏览器环境", exact: true }).click();
+  await page.getByRole("button", { name: "指纹浏览器", exact: true }).click();
   await page
     .locator(".environment-row")
     .filter({ hasText: "模拟指纹环境" })
@@ -716,7 +716,7 @@ try {
   checks.push(
     "长列表编辑自动定位并聚焦、取消返回触发按钮；环境关联入口预选新账号及已有账号目标环境",
   );
-  await page.getByRole("tab", { name: "浏览器环境", exact: true }).click();
+  await page.getByRole("button", { name: "指纹浏览器", exact: true }).click();
   await page
     .getByRole("heading", { name: "环境任务调度", exact: true })
     .scrollIntoViewIfNeeded();
@@ -799,10 +799,10 @@ try {
   });
   environmentReadMode = "normal";
   await page
-    .getByRole("button", { name: "管理浏览器环境", exact: true })
+    .getByRole("button", { name: "管理指纹浏览器", exact: true })
     .click();
   await page
-    .getByRole("heading", { name: "浏览器环境", exact: true })
+    .getByRole("heading", { name: "指纹浏览器", exact: true })
     .waitFor();
   environmentReadMode = "hold";
   await mainNavigation
@@ -833,7 +833,7 @@ try {
     .getByRole("button", { name: "账号管理", exact: true })
     .click();
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.getByRole("tab", { name: "浏览器环境", exact: true }).click();
+  await page.getByRole("button", { name: "指纹浏览器", exact: true }).click();
   await page.getByRole("button", { name: "新建环境", exact: true }).click();
   assert.equal(
     await environmentName.evaluate((el) => document.activeElement === el),

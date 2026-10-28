@@ -1,7 +1,13 @@
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
+import { SmzdmArticles } from "./smzdm/service";
+import { PipixSources } from "./pipix/service";
+import { ZhihuOperations } from "./zhihu/service";
+import { BitBrowserManagement } from "./bitbrowser-management";
+import { createEnvironmentStatus } from "./browser-environment-status";
 import { BrowserEnvironments } from "./browser-environments";
 import { BrowserEnvironmentQueue } from "./browser-environment-queue";
 import { ResourceAnswers } from "./resource-answers";
+import { Distribution } from "./distribution";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
@@ -43,6 +49,7 @@ import { CsdnWorkflows } from "./csdn/workflow";
 import { CsdnBrowserEditor } from "./csdn/editor";
 import { WeiboMarketing } from "./weibo/marketing";
 import { WeiboPosts } from "./weibo/posts";
+import { WeiboStatistics } from "./weibo/statistics";
 import {
   canUseLinkPosition,
   includesOwnShareLink,
@@ -65,7 +72,12 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly smzdm: SmzdmArticles;
+  readonly distribution: Distribution;
+  readonly zhihu: ZhihuOperations;
+  readonly pipix: PipixSources;
   readonly weiboPosts: WeiboPosts;
+  readonly weiboStatistics: WeiboStatistics;
   readonly weibo: WeiboMarketing;
   readonly csdn: CsdnWorkflows;
   readonly csdnEditor: CsdnBrowserEditor;
@@ -86,6 +98,7 @@ export class AppService {
   readonly resourceAnswers: ResourceAnswers;
   readonly traffic: TrafficService;
   readonly bit: BitBrowser;
+  readonly bitManagement: BitBrowserManagement;
   readonly importer: BulkImporter;
   readonly operations: Operations;
   readonly insertion: InsertionService;
@@ -106,13 +119,22 @@ export class AppService {
   ) {
     this.db = new Database(dbPath);
     this.repo = new Repository(this.db);
+    this.distribution = new Distribution(this.db, ports, async source => {
+      const result = await this.invoke(source.splitItemId ? "split.link" : "copy.link", source.splitItemId ? { itemId: source.splitItemId } : { copyId: source.copyId }) as { text: string };
+      return result.text;
+    }, changed);
     this.secrets = new SecretStore(this.db, codec);
     this.environments = new BrowserEnvironments(this.db, this.secrets, ports, dataPath, changed);
     this.environmentQueue = new BrowserEnvironmentQueue(this.db, this.environments, changed);
     const browserPorts = createBrowserPlatformPorts(ports, this.environments, () => this.bit);
     this.ports = browserPorts;
     this.websiteAccounts = new WebsiteAccounts(this.db, browserPorts, changed, this.environments, this.environmentQueue);
+    this.zhihu = new ZhihuOperations({db: this.db, accounts: this.websiteAccounts, environments: this.environments, queue: this.environmentQueue, ports: browserPorts, dataPath, changed});
     this.weiboPosts = new WeiboPosts({ db: this.db, accounts: this.websiteAccounts, dataPath: this.dataPath, ports: browserPorts, changed });
+    this.pipix = new PipixSources({ db: this.db, dataPath, ports: browserPorts, secrets: this.secrets, changed, destinations: {
+      zhihu: material => this.zhihu.saveSource(material),
+      weibo: (material, accountId) => this.weiboPosts.saveSource(material, accountId),
+    } });
     this.notes = new NoteExporter(this.repo, this.secrets, dataPath);
     this.queue = new TransferQueue(
       this.repo,
@@ -123,6 +145,18 @@ export class AppService {
       changed,
     );
     this.ai = new AiService(this.repo, this.secrets, changed);
+    this.smzdm = new SmzdmArticles({
+      repo: this.repo,
+      secrets: this.secrets,
+      ai: this.ai,
+      accounts: this.websiteAccounts,
+      port: browserPorts.smzdm,
+      saveResource: (input) => this.saveResource(input),
+      assertOwnCopy: (copy) => this.assertOwnCopy(copy),
+      checkShare: (copyId) => this.checkShare(copyId),
+      environmentStamp: (accountId) => this.environments.stamp({kind: "website", id: accountId}),
+      changed,
+    });
     this.zhidao = new ZhidaoOperations(
       this.repo,
       this.secrets,
@@ -238,6 +272,7 @@ export class AppService {
     this.queue.onAccountBlocked = (accountId, stage, message) =>
       this.operations.pauseAccount(accountId, stage, message);
     this.driveFiles = new DriveFiles({
+      material: (id) => this.insertion.materialDetail(id),
       db: this.db,
       repo: this.repo,
       secrets: this.secrets,
@@ -252,7 +287,35 @@ export class AppService {
         if (ref.kind === "binding" && this.csdn.isBusy) throw new AppError("ENVIRONMENT_BUSY", "发布任务正在执行，请完成后再修改环境。");
       }
     });
+    const environmentStatus = createEnvironmentStatus({
+      db: this.db,
+      environments: this.environments,
+      posts: () => this.weiboPosts.list(),
+      marketing: () => this.weibo.history(),
+      csdn: () => this.csdn.history(),
+    });
+    this.bitManagement = new BitBrowserManagement({
+      bit: this.bit,
+      environments: this.environments,
+      connector: () => this.db.setting("bitUrl", ""),
+      accountState: (ref) => environmentStatus.account(ref),
+      pendingOperations: (refs) => environmentStatus.pending(refs),
+      openAccount: async (ref) => {
+        if (ref.kind === "website") return this.websiteAccounts.login(ref.id);
+        if (ref.kind === "zhidao") return this.zhidao.login(ref.id);
+        const binding = this.repo.bindings().find((binding) => binding.id === ref.id);
+        if (!binding) throw new AppError("NOT_FOUND", "发布账号映射不存在，请刷新后重试。");
+        return this.openBinding(binding);
+      },
+    });
+    this.weiboStatistics = new WeiboStatistics({ db: this.db, accounts: this.websiteAccounts, ports: this.ports, changed, posts: (accountId) => this.weiboPosts.list(accountId), marketing: () => this.weibo.history() });
     this.handlers = createApplicationHandlers({
+      smzdm: this.smzdm,
+      distribution: this.distribution,
+      zhihu: this.zhihu,
+      pipix: this.pipix,
+      weiboStatistics: this.weiboStatistics,
+      bitManagement: this.bitManagement,
       environments: this.environments,
       environmentQueue: this.environmentQueue,
       weibo: this.weibo,
@@ -313,11 +376,12 @@ export class AppService {
       this.switchingWorkspace ||
       activeOperations ||
       this.queue.isBusy ||
-      this.hasRunningJobs()
+      this.hasRunningJobs() ||
+      this.ports.collectionWebSession?.isOpen()
     )
       throw new AppError(
         "UPDATE_TASKS_RUNNING",
-        "仍有任务、工作空间切换或其他操作正在进行，请完成或停止后再安装更新。",
+        "仍有任务、网页采集窗口、工作空间切换或其他操作正在进行，请完成或关闭后再安装更新。",
       );
   }
   private account(id: string) {
@@ -752,12 +816,18 @@ export class AppService {
   }
   private hasRunningJobs() {
     return (
+      this.smzdm.isBusy ||
+      this.distribution.isBusy ||
+      !!this.ports.distributionSessions?.isOpen() ||
       this.environmentQueue.isBusy ||
+      this.bitManagement.isBusy ||
       this.environments.isBusy ||
       this.driveFiles.isBusy ||
       this.websiteAccounts.isBusy ||
       this.weibo.isBusy ||
       this.weiboPosts.isBusy ||
+      this.zhihu.isBusy ||
+      this.pipix.isBusy ||
       this.csdn.isBusy ||
       this.zhidao.isBusy ||
       this.insertion.isBusy ||
@@ -1018,6 +1088,14 @@ export class AppService {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    for (const directory of ["zhihu-assets", "content-assets"]) {
+      await mkdir(join(folder, directory), {mode: 0o700});
+      try {
+        for (const entry of await readdir(join(this.dataPath, directory)))
+          if (/^[a-f0-9]{64}\.(png|jpg|gif)$/.test(entry))
+            await copyFile(join(this.dataPath, directory, entry), join(folder, directory, entry));
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
     await writeFile(
       join(folder, "manifest.json"),
       JSON.stringify(
@@ -1041,6 +1119,10 @@ export class AppService {
     return folder;
   }
   close() {
+    this.smzdm.close();
+    this.distribution.close();
+    this.pipix.close();
+    this.zhihu.close();
     this.weibo.close();
     this.csdn.close();
     this.zhidao.close();

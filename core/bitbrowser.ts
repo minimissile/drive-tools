@@ -6,6 +6,7 @@ import { fetchJson } from "./http";
 import { platformSpecs } from "../shared/platforms";
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
+import type { BitBrowserProfile, BitProfileConfiguration } from "../shared/bitbrowser";
 export function assertEditorPage(
   editor: string,
   current: string,
@@ -57,8 +58,10 @@ export class BitBrowser {
     private requestJson = fetchJson,
     private lease?: <T>(binding: BrowserBinding, action: () => Promise<T>) => Promise<T>,
   ) {}
-  private async call(path: string, data: unknown = {}) {
+  private async call(path: string, data: unknown = {}, expectedUrl?: string) {
     const config = await this.config();
+    if (expectedUrl !== undefined && config.url !== expectedUrl)
+      throw new AppError("BIT_CONNECTION_CHANGED", "比特连接地址已变化，请重新读取窗口列表后操作。");
     const base = validateLoopback(config.url);
     if (base.pathname !== "/" && base.pathname !== "")
       throw new AppError(
@@ -88,6 +91,50 @@ export class BitBrowser {
     await this.call("/health");
     return { connected: true };
   }
+  async profileDetails(profileId: string): Promise<BitProfileConfiguration> {
+    const response = await this.call("/browser/detail", { id: profileId });
+    const data = response.data;
+    if (!data || data.id !== profileId || !data.browserFingerPrint || typeof data.browserFingerPrint !== "object" || Array.isArray(data.browserFingerPrint))
+      throw new AppError("BIT_PROFILE_INVALID", "比特未返回完整配置，请确认窗口仍存在且具有访问权限。");
+    // Only return display fields. Detail responses also contain cookies and credentials.
+    return {
+      proxyType: String(data.proxyType ?? "unknown").slice(0, 40),
+      proxyHost: String(data.host ?? "").slice(0, 253),
+      proxyPort: String(data.port ?? "").slice(0, 10),
+      dynamicIp: data.isDynamicIpChangeIp === true,
+      stopWhileNetError: data.stopWhileNetError === true,
+      randomFingerprint: data.randomFingerprint === true,
+      os: String(data.browserFingerPrint.os ?? "").slice(0, 80),
+      coreVersion: String(data.browserFingerPrint.version ?? data.coreVersion ?? "").slice(0, 80),
+    };
+  }
+  async runningProfiles(ids: string[]): Promise<Set<string>> {
+    if (!ids.length) return new Set();
+    const parse = (data: unknown) => {
+      if (!data || typeof data !== "object" || Array.isArray(data))
+        throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "比特未返回有效的窗口进程状态，请刷新重试。");
+      const running = new Set<string>();
+      for (const [id, pid] of Object.entries(data)) {
+        if ((typeof pid !== "number" && typeof pid !== "string") || !String(pid).trim() || !Number.isSafeInteger(Number(pid)) || Number(pid) < 0)
+          throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "窗口进程状态无法识别，请检查比特客户端版本。");
+        if (Number(pid) > 0) running.add(id);
+      }
+      return running;
+    };
+    try {
+      return parse((await this.call("/browser/pids/all")).data);
+    } catch {
+      const running = new Set<string>();
+      for (let start = 0; start < ids.length; start += 100)
+        for (const id of parse((await this.call("/browser/pids", { ids: ids.slice(start, start + 100) })).data))
+          running.add(id);
+      return running;
+    }
+  }
+  async closeProfile(profileId: string, expectedUrl?: string) {
+    await this.call("/browser/close", { id: profileId }, expectedUrl);
+    return true;
+  }
   async environmentConfiguration(profileId: string) {
     const response = await this.call("/browser/detail", { id: profileId });
     const data = response.data;
@@ -116,9 +163,10 @@ export class BitBrowser {
     if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "无法确认指纹环境是否已关闭，请检查比特连接后重试。");
     if (Number(response.data[profileId]) > 0) throw new AppError("ENVIRONMENT_WINDOW_OPEN", "请先关闭此指纹环境的浏览器窗口，再修改配置或迁移账号；登录状态会保留。");
   }
-  async windows() {
-    const windows: { id: string; name: string; seq: number | null }[] = [];
-    for (let page = 0; page < 30; page++) {
+  async profiles(): Promise<BitBrowserProfile[]> {
+    const windows: BitBrowserProfile[] = [];
+    const seen = new Set<string>();
+    for (let page = 0; page < 1000; page++) {
       const response = await this.call("/browser/list", {
         page,
         pageSize: 100,
@@ -126,26 +174,33 @@ export class BitBrowser {
       const rows = response.data?.list ?? response.data;
       if (!Array.isArray(rows))
         throw new AppError("BIT_SCHEMA_CHANGED", "比特窗口列表格式无法识别。");
-      windows.push(
-        ...rows.map((r: Record<string, any>) => {
+      for (const r of rows as Record<string, any>[]) {
           if (!r || typeof r.id !== "string" || !r.id.trim())
             throw new AppError(
               "BIT_SCHEMA_CHANGED",
               "比特窗口缺少有效ID，未建立账号映射。",
             );
-          return {
+          if (seen.has(r.id))
+            throw new AppError("BIT_LIST_CHANGED", "读取期间窗口列表发生变化或分页重复，请重新刷新；未展示不完整结果。");
+          seen.add(r.id);
+          windows.push({
             id: r.id,
-            name: String(r.name ?? r.id),
+            name: String(r.name || r.id).slice(0, 300),
             seq: typeof r.seq === "number" ? r.seq : null,
-          };
-        }),
-      );
+            groupId: String(r.groupId ?? "").slice(0, 200),
+            groupName: String(r.groupName ?? "").slice(0, 200),
+            remark: String(r.remark ?? "").slice(0, 2000),
+          });
+      }
       if (rows.length < 100) return windows;
     }
     throw new AppError(
       "TOO_MANY_WINDOWS",
-      "指纹窗口超过3000个，未返回不完整列表，请先在比特客户端整理窗口。",
+      "窗口列表超出单次读取范围，未展示不完整结果，请在比特客户端整理后重试。",
     );
+  }
+  async windows() {
+    return (await this.profiles()).map(({ id, name, seq }) => ({ id, name, seq }));
   }
   async open(binding: BrowserBinding) {
     const editor = validateEditorUrl(binding.platform, binding.editorUrl);
@@ -171,11 +226,11 @@ export class BitBrowser {
     const run = () => this.withProfile(binding.windowId, action);
     return this.lease ? this.lease(binding, run) : run();
   }
-  async withProfile<T>(profileId: string, action: (context: BrowserContext) => Promise<T>): Promise<T> {
+  async withProfile<T>(profileId: string, action: (context: BrowserContext) => Promise<T>, expectedUrl?: string): Promise<T> {
     const response = await this.call("/browser/open", {
       id: profileId,
       loadExtensions: true,
-    });
+    }, expectedUrl);
     const endpoint = String(response.data?.ws ?? "");
     const debug = validateLoopback(endpoint, true);
     if (!["ws:", "wss:"].includes(debug.protocol))

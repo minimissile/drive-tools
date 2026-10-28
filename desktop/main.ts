@@ -20,7 +20,9 @@ import { Readable } from "node:stream";
 import { isAbsolute, join, basename } from "node:path";
 import { AppService, type AppPorts } from "../core/service";
 import { createZhidaoSession } from "./zhidao-session";
+import { createCollectionWebSession } from "./collection-web-session";
 import { createWebsiteSessions } from "./website-sessions";
+import { createDistributionSessions } from "./distribution-sessions";
 import { createEnvironmentSessions } from "./browser-environment-session";
 import { readTableBytes } from "../core/table-files";
 import { QuarkProvider } from "../core/providers/quark";
@@ -159,7 +161,7 @@ async function providerResponse(
     signal: AbortSignal.timeout(45_000),
     headers: { Referer: referrer, ...init.headers },
   });
-  if (![200, 201, 202].includes(response.status)) {
+  if (![200, 201, 202, 204].includes(response.status)) {
     let detail = "";
     let remoteCode = "";
     try {
@@ -177,7 +179,7 @@ async function providerResponse(
           `网盘接口 ${url.pathname} 返回 HTTP ${response.status}${detail}，未确认操作成功。`,
         ),
       ),
-      init.method === "POST",
+      !!init.method && !["GET", "HEAD"].includes(init.method),
     );
   }
   return response;
@@ -220,13 +222,14 @@ const transport: ProviderTransport = {
   async json(accountId, url, init) {
     const response = await providerResponse(accountId, url, init);
     const text = await readLimited(response);
+    if (response.status === 204 && !text.trim()) return {};
     try {
       return JSON.parse(text);
     } catch {
       throw new AppError(
         "REMOTE_SCHEMA_CHANGED",
         "网盘返回非JSON数据，可能需要重新登录或人工验证。",
-        init?.method === "POST",
+        !!init?.method && !["GET", "HEAD"].includes(init.method),
       );
     }
   },
@@ -400,16 +403,20 @@ function changed() {
 const environmentSessions = createEnvironmentSessions((ref) => service.environments.forAccount(ref));
 const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
 const ports: AppPorts = {
+  collectionWebSession: createCollectionWebSession(() => service.dataPath),
+  distributionSessions: createDistributionSessions(() => service.dataPath),
   browserEnvironments: environmentSessions,
   zhidaoSession: createZhidaoSession((id) => environmentSessions.profile({ kind: "zhidao", id })),
   baiduKeywords: websiteSessions.baiduKeywords,
   websiteSessions: websiteSessions.sessions,
+  smzdm: websiteSessions.smzdm,
   weiboPublisher: websiteSessions.weiboPublisher,
-  async readWeiboImages() {
+  weiboStatistics: websiteSessions.weiboStatistics,
+  async readWeiboImages(platform = "weibo") {
     const result = await dialog.showOpenDialog(window!, {
-      title: "选择微博配图（最多 9 张）",
+      title: `选择${platform === "zhihu" ? "知乎" : "微博"}配图（最多 9 张）`,
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "微博图片", extensions: ["png", "jpg", "jpeg", "gif"] }],
+      filters: [{ name: "内容图片", extensions: platform === "zhihu" ? ["png", "jpg", "jpeg"] : ["png", "jpg", "jpeg", "gif"] }],
     });
     if (result.canceled) return null;
     if (result.filePaths.length > 9) throw new AppError("WEIBO_IMAGE_LIMIT", "一次最多选择 9 张图片。");
@@ -681,6 +688,8 @@ function createWindow() {
       running.length ||
       service.studio.isBusy ||
       service.websiteAccounts.isBusy ||
+      service.zhihu.isBusy ||
+      service.pipix.isBusy ||
       service.weibo.isBusy ||
       service.csdn.isBusy ||
       service.zhidao.isBusy ||
@@ -955,7 +964,9 @@ else {
               loginWindows.size ||
               clearingSessions.size ||
               ports.zhidaoSession?.isOpen?.() ||
-              ports.websiteSessions?.isOpen()
+              ports.distributionSessions?.isOpen() ||
+              ports.websiteSessions?.isOpen() ||
+              ports.collectionWebSession?.isOpen()
             )
               throw new Error("请先完成并关闭账号登录窗口。");
             devRestarting = true;
@@ -992,6 +1003,7 @@ else {
     });
   app.on("before-quit", () => {
     quitting = true;
+    service?.distribution.close();
     service?.queue.stop();
     updater?.dispose();
   });

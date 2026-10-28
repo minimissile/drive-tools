@@ -10,6 +10,8 @@ import type {
   DriveShareResult,
 } from "./zhidao";
 import type { RemoteFile } from "./types";
+import type { CollectionDriveFilter } from "./resource-collection";
+import type { CollectionWebSource } from "./resource-collection";
 type Contract<A, V> = { args: A; value: V };
 export interface ZhidaoContract {
   "zhidao.summary": Contract<undefined, OperationsSummary>;
@@ -32,11 +34,18 @@ export interface ZhidaoContract {
   "zhidao.account.remove": Contract<{ id: string; confirmed: true }, boolean>;
   "zhidao.settings": Contract<undefined, ZhidaoSettings>;
   "zhidao.settings.save": Contract<ZhidaoSettings, ZhidaoSettings>;
+  "zhidao.collection.openSource": Contract<
+    { source: CollectionWebSource },
+    boolean
+  >;
   "zhidao.runs": Contract<
     { kind?: OperationKind; page?: number },
     { items: OperationRun[]; total: number }
   >;
-  "zhidao.run": Contract<{ id: string; page?: number }, OperationDetail>;
+  "zhidao.run": Contract<
+    { id: string; page?: number; driveType?: CollectionDriveFilter },
+    OperationDetail
+  >;
   "zhidao.start": Contract<RunStartInput, OperationRun>;
   "zhidao.pause": Contract<{ id: string }, OperationRun>;
   "zhidao.resume": Contract<{ id: string; authorized: true }, OperationRun>;

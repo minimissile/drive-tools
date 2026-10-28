@@ -9,6 +9,8 @@ import { buildBaiduResearchRequest } from "../core/baidu-research";
 import { AppError } from "../core/errors";
 import { readLimited, readLimitedBytes } from "../core/http";
 import { createWeiboSessions } from "./weibo-session";
+import { createZhihuIdentitySession } from "./zhihu-session";
+import { createSmzdmSession } from "./smzdm-session";
 import { browserSessionFetch } from "./browser-session-fetch";
 import {
   baiduKeywordPath,
@@ -447,14 +449,16 @@ export function createWebsiteSessions(workspace: () => string, environmentProfil
     },
   };
   const weiboSessions = createWeiboSessions(workspace, environmentProfile);
+  const zhihuIdentity = createZhihuIdentitySession(context);
+  const smzdm = createSmzdmSession(context);
   const adapter = (account: WebsiteAccount) => account.provider === "weibo" ? weiboSessions : baiduSessions;
   const sessions: NonNullable<AppPorts["websiteSessions"]> = {
-    isOpen: () => baiduSessions.isOpen() || weiboSessions.isOpen(),
+    isOpen: () => baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen(),
     login: (account) => adapter(account).login(account),
-    status: (account) => adapter(account).status(account),
+    status: (account) => account.provider === "smzdm" ? Promise.resolve(smzdm.status(account)) : account.provider === "zhihu" ? Promise.resolve(zhihuIdentity.status(account)) : adapter(account).status(account),
     clear: (account) => adapter(account).clear(account),
-    invalidate: (account) => adapter(account).invalidate(account),
-    verify: (account) => account.provider === "weibo" ? weiboSessions.verify(account) : baiduSessions.status(account),
+    invalidate: async (account) => account.provider === "smzdm" ? smzdm.invalidate(account) : account.provider === "zhihu" ? zhihuIdentity.invalidate(account) : adapter(account).invalidate(account),
+    verify: (account) => account.provider === "smzdm" ? smzdm.verify(account) : account.provider === "zhihu" ? zhihuIdentity.verify(account) : account.provider === "weibo" ? weiboSessions.verify(account) : baiduSessions.status(account),
     open: async (account, expectedUid) => {
       if (account.provider !== "weibo") throw new AppError("WEBSITE_PUBLISH_UNSUPPORTED", "此平台暂未接入网站发布窗口。");
       await weiboSessions.open(account, expectedUid);
@@ -464,5 +468,5 @@ export function createWebsiteSessions(workspace: () => string, environmentProfil
       await weiboSessions.openPost(account, url);
     },
   };
-  return { sessions, baiduKeywords, weiboPublisher: weiboSessions.publisher };
+  return { sessions, baiduKeywords, weiboPublisher: weiboSessions.publisher, weiboStatistics: weiboSessions.statistics, smzdm: smzdm.port };
 }

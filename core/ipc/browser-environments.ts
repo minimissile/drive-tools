@@ -24,7 +24,7 @@ export function createBrowserEnvironmentHandlers(
     "environments.bind": (input) => {
       const v = environmentAccountSchema
         .extend({
-          environmentId: environmentIdSchema,
+          environmentId: environmentIdSchema.optional(),
           confirmed: z.literal(true),
         })
         .parse(input);

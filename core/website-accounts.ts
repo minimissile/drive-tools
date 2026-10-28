@@ -77,6 +77,10 @@ export class WebsiteAccounts {
     return Promise.all(ids.map((row) => this.check(row.id)));
   }
   add(provider: WebsiteProvider, alias?: string, environmentId?: string) {
+    if (provider === "smzdm") {
+      if (this.db.get("SELECT id FROM website_accounts WHERE provider='smzdm'")) throw new AppError("SMZDM_SINGLE_ACCOUNT", "什么值得买仅连接一个账号，请使用已有账号或先移除旧连接。");
+      if (environmentId && this.environments?.get(environmentId).engine !== "electron") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买文章发布目前使用内置浏览器，请关闭指纹浏览器选项。");
+    }
     const time = now(),
       accountId = id("web");
     const count = this.db.get<{ n: number }>(
@@ -136,8 +140,9 @@ export class WebsiteAccounts {
         : await sessions.status(account);
     const ref = { kind: "website" as const, id: accountId };
     if (!fresh && this.environments && !this.environments.identityCurrent(ref)) {
+      if(state.hasSession || !state.error)
+        state.error = "此环境的登录或配置已变化，请检查当前平台身份后再使用。";
       state.hasSession = false;
-      state.error = "此环境的登录或配置已变化，请检查当前平台身份后再使用。";
     }
     const mismatch =
       !!account.uid &&
@@ -238,6 +243,7 @@ export class WebsiteAccounts {
     }
   }
   async verify(accountId: string) {
+    this.get(accountId);
     if (this.active.has(accountId))
       throw new AppError(
         "WEBSITE_ACCOUNT_BUSY",
@@ -400,7 +406,7 @@ export class WebsiteAccounts {
     this.active.add(accountId);
     try {
       const actionWithIdentity = async () => {
-      const account = await this.check(accountId, provider === "weibo");
+      const account = await this.check(accountId, provider !== "baidu-marketing");
       if (account.provider !== provider)
         throw new AppError(
           "WEBSITE_PROVIDER_MISMATCH",
@@ -409,7 +415,7 @@ export class WebsiteAccounts {
       if (account.status !== "connected")
         throw new AppError(
           "WEBSITE_LOGIN_REQUIRED",
-          "请先在账号管理中完成此网站账号的登录。",
+          account.message || "请先在账号管理中完成此网站账号的登录。",
         );
       return await action(account);
       };

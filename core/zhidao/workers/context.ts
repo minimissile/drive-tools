@@ -6,6 +6,8 @@ import type { OperationRun } from "../../../shared/zhidao";
 import type { OperationsStore } from "../store";
 import type { ZhidaoClient, SourceFetch } from "../client";
 import type { Pansou } from "../pansou";
+import type { Pansoo } from "../../resource-collection/pansoo";
+import type { Haisou } from "../../resource-collection/haisou";
 export interface WorkerContext {
   repo: Repository;
   secrets: SecretStore;
@@ -13,6 +15,8 @@ export interface WorkerContext {
   store: OperationsStore;
   client: ZhidaoClient;
   pansou: Pansou;
+  pansoo: Pansoo;
+  haisou: Haisou;
   fetcher: SourceFetch;
   pace: number;
   readonly closed: boolean;

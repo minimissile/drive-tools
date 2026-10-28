@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CollectionResultSummary } from "./resource-collection";
 import { answerStyle } from "./answer-styles";
 import {
   generationResource,
@@ -96,6 +97,7 @@ export interface OperationDetail {
   total: number;
   page: number;
   pageSize: number;
+  collection?: CollectionResultSummary;
 }
 export interface OperationsSummary {
   runs: OperationRun[];
@@ -120,8 +122,13 @@ export const collectionInput = z
     accountIds: z.array(text.min(1).max(100)).max(2),
     zhidao: z.boolean(),
     pansou: z.boolean(),
+    pansoo: z.boolean().default(false),
+    haisou: z.boolean().default(false),
   })
-  .refine((v) => v.zhidao || v.pansou, "请至少选择一个采集来源")
+  .refine(
+    (v) => v.zhidao || v.pansou || v.pansoo || v.haisou,
+    "请至少选择一个采集来源",
+  )
   .refine(
     (v) => !v.zhidao || v.accountIds.length > 0,
     "百度知道采集需要选择账号",

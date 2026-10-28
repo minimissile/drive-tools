@@ -1,0 +1,178 @@
+.drive-browser {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.drive-browser > .panel {
+  margin: 0;
+}
+.drive-location {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+}
+.drive-browser-actions,
+.drive-breadcrumb,
+.drive-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.drive-breadcrumb {
+  margin-bottom: var(--space-3);
+}
+.drive-breadcrumb button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.drive-breadcrumb > span {
+  color: var(--muted);
+}
+.drive-selection-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--space-3);
+}
+.drive-selection-actions > strong {
+  margin-right: auto;
+  font-size: 13px;
+}
+.drive-file-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 150px auto;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.drive-table-scroll {
+  overflow-x: auto;
+}
+.drive-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+}
+.drive-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg);
+}
+.drive-table td,
+.drive-table th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.drive-table td {
+  overflow-wrap: anywhere;
+}
+.drive-table tr[data-selected] {
+  background: var(--blue-bg);
+}
+.drive-table .drive-check {
+  width: 42px;
+}
+.drive-table .drive-size {
+  width: 130px;
+}
+.drive-table .drive-detail {
+  width: 78px;
+}
+.drive-file-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.drive-file-name:hover {
+  color: var(--blue);
+}
+.drive-file-name:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+.drive-file-name svg {
+  flex: none;
+  color: var(--muted);
+}
+.drive-file-name span {
+  overflow-wrap: anywhere;
+}
+.drive-file-metadata {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+.drive-file-metadata dt {
+  color: var(--muted);
+}
+.drive-file-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.drive-confirm-list {
+  min-height: 1.8em;
+  max-height: 180px;
+  overflow: auto;
+  padding-left: var(--space-5);
+  overflow-wrap: anywhere;
+}
+.modal.drive-ad-dialog {
+  max-width: 840px;
+  width: 100%;
+}
+.drive-ad-dialog .panel {
+  padding: 0;
+  border: 0;
+  margin: 0;
+  box-shadow: none;
+}
+.drive-ad-dialog .insertion-material-list {
+  max-height: 190px;
+}
+.drive-share-results {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.drive-share-result-url {
+  user-select: text;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.drive-share-controls {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+.drive-copy-manifest {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+}
+.drive-copy-manifest h3 {
+  font-size: 14px;
+  margin: 0 0 var(--space-2);
+}
+.drive-copy-manifest p {
+  color: var(--muted);
+  margin: 0 0 var(--space-3);
+}

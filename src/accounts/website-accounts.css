@@ -5,12 +5,28 @@
 }
 .website-account-add {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(160px, 0.8fr) minmax(210px, 1fr) auto;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(160px, 1fr) auto;
   justify-content: start;
   gap: var(--space-4);
   align-items: end;
   margin-top: var(--space-4);
 }
+.account-browser-choice {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-4);
+  max-width: 560px;
+}
+.account-browser-choice > p { margin: 0; }
+.account-browser-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: fit-content;
+  cursor: pointer;
+}
+.account-browser-toggle > span { font-weight: 500; }
+.account-browser-choice > .field { margin-top: var(--space-2); }
 .website-account-list {
   border: 1px solid var(--line);
   border-radius: var(--panel-radius);

@@ -141,6 +141,7 @@ export function validatePublicationUrl(
   text: string,
 ): string {
   const allowed: Record<Platform, string[]> = {
+    smzdm: ["post.smzdm.com"],
     xiaohongshu: ["www.xiaohongshu.com", "xiaohongshu.com", "xhslink.com"],
     douyin: ["www.douyin.com", "douyin.com", "v.douyin.com"],
     kuaishou: ["www.kuaishou.com", "kuaishou.com", "v.kuaishou.com"],

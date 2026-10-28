@@ -91,6 +91,7 @@ export class TokenDriveProvider implements DriveProvider {
     query: Record<string, string | number> = {},
     body?: unknown,
     refreshed = false,
+    method?: "PATCH",
   ): Promise<JsonObject> {
     const url = new URL(path.startsWith("https:") ? path : this.api + path);
     Object.entries(query).forEach(([key, value]) =>
@@ -104,7 +105,7 @@ export class TokenDriveProvider implements DriveProvider {
       );
     try {
       const data = await this.transport.json(account.id, url.href, {
-        method: body === undefined ? "GET" : "POST",
+        method: method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           ...headers,
           "Content-Type": "application/json",
@@ -362,6 +363,17 @@ export class TokenDriveProvider implements DriveProvider {
         "上传未返回文件或存储任务，请核对目录。",
         true,
       );
+    }
+  }
+  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
+    if (input.action === "mkdir") {
+      await this.request(account, "files", {}, { kind: "drive#folder", name: input.name, parent_id: root(input.parentId), space: "" });
+    } else if (input.action === "rename") {
+      await this.request(account, `files/${encodeURIComponent(input.file!.id)}`, {}, { name: input.name, ...(this.id === "xunlei" ? { space: "" } : {}) }, false, "PATCH");
+    } else if (this.id === "xunlei") {
+      await this.request(account, `files/${encodeURIComponent(input.file!.id)}/trash`, { space: "" }, {}, false, "PATCH");
+    } else {
+      await this.request(account, "files:batchTrash", {}, { ids: [input.file!.id] });
     }
   }
   async ensureFolder(account: Account, path: string) {

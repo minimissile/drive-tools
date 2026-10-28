@@ -6,12 +6,13 @@ import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppData } from "../state";
 import { Dialog } from "../ui/Dialog";
-import { Button, Field, Notice } from "../ui/primitives";
+import { Button, Field, LoadingState, Notice } from "../ui/primitives";
 import { CheckboxField } from "../ui/CheckboxField";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import type { OtherAccount } from "./useOtherAccounts";
 import type { WeiboPost } from "../../shared/weibo-posts";
+import { WeiboStatistics } from "../weibo/Statistics";
 
 const schema = z.object({
   id: z.string(),
@@ -22,13 +23,15 @@ const empty = { id: "", text: "", visibility: "self" as const };
 export function WeiboComposer({
   account,
   onClose,
+  initialPostId,
 }: {
   account: OtherAccount;
   onClose(): void;
+  initialPostId?: string;
 }) {
   const { data } = useAppData();
   const form = useLocalDraft(
-    `weibo-composer:${data!.dataPath}:${account.id}`,
+    `weibo-composer:${data!.dataPath}:${account.id}${initialPostId ? `:post:${initialPostId}` : ""}`,
     empty,
     (raw) => schema.parse(raw),
   );
@@ -40,12 +43,25 @@ export function WeiboComposer({
   const [post, setPost] = useState<WeiboPost | null>(null);
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
+  const [initialError, setInitialError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState("");
   const lock = useRef(false);
+  const initialLoaded = useRef(false);
+  useEffect(() => {
+    if (!initialPostId || initialLoaded.current || !history.data) return;
+    const selected = history.data.find(v => v.id === initialPostId);
+    if (!selected) { setInitialError("此微博草稿暂未找到，请重新读取；如已删除，请返回采集页检查去向记录。"); return; }
+    initialLoaded.current = true;
+    setInitialError("");
+    setPost(selected);
+    if (!form.restored || form.value.id !== initialPostId)
+      form.update({ id:selected.id, text:selected.text, visibility:selected.visibility });
+  }, [initialPostId, history.data, form.restored, form.value.id, form.update]);
   const current =
     post ?? history.data?.find((item) => item.id === form.value.id) ?? null;
-  const locked = !!current && !["editing", "attention"].includes(current.stage);
+  const initializing = !!initialPostId && !initialLoaded.current;
+  const locked = initializing || (!!current && !["editing", "attention"].includes(current.stage));
   const busy = !!pending;
   useEffect(() => {
     setConfirmed(false);
@@ -100,6 +116,7 @@ export function WeiboComposer({
           <Button disabled={busy} onClick={onClose}>
             关闭
           </Button>
+          {!locked ? <Button disabled={busy || history.loading || !!history.error || !form.value.text.trim()} onClick={()=>void work("正在保存草稿…", async()=>save())}>保存本地草稿</Button> : null}
           {current?.stage === "filled" ? (
             <Button disabled={busy} onClick={() => void upload()}>
               重新检查并填写
@@ -144,12 +161,14 @@ export function WeiboComposer({
         直接使用已登录的官方网页，支持手写文案和 0–9 张本地图片，无需模型或付费
         API。网盘推广请从“微博图文营销”关联本人资料。
       </p>
+      {current?.source ? <Notice>来源：皮皮虾 · {current.source.author}，包含 {current.source.comments.length} 条评论。<Button size="compact" onClick={()=>void ipc("system.external", {url:current.source!.url})}>查看原帖</Button></Notice> : null}
       <QueryError
-        error={history.error}
+        error={history.error || initialError}
         loading={history.loading}
-        onRetry={history.reload}
+        onRetry={() => {setInitialError(""); history.reload();}}
       />
-      {history.data?.length ? (
+      {initializing && history.loading ? <LoadingState compact label="正在定位指定微博草稿…" /> : null}
+      {history.data?.length && !initialPostId ? (
         <Field label="本地微博草稿与回执" as="div">
           <Select
             aria-label="微博草稿与回执"
@@ -275,6 +294,7 @@ export function WeiboComposer({
           查看已提交的微博
         </Button>
       ) : null}
+      {current?.url ? <section aria-label="已发布微博数据"><h3>数据统计</h3><WeiboStatistics accountId={account.id} url={current.url} /></section> : null}
       {current && ["filled", "uncertain"].includes(current.stage) ? (
         <details>
           <summary>核对提交结果或返回编辑</summary>

@@ -1,0 +1,379 @@
+.distribution-library-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: var(--space-5);
+}
+.distribution-library-summary strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.distribution-workspace {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.distribution-platforms {
+  padding: var(--space-2) 0;
+}
+.distribution-platforms h2 {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 var(--space-3) var(--space-3);
+}
+.distribution-platforms nav {
+  display: grid;
+  gap: var(--space-2);
+}
+.distribution-platforms nav button {
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: var(--space-3);
+  border-radius: var(--control-radius);
+  color: var(--text);
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+}
+.distribution-platforms nav button:hover {
+  background: var(--surface);
+}
+.distribution-platforms nav button[aria-current="page"] {
+  border-color: var(--line);
+  background: var(--surface);
+}
+.distribution-platform-name {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+.distribution-platform-name small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.distribution-platform-host,
+.distribution-platform-counts {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.distribution-platform-counts {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+.distribution-platforms > p {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 var(--space-3);
+  margin-top: var(--space-5);
+}
+.distribution-main {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.distribution-platform-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: start;
+}
+.distribution-platform-heading h2,
+.distribution-progress-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.distribution-platform-heading p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.distribution-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+.distribution-facts dt,
+.distribution-counts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.distribution-facts dd,
+.distribution-counts dd {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.distribution-rules details {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+  font-size: 13px;
+}
+.distribution-rules summary {
+  cursor: pointer;
+}
+.distribution-rules summary span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: var(--space-3);
+}
+.distribution-rules ul {
+  padding-left: var(--space-5);
+  margin: var(--space-3) 0;
+}
+.distribution-rules li + li {
+  margin-top: var(--space-1);
+}
+.distribution-unknown {
+  background: var(--amber-bg);
+  color: var(--amber);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--control-radius);
+}
+.distribution-unknown ul {
+  margin-bottom: 0;
+}
+.distribution-session {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.distribution-session > div:first-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+.distribution-session small {
+  color: var(--muted);
+}
+.distribution-settings {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.distribution-rule-note {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 12px;
+  margin: var(--space-3) 0 0;
+}
+.distribution-progress-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+.distribution-progress-panel > p {
+  margin: 0;
+  font-size: 12px;
+}
+.distribution-progress-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.distribution-progress-caption strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.distribution-progress-caption span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.distribution-progress,
+.distribution-platforms progress {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: var(--control-radius);
+  overflow: hidden;
+  background: var(--line);
+}
+.distribution-progress::-webkit-progress-bar,
+.distribution-platforms progress::-webkit-progress-bar {
+  background: var(--line);
+}
+.distribution-progress::-webkit-progress-value,
+.distribution-platforms progress::-webkit-progress-value {
+  background: var(--blue);
+}
+.distribution-platforms progress {
+  height: 4px;
+  margin-top: var(--space-1);
+}
+.distribution-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+.distribution-run-message {
+  font-size: 12px;
+  background: var(--bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--control-radius);
+  overflow-wrap: anywhere;
+}
+.distribution-actions {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.distribution-view-tabs {
+  display: flex;
+  gap: var(--space-2);
+}
+.distribution-view-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--control-radius);
+  font-size: 13px;
+}
+.distribution-view-tabs button[aria-pressed="true"] {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+.distribution-filter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.distribution-record,
+.distribution-batches article {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--line);
+}
+.distribution-record-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: var(--space-4);
+}
+.distribution-record-top > div {
+  min-width: 0;
+}
+.distribution-record-top h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.distribution-record-top p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.distribution-record-top .status {
+  flex-shrink: 0;
+}
+.distribution-record-message {
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: var(--space-2) 0;
+}
+.distribution-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: var(--space-2);
+}
+.distribution-record-meta span {
+  max-width: 46%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.distribution-history {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  flex: 1;
+}
+.distribution-history summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.distribution-history dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+.distribution-history dl > div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.distribution-history dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.distribution-history ol {
+  padding-left: var(--space-4);
+}
+.distribution-history li {
+  margin-top: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.distribution-history li time {
+  margin-left: var(--space-3);
+}
+.distribution-history li p {
+  margin: var(--space-1) 0;
+  white-space: pre-wrap;
+}
+.distribution-resolve {
+  display: grid;
+  gap: var(--space-3);
+}
+.distribution-resolve > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.distribution-resolve > .button {
+  justify-self: start;
+}
+.distribution-batches small {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.distribution-batches p {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1220px) {
+  .distribution-workspace {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .distribution-platform-heading {
+    flex-wrap: wrap;
+  }
+  .distribution-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

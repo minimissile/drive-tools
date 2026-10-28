@@ -156,6 +156,20 @@ export class GuangyaProvider implements DriveProvider {
     const data = await this.request(account, "/assets/v1/get_assets");
     return normalizeCapacity(data.totalSpaceSize, data.usedSpaceSize);
   }
+  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
+    const result = input.action === "mkdir"
+      ? await this.request(account, "/nd.bizuserres.s/v1/file/create_dir", { parentId: root(input.parentId), dirName: input.name }, true)
+      : input.action === "rename"
+        ? await this.request(account, "/nd.bizuserres.s/v1/file/rename", { fileId: input.file!.id, newName: input.name }, true)
+        : await this.request(account, "/nd.bizuserres.s/v1/file/delete_file", { fileIds: [input.file!.id] }, true);
+    if (result.taskId) {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (await this.poll(account, String(result.taskId))) return;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      throw new AppError("UNCERTAIN_REMOTE_RESULT", "光鸭操作已提交，结果待核对。", true);
+    }
+  }
   private rows(data: JsonObject, parentId: string): RemoteFile[] {
     if (!Array.isArray(data.list))
       throw new AppError(

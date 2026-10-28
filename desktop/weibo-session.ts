@@ -10,6 +10,7 @@ import { AppError } from "../core/errors";
 import { WeiboPublisher } from "./weibo-publisher";
 import type { WeiboEditorPayload } from "../shared/weibo-publishing";
 import { weiboReceiptUrl } from "../shared/weibo-marketing";
+import { readNativeWeiboStatistics } from "./weibo-statistics";
 import {
   readWeiboViewer,
   weiboViewerScript,
@@ -340,6 +341,7 @@ export function createWeiboSessions(workspace: () => string, environmentProfile?
     },
   );
   return {
+    statistics: { read: (account: WebsiteAccount, url: string) => readNativeWeiboStatistics(context(account).profile, account.uid!, weiboReceiptUrl(url, account.uid!)) },
     publisher: {
       prepare: (account: WebsiteAccount, payload: WeiboEditorPayload) => publisher(account, payload).prepare(payload),
       submit: (account: WebsiteAccount, payload: WeiboEditorPayload, before: () => Promise<void>) => publisher(account, payload).submit(payload, before),

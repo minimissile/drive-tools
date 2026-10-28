@@ -1,5 +1,11 @@
 import { createResourceAnswerHandlers } from "./resource-answers";
+import { createSmzdmHandlers } from "./smzdm";
+import { createDriveFilesHandlers } from "./drive-files";
+import { createDistributionHandlers } from "./distribution";
+import { createPipixHandlers } from "./pipix";
+import { createZhihuHandlers } from "./zhihu";
 import { createBrowserEnvironmentHandlers } from "./browser-environments";
+import { createBitBrowserHandlers } from "./bitbrowser";
 import { createInsertionHandlers } from "./insertion";
 import { createZhidaoHandlers } from "./zhidao";
 import { createIpcRegistry } from "./registry";
@@ -24,12 +30,20 @@ import { createPublicationHandlers } from "./publication";
 import { createCsdnHandlers } from "./csdn";
 import { createWeiboHandlers } from "./weibo";
 import { createWeiboPostHandlers } from "./weibo-posts";
+import { createWeiboStatisticsHandlers } from "./weibo-statistics";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createSmzdmHandlers(services),
+    createDriveFilesHandlers(services),
+    createDistributionHandlers(services),
+    createZhihuHandlers(services),
+    createPipixHandlers(services),
     createBrowserEnvironmentHandlers(services),
+    createBitBrowserHandlers(services),
     createResourceAnswerHandlers(services),
     createWeiboPostHandlers(services),
+    createWeiboStatisticsHandlers(services),
     createWeiboHandlers(services),
     createCsdnHandlers(services),
     createZhidaoHandlers(services),

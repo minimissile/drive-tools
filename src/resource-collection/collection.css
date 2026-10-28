@@ -1,0 +1,19 @@
+.collection-result-filter {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.collection-result-filter .field {
+  width: 240px;
+  margin: 0;
+}
+.collection-result-filter > span {
+  color: var(--muted);
+  font-size: 12px;
+  padding-bottom: 8px;
+}
+.operations-table .collection-drive-column {
+  width: 108px;
+}

@@ -1,0 +1,41 @@
+{
+  "feature": "微博单条数据统计",
+  "date": "2026-10-26",
+  "environment": "existing npm run dev source Electron instance",
+  "liveScope": "One existing own private Weibo post, read-only; four reads while completing and reviewing the adapter",
+  "latestObservedAtLocal": "2026-10-26 15:21:05 Asia/Shanghai",
+  "latestMetrics": {
+    "reads": 0,
+    "reposts": 0,
+    "comments": 0,
+    "likes": 0,
+    "linkClicks": null
+  },
+  "history": "Four persisted samples; the first two retain unavailable reads as null. Three persisted samples were also checked after development reload",
+  "reviewCorrection": "DOM read labels are confined to the smallest exact-status component boundary containing the target permalink, author and post content; candidates containing another post are rejected. Missing or unproven metrics remain null. The same private post still returned reads 0 after correction",
+  "uiChecks": [
+    "account entry and long receipt label",
+    "initial empty state before first read",
+    "latest real zero values versus unavailable link clicks",
+    "expanded four-sample history",
+    "invalid homepage URL rejected locally, then original target restored"
+  ],
+  "screenshots": [
+    "account-empty-desktop.png",
+    "account-result-desktop.png",
+    "account-history-desktop.png",
+    "account-invalid-link-desktop.png"
+  ],
+  "captureSize": "3420x2146 physical, approximately 1710x1073 logical desktop",
+  "staticChecks": ["npx tsc --noEmit", "git diff --check"],
+  "detector": "One run on changed statistics UI and entry components returned []",
+  "notPerformed": [
+    "unit, integration or E2E test suite",
+    "publishing, liking, commenting or new uploads",
+    "paid API calls",
+    "BitBrowser live statistics read",
+    "nonzero or approximate-count live examples",
+    "mobile, narrow-screen or full viewport matrix validation",
+    "independent rendered validation of receipt entry points"
+  ]
+}

@@ -1,0 +1,48 @@
+.weibo-account-statistics {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}
+.weibo-account-statistics > .field {
+  margin-block: var(--space-4);
+}
+.weibo-statistics-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+.weibo-statistics-toolbar p {
+  margin: 0;
+}
+.weibo-statistics-reading {
+  min-width: 0;
+}
+.weibo-statistics-values {
+  table-layout: fixed;
+}
+.weibo-statistics-values th,
+.weibo-statistics-values td {
+  overflow-wrap: anywhere;
+}
+.weibo-statistics-values td {
+  font-variant-numeric: tabular-nums;
+}
+.weibo-statistics-values small {
+  display: block;
+  color: var(--muted);
+}
+.weibo-statistics-history {
+  min-width: 620px;
+  font-variant-numeric: tabular-nums;
+}
+.weibo-statistics-note {
+  margin-block: var(--space-3);
+}
+.weibo-statistics-reading summary {
+  cursor: pointer;
+  margin-block: var(--space-3);
+}

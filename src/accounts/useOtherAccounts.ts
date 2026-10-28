@@ -72,8 +72,9 @@ export function useOtherAccounts() {
   return {
     data,
     error: errors,
-    loading: websites.loading || zhidao.loading,
-    ready: !!websites.data && !!zhidao.data,
+    loading: websites.loading || zhidao.loading || environments.loading,
+    environmentsReady: !!environments.data && !environments.error,
+    ready: !!websites.data && !!zhidao.data && !!environments.data,
     reload,
     environments: environments.data ?? [],
   };

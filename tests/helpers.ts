@@ -13,8 +13,12 @@ export const file: RemoteFile = {
   isDirectory: false,
   size: 120,
 };
-export const currentSchemaVersion = 18;
-export const removeV18 = "DROP TABLE browser_environment_jobs;";
+export const currentSchemaVersion = 22;
+export const removeV22 = "DROP TABLE content_knowledge_hits; DROP TABLE content_knowledge_items; DROP TABLE content_source_responses;";
+export const removeV21 = removeV22 + "DROP TABLE content_source_exports;";
+export const removeV20 = removeV21 + "DROP TABLE pipix_sources;";
+export const removeV19 = removeV20 + "DROP TABLE zhihu_contents; DROP TABLE zhihu_tasks; DROP TABLE zhihu_plans;";
+export const removeV18 = removeV19 + "DROP TABLE browser_environment_jobs;";
 export const removeV17 = removeV18 + "DROP TABLE browser_environment_accounts; DROP TABLE browser_environment_identities; DROP TABLE browser_environments;";
 export const removeV16 = removeV17 + "DROP INDEX binding_website_account; ALTER TABLE browser_bindings DROP COLUMN website_account_id; ALTER TABLE website_accounts DROP COLUMN nickname; ALTER TABLE website_accounts DROP COLUMN checked_at;";
 export const removeV15 = removeV16 + "DROP TABLE website_accounts;";

@@ -1,4 +1,5 @@
 import { AppError } from "../errors";
+import { zhidaoQuestionTitleLimit } from "../../shared/zhidao-content";
 
 export function decodeHtml(value: string): string {
   return value
@@ -132,18 +133,18 @@ export function safeHtmlAnswer(text: string, link = "", code = "") {
   );
 }
 const titlePairs = [
-  ["求分享", "百度网盘链接"],
-  ["求", "完整网盘链接下载"],
-  ["求", "完整网盘链接获取"],
-  ["哪里有", "完整网盘资源链接"],
-  ["求", "百度网盘链接下载"],
-  ["谁有", "百度网盘资源链接"],
+  ["如何使用", "？"],
+  ["怎么上手", "？"],
+  ["使用", "前需要注意什么？"],
 ];
 export function questionTitle(name: string, index: number) {
   const [prefix, suffix] = titlePairs[index % titlePairs.length];
   return (
     prefix +
-    resourceName(name).slice(0, 49 - prefix.length - suffix.length) +
+    resourceName(name).slice(
+      0,
+      zhidaoQuestionTitleLimit - prefix.length - suffix.length,
+    ) +
     suffix
   );
 }

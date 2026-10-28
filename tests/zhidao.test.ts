@@ -160,7 +160,7 @@ test("采集解析保留链接和邻近提取码，区分正常空页、风控�
     code: "SOURCE_CHANGED",
   });
 });
-test("模板HTML转义内容，轮换标题始终保留前后缀并限制49字", () => {
+test("模板HTML转义内容，轮换标题使用自然问句并限制49字", () => {
   const html = safeHtmlAnswer(
     '<script>alert("x")</script>\n正常说明',
     link,
@@ -172,7 +172,7 @@ test("模板HTML转义内容，轮换标题始终保留前后缀并限制49字",
   for (let n = 0; n < 20; n++) {
     const title = questionTitle("本人独立制作的学习资料".repeat(20), n);
     assert.ok(title.length <= 49);
-    assert.match(title, /链接|资源/);
+    assert.match(title, /[？?]$/);
   }
 });
 test("XLSX、带BOM CSV与TXT导入真实表格，关键词拒绝资源表与多列", () => {

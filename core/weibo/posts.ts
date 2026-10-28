@@ -8,6 +8,8 @@ import { weiboReceiptUrl } from "../../shared/weibo-marketing";
 import type { WeiboEditorPayload } from "../../shared/weibo-publishing";
 import type { WebsiteAccounts } from "../website-accounts";
 import type { AppPorts } from "../ports";
+import type { SourceMaterial } from "../../shared/content-sources";
+import { contentImagePath, readContentImage, saveContentImage } from "../content-assets";
 import { validateOutgoingLinks } from "../links";
 
 const indexKey = "weiboPosts:index:v1";
@@ -123,6 +125,15 @@ export class WeiboPosts {
     this.persist(post);
     return post;
   }
+  saveSource(material: SourceMaterial, accountId: string) {
+    if (material.body.length > 2000) throw new AppError("WEIBO_TEXT_LIMIT", "所选文案与评论超过微博草稿的 2000 字符上限，请减少评论后重试。");
+    const post = this.save({ accountId, text: material.body, visibility: "self" });
+    post.images = material.images.map(asset => ({ name: asset.name, sha256: asset.sha256, asset }));
+    post.source = material.source;
+    this.persist(post);
+    const owner = this.deps.accounts.get(accountId);
+    return { ...post, accountLabel: `${owner.nickname || owner.alias} · UID ${owner.uid}` };
+  }
   private directory(post: WeiboPost) {
     return join(this.deps.dataPath, "weibo-posts", post.id);
   }
@@ -141,7 +152,7 @@ export class WeiboPosts {
       if (files.length > 9)
         throw new AppError("WEIBO_IMAGE_LIMIT", "最多选择 9 张图片。");
       const staged = join(this.directory(post), `images-${idSuffix()}`);
-      await mkdir(staged, { recursive: true, mode: 0o700 });
+      if (!post.source) await mkdir(staged, { recursive: true, mode: 0o700 });
       const images = [];
       try {
         for (const [index, file] of files.entries()) {
@@ -163,6 +174,11 @@ export class WeiboPosts {
               "WEIBO_IMAGE_INVALID",
               "请选择实际 PNG、JPG、GIF 图片，每张小于 20MB。",
             );
+          if (post.source) {
+            const asset = await saveContentImage(this.deps.dataPath, file.bytes, file.name, "content-assets", true);
+            images.push({ name:asset.name, sha256:asset.sha256, asset });
+            continue;
+          }
           const name = `${String(index + 1).padStart(2, "0")}${extension}`;
           await writeFile(join(staged, name), file.bytes, { mode: 0o600 });
           images.push({
@@ -176,7 +192,7 @@ export class WeiboPosts {
         post.message = `已保存 ${images.length} 张本地图片，尚未上传。`;
         this.persist(post);
         for (const file of previous)
-          await rm(join(this.directory(post), file.name), {
+          if (!file.asset) await rm(join(this.directory(post), file.name), {
             force: true,
           }).catch(() => {});
       } catch (error) {
@@ -191,7 +207,8 @@ export class WeiboPosts {
   private async payload(post: WeiboPost): Promise<WeiboEditorPayload> {
     const images = [];
     for (const image of post.images) {
-      const path = join(this.directory(post), image.name);
+      if (image.asset) await readContentImage(this.deps.dataPath, image.asset);
+      const path = image.asset ? contentImagePath(this.deps.dataPath, image.asset) : join(this.directory(post), image.name);
       if (
         createHash("sha256")
           .update(await readFile(path))

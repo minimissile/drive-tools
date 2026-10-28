@@ -3,6 +3,7 @@ import {
   FileOutput,
   FilePlus2,
   Files,
+  Fingerprint,
   FolderTree,
   LayoutDashboard,
   Library,
@@ -11,6 +12,7 @@ import {
   Plug,
   Radar,
   Send,
+  Share2,
   Users,
   Workflow,
   type LucideIcon,
@@ -34,6 +36,7 @@ export const sidebarEntries: NavigationEntry[] = [
   { page: "library", title: "资源库", Icon: Library, group: "内容资产" },
   { page: "traffic", title: "流量发现", Icon: Radar, group: "内容规划" },
   { page: "search", title: "搜索运营", Icon: Workflow },
+  { page: "distribution", title: "内容分发", Icon: Share2 },
   {
     page: "share-statistics",
     title: "分享统计",
@@ -41,6 +44,7 @@ export const sidebarEntries: NavigationEntry[] = [
     group: "运营复盘",
   },
   { page: "accounts", title: "账号管理", Icon: Users, group: "工作空间" },
+  { page: "browser-environments", title: "指纹浏览器", Icon: Fingerprint },
   { page: "settings", title: "连接与设置", Icon: Plug },
 ];
 export const resourceOperations: WorkbenchEntry[] = [
@@ -77,6 +81,7 @@ export const resourceOperations: WorkbenchEntry[] = [
   },
 ];
 export const contentOperations: WorkbenchEntry[] = [
+  { page: "pipix-sources", title: "皮皮虾采集", description: "采集图文与评论，共用于知乎、微博等渠道草稿", Icon: Library },
   {page:"resource-answers", title:"资源问答", description:"围绕问题和资源生成文字、图片与图文，逐版校准", Icon:NotebookPen},
   {
     page: "studio",
@@ -114,6 +119,17 @@ export const csdnOperations: WorkbenchEntry[] = [
 export const weiboOperations: WorkbenchEntry[] = [
   { page: "weibo-marketing", title: "微博图文营销", description: "选词配资料，准备图文包，回填发布与效果", Icon: Send },
 ];
+export const zhihuOperations: WorkbenchEntry[] = [
+  { page: "zhihu-operations", title: "知乎多号运营", description: "比特多号养号、素材审核、错峰发布与结果核对", Icon: Send },
+];
+export const smzdmOperations: WorkbenchEntry[] = [
+  {
+    page: "smzdm-workflow",
+    title: "什么值得买文章分发",
+    description: "导入公众号文章，关联本人资源，编辑检查后发布",
+    Icon: NotebookPen,
+  },
+];
 
 export const workbenchEntries: readonly WorkbenchEntry[] = [
   ...discoveryEntries,
@@ -121,13 +137,15 @@ export const workbenchEntries: readonly WorkbenchEntry[] = [
   ...operationEntries,
   ...csdnOperations,
   ...weiboOperations,
+  ...zhihuOperations,
+  ...smzdmOperations,
   ...contentOperations,
 ];
 
 const accountPages: Page[] = [
   "accounts",
   "website-accounts",
-  "browser-environments",
+  "smzdm-accounts",
   "zhidao-accounts",
 ];
 export function sidebarPage(page: Page): Page {

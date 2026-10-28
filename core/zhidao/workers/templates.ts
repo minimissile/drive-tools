@@ -12,6 +12,7 @@ import { safeHtmlAnswer, questionTitle } from "../parsers";
 import { publicEvidence } from "../mining";
 import type { OperationRun } from "../../../shared/zhidao";
 import type { WorkerContext } from "./context";
+import { zhidaoQuestionIssue } from "../../../shared/zhidao-content";
 
 export async function runTemplates(
   ctx: WorkerContext,
@@ -72,6 +73,12 @@ export async function runTemplates(
           .ownTarget(copyId)
           .copy.files.slice(0, 50)
           .map((file) => file.name);
+      const rules = input.rules;
+      const question = rules
+        ? generationQuestion(resource, rules)
+        : questionTitle(resource.title, index);
+      const titleIssue = zhidaoQuestionIssue(question);
+      if (titleIssue) throw new AppError("INVALID_CONTENT", titleIssue);
       if (input.verifyFacts) {
         evidence.web = await publicEvidence(
           `${resource.title} 简介`,
@@ -80,19 +87,15 @@ export async function runTemplates(
         );
         signal.throwIfAborted();
       }
-      const rules = input.rules;
-      const question = rules
-        ? generationQuestion(resource, rules)
-        : questionTitle(resource.title, index);
       let answer: string;
       if (rules?.mode === "template") answer = generationHtml(resource, rules);
       else {
         if (rules)
           evidence.requirements = [
-            `这是${generationTracks[rules.track].label}资料问答。先直接回应问题，再说明资料具体内容、适用对象、使用顺序和限制。`,
+            `这是${generationTracks[rules.track].label}资料问答。先直接回应问题，再说明资料具体内容、适用对象、使用顺序和限制；不能仅用资料名、通用使用建议或链接代替具体解答。`,
             `正文不超过${rules.maxChars}字。资料依据：${resource.summary || "只有资源名称，缺少目录和版本，请明确这一限制"}。`,
             `写作结构参考：${generationBody(resource, rules)}。关键词只在内容相关时自然使用：${rules.keywords.join("、")}。`,
-            "不编造完整、最新、免费、官方、亲测等属性，不虚构个人经历。不要生成链接、提取码或HTML，系统将追加用户提供的真实资料入口。",
+            "不编造完整、最新、免费、官方、亲测等属性，不虚构个人经历。链接不能代表授权或平台认可，不写求赞、求采纳、加群、私聊、付费领取等引导。不要生成链接、提取码或HTML，系统将追加用户提供的真实资料入口。",
           ].join("\n");
         const result = await ctx.generateAnswer(
           rules

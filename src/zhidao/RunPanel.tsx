@@ -195,7 +195,7 @@ export function RunPanel({
               onChanged={model.refresh}
             />
           ) : null}
-          {detail.total ? (
+          {detail.total || detail.collection?.total ? (
             children?.(detail.items)
           ) : model.running ? (
             <LoadingState label="任务正在运行，结果将逐条显示…" />

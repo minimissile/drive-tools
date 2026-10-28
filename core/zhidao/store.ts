@@ -1,5 +1,6 @@
 import { Database, id, now, parseJson } from "../database";
 import { AppError } from "../errors";
+import { collectionDriveType, type CollectionDriveFilter, type CollectionResultSummary } from "../../shared/resource-collection";
 import type {
   OperationRun,
   OperationItem,
@@ -201,8 +202,20 @@ export class OperationsStore {
       item.id,
     );
   }
-  detail(runId: string, page = 1) {
+  detail(runId: string, page = 1, driveType: CollectionDriveFilter = "all") {
     const run = this.run(runId);
+    if (run.kind === "collect") {
+      const all = this.items(runId);
+      const counts: CollectionResultSummary["counts"] = {};
+      for (const item of all) {
+        const type = item.link ? collectionDriveType(item.link) : "unmatched";
+        counts[type] = (counts[type] ?? 0) + 1;
+      }
+      const items = driveType === "all" ? all : all.filter((item) => (item.link ? collectionDriveType(item.link) : "unmatched") === driveType);
+      const currentPage = Math.min(page, Math.max(1, Math.ceil(items.length / 25)));
+      return { run, items: items.slice((currentPage - 1) * 25, currentPage * 25), total: items.length,
+        page: currentPage, pageSize: 25, collection: { driveType, total: all.length, counts } };
+    }
     return {
       run,
       items: this.db

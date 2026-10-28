@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Copy, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import type { OperationItem } from "../../shared/zhidao";
+import {
+  collectionDriveLabels,
+  collectionDriveType,
+} from "../../shared/resource-collection";
 import { Button, Field, Notice, Status } from "../ui/primitives";
 import { Dialog } from "../ui/Dialog";
 import "./operation-dialogs.css";
@@ -21,6 +25,7 @@ export function ResultTable({
   selectable = () => true,
   publication = false,
   reviewSelection = false,
+  resourceCollection = false,
   onChanged,
 }: {
   items: OperationItem[];
@@ -31,6 +36,7 @@ export function ResultTable({
   selectable?: (item: OperationItem) => boolean;
   publication?: boolean;
   reviewSelection?: boolean;
+  resourceCollection?: boolean;
   onChanged(): void;
 }) {
   const action = useOperationAction();
@@ -77,7 +83,10 @@ export function ResultTable({
                   />
                 </th>
               ) : null}
-              <th>名称 / 问题</th>
+              <th>{resourceCollection ? "资源名称" : "名称 / 问题"}</th>
+              {resourceCollection ? (
+                <th className="collection-drive-column">网盘类型</th>
+              ) : null}
               <th>结果与来源</th>
               <th>状态</th>
               <th>操作</th>
@@ -151,6 +160,21 @@ export function ResultTable({
                       <small>{item.name}</small>
                     ) : null}
                   </td>
+                  {resourceCollection ? (
+                    <td>
+                      {item.link ? (
+                        <Status>
+                          {
+                            collectionDriveLabels[
+                              collectionDriveType(item.link)
+                            ]
+                          }
+                        </Status>
+                      ) : (
+                        <small>未命中</small>
+                      )}
+                    </td>
+                  ) : null}
                   <td>
                     <p className="operation-result-preview">
                       {item.answer
@@ -181,7 +205,7 @@ export function ResultTable({
                       {
                         {
                           pending: "待处理",
-                          ready: "已生成",
+                          ready: resourceCollection ? "已采集" : "已生成",
                           failed: "失败",
                           submitted: "已提交",
                           uncertain: "待核对",
@@ -222,7 +246,11 @@ export function ResultTable({
                           quiet
                           size="compact"
                           aria-label={`打开 ${item.name}`}
-                          title="打开问题或来源"
+                          title={
+                            resourceCollection && item.link
+                              ? "打开网盘链接"
+                              : "打开问题或来源"
+                          }
                           disabled={
                             !!action.pending || (running && !!item.questionId)
                           }
@@ -232,7 +260,9 @@ export function ResultTable({
                                   id: item.id,
                                 })
                               : void action.run("zhidao.open", {
-                                  url: item.sourceUrl || item.link,
+                                  url: resourceCollection
+                                    ? item.link || item.sourceUrl
+                                    : item.sourceUrl || item.link,
                                 })
                           }
                         >

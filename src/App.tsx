@@ -24,14 +24,19 @@ const ZhidaoTemplates = lazy(() => import("./zhidao/Templates"));
 const ZhidaoPublish = lazy(() => import("./zhidao/Publish"));
 const DriveFiles = lazy(() => import("./pages/DriveFiles"));
 const Accounts = lazy(() => import("./pages/Accounts"));
+const FingerprintBrowser = lazy(() => import("./pages/FingerprintBrowser"));
 const LibraryPage = lazy(() => import("./pages/Library"));
 const Intake = lazy(() => import("./pages/Intake"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Traffic = lazy(() => import("./pages/Traffic"));
 const Studio = lazy(() => import("./pages/Studio"));
 const Publish = lazy(() => import("./pages/Publish"));
+const Distribution = lazy(() => import("./pages/Distribution"));
 const CsdnWorkflow = lazy(() => import("./csdn/Workflow"));
 const WeiboWorkflow = lazy(() => import("./weibo/Workflow"));
+const PipixWorkflow = lazy(() => import("./pipix/Workflow"));
+const ZhihuWorkflow = lazy(() => import("./zhihu/Workflow"));
+const SmzdmWorkflow = lazy(() => import("./smzdm/Workflow"));
 const Settings = lazy(() => import("./pages/Settings"));
 const BatchProcessing = lazy(() => import("./pages/BatchProcessing"));
 
@@ -47,6 +52,7 @@ function CsdnPublish() {
   return <Publish platform="csdn" />;
 }
 const surfaces = {
+  distribution: Distribution,
   workbench: Workbench,
   "zhidao-mine": KeywordMining,
   "zhidao-collect": ResourceCollection,
@@ -58,7 +64,9 @@ const surfaces = {
   library: LibraryPage,
   accounts: Accounts,
   "website-accounts": Accounts,
-  "browser-environments": Accounts,
+  "smzdm-accounts": Accounts,
+  "smzdm-workflow": SmzdmWorkflow,
+  "browser-environments": FingerprintBrowser,
   intake: Intake,
   tasks: Tasks,
   traffic: Traffic,
@@ -68,6 +76,8 @@ const surfaces = {
   "csdn-publish": CsdnPublish,
   "csdn-workflow": CsdnWorkflow,
   "weibo-marketing": WeiboWorkflow,
+  "zhihu-operations": ZhihuWorkflow,
+  "pipix-sources": PipixWorkflow,
   settings: Settings,
   bulk: BatchProcessing,
   batch: BatchProcessing,

@@ -18,6 +18,8 @@ import {
   contentOperations,
   csdnOperations,
   weiboOperations,
+  zhihuOperations,
+  smzdmOperations,
   resourceOperations,
   type WorkbenchEntry,
 } from "../navigation";
@@ -80,6 +82,12 @@ export default function Workbench() {
           </Panel>
           <Panel title="微博内容操作" extra={<Button quiet size="compact" onClick={() => navigate("website-accounts")}>管理微博账号<ArrowRight size={13} /></Button>}>
             <EntryList entries={weiboOperations} onOpen={navigate} />
+          </Panel>
+          <Panel title="知乎内容操作">
+            <EntryList entries={zhihuOperations} onOpen={navigate} />
+          </Panel>
+          <Panel title="什么值得买内容操作" extra={<Button quiet size="compact" onClick={() => navigate("smzdm-accounts")}>管理值得买账号<ArrowRight size={13} /></Button>}>
+            <EntryList entries={smzdmOperations} onOpen={navigate} />
           </Panel>
           <Panel title="资源与网盘操作">
             <EntryList

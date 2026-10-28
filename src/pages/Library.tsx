@@ -148,6 +148,9 @@ export default function LibraryPage() {
         description="采集、转存与内容运营，从你的本地资源库开始。"
         action={
           <div className="row">
+            <Button quiet onClick={() => navigate("drive-files")}>
+              网盘文件
+            </Button>
             <Button quiet onClick={() => navigate("bulk")}>
               批量录入
             </Button>

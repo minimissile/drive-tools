@@ -6,6 +6,7 @@ import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import type { IpcArgs, IpcMethod, IpcValue } from "../../shared/ipc";
 import type { OperationKind } from "../../shared/zhidao";
+import type { CollectionDriveFilter } from "../../shared/resource-collection";
 
 export function useOperationAction() {
   const { notify } = useAppActions();
@@ -81,6 +82,7 @@ export function useOperation(kind: OperationKind) {
   const [page, setPage] = useState(1),
     [historyPage, setHistoryPage] = useState(1),
     [revision, setRevision] = useState(0);
+  const [driveType, setDriveType] = useState<CollectionDriveFilter>("all");
   const history = useIpcQuery(
     "zhidao.runs",
     { kind, page: historyPage },
@@ -88,7 +90,7 @@ export function useOperation(kind: OperationKind) {
   );
   const detail = useIpcQuery(
     "zhidao.run",
-    { id: draft.value.id, page },
+    { id: draft.value.id, page, ...(kind === "collect" ? { driveType } : {}) },
     {
       enabled: !!draft.value.id,
       revision,
@@ -117,6 +119,11 @@ export function useOperation(kind: OperationKind) {
     },
     page,
     setPage,
+    driveType,
+    setDriveType: (value: CollectionDriveFilter) => {
+      setDriveType(value);
+      setPage(1);
+    },
     historyPage,
     setHistoryPage,
     refresh,

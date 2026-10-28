@@ -10,6 +10,15 @@ import {
 import { wait } from "./context";
 import type { OperationRun } from "../../../shared/zhidao";
 import type { WorkerContext } from "./context";
+import {
+  collectionDriveType,
+  collectionLinkKey,
+  type CollectionCandidate,
+} from "../../../shared/resource-collection";
+import {
+  collectionPageCheckpoint,
+  type CollectionSearchClient,
+} from "../../resource-collection/checkpoint";
 
 export async function runCollect(
   ctx: WorkerContext,
@@ -22,20 +31,59 @@ export async function runCollect(
     ctx.store
       .items(run.id)
       .filter((i) => i.link)
-      .map((i) => i.link.split("?")[0]),
+      .map((i) => collectionLinkKey(i.link)),
   );
-  const errors: string[] = [];
-  for (const a of input.accountIds) {
+  for (const a of input.zhidao ? input.accountIds : []) {
     await ctx.identity(a);
     signal.throwIfAborted();
   }
   const terms = [...new Set(input.keywords)];
+  let checkpoint = { ...run.config };
+  const saveCheckpoint = (values: Record<string, unknown>) => {
+    checkpoint = { ...checkpoint, ...values };
+    ctx.store.config(run.id, checkpoint);
+  };
+  const sources: {
+    id: "pansoo" | "haisou";
+    enabled: boolean;
+    client: CollectionSearchClient;
+    finished: Set<string>;
+  }[] = [
+    {
+      id: "pansoo",
+      enabled: input.pansoo,
+      client: ctx.pansoo,
+      finished: new Set(
+        Array.isArray(checkpoint.pansooFinished)
+          ? checkpoint.pansooFinished.map(String)
+          : [],
+      ),
+    },
+    {
+      id: "haisou",
+      enabled: input.haisou,
+      client: ctx.haisou,
+      finished: new Set(
+        Array.isArray(checkpoint.haisouFinished)
+          ? checkpoint.haisouFinished.map(String)
+          : [],
+      ),
+    },
+  ];
   const max =
     input.mode === "precise"
       ? terms.length
       : Math.min(120, Math.max(16, input.count * 2));
   for (let index = done; index < max; index++) {
     signal.throwIfAborted();
+    if (
+      !input.pansou &&
+      !input.zhidao &&
+      sources
+        .filter((source) => source.enabled)
+        .every((source) => source.finished.size >= terms.length)
+    )
+      break;
     if (ctx.store.items(run.id).filter((i) => !!i.link).length >= input.count)
       break;
     const word = terms[index % terms.length];
@@ -44,14 +92,13 @@ export async function runCollect(
       `正在搜索「${word}」 · 已处理${index}/${max}`,
       ctx.store.items(run.id).filter((i) => !!i.link).length,
     );
-    let candidates: {
-      name: string;
-      link: string;
-      code: string;
-      sourceName?: string;
-      sourceUrl?: string;
-      verified?: boolean;
-    }[] = [];
+    const candidates: CollectionCandidate[] = [];
+    const errors: string[] = [];
+    const pageErrors: unknown[] = [];
+    const currentPage = collectionPageCheckpoint(
+      checkpoint.collectionPage,
+      index,
+    );
     let sourceSuccess = false;
     if (input.pansou) {
       try {
@@ -73,6 +120,29 @@ export async function runCollect(
       } catch (error) {
         signal.throwIfAborted();
         errors.push(safeMessage(error));
+      }
+    }
+    for (const source of sources.filter((entry) => entry.enabled)) {
+      try {
+        if (!source.finished.has(word)) {
+          const page =
+            input.mode === "precise" ? 1 : Math.floor(index / terms.length) + 1;
+          let result = currentPage[source.id];
+          if (!result) {
+            result = await source.client.search(word, page, signal);
+            currentPage[source.id] = result;
+            // Save the successful response before another source or stop can interrupt the page.
+            saveCheckpoint({ collectionPage: currentPage });
+          }
+          signal.throwIfAborted();
+          candidates.push(...result.rows);
+          if (!result.hasMore) source.finished.add(word);
+        }
+        sourceSuccess = true;
+      } catch (error) {
+        signal.throwIfAborted();
+        errors.push(safeMessage(error));
+        pageErrors.push(error);
       }
     }
     if (input.zhidao && (input.mode === "fuzzy" || !candidates.length)) {
@@ -100,7 +170,8 @@ export async function runCollect(
             assertSourcePage(detail);
             const name = resourceName(result.title) || word;
             for (const share of extractBaiduShares(detail)) {
-              if (!share.code || used.has(share.link.split("?")[0])) continue;
+              if (!share.code || used.has(collectionLinkKey(share.link)))
+                continue;
               candidates.push({
                 ...share,
                 name,
@@ -129,16 +200,19 @@ export async function runCollect(
       );
     const unique = candidates.filter(
       (c, i, a) =>
-        a.findIndex((v) => v.link.split("?")[0] === c.link.split("?")[0]) ===
-          i && !used.has(c.link.split("?")[0]),
+        a.findIndex(
+          (v) => collectionLinkKey(v.link) === collectionLinkKey(c.link),
+        ) === i && !used.has(collectionLinkKey(c.link)),
     );
-    if (!unique.length)
+    if (!unique.length && !pageErrors.length)
       ctx.store.put(run.id, `miss:${index}`, {
         name: word,
         status: "skipped",
         message: errors.length
           ? `可用来源未命中；${errors.at(-1)}`
-          : "来源正常，未找到符合条件的资源链接",
+          : candidates.length
+            ? "本轮结果已在此任务中，不重复采集"
+            : "来源正常，未找到符合条件的资源链接",
         evidence: word,
       });
     for (const candidate of input.mode === "precise"
@@ -146,8 +220,8 @@ export async function runCollect(
       : unique) {
       if (ctx.store.items(run.id).filter((i) => !!i.link).length >= input.count)
         break;
-      used.add(candidate.link.split("?")[0]);
-      ctx.store.put(run.id, normalizedName(candidate.link.split("?")[0]), {
+      used.add(collectionLinkKey(candidate.link));
+      ctx.store.put(run.id, collectionLinkKey(candidate.link), {
         name: candidate.name,
         link: candidate.link,
         code: candidate.code,
@@ -158,14 +232,33 @@ export async function runCollect(
           ? "来源验活通过"
           : "已提取链接；转存前检查有效性",
         backups: unique
-          .filter((c) => c.link !== candidate.link)
+          .filter(
+            (c) =>
+              c.link !== candidate.link &&
+              collectionDriveType(c.link) ===
+                collectionDriveType(candidate.link) &&
+              normalizedName(c.name) === normalizedName(candidate.name),
+          )
           .slice(0, 2)
           .map((c) => ({ name: c.name, link: c.link, code: c.code })),
         evidence: word,
       });
     }
+    // Keep successful sources' rows, but do not skip a failed website page on resume.
+    if (pageErrors.length)
+      throw new AppError(
+        "COLLECTION_PAGE_FAILED",
+        pageErrors.map(safeMessage).join("；"),
+      );
     done = index + 1;
-    ctx.store.config(run.id, { ...input, processed: done });
+    saveCheckpoint({
+      ...input,
+      processed: done,
+      collectionPage: undefined,
+      ...Object.fromEntries(
+        sources.map((source) => [`${source.id}Finished`, [...source.finished]]),
+      ),
+    });
     ctx.progress(
       run,
       `已处理${done}/${max}；已采集${ctx.store.items(run.id).filter((i) => !!i.link).length}条${errors.length ? `；最近来源提示：${errors.at(-1)}` : ""}`,

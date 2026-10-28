@@ -13,7 +13,7 @@ import {
   websiteNavigationAllowed,
   websitePostLoginUrl,
 } from "../desktop/website-session-policy";
-import { fixture, removeV15 } from "./helpers";
+import { fixture, removeV15, currentSchemaVersion } from "./helpers";
 
 test("Website accounts own login lifecycle without a caller supplied platform UID", async () => {
   const f = await fixture();
@@ -74,7 +74,7 @@ test("Website accounts own login lifecycle without a caller supplied platform UI
     assert.equal(live.uid, "94200132");
     assert.equal(live.status, "connected");
     await invoke("websiteAccounts.remove", { id: a.id, confirmed: true });
-    assert.ok(log.includes(`clear:${a.id}`));
+    assert.ok(!log.includes(`clear:${a.id}`), "移除账号保留共享环境的登录数据");
     await assert.rejects(invoke("websiteAccounts.check", { id: a.id }), {
       code: "WEBSITE_ACCOUNT_NOT_FOUND",
     });
@@ -180,7 +180,7 @@ test("v14 migration backs up existing accounts and preserves them through v15 re
     assert.equal(
       upgraded.get<{ user_version: number }>("PRAGMA user_version")
         ?.user_version,
-      15,
+      currentSchemaVersion,
     );
     assert.equal(
       upgraded.get<{ id: string }>("SELECT id FROM accounts")?.id,

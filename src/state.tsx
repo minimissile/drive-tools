@@ -29,6 +29,7 @@ import type {
   Draft,
 } from "../shared/types";
 export type Page =
+  | "distribution"
   | "workbench"
   | "zhidao-mine"
   | "zhidao-collect"
@@ -42,6 +43,8 @@ export type Page =
   | "library"
   | "accounts"
   | "website-accounts"
+  | "smzdm-accounts"
+  | "smzdm-workflow"
   | "browser-environments"
   | "intake"
   | "tasks"
@@ -53,6 +56,8 @@ export type Page =
   | "csdn-publish"
   | "csdn-workflow"
   | "weibo-marketing"
+  | "pipix-sources"
+  | "zhihu-operations"
   | "settings"
   | "bulk"
   | "batch"
@@ -147,6 +152,7 @@ export function useApp(): Store {
   };
 }
 const pages: Page[] = [
+  "distribution",
   "workbench",
   "zhidao-mine",
   "zhidao-collect",
@@ -160,6 +166,8 @@ const pages: Page[] = [
   "library",
   "accounts",
   "website-accounts",
+  "smzdm-accounts",
+  "smzdm-workflow",
   "browser-environments",
   "intake",
   "tasks",
@@ -171,6 +179,7 @@ const pages: Page[] = [
   "csdn-publish",
   "csdn-workflow",
   "weibo-marketing",
+  "zhihu-operations",
   "settings",
   "bulk",
   "batch",
@@ -178,7 +187,7 @@ const pages: Page[] = [
   "search",
 ];
 export type SettingsSection =
-  "ai" | "traffic" | "notes" | "browser" | "bindings" | "maintenance";
+  "sources" | "ai" | "traffic" | "notes" | "browser" | "bindings" | "maintenance";
 const WorkspaceStatus = stableContext("WorkspaceStatus", {
   loading: true,
   error: "",

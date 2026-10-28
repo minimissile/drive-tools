@@ -18,8 +18,11 @@ import { bitBaiduExchange } from "./baidu-bit-session";
 import { weiboReceiptUrl } from "../shared/weibo-marketing";
 import { zhidaoAccountPages } from "../shared/zhidao-rights";
 import { browserPageRequest } from "./browser-page-request";
+import { weiboStatisticsScript } from "./weibo/statistics-page";
+import { weiboStatisticsReading } from "../shared/weibo-statistics";
 import { baiduKeywordPath, buildBaiduKeywordRequest } from "./baidu-keywords";
 import { buildBaiduResearchRequest } from "./baidu-research";
+import { verifyZhihu, zhihuBrowser } from "./zhihu/browser";
 
 const webRef = (a: WebsiteAccount): EnvironmentAccountRef => ({
   kind: "website",
@@ -46,8 +49,10 @@ export function createBrowserPlatformPorts(
     environments.forAccount(ref).engine === "bitbrowser";
   const verify = async (a: WebsiteAccount) =>
     profile(webRef(a), async (context) => {
+      if (a.provider === "smzdm") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买文章发布目前使用内置浏览器，请在账号管理关联内置环境。");
       let state: WebsiteSessionState;
-      if (a.provider === "weibo") state = await verifyBitWeibo(context);
+      if (a.provider === "zhihu") state = await verifyZhihu(context);
+      else if (a.provider === "weibo") state = await verifyBitWeibo(context);
       else {
         const cookies = await context.cookies("https://fengchao.baidu.com/");
         const token = cookies.find((c) =>
@@ -85,16 +90,34 @@ export function createBrowserPlatformPorts(
       profile({ kind: "zhidao", id }, action),
     );
   return Object.assign(Object.create(native) as AppPorts, {
+    zhihu: native.zhihu ?? zhihuBrowser((a, action) => {
+      if (!isBit(webRef(a))) return missing();
+      return profile(webRef(a), action);
+    }),
+    weiboStatistics: {
+      read: (account, url) => {
+        if (!isBit(webRef(account))) return native.weiboStatistics?.read(account, url) ?? missing();
+        return profile(webRef(account), async (context) => {
+          const page = await context.newPage();
+          try {
+            const response = await page.goto(weiboReceiptUrl(url, account.uid!), { waitUntil: "domcontentloaded", timeout: 20000 });
+            if (!response?.ok()) throw new AppError("WEIBO_STATISTICS_LOAD", "微博详情暂时无法访问，请完成登录或安全验证后重试。");
+            return weiboStatisticsReading.parse(await page.evaluate(weiboStatisticsScript(account.uid!, url)));
+          } finally { await page.close().catch(() => {}); }
+        });
+      },
+    },
     websiteSessions: {
       isOpen: () => native.websiteSessions?.isOpen() ?? false,
       login: async (a) => {
         if (!isBit(webRef(a)))
           return (native.websiteSessions ?? missing()).login(a);
+        if (a.provider === "smzdm") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买账号请使用内置浏览器环境。");
         await profile(webRef(a), async (context) => {
           const page = await pageFor(
             context,
             `panxu:${a.provider}:${a.id}`,
-            a.provider === "weibo"
+            a.provider === "zhihu" ? "https://www.zhihu.com/" : a.provider === "weibo"
               ? "https://weibo.com/"
               : "https://qingge.baidu.com/login",
           );

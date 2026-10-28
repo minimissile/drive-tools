@@ -1,11 +1,13 @@
 import { z } from "zod";
 
-export const websiteProviderSchema = z.enum(["baidu-marketing", "weibo"]);
+export const websiteProviderSchema = z.enum(["baidu-marketing", "weibo", "zhihu", "smzdm"]);
 export type WebsiteProvider = z.infer<typeof websiteProviderSchema>;
 export const websiteProviderSpecs: Record<
   WebsiteProvider,
   { name: string; description: string }
 > = {
+  smzdm: {name: "什么值得买", description: "公众号文章整理与单账号发布"},
+  zhihu: { name: "知乎", description: "比特多账号养号与文章、回答发布" },
   weibo: { name: "微博", description: "资源推荐图文与微博发布" },
   "baidu-marketing": {
     name: "百度营销",

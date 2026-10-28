@@ -30,6 +30,10 @@ import { OperationsStore } from "./store";
 import { ZhidaoClient, sourceFetch, type SourceFetch } from "./client";
 import { extractBaiduShares } from "./parsers";
 import { Pansou, pansouUrl } from "./pansou";
+import { Pansoo } from "../resource-collection/pansoo";
+import { Haisou } from "../resource-collection/haisou";
+import type { CollectionWebSource } from "../../shared/resource-collection";
+import { collectionDriveLabels, collectionDriveType } from "../../shared/resource-collection";
 import { answerInstruction } from "./answer-prompt";
 import { publicationFingerprint } from "./publishing";
 import {
@@ -44,6 +48,8 @@ export class ZhidaoOperations {
   readonly store: OperationsStore;
   readonly client: ZhidaoClient;
   readonly pansou: Pansou;
+  readonly pansoo: Pansoo;
+  readonly haisou: Haisou;
   private active = new Map<
     string,
     { controller: AbortController; promise: Promise<void> }
@@ -80,6 +86,8 @@ export class ZhidaoOperations {
     this.store.recover();
     this.client = new ZhidaoClient(ports.zhidaoSession);
     this.pansou = new Pansou(dataPath, ports.pansouBinary);
+    this.pansoo = new Pansoo(ports.collectionWebSession);
+    this.haisou = new Haisou(ports.collectionWebSession);
   }
   private environments?: BrowserEnvironments;
   private schedule?: <T>(refs: import("../../shared/browser-environments").EnvironmentAccountRef[], label: string, action: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
@@ -108,7 +116,14 @@ export class ZhidaoOperations {
     };
   }
   settings() {
-    return { pansouUrl: this.repo.db.setting("zhidao:pansouUrl", "") };
+    return {
+      pansouUrl: this.repo.db.setting("zhidao:pansouUrl", ""),
+    };
+  }
+  async openCollectionSource(source: CollectionWebSource) {
+    if (!this.ports.collectionWebSession) throw new AppError("COLLECTION_WEB_UNAVAILABLE", "当前环境不支持网页采集会话。");
+    await this.ports.collectionWebSession.open(source);
+    return true;
   }
   saveSettings(url: string) {
     if (this.isBusy)
@@ -317,6 +332,7 @@ export class ZhidaoOperations {
   async start(raw: RunStartInput) {
     const v = runStartInput.parse(raw);
     const config = { ...v.input };
+    if (v.kind === "collect" && !v.input.zhidao) Object.assign(config, { accountIds: [] });
     this.assertAvailable(v.kind, config);
     if (v.kind === "publish") {
       if (
@@ -585,6 +601,8 @@ export class ZhidaoOperations {
       store: this.store,
       client: this.client,
       pansou: this.pansou,
+      pansoo: this.pansoo,
+      haisou: this.haisou,
       fetcher: this.fetcher,
       pace: this.pace,
       get closed() {
@@ -706,13 +724,15 @@ export class ZhidaoOperations {
       if (
         !["template", "answer"].includes(this.store.run(item.runId).kind) ||
         item.status !== "ready" ||
-        !item.reviewed ||
-        zhidaoContentIssue(item)
+        !item.reviewed
       )
         throw new AppError(
           "REVIEW_REQUIRED",
           "请选择已人工审核且标题不超过49字的问答。",
         );
+      const issue = zhidaoContentIssue(item);
+      if (issue)
+        throw new AppError("INVALID_CONTENT", `${issue}，请编辑后重新审核。`);
       if (item.copyId) {
         const { copy } = this.ownTarget(item.copyId);
         if (
@@ -781,6 +801,10 @@ export class ZhidaoOperations {
       throw new AppError("ITEM_LOCKED", "运行中或已提交的结果不能修改。");
     const changed =
       item.question !== input.question || item.answer !== input.answer;
+    if (!changed && input.reviewed) {
+      const issue = zhidaoContentIssue(input);
+      if (issue) throw new AppError("REVIEW_REQUIRED", `${issue}，再确认审核。`);
+    }
     return this.store.put(item.runId, item.key, {
       name: input.name,
       question: input.question,
@@ -932,13 +956,15 @@ export class ZhidaoOperations {
             ]),
           ]
         : [
-            ["资源名称", "网盘链接", "提取码", "来源", "状态"],
+            ["资源名称", "网盘链接", "提取码", "来源", "状态", "网盘类型", "采集渠道"],
             ...items.map((i) => [
               i.name,
               i.link,
               i.code,
               i.sourceUrl,
               i.message,
+              i.link ? collectionDriveLabels[collectionDriveType(i.link)] : "",
+              i.sourceName,
             ]),
           ];
     if (rows.length === 1)

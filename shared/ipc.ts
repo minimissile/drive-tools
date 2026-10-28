@@ -1,6 +1,12 @@
 import type { ResourceAnswerContract } from "./resource-answers";
+import type { SmzdmContract } from "./smzdm";
+import type { DistributionContract } from "./distribution";
+import type { PipixContract } from "./pipix";
+import type { ZhihuContract } from "./zhihu";
 import type { BrowserEnvironmentContract } from "./browser-environments";
+import type { BitBrowserContract } from "./bitbrowser";
 import type { IpcCommands } from "./ipc-commands";
+import type { DriveFilesContract } from "./drive-files";
 import type { ZhidaoContract } from "./zhidao-ipc";
 import type { BaiduKeywordContract } from "./baidu-keywords";
 import type { BaiduResearchContract } from "./baidu-research";
@@ -8,6 +14,7 @@ import type { WebsiteAccountContract } from "./website-accounts";
 import type { CsdnWorkflowContract } from "./csdn-workflow";
 import type { WeiboMarketingContract } from "./weibo-marketing";
 import type { WeiboPostsContract } from "./weibo-posts";
+import type { WeiboStatisticsContract } from "./weibo-statistics";
 import type {
   AppSnapshot,
   BrowserBinding,
@@ -64,7 +71,13 @@ export type SplitSummary = {
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
 export interface IpcContract
   extends
+    SmzdmContract,
+    DriveFilesContract,
+    DistributionContract,
+    ZhihuContract,
+    PipixContract,
     BrowserEnvironmentContract,
+    BitBrowserContract,
     ResourceAnswerContract,
     IpcCommands,
     ZhidaoContract,
@@ -73,7 +86,8 @@ export interface IpcContract
     WebsiteAccountContract,
     CsdnWorkflowContract,
     WeiboMarketingContract,
-    WeiboPostsContract {
+    WeiboPostsContract,
+    WeiboStatisticsContract {
   "binding.list": Contract<undefined, BrowserBinding[]>;
   snapshot: Contract<{ resourceId?: string } | undefined, AppSnapshot>;
   "resource.get": Contract<{ id: string }, Resource>;
@@ -166,6 +180,19 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "smzdm.list",
+  "smzdm.get",
+  "distribution.overview",
+  "distribution.list",
+  "distribution.history",
+  "distribution.batches",
+  "pipix.list",
+  "pipix.discoveryConfig",
+  "pipix.knowledge",
+  "pipix.image",
+  "zhihu.snapshot",
+  "bit.profiles",
+  "bit.diagnose",
   "environments.list",
   "environments.jobs",
   "binding.list",
@@ -175,6 +202,8 @@ export const queryMethods = [
   "weibo.history",
   "weibo.get",
   "weiboPosts.list",
+  "weiboStats.list",
+  "weiboStats.get",
   "csdn.words",
   "csdn.matches",
   "csdn.history",

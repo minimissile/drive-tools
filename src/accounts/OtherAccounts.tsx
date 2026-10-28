@@ -6,6 +6,7 @@ import { ZhidaoRightsDialog } from "./ZhidaoRightsDialog";
 import { WeiboPublishingDialog } from "./WeiboPublishingDialog";
 import { WeiboComposer } from "./WeiboComposer";
 import { PublishingAccounts } from "./PublishingAccounts";
+import { WeiboAccountStatistics } from "../weibo/Statistics";
 import { formatTime } from "../lib/format";
 import { Globe, LogIn, Plus } from "lucide-react";
 import {
@@ -28,6 +29,7 @@ import {
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { Dialog } from "../ui/Dialog";
+import { AccountBrowserChoice, type AccountBrowserSelection } from "./AccountBrowserChoice";
 import {
   clearAccountEnvironment,
   readAccountEnvironment,
@@ -60,16 +62,36 @@ export default function OtherAccounts({
   const [composerAccount, setComposerAccount] = useState<OtherAccount | null>(
     null,
   );
+  const [statisticsAccountId, setStatisticsAccountId] = useState("");
   const [provider, setProvider] = useState<OtherProvider>(initialProvider);
+  const singleSmzdm = provider === "smzdm";
+  const hasSmzdm = accounts.data.some((account) => account.provider === "smzdm");
   const [newAlias, setNewAlias] = useState("");
-  const [environmentId, setEnvironmentId] = useState(() =>
-    readAccountEnvironment(data!.dataPath),
-  );
+  const initialEnvironment = useRef(readAccountEnvironment(data!.dataPath));
+  const [browser, setBrowser] = useState<AccountBrowserSelection>({
+    fingerprint: false,
+    environmentId: "",
+  });
   useEffect(() => {
-    clearAccountEnvironment(data!.dataPath, environmentId);
-  }, [data!.dataPath, environmentId]);
+    const id = initialEnvironment.current;
+    if (!id || !accounts.environmentsReady) return;
+    const env = accounts.environments.find((item) => item.id === id);
+    if (env) setBrowser({ fingerprint: env.engine === "bitbrowser", environmentId: id });
+    clearAccountEnvironment(data!.dataPath, id);
+    initialEnvironment.current = "";
+  }, [data!.dataPath, accounts.environments, accounts.environmentsReady]);
   const [assigning, setAssigning] = useState<OtherAccount | null>(null);
-  const [targetEnvironmentId, setTargetEnvironmentId] = useState("");
+  const [targetBrowser, setTargetBrowser] = useState<AccountBrowserSelection>({
+    fingerprint: false,
+    environmentId: "",
+  });
+  const validBrowser = (selection: AccountBrowserSelection) =>
+    !selection.environmentId
+      ? !selection.fingerprint
+      : accounts.environments.some((env) =>
+          env.id === selection.environmentId &&
+          env.engine === (selection.fingerprint ? "bitbrowser" : "electron"),
+        );
   const [cookie, setCookie] = useState("");
   const [pending, setPending] = useState<string | null>(null),
     [failure, setFailure] = useState<{ id: string; text: string } | null>(null);
@@ -101,9 +123,21 @@ export default function OtherAccounts({
     <div className="website-accounts-workspace">
       <Panel title="连接其他账号">
         <p className="muted">
-          这里统一管理微博、百度营销、百度知道等非网盘账号。选择平台后打开官方登录窗口，无需填写用户
-          ID；完成扫码后点击“检查登录”。可将不同平台账号关联到同一浏览器环境。
+          这里统一管理微博、百度营销、百度知道、什么值得买等非网盘账号。选择平台后打开官方登录窗口，无需填写用户
+          ID；完成扫码后点击“检查登录”。默认使用内置浏览器，多账号运营时可开启指纹浏览器关联。
         </p>
+        {singleSmzdm ? <Notice>什么值得买使用一个账号，通过独立内置浏览器保存登录状态。{hasSmzdm ? "请在下方已有账号中登录或检查身份。" : "完成官方登录后，点击下方账号的“检查登录”。"}</Notice> : <AccountBrowserChoice
+          value={browser}
+          onChange={(value) => { initialEnvironment.current = ""; setBrowser(value); }}
+          environments={accounts.environments}
+          disabled={!!pending || !accounts.environmentsReady}
+        />}
+        {!singleSmzdm && browser.fingerprint && accounts.environmentsReady && !accounts.environments.some((env) => env.engine === "bitbrowser") ? (
+          <Notice>
+            暂无指纹浏览器环境，请先在“指纹浏览器”中接入环境。
+            <Button quiet onClick={() => navigate("browser-environments")}>配置指纹浏览器</Button>
+          </Notice>
+        ) : null}
         <div className="website-account-add">
           <Field label="账号平台">
             <Select
@@ -124,34 +158,16 @@ export default function OtherAccounts({
               placeholder="例如：运营主账号"
             />
           </Field>
-          <Field label="浏览器环境">
-            <Select
-              aria-label="账号浏览器环境"
-              value={environmentId}
-              onValueChange={setEnvironmentId}
-              items={[
-                { value: "", label: "自动新建内置环境" },
-                ...accounts.environments.map((env) => ({
-                  value: env.id,
-                  label: `${env.name} · ${env.engine === "electron" ? "内置" : "比特"}`,
-                })),
-              ]}
-            />
-          </Field>
           <Button
             primary
-            disabled={
-              !!pending ||
-              (!!environmentId &&
-                !accounts.environments.some((env) => env.id === environmentId))
-            }
+            disabled={!!pending || !accounts.ready || !!accounts.error || (singleSmzdm ? hasSmzdm : !accounts.environmentsReady || !validBrowser(browser))}
             onClick={() =>
               void run("add", async () => {
                 const account = await otherAccountActions.add(
                   provider,
                   newAlias,
                   cookie,
-                  environmentId || undefined,
+                  singleSmzdm ? undefined : browser.environmentId || undefined,
                 );
                 setNewAlias("");
                 setCookie("");
@@ -171,16 +187,19 @@ export default function OtherAccounts({
             }
           >
             <Plus size={16} />
-            {pending === "add" ? "正在打开…" : "登录新账号"}
+            {pending === "add" ? "正在打开…" : singleSmzdm && hasSmzdm ? "已添加单账号" : "登录新账号"}
           </Button>
         </div>
-        {environmentId ? (
+        {!singleSmzdm && browser.environmentId ? (
           <p className="muted">
-            新账号将关联到“
-            {accounts.environments.find((env) => env.id === environmentId)
-              ?.name ?? "正在读取的环境"}
-            ”。 关联已有账号时，请点击下方账号的“环境”按钮。
+            新账号将关联到“{accounts.environments.find((env) => env.id === browser.environmentId)?.name ?? "原环境不可用"}”。
+            关联已有账号时，请点击下方账号的“环境”按钮。
           </p>
+        ) : !singleSmzdm && !browser.fingerprint ? (
+          <p className="muted">登录时自动创建独立内置环境，保留此账号的登录状态。</p>
+        ) : null}
+        {provider === "zhihu" && !browser.fingerprint ? (
+          <Notice>内置浏览器支持知乎登录与身份检查；知乎的养号和自动发布任务目前仍需指纹浏览器环境。</Notice>
         ) : null}
         {provider === "baidu-zhidao" ? (
           <details>
@@ -276,6 +295,22 @@ export default function OtherAccounts({
                   ) : null}
                 </div>
                 <div className="website-account-actions">
+                  {account.provider === "smzdm" ? <Button disabled={!!pending} onClick={() => navigate("smzdm-workflow")}>文章分发</Button> : null}
+                  {account.provider === "smzdm" && account.status === "connected" ? <Button disabled={!!pending} onClick={()=>void run(account.key,()=>ipc("smzdm.openEditor"))}>官方编辑器</Button> : null}
+                  {account.provider === "zhihu" ? <Button disabled={!!pending} onClick={() => navigate("zhihu-operations")}>知乎运营</Button> : null}
+                  {account.provider === "weibo" && account.uid ? (
+                    <Button
+                      quiet
+                      aria-expanded={statisticsAccountId === account.id}
+                      onClick={() =>
+                        setStatisticsAccountId((current) =>
+                          current === account.id ? "" : account.id,
+                        )
+                      }
+                    >
+                      数据统计
+                    </Button>
+                  ) : null}
                   {account.provider === "weibo" &&
                   account.status === "connected" ? (
                     <>
@@ -349,18 +384,18 @@ export default function OtherAccounts({
                   >
                     {account.checking ? "正在核实…" : "检查登录"}
                   </Button>
-                  <Button
+                  {account.provider !== "smzdm" ? <Button
                     quiet
-                    disabled={!!pending}
+                    disabled={!!pending || !accounts.environmentsReady}
                     onClick={() => {
+                      setFailure(null);
                       setAssigning(account);
-                      setTargetEnvironmentId(
-                        environmentId || account.environmentId || "",
-                      );
+                      const env = accounts.environments.find((item) => item.id === account.environmentId);
+                      setTargetBrowser({ fingerprint: env?.engine === "bitbrowser", environmentId: env?.id ?? "" });
                     }}
                   >
                     环境
-                  </Button>
+                  </Button> : null}
                   <Button
                     quiet
                     disabled={!!pending}
@@ -379,6 +414,10 @@ export default function OtherAccounts({
                     移除
                   </Button>
                 </div>
+                {account.provider === "weibo" &&
+                statisticsAccountId === account.id ? (
+                  <WeiboAccountStatistics accountId={account.id} />
+                ) : null}
               </article>
             ))}
           </div>
@@ -399,17 +438,13 @@ export default function OtherAccounts({
             为“{assigning.alias}
             ”选择运行环境。同一环境可以保持多个不同平台的登录。
           </p>
-          <Field label="目标浏览器环境">
-            <Select
-              aria-label="目标浏览器环境"
-              value={targetEnvironmentId}
-              onValueChange={setTargetEnvironmentId}
-              items={accounts.environments.map((env) => ({
-                value: env.id,
-                label: env.name,
-              }))}
-            />
-          </Field>
+          <AccountBrowserChoice
+            value={targetBrowser}
+            onChange={setTargetBrowser}
+            environments={accounts.environments}
+            disabled={!!pending || !accounts.environmentsReady}
+            existing
+          />
           <Notice warning>
             {accounts.environments
               .flatMap((env) => env.accounts)
@@ -435,8 +470,9 @@ export default function OtherAccounts({
               primary
               disabled={
                 !!pending ||
-                !targetEnvironmentId ||
-                targetEnvironmentId === assigning.environmentId
+                !accounts.environmentsReady ||
+                !validBrowser(targetBrowser) ||
+                targetBrowser.environmentId === assigning.environmentId
               }
               onClick={() =>
                 void run(assigning.key, async () => {
@@ -446,7 +482,7 @@ export default function OtherAccounts({
                         ? "zhidao"
                         : "website",
                     id: assigning.id,
-                    environmentId: targetEnvironmentId,
+                    environmentId: targetBrowser.environmentId || undefined,
                     confirmed: true,
                   });
                   setAssigning(null);

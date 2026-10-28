@@ -41,6 +41,9 @@ export function ResumeRunDialog({
           ? "请先选择文案创作模型并保存设置，再继续任务。"
           : "";
   const automatic = run.kind === "answer" && run.config.mode === "auto";
+  const webCollection =
+    run.kind === "collect" &&
+    (run.config.haisou === true || run.config.pansoo === true);
   return (
     <Dialog
       title={
@@ -69,7 +72,10 @@ export function ResumeRunDialog({
             onClick={() =>
               void action.run(
                 "zhidao.resume",
-                { id: run.id, authorized: true },
+                {
+                  id: run.id,
+                  authorized: true,
+                },
                 () => {
                   onClose();
                   onResumed();
@@ -148,21 +154,27 @@ export function ResumeRunDialog({
         </Notice>
       ) : null}
       <Notice>
-        {run.kind === "publish"
-          ? "将从已保存进度继续上传到绑定账号。已提交批次不会重传；结果未知的批次需先核对，本操作不会调用 AI 生成内容。"
-          : automatic
-            ? "将从已保存进度继续，可能产生新的 AI 费用并向绑定账号提交内容。已提交记录会保留，结果未知的条目需先人工核对。"
-            : run.kind === "template" && !templateUsesAi(run.config)
-              ? "将跳过已生成的问答，仅整理未完成的资料。不调用AI，也不会自动上传。"
-              : run.kind === "answer" || run.kind === "template"
-                ? "将从已保存进度继续生成，可能产生新的 AI 费用。已生成的结果会保留。"
-                : "将从已保存进度继续。已有结果会保留，已授权的 AI 操作可能产生新的费用。"}
+        {webCollection
+          ? "将从保存的网页采集进度继续，复用已读取的搜索页。原站要求登录、安全验证或提示请求频繁时，请先在原站处理或稍后继续。"
+          : run.kind === "publish"
+            ? "将从已保存进度继续上传到绑定账号。已提交批次不会重传；结果未知的批次需先核对，本操作不会调用 AI 生成内容。"
+            : automatic
+              ? "将从已保存进度继续，可能产生新的 AI 费用并向绑定账号提交内容。已提交记录会保留，结果未知的条目需先人工核对。"
+              : run.kind === "template" && !templateUsesAi(run.config)
+                ? "将跳过已生成的问答，仅整理未完成的资料。不调用AI，也不会自动上传。"
+                : run.kind === "answer" || run.kind === "template"
+                  ? "将从已保存进度继续生成，可能产生新的 AI 费用。已生成的结果会保留。"
+                  : "将从已保存进度继续。已有结果会保留，已授权的 AI 操作可能产生新的费用。"}
       </Notice>
       <CheckboxField
         checked={consent}
         onChange={(event) => setConsent(event.target.checked)}
         disabled={!!action.pending}
-        label="我已核对账号、任务内容和已提交结果"
+        label={
+          webCollection
+            ? "我已核对任务和网页采集来源"
+            : "我已核对账号、任务内容和已提交结果"
+        }
         hint="仅授权继续上方这一个任务，本次勾选不会保存。"
       />
     </Dialog>

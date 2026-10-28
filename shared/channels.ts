@@ -10,6 +10,7 @@ export const platformIds = [
   "x",
   "zhihu",
   "csdn",
+  "smzdm",
   "bilibili",
   "toutiao",
   "baijiahao",
@@ -121,6 +122,7 @@ type Profile = {
   technical?: boolean;
 };
 export const channelProfiles: Record<Platform, Profile> = {
+  smzdm: {group: "通用内容", formats: ["article"], positions: ["body"], purpose: "经验、软件与资料相关文章；保留来源，核对转载授权、事实与平台外链要求，不虚构亲测。"},
   xiaohongshu: {
     group: "图文视频",
     formats: ["note", "longform"],

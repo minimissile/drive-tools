@@ -11,20 +11,10 @@ import { ActionBar } from "../ui/ActionBar";
 import { useAttachmentDraft } from "../hooks/useAttachmentDraft";
 import { z } from "zod";
 import { useLocalDraft } from "../hooks/useLocalDraft";
-import { updateSelection } from "../lib/selection";
 import { ipc } from "../api/client";
 import { providerIds, providerSpecs } from "../../shared/providers";
 import { useEffect, useRef, useState } from "react";
-import {
-  ArrowDownToLine,
-  ArrowUp,
-  ExternalLink,
-  File as FileIcon,
-  Folder,
-  ImagePlus,
-  Upload,
-  X,
-} from "lucide-react";
+import { ArrowDownToLine, ImagePlus, Upload, X } from "lucide-react";
 import {
   useAppActions,
   useAppActivity,
@@ -34,8 +24,9 @@ import {
 } from "../state";
 import { Button, Empty, Field, Header, Notice, Panel } from "../ui/primitives";
 import { providerName } from "../resources/labels";
-import { formatSize } from "../lib/format";
-import type { Provider, ShareInspection } from "../../shared/types";
+import { DriveBrowser } from "../drive-files/DriveBrowser";
+import { SourceContents, type ShareParent } from "../resources/SourceContents";
+import type { Provider, RemoteFile, ShareInspection } from "../../shared/types";
 export default function Intake() {
   const { data } = useAppData(),
     { activeAccounts, select, resource } = useAppSelection(),
@@ -114,7 +105,10 @@ export default function Intake() {
     };
   }, []);
   const [inspection, setInspection] = useState<ShareInspection | null>(null),
-    [selected, setSelected] = useState<string[]>([]),
+    [selected, setSelected] = useState<RemoteFile[]>([]),
+    [inspectionLoading, setInspectionLoading] = useState(false),
+    [inspectionError, setInspectionError] = useState(""),
+    [manageOwn, setManageOwn] = useState(false),
     [parents, setParents] = useState<{ id: string; name: string }[]>([
       { id: "0", name: "分享根目录" },
     ]);
@@ -135,6 +129,8 @@ export default function Intake() {
         ?.defaultDirectory ?? "/盘序资源",
     );
     setInspection(null);
+    setInspectionLoading(false);
+    setInspectionError("");
     setSelected([]);
     setParents([{ id: "0", name: "分享根目录" }]);
   };
@@ -158,36 +154,58 @@ export default function Intake() {
       if (result.provider !== provider || result.accountId !== accountId) {
         inspectionRevision.current++;
         setInspection(null);
+        setInspectionLoading(false);
+        setInspectionError("");
         setSelected([]);
         setParents([{ id: "0", name: "分享根目录" }]);
       }
     },
   });
-  const inspect = async (parentId = "0", page = 1, cursor?: string) => {
+  const inspect = async (
+    parentId = "0",
+    page = 1,
+    cursor?: string,
+    nextParents?: ShareParent[],
+  ) => {
     const parsed = await link.parse();
     if (!parsed || !mounted.current) return;
-    const targetAccount = parsed.accountId;
-    const requestRevision = inspectionRevision.current;
-    const result = await command("share.inspect", {
-      accountId: targetAccount,
-      sourceText: parsed.share.url,
-      code: parsed.share.code,
-      resourceId: existing?.id,
-      parentId,
-      page,
-      cursor,
-    });
-    if (
-      result &&
-      mounted.current &&
-      requestRevision === inspectionRevision.current
-    ) {
-      setInspection(
-        page > 1 && inspection?.parentId === parentId
-          ? { ...result, files: [...inspection.files, ...result.files] }
+    const requestRevision = ++inspectionRevision.current;
+    setInspectionLoading(true);
+    setInspectionError("");
+    try {
+      const result = await ipc("share.inspect", {
+        accountId: parsed.accountId,
+        sourceText: parsed.share.url,
+        code: parsed.share.code,
+        resourceId: existing?.id,
+        parentId,
+        page,
+        cursor,
+      });
+      if (!mounted.current || requestRevision !== inspectionRevision.current)
+        return;
+      setInspection((previous) =>
+        page > 1 && previous?.parentId === parentId
+          ? {
+              ...result,
+              files: [
+                ...new Map(
+                  [...previous.files, ...result.files].map((f) => [f.id, f]),
+                ).values(),
+              ],
+            }
           : result,
       );
-      if (page === 1) setSelected([]);
+      if (nextParents) setParents(nextParents);
+      // Selection retains its full manifest while browsing another folder.
+    } catch (error) {
+      if (mounted.current && requestRevision === inspectionRevision.current)
+        setInspectionError(
+          error instanceof Error ? error.message : "读取分享失败，请重试。",
+        );
+    } finally {
+      if (mounted.current && requestRevision === inspectionRevision.current)
+        setInspectionLoading(false);
     }
   };
   const readImage = (file?: File) => {
@@ -233,9 +251,7 @@ export default function Intake() {
             ? (priorCopy?.directory ?? "/")
             : parsed.directory,
           isOwnResource,
-          selectedFiles: !isOwnResource
-            ? inspection?.files.filter((f) => selected.includes(f.id))
-            : undefined,
+          selectedFiles: !isOwnResource ? selected : undefined,
           enqueue,
         },
         isOwnResource
@@ -287,6 +303,7 @@ export default function Intake() {
               primary={isOwnResource}
               disabled={
                 submitting ||
+                inspectionLoading ||
                 imageDraft.loading ||
                 busy > 0 ||
                 !title.trim() ||
@@ -306,6 +323,7 @@ export default function Intake() {
                 primary
                 disabled={
                   submitting ||
+                  inspectionLoading ||
                   imageDraft.loading ||
                   busy > 0 ||
                   !selected.length ||
@@ -399,6 +417,8 @@ export default function Intake() {
                     onCheckedChange={(checked) => {
                       inspectionRevision.current++;
                       setInspection(null);
+                      setInspectionLoading(false);
+                      setInspectionError("");
                       setSelected([]);
                       setParents([{ id: "0", name: "分享根目录" }]);
                       draft.update({ isOwnResource: checked });
@@ -419,6 +439,8 @@ export default function Intake() {
                       draft.update({ sourceText: e.target.value, code: "" });
                       setParents([{ id: "0", name: "分享根目录" }]);
                       setInspection(null);
+                      setInspectionLoading(false);
+                      setInspectionError("");
                       setSelected([]);
                     }}
                   />
@@ -469,6 +491,8 @@ export default function Intake() {
                         setCode(e.target.value);
                         setSelected([]);
                         setInspection(null);
+                        setInspectionLoading(false);
+                        setInspectionError("");
                       }}
                     />
                   </Field>
@@ -590,6 +614,8 @@ export default function Intake() {
                             ?.defaultDirectory ?? "/盘序资源",
                         );
                         setInspection(null);
+                        setInspectionLoading(false);
+                        setInspectionError("");
                         setSelected([]);
                       }}
                       items={[
@@ -671,138 +697,67 @@ export default function Intake() {
               </Panel>
             </div>
           </div>
-          {isOwnResource ? null : priorCopy?.status !== "ready" ? (
-            <Panel
-              title="选择需要转存的文件"
-              extra={
-                <div className="row">
-                  <Button
-                    quiet
-                    disabled={busy > 0 || !accountId || !sourceText}
-                    onClick={() =>
-                      void command("share.open", {
-                        accountId,
-                        sourceText,
-                        code,
-                        resourceId: existing?.id,
-                      })
-                    }
-                  >
-                    <ExternalLink size={14} />
-                    在本人窗口打开分享
-                  </Button>
-                  <Button
-                    disabled={busy > 0 || !accountId || !sourceText}
-                    onClick={() => void inspect()}
-                  >
-                    <ArrowDownToLine size={14} />
-                    读取分享内容
-                  </Button>
-                </div>
+          {priorCopy?.status !== "ready" ? (
+            <SourceContents
+              inspection={inspection}
+              provider={provider}
+              selected={selected}
+              parents={parents}
+              loading={inspectionLoading}
+              error={inspectionError}
+              enabled={busy === 0 && !!accountId && !!sourceText}
+              own={isOwnResource}
+              onRead={(parentId, page, cursor, next) =>
+                void inspect(parentId, page, cursor, next)
               }
+              onOpenOfficial={() =>
+                void command("share.open", {
+                  accountId,
+                  sourceText,
+                  code,
+                  resourceId: existing?.id,
+                })
+              }
+              onSelect={setSelected}
+            />
+          ) : null}
+          <Panel
+            title={
+              priorCopy?.folderId ? "管理已存入的资源" : "管理本人网盘资源"
+            }
+            extra={
+              <Button quiet onClick={() => navigate("drive-files")}>
+                打开独立网盘文件页
+              </Button>
+            }
+          >
+            <p>
+              {priorCopy?.folderId
+                ? "在本人副本中新增、删除、重命名文件，插入、替换或清理广告。内容变更后需要重新核验关联分享。"
+                : isOwnResource
+                  ? "直接浏览本人网盘，整理资源文件与已有广告，再保存资源资料。"
+                  : "来源分享可浏览与选择。需要修改文件或广告时，先转存到本人网盘，再打开资源副本管理。"}
+            </p>
+            <Button
+              disabled={!accountId || account?.status !== "connected"}
+              onClick={() => setManageOwn((v) => !v)}
             >
-              {["xunlei", "guangya", "pikpak"].includes(provider) ? (
-                <small>
-                  若读取要求验证，请在本人窗口打开此分享，完成官方验证后关闭窗口，再读取内容。
-                </small>
-              ) : null}
-              {inspection ? (
-                <>
-                  <div className="row folder-breadcrumb">
-                    <Button
-                      quiet
-                      disabled={parents.length <= 1}
-                      onClick={() => {
-                        const next = parents.slice(0, -1);
-                        setParents(next);
-                        void inspect(next[next.length - 1].id);
-                      }}
-                    >
-                      <ArrowUp size={14} />
-                      上级
-                    </Button>
-                    <span>{parents.map((p) => p.name).join(" / ")}</span>
-                    <span className="tag">已选 {selected.length} 项</span>
-                  </div>
-                  <div className="file-list">
-                    {inspection.files.map((f) => (
-                      <div className="file-row" key={f.id}>
-                        <label className="checkbox">
-                          <input
-                            aria-label={`选择${f.name}`}
-                            type="checkbox"
-                            checked={selected.includes(f.id)}
-                            disabled={
-                              !selected.includes(f.id) && selected.length >= 100
-                            }
-                            onChange={(e) =>
-                              setSelected((ids) =>
-                                updateSelection(
-                                  ids,
-                                  [f.id],
-                                  e.target.checked,
-                                  100,
-                                ),
-                              )
-                            }
-                          />
-                          {f.isDirectory ? (
-                            <Folder size={16} />
-                          ) : (
-                            <FileIcon size={16} />
-                          )}
-                          <span>{f.name}</span>
-                        </label>
-                        <small>
-                          {f.isDirectory ? "目录" : formatSize(f.size)}
-                        </small>
-                        {f.isDirectory ? (
-                          <Button
-                            quiet
-                            onClick={() => {
-                              const parentId =
-                                provider === "baidu"
-                                  ? (f.path ?? f.name)
-                                  : f.id;
-                              setParents((p) => [
-                                ...p,
-                                { id: parentId, name: f.name },
-                              ]);
-                              void inspect(parentId);
-                            }}
-                          >
-                            打开
-                          </Button>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                  {inspection.hasMore ? (
-                    <Button
-                      onClick={() =>
-                        void inspect(
-                          inspection.parentId,
-                          inspection.page + 1,
-                          inspection.nextCursor,
-                        )
-                      }
-                      disabled={busy > 0}
-                    >
-                      加载下一页
-                    </Button>
-                  ) : null}
-                </>
-              ) : (
-                <p className="muted">
-                  登录并读取分享后，可以选择文件或整个目录。单次最多100个顶层项目。
-                </p>
-              )}
-            </Panel>
-          ) : (
-            <Notice>
-              此副本已完成归档。本页只更新资源资料，不重复转存或替换已有分享。
-            </Notice>
-          )}
+              {manageOwn
+                ? "收起文件管理"
+                : priorCopy?.folderId
+                  ? "展开资源目录管理"
+                  : "展开本人网盘管理"}
+            </Button>
+          </Panel>
+          {manageOwn && account?.status === "connected" ? (
+            <DriveBrowser
+              key={`${accountId}:${priorCopy?.id ?? "new"}`}
+              accountId={accountId}
+              copy={priorCopy}
+              initialPath={priorCopy?.folderId ? priorCopy.directory : "/"}
+              workspace={data!.dataPath}
+            />
+          ) : null}
         </>
       )}
     </Workspace>

@@ -95,9 +95,9 @@ export function BrowserBindings({
       !environments.error &&
       !fingerprintEnvironments.length ? (
         <Empty compact title="尚未接入指纹浏览器环境">
-          先在账号管理中登记比特浏览器配置，再添加平台映射。
+          先在侧栏“指纹浏览器”中接入比特配置，再添加平台映射。
           <Button onClick={() => navigate("browser-environments")}>
-            管理浏览器环境
+            管理指纹浏览器
           </Button>
         </Empty>
       ) : null}
@@ -136,7 +136,7 @@ export function BrowserBindings({
             placeholder="例如：效率分享小红书账号"
           />
         </Field>
-        <Field label="浏览器环境" hint="在账号管理 → 浏览器环境中接入比特配置">
+        <Field label="浏览器环境" hint="在侧栏“指纹浏览器”中接入比特配置">
           <Select
             aria-label="发布浏览器环境"
             value={windowId}

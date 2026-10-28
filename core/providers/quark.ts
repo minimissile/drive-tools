@@ -238,6 +238,22 @@ export class QuarkProvider implements DriveProvider {
       this.request(account, path, {}, body),
     );
   }
+  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
+    if (input.action === "mkdir") {
+      await this.request(account, "file", {}, { pdir_fid: input.parentId, file_name: input.name, dir_path: "", dir_init_lock: false });
+    } else if (input.action === "rename") {
+      await this.request(account, "file/rename", {}, { fid: input.file!.id, file_name: input.name });
+    } else {
+      const result = await this.request(account, "file/delete", {}, { action_type: 2, filelist: [input.file!.id], exclude_fids: [] });
+      if (result.data?.task_id) {
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (await this.poll(account, String(result.data.task_id))) return;
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+        throw new AppError("UNCERTAIN_REMOTE_RESULT", "删除已提交，结果待核对。", true);
+      }
+    }
+  }
   async ensureFolder(account: Account, path: string) {
     let parent = "0";
     for (const name of normalizedDirectory(path).split("/").filter(Boolean)) {

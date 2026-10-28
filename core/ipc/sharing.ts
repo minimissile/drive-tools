@@ -41,7 +41,8 @@ export function createSharingHandlers(
       !copy.verifiedAt ||
       !copy.files.length ||
       (source &&
-        (source.url === resource.sourceUrl ||
+        ((source.url === resource.sourceUrl &&
+          resource.sourceKind !== "owned") ||
           source.provider !== resource.provider)) ||
       (method === "copy.recoverShare" && !source)
     )
@@ -54,10 +55,15 @@ export function createSharingHandlers(
       if (a.uid !== copy.ownerUid)
         throw new AppError("ACCOUNT_UID_MISMATCH", "文件归属UID不匹配。");
       const actual = await p.list(a, copy.folderId!);
-      assertManifest(copy.files, actual);
+      // Only the explicitly confirmed manifest participates in this share.
+      // Other files in a user's existing directory must never be added implicitly.
+      const scoped = actual.filter((file) =>
+        copy.files.some((expected) => expected.id === file.id),
+      );
+      assertManifest(copy.files, scoped);
       if (
-        actual.length !== copy.files.length ||
-        !copy.files.every((f) => actual.some((c) => c.id === f.id))
+        scoped.length !== copy.files.length ||
+        !copy.files.every((f) => scoped.some((c) => c.id === f.id))
       )
         throw new AppError(
           "TARGET_CHANGED",
@@ -97,7 +103,8 @@ export function createSharingHandlers(
       const parsedShare = parseShare(share.url);
       if (
         parsedShare.provider !== resource.provider ||
-        parsedShare.url === resource.sourceUrl ||
+        (parsedShare.url === resource.sourceUrl &&
+          resource.sourceKind !== "owned") ||
         !(await p.verifyShare(a, share.id, copy.files, share.code))
       )
         throw new AppError(

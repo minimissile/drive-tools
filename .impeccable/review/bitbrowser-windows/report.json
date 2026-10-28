@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-26",
+  "surface": "账号管理 → 浏览器环境 → 比特浏览器窗口",
+  "mode": "Operate",
+  "validation": "manual-source-development",
+  "automatedTestsRun": false,
+  "sourceChecks": ["tsc --noEmit: passed", "git diff --check: passed"],
+  "manualEnvironment": "复用现有Vite服务，真实AppService、临时数据库、本地模拟比特接口及浏览器模拟传输；没有启动第二个桌面。",
+  "observed": [
+    "已有窗口、未运行窗口和未接入窗口共27个，长名称与备注可读",
+    "搜索、运行与接入筛选、分页及状态刷新",
+    "从列表接入环境，名称与配置ID预填，保存后关联入口更新",
+    "关联账号导航携带选定环境，关联平台打开走原业务入口",
+    "关闭确认显示未完成的微博填写，勾选确认后关闭模拟窗口并刷新",
+    "状态失败显示未知，连接失败保留已读列表，恢复后重试成功",
+    "1440×900和1366×768桌面布局与主要操作可达性"
+  ],
+  "review": {
+    "disposition": "ship",
+    "scope": "指定截图与源码复核；最终verdict只覆盖列出的修复项",
+    "resolved": [
+      "新建环境草稿与配置ID绑定比特服务来源，切换服务后要求重新读取或填写",
+      "已有环境恢复旧编辑草稿时以持久连接来源为准，不因缺少新字段锁死保存"
+    ]
+  },
+  "designSystem": {
+    "changes": "none",
+    "evidence": ["src/styles/tokens.css", "src/ui/form-controls.css", "src/ui/Select.tsx", "src/ui/Pagination.tsx", "src/ui/DataState.tsx", "src/ui/Dialog.tsx"],
+    "notes": "继承现有白色工作台、系统字体、语义颜色、统一表单焦点及桌面密度；未引入新的视觉系统。"
+  },
+  "limitations": ["窗口生命周期和平台页面使用模拟适配，真实比特客户端CDP、唤起、关闭同步、代理和网页登录联动尚未实测"],
+  "screenshots": ["windows-1440.png", "windows-1366.png"],
+  "cleanup": "临时服务已退出，临时数据库、桥接脚本、HTML和浏览器标签已清理；原源码桌面保留。"
+}

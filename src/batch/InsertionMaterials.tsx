@@ -25,6 +25,10 @@ export function InsertionMaterials({
   onChanged,
   disabled,
   libraryState,
+  title = "1 · 准备插入素材",
+  selectionLimit = 10,
+  kinds = ["folder", "txt", "image"],
+  compactEditor = false,
 }: {
   workspace: string;
   materials: InsertionMaterial[];
@@ -33,15 +37,23 @@ export function InsertionMaterials({
   onChanged: () => void;
   disabled: boolean;
   libraryState: "loading" | "error" | "ready";
+  title?: string;
+  selectionLimit?: number;
+  kinds?: readonly ("folder" | "txt" | "image")[];
+  compactEditor?: boolean;
 }) {
   const draft = useLocalDraft(
-    "panxu-insertion-material:" + workspace,
+    "panxu-insertion-material:" +
+      workspace +
+      (kinds.length < 3 ? ":" + kinds.join("-") : ""),
     { kind: "folder" as "folder" | "txt" | "image", name: "", text: "" },
     parse,
   );
-  const { kind, name, text } = draft.value,
-    { command, notify } = useAppActions();
+  const { name, text } = draft.value;
+  const kind = kinds.includes(draft.value.kind) ? draft.value.kind : kinds[0];
+  const { command, notify } = useAppActions();
   const [previewId, setPreviewId] = useState("");
+  const [editorOpen, setEditorOpen] = useState(!compactEditor);
   const preview = useIpcQuery(
     "insertion.materialDetail",
     { id: previewId },
@@ -89,6 +101,7 @@ export function InsertionMaterials({
         onChanged();
         draft.update({ name: "", text: "" });
         setImage(null);
+        if (compactEditor) setEditorOpen(false);
       }
     } catch (e) {
       notify(e instanceof Error ? e.message : "素材读取失败", "error");
@@ -98,84 +111,106 @@ export function InsertionMaterials({
   };
   return (
     <Panel
-      title="1 · 准备插入素材"
-      extra={<small>最多选择 10 项 · 同名项跳过</small>}
+      title={title}
+      extra={
+        <div className="row">
+          <small>最多选择 {selectionLimit} 项</small>
+          {compactEditor ? (
+            <Button
+              quiet
+              size="compact"
+              onClick={() => setEditorOpen((v) => !v)}
+              disabled={disabled || saving}
+            >
+              {editorOpen ? "收起创建表单" : "创建新素材"}
+            </Button>
+          ) : null}
+        </div>
+      }
     >
       {draft.error ? <Notice danger>{draft.error}</Notice> : null}
-      <div className="field-pair">
-        <Field label="素材类型">
-          <Select
-            aria-label="插入素材类型"
-            value={kind}
-            onValueChange={(v) => {
-              draft.update({ kind: v as typeof kind, name: "", text: "" });
-              setImage(null);
-            }}
-            items={[
-              { value: "folder", label: "文件夹 · 名称引流" },
-              { value: "txt", label: "TXT · 文字说明" },
-              { value: "image", label: "图片 · 海报或二维码" },
-            ]}
-          />
-        </Field>
-        <Field label={kind === "folder" ? "文件夹名称" : "文件名称"}>
-          <input
-            aria-label="插入素材名称"
-            value={name}
-            maxLength={160}
-            onChange={(e) => draft.update({ name: e.target.value })}
-            placeholder={
-              kind === "folder"
-                ? "更多学习资料 · 见说明"
-                : kind === "txt"
-                  ? "资料使用说明.txt"
-                  : "保留图片扩展名"
-            }
-          />
-        </Field>
-      </div>
-      {kind === "txt" ? (
-        <Field label="TXT 内容">
-          <textarea
-            aria-label="插入TXT内容"
-            rows={5}
-            value={text}
-            onChange={(e) => draft.update({ text: e.target.value })}
-            placeholder="填写资料说明、联系方式或引流信息。"
-          />
-        </Field>
-      ) : null}
-      {kind === "image" ? (
-        <Field label="本地图片 · PNG / JPEG / WebP，最多 4 MiB">
-          <input
-            aria-label="插入图片"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              setImage(f);
-              if (f) draft.update({ name: f.name });
-            }}
-          />
-          {image ? (
-            <small>
-              {image.name} · 图片加入素材库后保存在本地，刷新前请先保存。
-            </small>
+      {editorOpen ? (
+        <div className="insertion-material-editor">
+          <div className="field-pair">
+            <Field label="素材类型">
+              <Select
+                aria-label="插入素材类型"
+                value={kind}
+                disabled={disabled || saving}
+                onValueChange={(v) => {
+                  draft.update({ kind: v as typeof kind, name: "", text: "" });
+                  setImage(null);
+                }}
+                items={[
+                  { value: "folder", label: "文件夹 · 名称引流" },
+                  { value: "txt", label: "TXT · 文字说明" },
+                  { value: "image", label: "图片 · 海报或二维码" },
+                ].filter((item) => kinds.includes(item.value as typeof kind))}
+              />
+            </Field>
+            <Field label={kind === "folder" ? "文件夹名称" : "文件名称"}>
+              <input
+                aria-label="插入素材名称"
+                value={name}
+                disabled={disabled || saving}
+                maxLength={160}
+                onChange={(e) => draft.update({ name: e.target.value })}
+                placeholder={
+                  kind === "folder"
+                    ? "更多学习资料 · 见说明"
+                    : kind === "txt"
+                      ? "资料使用说明.txt"
+                      : "保留图片扩展名"
+                }
+              />
+            </Field>
+          </div>
+          {kind === "txt" ? (
+            <Field label="TXT 内容">
+              <textarea
+                aria-label="插入TXT内容"
+                rows={5}
+                value={text}
+                disabled={disabled || saving}
+                onChange={(e) => draft.update({ text: e.target.value })}
+                placeholder="填写资料说明、联系方式或引流信息。"
+              />
+            </Field>
           ) : null}
-        </Field>
+          {kind === "image" ? (
+            <Field label="本地图片 · PNG / JPEG / WebP，最多 4 MiB">
+              <input
+                aria-label="插入图片"
+                type="file"
+                disabled={disabled || saving}
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  setImage(f);
+                  if (f) draft.update({ name: f.name });
+                }}
+              />
+              {image ? (
+                <small>
+                  {image.name} · 图片加入素材库后保存在本地，刷新前请先保存。
+                </small>
+              ) : null}
+            </Field>
+          ) : null}
+          <Button
+            onClick={() => void save()}
+            disabled={
+              disabled ||
+              saving ||
+              (!name.trim() && kind !== "image") ||
+              (kind === "txt" && !text.trim()) ||
+              (kind === "image" && !image)
+            }
+          >
+            {saving ? "保存中…" : "加入本地素材库"}
+          </Button>
+        </div>
       ) : null}
-      <Button
-        onClick={() => void save()}
-        disabled={
-          disabled ||
-          saving ||
-          (!name.trim() && kind !== "image") ||
-          (kind === "txt" && !text.trim()) ||
-          (kind === "image" && !image)
-        }
-      >
-        {saving ? "保存中…" : "加入本地素材库"}
-      </Button>
       <div className="insertion-material-list">
         {materials.length === 0 ? (
           <small>
@@ -194,7 +229,8 @@ export function InsertionMaterials({
                   checked={selected.includes(m.id)}
                   disabled={
                     disabled ||
-                    (!selected.includes(m.id) && selected.length >= 10)
+                    (!selected.includes(m.id) &&
+                      selected.length >= selectionLimit)
                   }
                   onChange={(e) => onSelect(m.id, e.target.checked)}
                 />

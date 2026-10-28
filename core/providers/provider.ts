@@ -39,6 +39,7 @@ export interface TransferResult {
   taskId: string | null;
 }
 export interface DriveProvider {
+  manageFile?(account: Account, input: import("../../shared/drive-files").ProviderFileMutation): Promise<void>;
   manage?(account: Account, action: "mkdir" | "rename" | "delete", path: string, name?: string): Promise<void>;
   upload?(
     account: Account,

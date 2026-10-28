@@ -8,6 +8,7 @@ import { BrowserBindings } from "../settings/BrowserBindings";
 import { WorkspaceBackup } from "../settings/WorkspaceBackup";
 import { SecretField } from "../settings/SecretField";
 import { ApiPlanForm } from "../settings/ApiPlanForm";
+import { ContentSourcesSettings } from "../settings/ContentSources";
 
 import { useState } from "react";
 import { Database, FolderOpen, Link, Save } from "lucide-react";
@@ -215,6 +216,9 @@ export default function Settings() {
                 ))}
               </div>
             </Panel>
+          </div>
+          <div id="settings-sources" tabIndex={-1}>
+            <ContentSourcesSettings />
           </div>
           <div id="settings-notes" tabIndex={-1}>
             <Panel title="Obsidian / 本地知识库" extra={<Database size={18} />}>

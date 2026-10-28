@@ -46,6 +46,8 @@ const reads = new Set<string>([
 ]);
 export const shouldRefreshSnapshot = (method: string) =>
   !reads.has(method) &&
+  !method.startsWith("distribution.") &&
+  !method.startsWith("smzdm.") &&
   !method.startsWith("baiduKeywords.") &&
   !method.startsWith("baiduResearch.") &&
   !method.startsWith("websiteAccounts.") &&

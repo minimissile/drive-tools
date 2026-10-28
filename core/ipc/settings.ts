@@ -14,7 +14,7 @@ import type { HandlerServices, HandlerMap } from "./types";
 export function createSettingsHandlers(
   services: Pick<
     HandlerServices,
-    "changed" | "db" | "notes" | "ports" | "repo" | "secrets"
+    "changed" | "db" | "notes" | "ports" | "repo" | "secrets" | "environments" | "environmentQueue" | "bitManagement" | "pipix"
   >,
 ) {
   return {
@@ -65,6 +65,9 @@ export function createSettingsHandlers(
         )
         .parse(object);
       if (input.bitUrl) validateLoopback(input.bitUrl);
+      if (input.bitUrl !== undefined && input.bitUrl !== services.db.setting("bitUrl", "") &&
+        (services.environments.isBusy || services.environmentQueue.isBusy || services.bitManagement.isBusy))
+        throw new AppError("ENVIRONMENT_BUSY", "浏览器环境正在操作或排队，请处理完成后再更换比特连接地址。");
       if (input.aiModels) {
         const catalog = {
           text: services.db.setting<import("../ai").AiModel[]>(
@@ -100,6 +103,7 @@ export function createSettingsHandlers(
           kind: z.enum([
             "openrouter",
             "bit",
+            "pipix:tikhub",
             "5118:longtail",
             "5118:suggest",
             "5118:metrics",
@@ -108,6 +112,10 @@ export function createSettingsHandlers(
           value: z.string().max(20000),
         })
         .parse(object);
+      if (input.kind === "pipix:tikhub") {
+        await services.pipix.saveDiscoveryKey({ value: input.value });
+        return true;
+      }
       await services.secrets.set(input.kind, input.value);
       services.db.setSetting(
         `keyRevision:${input.kind.replace("5118:", "")}`,

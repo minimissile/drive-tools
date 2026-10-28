@@ -22,6 +22,8 @@ import "./browser-environments.css";
 import { EnvironmentEditor } from "./EnvironmentEditor";
 import { EnvironmentJobs } from "./EnvironmentJobs";
 import { prepareEnvironmentAccounts } from "./environment-navigation";
+import { BitBrowserWindows } from "./BitBrowserWindows";
+import type { BitBrowserProfile } from "../../shared/bitbrowser";
 
 export const environmentEngineLabel = (engine: BrowserEnvironment["engine"]) =>
   engine === "electron" ? "内置浏览器" : "比特浏览器";
@@ -39,6 +41,9 @@ export default function BrowserEnvironments() {
     { notify } = useAppActions();
   const { data } = useAppData();
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
+  const [importing, setImporting] = useState<
+    (BitBrowserProfile & { connectorKey: string }) | undefined
+  >();
   const [editing, setEditing] = useState<BrowserEnvironment | "new" | null>(
       null,
     ),
@@ -58,13 +63,24 @@ export default function BrowserEnvironments() {
   }, [editing]);
   return (
     <div className="website-accounts-workspace">
+      <BitBrowserWindows
+        environments={query.data}
+        onChanged={query.reload}
+        onImport={(profile, trigger) => {
+          editorTrigger.current = trigger;
+          setImporting(profile);
+          setEditing("new");
+          setError("");
+        }}
+      />
       <Panel
-        title="浏览器环境"
+        title="已登记环境"
         extra={
           <Button
             primary
             onClick={(event) => {
               editorTrigger.current = event.currentTarget;
+              setImporting(undefined);
               setEditing("new");
               setError("");
             }}
@@ -149,6 +165,7 @@ export default function BrowserEnvironments() {
                     disabled={env.busy || !!editing}
                     onClick={(event) => {
                       editorTrigger.current = event.currentTarget;
+                      setImporting(undefined);
                       setEditing(env);
                       setError("");
                     }}
@@ -187,8 +204,9 @@ export default function BrowserEnvironments() {
       </Panel>
       {editing ? (
         <EnvironmentEditor
-          key={editing === "new" ? "new" : editing.id}
+          key={editing === "new" ? (importing?.id ?? "new") : editing.id}
           environment={editing === "new" ? null : editing}
+          initialProfile={editing === "new" ? importing : undefined}
           onCancel={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
