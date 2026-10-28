@@ -95,6 +95,16 @@ export class ResourceDeletion {
       reasons.push("此资源已关联发布记录。为保留发布和效果历史，暂不能删除。");
     if (
       this.db.get(
+        "SELECT article.key FROM settings article WHERE article.key LIKE 'smzdm:article:v1:%' AND EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(article.value) THEN article.value ELSE '{}' END,'$.links') link WHERE json_extract(link.value,'$.resourceId')=? OR json_extract(link.value,'$.copyId') IN (SELECT id FROM copies WHERE resource_id=?)) LIMIT 1",
+        resourceId,
+        resourceId,
+      )
+    )
+      reasons.push(
+        "此资源仍被什么值得买文章引用，请先处理文章或解除资源关联后再删除。",
+      );
+    if (
+      this.db.get(
         "SELECT id FROM studio_jobs WHERE draft_id IN (SELECT id FROM drafts WHERE resource_id=?) AND json_extract(data,'$.status') IN ('submitting','pending','in_progress','uncertain','download_failed') LIMIT 1",
         resourceId,
       )
