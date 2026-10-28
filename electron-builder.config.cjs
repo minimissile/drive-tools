@@ -37,6 +37,11 @@ module.exports = {
     : null,
   mac: {
     ...base.mac,
+    extendInfo: {
+      ...base.mac.extendInfo,
+      CFBundleDevelopmentRegion: "zh_CN",
+      CFBundleLocalizations: ["zh_CN"],
+    },
     // Match macOS .lproj names, including the Chinese grammar variants.
     electronLanguages: [
       "zh_CN",

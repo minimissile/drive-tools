@@ -8,6 +8,7 @@ import {
   BookOpen,
   Copy,
   FolderOpen,
+  FolderTree,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -86,6 +87,7 @@ export function ResourceDetail({
           navigate("split");
         }}
       >
+        <FolderTree size={14} />
         拆分为多个链接
       </MenuAction>
       <MenuAction disabled={busy > 0} onClick={onDelete}>
