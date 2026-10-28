@@ -590,8 +590,11 @@ export class AppService {
       const bytes = Buffer.from(match[2], "base64");
       if (bytes.length > 8 * 1024 * 1024)
         throw new AppError("COVER_TOO_LARGE", "封面不能超过8MB。");
-      const unchangedWebp = match[1] === "webp" && input.id &&
-        this.repo.getResource(input.id).coverId === createHash("sha256").update(bytes).digest("hex");
+      const unchangedWebp =
+        match[1] === "webp" &&
+        input.id &&
+        this.repo.getResource(input.id).coverId ===
+          createHash("sha256").update(bytes).digest("hex");
       coverId = await saveResourceCover(
         this.dataPath,
         unchangedWebp ? bytes : await this.ports.normalizeCover(bytes, "webp"),

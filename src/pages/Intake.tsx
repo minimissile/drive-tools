@@ -575,7 +575,9 @@ export default function Intake() {
                   hidden
                   onChange={(e) => readImage(e.target.files?.[0])}
                 />
-                <small>JPG / PNG / WebP · 原图最大8MB，保存时自动转为200KB以内的WebP。</small>
+                <small>
+                  JPG / PNG / WebP · 原图最大8MB，保存时自动转为200KB以内的WebP。
+                </small>
               </Panel>
               <Panel title={isOwnResource ? "资源归属" : "保存位置"}>
                 <div className="fields">
