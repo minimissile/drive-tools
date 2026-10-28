@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { lstatSync } from "node:fs";
 import policy from "./release-policy.cjs";
 const require = createRequire(import.meta.url),
   arg = (key) => {
@@ -19,6 +20,10 @@ if (!targets[platform])
   throw Error("当前发行计划未启用此平台，请先检查 release.config.json。");
 if (platform === "mac" && process.platform !== "darwin")
   throw Error("macOS 正式签名需要在 macOS 上执行。");
+if (lstatSync("node_modules").isSymbolicLink())
+  throw Error(
+    "正式打包不能使用符号链接 node_modules；请在当前项目通过 npm ci 准备真实依赖目录，避免遗漏生产传递依赖。",
+  );
 const env = { ...process.env, PANXU_REQUIRE_SIGNING: "1" };
 if (
   platform === "mac" &&

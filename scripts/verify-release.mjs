@@ -8,6 +8,7 @@ import { dirname } from "node:path";
 import { load } from "js-yaml";
 import { execFileSync, spawnSync } from "node:child_process";
 import updateConfig from "./update-config.cjs";
+import { verifyPackagedDependencies } from "./verify-packaged-dependencies.mjs";
 const require = createRequire(import.meta.url),
   asar = require("@electron/asar"),
   root = resolve(
@@ -38,7 +39,9 @@ const candidates = ["mac-arm64", "mac", "mac-universal"].map((dir) =>
 candidates.push(join(root, "win-unpacked", "resources", "app.asar"));
 const archives = candidates.filter(existsSync);
 assert.ok(archives.length, "没有找到应用归档");
+const packagedDependencies = [];
 for (const path of archives) {
+  packagedDependencies.push(verifyPackagedDependencies(path));
   const files = asar.listPackage(path);
   assert.equal(
     files.some((file) =>
@@ -179,6 +182,7 @@ console.log(
       version: pkg.version,
       archives: archives.length,
       filesPerArchive: sources.length,
+      packagedDependencies,
       artifacts,
       checksums: join(root, "SHA256SUMS.txt"),
       userDataIncluded: false,
