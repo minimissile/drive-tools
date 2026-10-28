@@ -28,7 +28,11 @@ export function BitBrowserCloseDialog({
   });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const blocked = environment?.busy || !!query.data?.blockers.length;
+  const blocked =
+    environment?.busy ||
+    query.loading ||
+    !!query.error ||
+    !!query.data?.blockers.length;
   const close = async () => {
     if (pending || blocked || !query.data) return;
     setPending(true);

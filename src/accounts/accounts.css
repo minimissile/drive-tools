@@ -251,9 +251,6 @@
 .account-editor .account-clear-button {
   color: var(--red);
 }
-.account-clear-confirm .row {
-  justify-content: flex-end;
-}
 @container accounts (max-width: 1000px) {
   .accounts-column-head {
     display: none;

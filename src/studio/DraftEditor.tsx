@@ -177,14 +177,9 @@ export default function DraftEditor({
           <Button
             quiet
             disabled={busy > 0 || working.saving}
-            onClick={() => {
-              if (
-                window.confirm(
-                  "放弃这份草稿尚未保存的修改，恢复当前已保存版本？",
-                )
-              )
-                void working.reset().catch((e) => notify(e.message, "error"));
-            }}
+            onClick={() =>
+              void working.reset().catch((e) => notify(e.message, "error"))
+            }
           >
             恢复已保存版本
           </Button>

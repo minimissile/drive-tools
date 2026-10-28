@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { z } from "zod";
 import type { OperationItem } from "../../shared/zhidao";
 import {
@@ -9,7 +8,6 @@ import { useAppData } from "../state";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { Button, Field, Notice } from "../ui/primitives";
 import { Dialog } from "../ui/Dialog";
-import { CheckboxField } from "../ui/CheckboxField";
 import { useOperationAction } from "./hooks";
 import "./operation-dialogs.css";
 export function ItemEditor({
@@ -35,27 +33,26 @@ export function ItemEditor({
     { name: item.name, question: item.question, answer: item.answer },
     (v) => parse.parse(v),
   );
-  const [reviewed, setReviewed] = useState(false);
   const changed =
     draft.value.question !== item.question ||
     draft.value.answer !== item.answer;
   const contentIssue = zhidaoContentIssue(draft.value);
-  const save = () => {
+  const save = (review: boolean) => {
     const complete = (saved: OperationItem) => {
       draft.clear();
       onSaved(saved);
     };
-    if (reviewAndSelect)
+    if (review)
       void action.run(
         "zhidao.item.review",
         { id: item.id, ...draft.value, confirmed: true },
         complete,
-        "已审核并选中",
+        reviewAndSelect ? "已审核并选中" : "内容已保存并审核",
       );
     else
       void action.run(
         "zhidao.item.save",
-        { id: item.id, ...draft.value, reviewed },
+        { id: item.id, ...draft.value, reviewed: false },
         complete,
         changed ? "修改已保存，请再次审核" : "审核状态已保存",
       );
@@ -71,20 +68,26 @@ export function ItemEditor({
           <Button disabled={!!action.pending} onClick={onClose}>
             取消
           </Button>
+          {!reviewAndSelect ? (
+            <Button
+              disabled={!!action.pending || !draft.value.name.trim()}
+              onClick={() => save(false)}
+            >
+              保存修改
+            </Button>
+          ) : null}
           <Button
             primary
             disabled={
-              !!action.pending ||
-              !draft.value.name.trim() ||
-              (reviewAndSelect && (!reviewed || !!contentIssue))
+              !!action.pending || !draft.value.name.trim() || !!contentIssue
             }
-            onClick={save}
+            onClick={() => save(true)}
           >
             {action.pending
               ? "正在保存…"
               : reviewAndSelect
                 ? "审核并选中"
-                : `保存${changed ? "修改" : reviewed ? "并确认审核" : ""}`}
+                : "保存并审核"}
           </Button>
         </>
       }
@@ -110,7 +113,6 @@ export function ItemEditor({
           maxLength={5000}
           onChange={(e) => {
             draft.update({ question: e.target.value });
-            setReviewed(false);
           }}
         />
       </Field>
@@ -123,28 +125,11 @@ export function ItemEditor({
           maxLength={25000}
           onChange={(e) => {
             draft.update({ answer: e.target.value });
-            setReviewed(false);
           }}
         />
       </Field>
       {draft.error ? <Notice danger>{draft.error}</Notice> : null}
-      <CheckboxField
-        checked={reviewed}
-        disabled={
-          (!reviewAndSelect && changed) || !!contentIssue || !!action.pending
-        }
-        onChange={(e) => setReviewed(e.target.checked)}
-        label="我已核对事实、链接与发布内容"
-        hint={
-          contentIssue
-            ? `${contentIssue}，再确认审核。`
-            : changed && !reviewAndSelect
-              ? "保存修改后，可再次打开并确认审核。"
-              : reviewAndSelect
-                ? "确认后保存当前内容并选中此条问答；修改内容后需重新确认。"
-                : "修改问题或回答后，需要重新确认审核。"
-        }
-      />
+      {contentIssue ? <Notice warning>{contentIssue}</Notice> : null}
     </Dialog>
   );
 }

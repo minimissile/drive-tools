@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowUp, FolderPlus, RefreshCw, Upload } from "lucide-react";
 import { ipc } from "../api/client";
 import { useAppActions } from "../state";
@@ -12,7 +12,6 @@ import {
   Panel,
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
-import { Dialog } from "../ui/Dialog";
 import type {
   DriveDirectory,
   DriveWriteReceipt,
@@ -50,8 +49,9 @@ export function DriveBrowser({
   const [receipt, setReceipt] = useState<DriveWriteReceipt | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState("");
-  const [resolve, setResolve] = useState(false);
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const reconciling = useRef(false);
   const read = async (next?: string) => {
     const success = await query.read(next);
     if (success && mounted.current) {
@@ -62,8 +62,9 @@ export function DriveBrowser({
     }
     return success;
   };
-  const pending =
+  const recordedPending =
     directory?.pending ?? (receipt?.state !== "success" ? receipt : null);
+  const pending = recordedPending?.id === resolvedId ? null : recordedPending;
   const blocked = loading || checking || sharing || !!pending;
   const files = directory?.files.filter((f) => selected.includes(f.id)) ?? [];
   const open = (action: DriveMutation["action"]) =>
@@ -92,6 +93,8 @@ export function DriveBrowser({
     });
   };
   const check = async () => {
+    if (reconciling.current || !directory) return;
+    reconciling.current = true;
     setChecking(true);
     setCheckError("");
     try {
@@ -109,6 +112,40 @@ export function DriveBrowser({
       if (mounted.current)
         setCheckError(e instanceof Error ? e.message : "核对失败。");
     } finally {
+      reconciling.current = false;
+      if (mounted.current) setChecking(false);
+    }
+  };
+  const resolveChecked = async () => {
+    if (reconciling.current || loading || sharing || !directory || !pending)
+      return;
+    reconciling.current = true;
+    setChecking(true);
+    setCheckError("");
+    try {
+      await ipc("drive.resolve", {
+        accountId,
+        path: directory.path,
+        operationId: pending.id,
+        confirmed: true,
+      });
+      if (!mounted.current) return;
+      setResolvedId(pending.id);
+      setReceipt(null);
+      setSelected([]);
+      const refreshed = await read(directory.path);
+      if (!refreshed && mounted.current)
+        notify(
+          "待处理记录已解除，目录刷新失败；请重试读取，无需再次解除。",
+          "warning",
+        );
+    } catch (cause) {
+      if (mounted.current)
+        setCheckError(
+          cause instanceof Error ? cause.message : "解除记录失败。",
+        );
+    } finally {
+      reconciling.current = false;
       if (mounted.current) setChecking(false);
     }
   };
@@ -202,6 +239,9 @@ export function DriveBrowser({
             {pending ? (
               <Notice warning>
                 <p>{pending.message}</p>
+                <p>
+                  人工核对原文件、备份和目标文件后，可解除待处理记录；解除后由你重新选择操作。
+                </p>
                 <div className="drive-browser-actions">
                   <Button
                     disabled={loading || checking || sharing}
@@ -212,9 +252,9 @@ export function DriveBrowser({
                   <Button
                     quiet
                     disabled={loading || checking || sharing}
-                    onClick={() => setResolve(true)}
+                    onClick={() => void resolveChecked()}
                   >
-                    我已手动核对目录
+                    已核对结果，解除待处理记录
                   </Button>
                 </div>
                 {checkError ? <p role="alert">{checkError}</p> : null}
@@ -317,51 +357,6 @@ export function DriveBrowser({
           onClose={() => setMutation(null)}
           onComplete={completed}
         />
-      ) : null}
-      {resolve && pending && directory ? (
-        <Dialog
-          title="确认已核对远端目录"
-          onClose={() => setResolve(false)}
-          busy={checking}
-        >
-          <Notice warning>
-            请先查看目录、原文件备份和目标文件，确认上次操作的实际结果。解除记录后不会重新执行上次请求；再次操作需要重新选择。
-          </Notice>
-          {checkError ? <Notice danger>{checkError}</Notice> : null}
-          <div className="dialog-actions">
-            <Button disabled={checking} onClick={() => setResolve(false)}>
-              取消
-            </Button>
-            <Button
-              disabled={checking}
-              onClick={async () => {
-                setChecking(true);
-                setCheckError("");
-                try {
-                  await ipc("drive.resolve", {
-                    accountId,
-                    path: directory.path,
-                    operationId: pending.id,
-                    confirmed: true,
-                  });
-                  if (mounted.current) {
-                    setResolve(false);
-                    await read(directory.path);
-                  }
-                } catch (e) {
-                  if (mounted.current)
-                    setCheckError(
-                      e instanceof Error ? e.message : "解除记录失败。",
-                    );
-                } finally {
-                  if (mounted.current) setChecking(false);
-                }
-              }}
-            >
-              已核对，解除待处理记录
-            </Button>
-          </div>
-        </Dialog>
       ) : null}
     </div>
   );

@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { DriveShareResult } from "../../shared/zhidao";
 import { ipc } from "../api/client";
 import { useAppActions, useAppNavigation } from "../state";
 import { Button, Notice } from "../ui/primitives";
-import { Dialog } from "../ui/Dialog";
 
 export function DriveSharePanel({
   accountId,
@@ -22,18 +21,12 @@ export function DriveSharePanel({
 }) {
   const { notify, refresh } = useAppActions();
   const { navigate } = useAppNavigation();
-  const [rights, setRights] = useState(false);
   const [result, setResult] = useState<DriveShareResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [reset, setReset] = useState(false);
   const lock = useRef(false);
-  const selectionKey = JSON.stringify(selected);
-  useEffect(() => {
-    setRights(false);
-  }, [selectionKey]);
   const share = async () => {
-    if (lock.current) return;
+    if (lock.current || disabled || !selected.length) return;
     lock.current = true;
     setBusy(true);
     onBusyChange(true);
@@ -47,7 +40,6 @@ export function DriveSharePanel({
       });
       if (!mounted.current) return;
       setResult(next);
-      setRights(false);
       notify(
         `已核验归档 ${next.urls.length} 个分享${next.failures.length ? `，${next.failures.length} 项待处理` : ""}。`,
         next.failures.length ? "warning" : "success",
@@ -67,21 +59,40 @@ export function DriveSharePanel({
       }
     }
   };
+  const resetUncreated = async () => {
+    if (lock.current || disabled || !result?.failures.length) return;
+    lock.current = true;
+    setBusy(true);
+    onBusyChange(true);
+    setError("");
+    try {
+      await ipc("drive.share.reset", {
+        accountId,
+        fileIds: result.failures.map((file) => file.id),
+        confirmed: true,
+      });
+      if (mounted.current) {
+        setResult(null);
+        notify("已解除待处理分享记录，可重新选择文件后分享。", "success");
+      }
+    } catch (cause) {
+      if (mounted.current)
+        setError(cause instanceof Error ? cause.message : "解除记录失败。");
+    } finally {
+      lock.current = false;
+      if (mounted.current) {
+        onBusyChange(false);
+        setBusy(false);
+      }
+    }
+  };
   return (
     <div className="drive-share-controls">
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={rights}
-          disabled={disabled || busy}
-          onChange={(e) => setRights(e.target.checked)}
-        />
-        我有权分享所选项目，并归档到资源库
-      </label>
+      <p>分别分享所选项目并归档到资源库，请确保有权分享这些文件。</p>
       <div className="drive-browser-actions">
         <Button
           primary
-          disabled={disabled || busy || !rights || !selected.length}
+          disabled={disabled || busy || !selected.length}
           onClick={() => void share()}
         >
           {busy ? "正在分享与核验…" : "分别分享并归档"}
@@ -105,59 +116,19 @@ export function DriveSharePanel({
                   {f.name}：{f.message}
                 </p>
               ))}
-              <Button quiet disabled={busy} onClick={() => setReset(true)}>
-                已在网盘核对未创建，准备重试
+              <p>
+                在网盘确认未创建分享后，可解除待处理记录；再次分享由你手动发起。
+              </p>
+              <Button
+                quiet
+                disabled={disabled || busy}
+                onClick={() => void resetUncreated()}
+              >
+                已核对未创建，解除待处理记录
               </Button>
             </Notice>
           ) : null}
         </div>
-      ) : null}
-      {reset ? (
-        <Dialog
-          title="确认平台未创建分享"
-          busy={busy}
-          onClose={() => setReset(false)}
-        >
-          <Notice warning>
-            只有确认未生成分享，才清除未知请求记录。已存在的分享仍需核对，不会重复建链。
-          </Notice>
-          <div className="dialog-actions">
-            <Button onClick={() => setReset(false)} disabled={busy}>
-              取消
-            </Button>
-            <Button
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                onBusyChange(true);
-                setError("");
-                try {
-                  await ipc("drive.share.reset", {
-                    accountId,
-                    fileIds: result!.failures.map((f) => f.id),
-                    confirmed: true,
-                  });
-                  if (mounted.current) {
-                    setReset(false);
-                    setResult(null);
-                    setRights(false);
-                  }
-                } catch (e) {
-                  if (mounted.current)
-                    setError(e instanceof Error ? e.message : "解除记录失败。");
-                } finally {
-                  if (mounted.current) {
-                    onBusyChange(false);
-                    setBusy(false);
-                  }
-                }
-              }}
-            >
-              确认未创建
-            </Button>
-          </div>
-          {error ? <Notice danger>{error}</Notice> : null}
-        </Dialog>
       ) : null}
     </div>
   );
