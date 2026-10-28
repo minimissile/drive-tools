@@ -75,16 +75,16 @@ Apple 会员和 Windows 证书是两项独立资质。申请审核通过后仍�
 
 ## 发布流程
 
-0.0.1 例外：用户明确要求不等待 Apple 公证，当前发布使用同一 Developer ID 签名的 DMG/ZIP，并在说明中标注未公证、首次打开可能出现系统安全提示。`verify-release.mjs --allow-unnotarized` 仅跳过公证票据及 Gatekeeper 验收，仍强制验证签名和包内容；更新签名与哈希检查不变。默认发布入口及 CI 继续要求公证，不将本次交付选择默认为后续版本配置。
+0.0.1 的历史例外：用户明确要求不等待 Apple 公证，该版本发布时使用同一 Developer ID 签名的 DMG/ZIP，并在说明中标注未公证、首次打开可能出现系统安全提示。`verify-release.mjs --allow-unnotarized` 仅跳过公证票据及 Gatekeeper 验收，仍强制验证签名和包内容；更新签名与哈希检查不变。默认发布入口及 CI 继续要求公证，0.0.2 已完成公证，不沿用该例外。
 
 1. 同步修改 `package.json` / `package-lock.json` 的版本，编写 `docs/releases/<version>.md`。只使用稳定 `x.y.z`。
 2. 完成检查并提交，推送与源码一致的 `v<version>` 标签。需要云端构建时手动触发 `.github/workflows/release-desktop.yml` 并选择对应标签，选择分支会被阻止；推送标签不会自动上传私钥或触发未配置凭据的构建。
-3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。0.0.1 仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。
+3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。当前 0.0.2 仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。0.0.1 的未公证交付属于上述历史例外。
 4. 全部已启用平台成功后，核对版本、架构、文件大小、SHA512、ZIP、blockmap，再生成统一的 `SHA256SUMS.txt`。最终检查拒绝缺少已启用平台，也拒绝混入未启用平台的清单或安装包。
 5. 上传到公开仓库的**草稿 Release**，确认所有附件均存在。已公开的同版本不会覆盖；失败后可重跑同一草稿。
 6. 维护者下载验收后，在 GitHub 正式发布草稿并设为最新版本，客户端才会看到更新。不要设为 prerelease。
 
-0.0.1 必须保留的附件：
+当前 macOS ARM64 发行必须保留的附件：
 
 ```text
 Panxu-Studio-<version>-mac-arm64.dmg / .zip
@@ -96,6 +96,8 @@ SHA256SUMS.txt
 输出按版本隔离在 `release/<version>/`，不会混入旧文件。最终草稿只由一个任务上传。Actions 临时 artifact（保留 14 天）用于构建与验收，不能充当客户端更新地址。[发布配置约定](https://www.electron.build/v26/docs/publish/)说明了包与清单的关系。
 
 ## 本地验证
+
+以下自动化测试入口仅在用户明确要求时按授权范围执行；发布编译、签名、公证及附件完整性检查不等同于功能测试。每版实际执行范围单独记录，不能沿用历史测试结果宣称通过。
 
 ```sh
 npm test
@@ -122,7 +124,7 @@ node scripts/verify-updates.mjs --arch=arm64
 - 安装快照在当前数据目录 `updates/backups/`，最多保留最近三份。快照含本机加密凭据，设置为本机私有文件，不能当作可共享备份；封面和登录目录原位保留。
 - 数据库已有迁移前备份和未来版本保护，旧安装包不能强行打开更高版本数据库。确需回退时先关闭应用、完整复制数据目录，再使用匹配版本的快照；便携恢复继续使用设置页的备份导出/预检流程。
 - 日志在当前数据目录 `logs/updater.log`，512 KiB 轮转一份，只记录版本、阶段、错误代码，不记录凭据、响应正文或临时下载链接。
-- 0.3.1 及更早版本没有更新入口，首次需手动安装具备此功能的版本。真实系统升级验收需要两份使用相同发行仓库、同一签名身份的安装包，在 macOS 和 Windows 分别执行“旧版本 → 新版本”。控制器和界面测试不能替代此验收。
+- 旧内部联调 0.3.1 及更早的内部版本没有更新入口，首次需手动安装具备此功能的版本。正式 0.0.1 及后续版本已包含更新入口。真实系统升级验收需要两份使用相同发行仓库、同一签名身份的安装包，在对应发行平台执行“旧版本 → 新版本”。控制器和界面测试不能替代此验收。
 
 ## 0.0.1 正式版起点（2026-10-20）
 
@@ -148,4 +150,10 @@ APPLE_KEYCHAIN_PROFILE=panxu-notary npm run release:mac
 
 0.0.1 已发布到 [GitHub](https://github.com/minimissile/drive-tools/releases/tag/v0.0.1)，附件与更新清单的远端 SHA256 均已核对。公开源在本机有成功版本识别和下载启动记录，也出现匿名 403 与慢速下载超时；完整公开下载未标为验收通过。更换可访问 GitHub 的网络后可重试，应用不会将网络失败伪报为最新版本。隔离的本机完整安装重启演练与正式安装副本验收已通过。
 
-本轮状态见 [0.0.1 验收记录](releases/0.0.1-readiness.md)及[目录清理记录](releases/0.0.1-cleanup.md)。
+0.0.1 的历史状态见 [0.0.1 验收记录](releases/0.0.1-readiness.md)及[目录清理记录](releases/0.0.1-cleanup.md)。
+
+## 0.0.2 已发布（2026-10-28）
+
+[0.0.2 正式发布页](https://github.com/minimissile/drive-tools/releases/tag/v0.0.2)提供 macOS Apple Silicon ARM64 安装包和更新 ZIP，沿用原有 Developer ID 发行主体。Apple 公证返回 Accepted，应用票据和 Gatekeeper 检查通过；6 个远端附件的大小及 SHA256 与本地一致，已设为最新稳定版本。
+
+本轮没有运行自动化功能测试、真实安装或 0.0.1 → 0.0.2 升级演练，不能将附件和签名校验视为全量功能验收。发行标签固定后的并行开发改动未混入本版。具体提交、公证标识、发布时间及检查范围见 [0.0.2 发布记录](releases/0.0.2-readiness.md)。

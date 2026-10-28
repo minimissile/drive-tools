@@ -4,12 +4,12 @@
 
 ## 最新更新
 
-### 2026-10-28 · 0.0.2 准备发布
+### 2026-10-28 · 0.0.2 已发布
 
 - 资源封面在入库保存时自动压缩并转换为 WebP，单张不超过200KB；兼容已有PNG封面及其预览、导出与备份。资源库搜索框限制宽度，“清除筛选”移至分类下拉框左侧。处理规则见[资源库与封面](docs/features/resource-library.md)。
 - “连接与设置”支持脱敏回显已保存的 OpenRouter、5118、TikHub 和比特 API Key，仅显示部分首尾字符，不提供明文查看。更换时单独输入新Key，保存后重新读取脱敏结果，读取失败可重试；密钥继续在本机加密存储，不进入表单暂存。
 
-本次整合以下开发更新，继续提供 macOS Apple Silicon（ARM64）DMG 和自动更新 ZIP。版本从 0.0.1 递增为 0.0.2，签名、公证和上传完成后更新发布状态。详见 [0.0.2 版本说明](docs/releases/0.0.2.md)。
+本次整合此前开发更新，提供 macOS Apple Silicon（ARM64）DMG 和自动更新 ZIP，已通过 Developer ID 签名、Apple 公证及 Gatekeeper 检查。6 个远端附件的大小与 SHA256 均已核对一致，已设为最新稳定版本。[下载 0.0.2](https://github.com/minimissile/drive-tools/releases/tag/v0.0.2)，或在 0.0.1 的“连接与设置 → 版本与更新”检查更新。本轮未运行自动化功能测试或实际升级演练，详见 [版本说明](docs/releases/0.0.2.md)及[发布记录](docs/releases/0.0.2-readiness.md)。
 
 ### 2026-10-27 · 开发中
 
@@ -80,18 +80,19 @@ npm run dev
 
 ## 验证
 
+生产编译使用 `npm run build`。以下自动化测试仅在用户明确要求时，按本次授权范围运行：
+
 ```sh
 npm test
-npm run build
 npm run test:e2e
 npm run test:e2e:updates
 ```
 
-测试使用临时数据库与模拟外部服务，不自动访问本人网盘或进行付费调用。`test:e2e:*` 是不同业务的交互回归入口。正式包还需执行 `test:e2e:packaged`、`test:e2e:production`、签名/公证与更新文件校验。界面验收包含常用桌面尺寸及 840px 最小窗口，自动化不能代替查看实际界面。
+测试使用临时数据库与模拟外部服务，不自动访问本人网盘或进行付费调用。`test:e2e:*` 是不同业务的交互回归入口，`test:e2e:packaged`、`test:e2e:production` 同样需要明确授权。发布仍需签名、公证与更新文件完整性校验。界面验收面向14寸及以上桌面设备，按受影响布局选择1366×768、1440×900或1920×1080；不例行进行小屏专项，自动化不能代替查看实际界面。
 
 ## 正式发布
 
-0.0.1 按用户明确要求以已签名、尚未公证的状态交付并发布，公证结果不阻塞本轮；校验通过显式选项 `--allow-unnotarized` 标明这一状态，仍强制验证签名、构建内容和更新文件。以下默认流程继续包含公证，不自动降低后续版本的检查要求。
+0.0.1 按用户明确要求以已签名、尚未公证的状态交付并发布，公证结果不阻塞该历史版本的交付；校验通过显式选项 `--allow-unnotarized` 标明这一状态，仍强制验证签名、构建内容和更新文件。0.0.2 已按默认流程完成公证，不沿用该例外。
 
 发行平台统一记录在 [release.config.json](release.config.json)，CI 矩阵与最终附件检查使用同一配置。本次仅启用 macOS ARM64。
 
@@ -111,6 +112,7 @@ npm run release:mac
 ## 文档
 
 - [0.0.2 版本说明](docs/releases/0.0.2.md)
+- [0.0.2 发布记录](docs/releases/0.0.2-readiness.md)
 - [0.0.1 版本说明](docs/releases/0.0.1.md)
 - [0.0.1 发布验收记录](docs/releases/0.0.1-readiness.md)
 - [签名、自动更新与发布配置](docs/updates.md)
