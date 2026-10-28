@@ -14,6 +14,10 @@ export function createDriveFilesHandlers(
     confirmed: z.literal(true),
   });
   return {
+    "drive.locateCopy": (input) =>
+      s.driveFiles.locateCopy(
+        z.object({ copyId: z.string().min(1).max(100) }).parse(input).copyId,
+      ),
     "drive.adoptCopy": (input) =>
       s.driveFiles.management.adoptCopy(
         location

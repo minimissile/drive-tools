@@ -17,6 +17,12 @@ export interface DriveDirectory {
   capabilities: { rename: boolean; delete: boolean; upload: boolean };
   pending: DriveWriteReceipt | null;
 }
+export interface DriveCopyLocation {
+  copyId: string;
+  /** The real parent directory containing these exact resource file IDs. */
+  directory: DriveDirectory;
+  files: RemoteFile[];
+}
 export interface DriveWriteReceipt {
   id: string;
   action: "mkdir" | "rename" | "delete" | "upload" | "replace";
@@ -42,6 +48,10 @@ export interface DriveMaterialInput {
   confirmed: true;
 }
 export interface DriveFilesContract {
+  "drive.locateCopy": {
+    args: { copyId: string };
+    value: DriveCopyLocation;
+  };
   "drive.adoptCopy": {
     args: {
       copyId: string;

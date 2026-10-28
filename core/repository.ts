@@ -25,6 +25,7 @@ import { AppError } from "./errors";
 import packageInfo from "../package.json" with { type: "json" };
 import { resolveAiModels } from "../shared/ai-models";
 import { accountCapacitySchema } from "../shared/drive-capacity";
+import { resourceTags } from "./resource-tags";
 export type Row = Record<string, any>;
 export class Repository {
   constructor(readonly db: Database) {}
@@ -97,7 +98,7 @@ export class Repository {
       sourceKind: row.source_kind ?? "share",
       provider: row.provider,
       category: row.category,
-      tags: parseJson(row.tags, []),
+      tags: resourceTags(parseJson<string[]>(row.tags, [])),
       summary: row.summary,
       coverId: row.cover_id,
       revision: row.revision,

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { SmzdmDetail } from "../../shared/smzdm";
+import type { SmzdmDetail, SmzdmResourceLink } from "../../shared/smzdm";
+import {
+  DriveResourceDialog,
+  type DriveResourceTarget,
+} from "../drive-files/DriveResourceDialog";
 import { providers } from "../../shared/platforms";
 import { ipc } from "../api/client";
 import { useAppActions, useAppData, useAppNavigation } from "../state";
@@ -27,6 +31,42 @@ export function ArticleResources({
     [error, setError] = useState("");
   const lock = useRef(false),
     alive = useRef(true);
+  const [viewing, setViewing] = useState<DriveResourceTarget | null>(null);
+  const [viewLoading, setViewLoading] = useState("");
+  const viewLink = async (link: SmzdmResourceLink, accountId: string) => {
+    if (viewLoading) return;
+    setViewLoading(link.id);
+    setError("");
+    try {
+      if (link.resourceId) {
+        const resource =
+          data?.resources.find((item) => item.id === link.resourceId) ??
+          (await ipc("resource.get", { id: link.resourceId }));
+        if (alive.current)
+          setViewing({
+            kind: "resource",
+            resource,
+            copy: resource.copies.find((copy) => copy.id === link.copyId),
+          });
+      } else if (alive.current) {
+        setViewing({
+          kind: "share",
+          accountId,
+          sourceText: link.sourceText,
+          code: link.code,
+          title: "文章配套资源",
+          ownership: "unknown",
+        });
+      }
+    } catch (cause) {
+      if (alive.current)
+        setError(
+          cause instanceof Error ? cause.message : "资源读取失败，请重试。",
+        );
+    } finally {
+      if (alive.current) setViewLoading("");
+    }
+  };
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -106,6 +146,17 @@ export function ArticleResources({
                   ) : null}
                 </div>
                 <div className="smzdm-resource-controls">
+                  <Button
+                    disabled={
+                      busy ||
+                      !!pending ||
+                      !!viewLoading ||
+                      (!linked && !accountId)
+                    }
+                    onClick={() => void viewLink(link, accountId)}
+                  >
+                    {viewLoading === link.id ? "正在读取…" : "查看网盘资源"}
+                  </Button>
                   {row.candidates.length && !linked ? (
                     <>
                       <Field label={`资源 ${i + 1} 已有副本`}>
@@ -211,6 +262,12 @@ export function ArticleResources({
           原文未检测到支持的网盘分享链接，可直接整理文章。
         </p>
       )}
+      {viewing ? (
+        <DriveResourceDialog
+          target={viewing}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
     </Panel>
   );
 }

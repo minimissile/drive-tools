@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { RemoteFile } from "../../shared/types";
 import type {
   DriveDirectory,
@@ -24,6 +24,13 @@ const titles = {
   upload: "插入广告素材",
   replace: "替换广告文件",
 };
+const actions = {
+  mkdir: "新建文件夹",
+  rename: "保存名称",
+  delete: "删除所选文件",
+  upload: "插入广告素材",
+  replace: "备份并替换",
+};
 
 export function DriveMutationDialog({
   mutation,
@@ -44,7 +51,7 @@ export function DriveMutationDialog({
   const [material, setMaterial] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
+  const submitting = useRef(false);
   const advertisement =
     mutation.action === "upload" || mutation.action === "replace";
   const kinds =
@@ -57,8 +64,16 @@ export function DriveMutationDialog({
     enabled: advertisement,
     keepPrevious: true,
   });
+  const canSubmit =
+    !busy &&
+    (advertisement
+      ? !!material && !library.loading && !library.error
+      : mutation.action === "delete"
+        ? mutation.files.length > 0
+        : !!name.trim());
   const submit = async () => {
-    if (busy) return;
+    if (submitting.current || !canSubmit) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
@@ -87,6 +102,7 @@ export function DriveMutationDialog({
         cause instanceof Error ? cause.message : "提交失败，请核对后重试。",
       );
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -101,24 +117,8 @@ export function DriveMutationDialog({
           <Button disabled={busy} onClick={onClose}>
             取消
           </Button>
-          <Button
-            primary
-            disabled={
-              busy ||
-              !confirmed ||
-              (advertisement
-                ? !material || library.loading || !!library.error
-                : mutation.action !== "delete" && !name.trim())
-            }
-            onClick={() => void submit()}
-          >
-            {busy
-              ? "正在提交并核对…"
-              : mutation.action === "delete"
-                ? "确认删除所选项目"
-                : mutation.action === "replace"
-                  ? "备份原文件并替换"
-                  : "确认写入本人网盘"}
+          <Button primary disabled={!canSubmit} onClick={() => void submit()}>
+            {busy ? "正在处理…" : actions[mutation.action]}
           </Button>
         </>
       }
@@ -170,7 +170,6 @@ export function DriveMutationDialog({
             onChanged={library.reload}
             onSelect={(id, checked) => {
               setMaterial(checked ? id : "");
-              setConfirmed(false);
             }}
           />
         </>
@@ -182,21 +181,11 @@ export function DriveMutationDialog({
             maxLength={160}
             onChange={(e) => {
               setName(e.target.value);
-              setConfirmed(false);
             }}
           />
         </Field>
       ) : null}
       {error ? <Notice danger>{error}</Notice> : null}
-      <label className="check">
-        <input
-          type="checkbox"
-          disabled={busy}
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />
-        我已核对本人网盘中的目标目录和所选项目
-      </label>
     </Dialog>
   );
 }

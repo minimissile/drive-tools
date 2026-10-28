@@ -264,7 +264,7 @@ export class SmzdmArticles {
           ),
         sourceText: link.sourceText,
         category: "学习资料",
-        tags: ["公众号文章", "什么值得买"],
+        tags: [],
         summary: `文章：${article.source.title}\n作者：${article.source.author}\n来源：${article.source.url}`,
         accountId,
         directory: "",

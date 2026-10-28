@@ -278,6 +278,8 @@
 }
 
 .dialog-heading {
+  --dialog-heading-bleed: calc(var(--dialog-padding) - var(--space-3));
+  --dialog-close-offset: 0px;
   position: sticky;
   top: 0;
   z-index: 2;
@@ -285,16 +287,17 @@
   align-items: flex-start;
   gap: 16px;
   background: var(--surface);
+  margin-top: calc(-1 * var(--dialog-heading-bleed));
+  margin-inline: calc(-1 * var(--dialog-heading-bleed));
+  padding-top: var(--dialog-heading-bleed);
+  padding-inline: var(--dialog-heading-bleed);
   padding-bottom: 10px;
+  padding-right: calc(var(--dialog-heading-bleed) + var(--space-6));
 }
 .dialog-heading h2 {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.dialog-heading > .button {
-  flex-shrink: 0;
-  white-space: nowrap;
 }
 .tab-panel {
   min-width: 0;

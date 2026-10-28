@@ -1,4 +1,5 @@
 import type { ResourceAnswerContract } from "./resource-answers";
+import type { ResourceDeletionContract } from "./resource-deletion";
 import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
@@ -20,6 +21,7 @@ import type {
   BrowserBinding,
   Resource,
   ResourcePage,
+  SimilarResource,
   SplitRun,
   SplitItem,
   TransferBatch,
@@ -79,6 +81,7 @@ export interface IpcContract
     BrowserEnvironmentContract,
     BitBrowserContract,
     ResourceAnswerContract,
+    ResourceDeletionContract,
     IpcCommands,
     ZhidaoContract,
     BaiduKeywordContract,
@@ -92,6 +95,10 @@ export interface IpcContract
   snapshot: Contract<{ resourceId?: string } | undefined, AppSnapshot>;
   "resource.get": Contract<{ id: string }, Resource>;
   "resource.search": Contract<{ query: string }, Resource[]>;
+  "resource.similar": Contract<
+    { title: string; excludeId?: string },
+    SimilarResource[]
+  >;
   "directory.list": Contract<
     { accountId: string; parentId: string },
     RemoteFile[]
@@ -229,6 +236,8 @@ export const queryMethods = [
   "insertion.list",
   "insertion.get",
   "resource.get",
+  "resource.similar",
+  "resource.deletePreview",
   "resource.intakeOptions",
   "resource.page",
   "cover.get",

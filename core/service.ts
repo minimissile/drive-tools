@@ -7,6 +7,9 @@ import { createEnvironmentStatus } from "./browser-environment-status";
 import { BrowserEnvironments } from "./browser-environments";
 import { BrowserEnvironmentQueue } from "./browser-environment-queue";
 import { ResourceAnswers } from "./resource-answers";
+import { ResourceDeletion } from "./resource-deletion";
+import { assertResourceUnique } from "./resource-duplicates";
+import { resourceTags } from "./resource-tags";
 import { Distribution } from "./distribution";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
 import { coverFilePattern, saveResourceCover } from "./cover-assets";
@@ -73,6 +76,7 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly resourceDeletion: ResourceDeletion;
   readonly smzdm: SmzdmArticles;
   readonly distribution: Distribution;
   readonly zhihu: ZhihuOperations;
@@ -310,7 +314,14 @@ export class AppService {
       },
     });
     this.weiboStatistics = new WeiboStatistics({ db: this.db, accounts: this.websiteAccounts, ports: this.ports, changed, posts: (accountId) => this.weiboPosts.list(accountId), marketing: () => this.weibo.history() });
+    this.resourceDeletion = new ResourceDeletion({
+      repo: this.repo,
+      driveFiles: this.driveFiles,
+      hasRunningJobs: () => this.hasRunningJobs(),
+      changed,
+    });
     this.handlers = createApplicationHandlers({
+      resourceDeletion: this.resourceDeletion,
       smzdm: this.smzdm,
       distribution: this.distribution,
       zhihu: this.zhihu,
@@ -377,6 +388,7 @@ export class AppService {
       this.switchingWorkspace ||
       activeOperations ||
       this.queue.isBusy ||
+      this.resourceDeletion.isBusy ||
       this.hasRunningJobs() ||
       this.ports.collectionWebSession?.isOpen()
     )
@@ -574,11 +586,21 @@ export class AppService {
       source.url,
     );
     const resourceId = input.id ?? existing?.id ?? id("resource");
+    this.resourceDeletion.assertMutable(resourceId);
     if (input.id && this.repo.getResource(input.id).sourceUrl !== source.url)
       throw new AppError(
         "SOURCE_IMMUTABLE",
         "已有资源的来源链接不能直接更换，请新建资源。",
       );
+    const uniqueness = {
+      resourceId,
+      sourceUrl: source.url,
+      title: input.title,
+      provider: account.provider,
+      accountId: account.id,
+      copyId: input.copyId,
+    };
+    assertResourceUnique(this.db, uniqueness);
     let coverId: string | null | undefined;
     if (input.coverData === null) coverId = null;
     else if (input.coverData) {
@@ -620,16 +642,15 @@ export class AppService {
       )
         throw new AppError(
           "COPY_MISMATCH",
-          "编辑资料时不能改绑已有副本账号；请新建该账号的副本。",
+          "编辑资料时不能改绑已有账号，请打开原账号的资源记录编辑。",
         );
       directory = editedCopy.directory;
     }
     const priorCopy =
-      input.isOwnResource && !input.copyId
+      input.copyId
         ? this.db.get<{ id: string; status: string }>(
-            "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? ORDER BY created_at LIMIT 1",
-            resourceId,
-            account.id,
+            "SELECT id,status FROM copies WHERE id=?",
+            input.copyId,
           )
         : this.db.get<{ id: string; status: string }>(
             "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? AND directory=?",
@@ -698,7 +719,9 @@ export class AppService {
     if (input.isOwnResource && source.code)
       await this.secrets.set(`share:${copyId}`, source.code);
     let jobId: string | null = null;
+    this.resourceDeletion.assertMutable(resourceId);
     this.db.transaction(() => {
+      assertResourceUnique(this.db, uniqueness);
       if (!resourceExists)
         this.db.run(
           "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,cover_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -708,7 +731,7 @@ export class AppService {
           source.shareKey,
           source.provider,
           input.category,
-          JSON.stringify(input.tags),
+          JSON.stringify(resourceTags(input.tags)),
           input.summary,
           coverId ?? null,
           time,
@@ -719,7 +742,7 @@ export class AppService {
           "UPDATE resources SET title=?,category=?,tags=?,summary=?,cover_id=?,revision=revision+1,updated_at=? WHERE id=?",
           input.title,
           input.category,
-          JSON.stringify(input.tags),
+          JSON.stringify(resourceTags(input.tags)),
           input.summary,
           coverId === undefined
             ? this.repo.getResource(input.id).coverId

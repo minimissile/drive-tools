@@ -43,17 +43,12 @@ export function CsdnPublication({ detail }: { detail: CsdnWorkflowDetail }) {
     storedKey = JSON.stringify(run.options);
   const dirty = optionsKey !== storedKey;
   const working = useDraftDeliveryStatus(draft ?? undefined);
-  const [confirmed, setConfirmed] = useState(false);
   const [optionError, setOptionError] = useState("");
-  useEffect(() => {
-    setConfirmed(false);
-  }, [run.draftId, run.prepared?.fingerprint, run.stage, optionsKey]);
   const final = ["submitted", "published", "uncertain"].includes(run.stage);
   const binding = bindings.find((binding) => binding.id === value.bindingId);
   const issue = draft ? csdnPublicationIssue(draft) : null;
   const disabled = busy > 0 || final;
   const prepare = async () => {
-    setConfirmed(false);
     const result = csdnPublicationOptions.safeParse(value);
     if (!result.success) {
       setOptionError(result.error.issues[0].message);
@@ -175,31 +170,17 @@ export function CsdnPublication({ detail }: { detail: CsdnWorkflowDetail }) {
       </div>
       {run.stage === "ready" && !dirty ? (
         <div className="csdn-submit-area">
-          <label className="checkbox">
-            <input
-              aria-label="我已核对当前文章、账号和资源入口，授权本次提交"
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-            />
-            我已核对当前文章、账号和资源入口，授权本次提交
-          </label>
           <Button
             primary
-            disabled={
-              !confirmed || busy > 0 || working.blocked || !draft?.reviewed
-            }
+            disabled={busy > 0 || working.blocked || !draft?.reviewed}
             onClick={() => {
-              setConfirmed(false);
               void command("csdn.submit", { id: run.id, confirmed: true });
             }}
           >
             <Send size={15} />
             提交当前文章到 CSDN
           </Button>
-          <small>
-            授权只对本次提交有效。扫码或验证码需要本人完成；结果不明时暂停核对。
-          </small>
+          <small>扫码或验证码需要本人完成；结果不明时暂停核对。</small>
         </div>
       ) : run.stage === "ready" && dirty ? (
         <Notice warning>发布设置有修改，请重新核验并填写后再提交。</Notice>
@@ -214,14 +195,11 @@ export function CsdnReceipt({ detail }: { detail: CsdnWorkflowDetail }) {
     { busy } = useAppActivity(),
     { openDraft, openSearch } = useAppNavigation();
   const [url, setUrl] = useState(run.url ?? "");
-  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     setUrl(run.url ?? "");
-    setConfirmed(false);
   }, [run.id, run.url, run.stage]);
   if (!["submitted", "published", "uncertain"].includes(run.stage)) return null;
   const resolve = (result: "submitted" | "published" | "not_submitted") => {
-    setConfirmed(false);
     void command("csdn.resolve", {
       id: run.id,
       result,
@@ -252,10 +230,7 @@ export function CsdnReceipt({ detail }: { detail: CsdnWorkflowDetail }) {
           value={url}
           maxLength={2000}
           disabled={!!run.url || busy > 0}
-          onChange={(e) => {
-            setUrl(e.target.value);
-            setConfirmed(false);
-          }}
+          onChange={(e) => setUrl(e.target.value)}
           placeholder="https://blog.csdn.net/用户名/article/details/文章ID"
         />
       </Field>
@@ -267,18 +242,9 @@ export function CsdnReceipt({ detail }: { detail: CsdnWorkflowDetail }) {
       ) : null}
       {run.stage !== "published" ? (
         <>
-          <label className="checkbox csdn-option">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-              aria-label="我已在 CSDN 核对本次提交结果"
-            />
-            我已在 CSDN 核对本次提交结果
-          </label>
           <div className="row">
             <Button
-              disabled={!confirmed || !url.trim() || busy > 0}
+              disabled={!url.trim() || busy > 0}
               onClick={() => resolve("submitted")}
             >
               {run.stage === "uncertain"
@@ -286,14 +252,14 @@ export function CsdnReceipt({ detail }: { detail: CsdnWorkflowDetail }) {
                 : "同步待审核回执"}
             </Button>
             <Button
-              disabled={!confirmed || !url.trim() || busy > 0}
+              disabled={!url.trim() || busy > 0}
               onClick={() => resolve("published")}
             >
               确认文章已公开
             </Button>
             {run.stage === "uncertain" ? (
               <Button
-                disabled={!confirmed || !!url.trim() || busy > 0}
+                disabled={!!url.trim() || busy > 0}
                 onClick={() => resolve("not_submitted")}
               >
                 确认未提交，允许重新准备

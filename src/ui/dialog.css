@@ -4,11 +4,20 @@
   overflow: hidden;
 }
 .modal--structured .dialog-heading {
-  position: static;
+  position: relative;
   flex: none;
   align-items: center;
   padding-bottom: 0;
   margin-bottom: var(--space-5);
+}
+.dialog-heading > .dialog-close {
+  position: absolute;
+  top: var(--dialog-close-offset);
+  right: var(--dialog-close-offset);
+  width: var(--space-8);
+  height: var(--space-8);
+  min-height: var(--space-8);
+  padding: 0;
 }
 .dialog-body {
   display: grid;

@@ -55,6 +55,20 @@ export class DriveManagement {
   private recordKey(accountId: string, id: string) {
     return `drive-write:${accountId}:${id}`;
   }
+  /** Durable evidence used by recovery workflows; never creates or repeats a write. */
+  writeReceipt(accountId: string, operationId: string): DriveWriteReceipt | null {
+    const record = this.db.setting<WriteRecord | null>(
+      this.recordKey(accountId, operationId),
+      null,
+    );
+    if (!record) return null;
+    if (record.ownerUid !== this.d.repo.getAccount(accountId).uid)
+      throw new AppError(
+        "ACCOUNT_UID_MISMATCH",
+        "此写入操作属于另一个账号身份，请登录原账号后核对。",
+      );
+    return record.receipt;
+  }
   private pending(accountId: string, path: string) {
     const id = this.db.setting<string | null>(this.slot(accountId, path), null);
     return id

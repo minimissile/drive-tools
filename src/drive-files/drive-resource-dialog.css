@@ -1,0 +1,62 @@
+.modal.drive-resource-dialog {
+  width: 1080px;
+  max-width: 100%;
+}
+.drive-resource-dialog .drive-browser > .panel,
+.drive-resource-body > .panel {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.drive-resource-body {
+  display: grid;
+  gap: var(--space-4);
+}
+.drive-resource-dialog .drive-browser {
+  display: grid;
+  gap: var(--space-4);
+}
+.drive-resource-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.drive-resource-heading > div {
+  min-width: 0;
+}
+.drive-resource-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.drive-resource-heading p {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.drive-resource-ownership {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border-radius: var(--control-radius);
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: 12px;
+}
+.drive-resource-ownership[data-own] {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.drive-resource-context {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}

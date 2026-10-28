@@ -3,8 +3,14 @@ import { ipc } from "../api/client";
 import type { DriveDirectory } from "../../shared/drive-files";
 
 /** Remote reads only run after an explicit directory action. */
-export function useDriveDirectory(accountId: string, initialPath: string) {
-  const [directory, setDirectory] = useState<DriveDirectory | null>(null);
+export function useDriveDirectory(
+  accountId: string,
+  initialPath: string,
+  initialDirectory?: DriveDirectory,
+) {
+  const [directory, setDirectory] = useState<DriveDirectory | null>(
+    initialDirectory ?? null,
+  );
   const [path, setPath] = useState(initialPath);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

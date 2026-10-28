@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
+import { X } from "lucide-react";
 import { Button } from "./primitives";
 import { useToastHost } from "./ToastLayer";
 import "./dialog.css";
@@ -52,8 +53,13 @@ export function Dialog({
           >
             <div className="panel-heading dialog-heading">
               <BaseDialog.Title>{title}</BaseDialog.Title>
-              <BaseDialog.Close render={<Button quiet />} disabled={busy}>
-                关闭
+              <BaseDialog.Close
+                render={<Button quiet className="dialog-close" />}
+                aria-label="关闭弹窗"
+                title="关闭"
+                disabled={busy}
+              >
+                <X size={18} aria-hidden="true" />
               </BaseDialog.Close>
             </div>
             {footer != null ? (

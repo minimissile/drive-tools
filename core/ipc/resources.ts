@@ -2,6 +2,7 @@ import { intakeOptions, addIntakeOption } from "../intake-options";
 import { z } from "zod";
 import { resourceInputSchema } from "../../shared/schemas";
 import { readResourceCover } from "../cover-assets";
+import { similarResources } from "../resource-duplicates";
 
 import type { HandlerServices, HandlerMap } from "./types";
 
@@ -24,6 +25,15 @@ export function createResourcesHandlers(
       return services.repo.resources(
         z.object({ query: z.string().max(200) }).parse(object).query,
       );
+    },
+    "resource.similar": (object) => {
+      const { title, excludeId } = z
+        .object({
+          title: z.string().trim().max(200),
+          excludeId: z.string().max(100).optional(),
+        })
+        .parse(object);
+      return similarResources(services.db, title, excludeId);
     },
     "resource.get": async (object) => {
       const { id } = z.object({ id: z.string() }).parse(object);
@@ -83,7 +93,10 @@ export function createResourcesHandlers(
         .object({ id: z.string().regex(/^[a-f0-9]{64}$/) })
         .parse(object);
       const cover = await readResourceCover(services.dataPath, coverId);
-      return services.ports.saveFile(`资源封面.${cover.extension}`, cover.bytes);
+      return services.ports.saveFile(
+        `资源封面.${cover.extension}`,
+        cover.bytes,
+      );
     },
     "cover.get": async (object) => {
       const { id: coverId } = z

@@ -10,16 +10,26 @@
   flex-direction: column;
   min-height: 0;
 }
-.library-workspace > .page-heading {
-  margin-bottom: var(--space-3);
+.library-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
   flex: none;
+}
+.library-primary-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .library-summary {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px 24px;
-  margin-bottom: var(--space-5);
   font-size: 12px;
   color: var(--muted);
 }
@@ -121,7 +131,6 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 .resource-list > .pagination {
   flex: none;
@@ -158,6 +167,54 @@
 }
 .resource-row:focus-visible {
   outline-offset: -3px;
+}
+.resource-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-3);
+}
+.resource-row-actions .button {
+  white-space: nowrap;
+}
+.resource-delete-title {
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.resource-delete-scope {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.resource-delete-scope [aria-pressed="true"]:not(:disabled) {
+  color: var(--blue);
+  background: var(--blue-bg);
+  border-color: var(--blue);
+}
+.resource-delete-copies {
+  display: grid;
+  gap: var(--space-4);
+  overflow-wrap: anywhere;
+}
+.resource-delete-copies > section:not(:last-child) {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.resource-delete-copy-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.resource-delete-copy-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.resource-delete-copies ul {
+  padding-left: var(--space-5);
+  margin-top: var(--space-2);
 }
 .resource-row-copy {
   flex: 1;
@@ -348,9 +405,10 @@
   overflow: hidden;
 }
 .resource-detail-dialog > .dialog-heading {
+  --dialog-close-offset: var(--space-3);
   flex: none;
   margin: 0;
-  padding: 16px 20px;
+  padding: var(--space-4) 48px var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--line);
 }
 .resource-detail-dialog > .resource-detail {

@@ -3,6 +3,12 @@ import { AppError, safeMessage } from "./errors";
 import { parseShare } from "./links";
 import { Repository } from "./repository";
 import { resourceInputSchema } from "../shared/schemas";
+import {
+  exactTitleResource,
+  normalizedResourceTitle,
+  resourceTitleSimilarity,
+  similarResources,
+} from "./resource-duplicates";
 import type {
   ImportPreview,
   ImportRow,
@@ -104,6 +110,8 @@ export class BulkImporter {
         "CSV首行须包含标题、链接、分类，列名不能重复。可选：标签、说明、账号、提取码。",
       );
     const seen = new Set<string>();
+    const seenTitles = new Set<string>();
+    const accepted: { row: number; title: string }[] = [];
     const items = rows.map((values, index) => {
       const data = Object.fromEntries(
         columns.map((key, i) => [key, values[i] ?? ""]),
@@ -152,15 +160,15 @@ export class BulkImporter {
         const sameCopy =
           existing &&
           this.repo.db.get(
-            "SELECT id FROM copies WHERE resource_id=? AND account_id=?",
+            "SELECT c.id FROM copies c JOIN accounts a ON a.id=c.account_id WHERE c.resource_id=? AND a.provider=? LIMIT 1",
             existing.id,
-            account.id,
+            source.provider,
           );
-        const key = `${source.url}:${account.id}`;
+        const key = source.url;
         if (sameCopy || seen.has(key)) {
           view.status = "skip";
           view.message = sameCopy
-            ? "该账号已录入此资源，跳过"
+            ? "该类型网盘已录入此资源，跳过；可从资源库编辑原记录"
             : "CSV内重复，跳过";
           return { view, input: null };
         }
@@ -182,11 +190,45 @@ export class BulkImporter {
           rightsConfirmed: false,
           enqueue: false,
         });
+        const titleKey = normalizedResourceTitle(input.title);
+        const providerTitle = `${source.provider}:${titleKey}`;
+        const sameTitle = exactTitleResource(
+          this.repo.db,
+          input.title,
+          source.provider,
+          existing?.id,
+        );
+        if (sameTitle || (titleKey && seenTitles.has(providerTitle))) {
+          view.status = "skip";
+          view.message = sameTitle
+            ? `该类型网盘已有同名资源“${sameTitle.title}”，跳过`
+            : "CSV内同类型网盘存在同名资源，跳过";
+          return { view, input: null };
+        }
+        const warnings = [
+          ...similarResources(this.repo.db, input.title, existing?.id).map(
+            (item) => `“${item.title}” ${Math.round(item.similarity * 100)}%`,
+          ),
+          ...accepted
+            .map((item) => ({
+              ...item,
+              similarity: resourceTitleSimilarity(input.title, item.title),
+            }))
+            .filter((item) => item.similarity >= 0.8)
+            .map(
+              (item) =>
+                `CSV第${item.row}行“${item.title}” ${Math.round(item.similarity * 100)}%`,
+            ),
+        ];
         seen.add(key);
+        if (titleKey) seenTitles.add(providerTitle);
+        accepted.push({ row: view.row, title: input.title });
         view.status = existing ? "copy" : "new";
         view.message = existing
-          ? "新增该账号的资料草稿，沿用已有资源信息"
+          ? "关联已有资源，新增该网盘类型的资料草稿"
           : "新增资料草稿，稍后单独选择文件并转存";
+        if (warnings.length)
+          view.message += `；名称相似提醒：${warnings.slice(0, 3).join("、")}${warnings.length > 3 ? "等" : ""}，请核对是否重复`;
         return { view, input };
       } catch (error) {
         view.message =
@@ -227,9 +269,9 @@ export class BulkImporter {
         const source = parseShare(input.sourceText);
         if (
           this.repo.db.get(
-            "SELECT c.id FROM copies c JOIN resources r ON r.id=c.resource_id WHERE r.source_url=? AND c.account_id=?",
+            "SELECT c.id FROM copies c JOIN resources r ON r.id=c.resource_id JOIN accounts a ON a.id=c.account_id WHERE r.source_url=? AND a.provider=? LIMIT 1",
             source.url,
-            input.accountId,
+            source.provider,
           )
         ) {
           skipped++;

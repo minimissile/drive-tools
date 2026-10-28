@@ -187,7 +187,7 @@
     padding: 15px;
   }
   .modal {
-    padding: 19px;
+    --dialog-padding: 19px;
   }
   .content-textarea {
     min-height: 300px;

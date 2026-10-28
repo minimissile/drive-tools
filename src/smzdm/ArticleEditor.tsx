@@ -49,7 +49,6 @@ export function ArticleEditor({
     [error, setError] = useState(""),
     [preview, setPreview] = useState(false),
     [publishDialog, setPublishDialog] = useState(false),
-    [consent, setConsent] = useState(false),
     [reviewed, setReviewed] = useState(false);
   const [resourceBusy, setResourceBusy] = useState(false);
   const busy = !!pending || resourceBusy;
@@ -96,7 +95,6 @@ export function ArticleEditor({
       revision: next.article.revision,
     });
     setReviewed(false);
-    setConsent(false);
     if (
       next.article.stage === "submitted" ||
       next.article.stage === "published"
@@ -151,7 +149,6 @@ export function ArticleEditor({
   const update = (patch: Partial<typeof draft.value>) => {
     draft.update(patch);
     setReviewed(false);
-    setConsent(false);
   };
   return (
     <div className="smzdm-article">
@@ -400,7 +397,6 @@ export function ArticleEditor({
               account?.status !== "connected"
             }
             onClick={() => {
-              setConsent(false);
               setPublishDialog(true);
             }}
           >
@@ -459,7 +455,6 @@ export function ArticleEditor({
                       resolution.update({
                         result: v as typeof resolution.value.result,
                       });
-                      setConsent(false);
                     }}
                     items={[
                       { value: "submitted", label: "已提交，等待审核" },
@@ -519,28 +514,25 @@ export function ArticleEditor({
           busy={busy}
           onClose={() => {
             setPublishDialog(false);
-            setConsent(false);
           }}
         >
           <p>
             将“{article.title}”发布到 {account?.nickname || account?.alias}
             。提交后仍可能进入平台审核。
           </p>
-          <label className="check smzdm-consent">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-            />
-            我有权使用本篇文章及配图，已核对本人资源链接，确认提交当前版本
-          </label>
           <div className="dialog-actions">
             <Button disabled={busy} onClick={() => setPublishDialog(false)}>
               取消
             </Button>
             <Button
               primary
-              disabled={!consent || busy}
+              disabled={
+                busy ||
+                dirty ||
+                !editable ||
+                article.reviewedRevision !== article.revision ||
+                account?.status !== "connected"
+              }
               onClick={() =>
                 void run("发布", async () => {
                   const next = await ipc("smzdm.publish", {
@@ -553,7 +545,7 @@ export function ArticleEditor({
                 })
               }
             >
-              确认发布
+              发布到什么值得买
             </Button>
           </div>
         </Dialog>

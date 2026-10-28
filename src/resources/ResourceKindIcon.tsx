@@ -1,5 +1,6 @@
-import { File, FileQuestion, Files, Folder, Folders } from "lucide-react";
+import { File, FileArchive, FileText } from "lucide-react";
 import type { RemoteFile, ResourceCopy } from "../../shared/types";
+import { resourceKind } from "../lib/resource-kind";
 import "./resource-kind.css";
 
 /** Destination folderId is a transfer container, not the resource's type. */
@@ -16,21 +17,20 @@ export function resourceFiles(
   );
 }
 
-export function ResourceKindIcon({ files }: { files: RemoteFile[] }) {
-  const folders = files.filter((file) => file.isDirectory).length;
-  const [Icon, label, kind] = !files.length
-    ? ([FileQuestion, "资源类型尚未读取", "unknown"] as const)
-    : files.length === 1
-      ? folders
-        ? ([Folder, "文件夹", "folder"] as const)
-        : ([File, "文件", "file"] as const)
-      : folders
-        ? ([
-            Folders,
-            folders === files.length ? "多个文件夹" : "多项资源（含文件夹）",
-            "folder",
-          ] as const)
-        : ([Files, "多个文件", "file"] as const);
+export function ResourceKindIcon({
+  files,
+  title,
+}: {
+  files: RemoteFile[];
+  title?: string;
+}) {
+  const kind = resourceKind(files, title);
+  const icons = {
+    archive: [FileArchive, "压缩包"],
+    file: [File, "文件"],
+    document: [FileText, "文档"],
+  } as const;
+  const [Icon, label] = icons[kind];
   return (
     <span
       className="resource-kind-icon"

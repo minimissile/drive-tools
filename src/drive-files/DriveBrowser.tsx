@@ -13,7 +13,10 @@ import {
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { Dialog } from "../ui/Dialog";
-import type { DriveWriteReceipt } from "../../shared/drive-files";
+import type {
+  DriveDirectory,
+  DriveWriteReceipt,
+} from "../../shared/drive-files";
 import { childPath, FileTable } from "./FileTable";
 import { useDriveDirectory } from "./useDriveDirectory";
 import { DriveMutationDialog, type DriveMutation } from "./DriveMutationDialog";
@@ -27,17 +30,22 @@ export function DriveBrowser({
   workspace,
   onPathChange,
   copy,
+  initialDirectory,
+  initialSelected = [],
 }: {
   accountId: string;
   initialPath?: string;
   workspace: string;
   onPathChange?(path: string): void;
   copy?: ResourceCopy;
+  /** A snapshot obtained by an explicit caller action, never an automatic remote read. */
+  initialDirectory?: DriveDirectory;
+  initialSelected?: string[];
 }) {
-  const query = useDriveDirectory(accountId, initialPath);
+  const query = useDriveDirectory(accountId, initialPath, initialDirectory);
   const { directory, path, setPath, loading, error, mounted } = query;
   const { refresh, notify } = useAppActions();
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(initialSelected);
   const [mutation, setMutation] = useState<DriveMutation | null>(null);
   const [receipt, setReceipt] = useState<DriveWriteReceipt | null>(null);
   const [checking, setChecking] = useState(false);

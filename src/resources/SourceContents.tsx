@@ -1,4 +1,9 @@
-import { ArrowDownToLine, ArrowUp, ExternalLink } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUp,
+  ExternalLink,
+  RefreshCw,
+} from "lucide-react";
 import type { Provider, RemoteFile, ShareInspection } from "../../shared/types";
 import { FileTable } from "../drive-files/FileTable";
 import {
@@ -24,7 +29,9 @@ export function SourceContents({
   error,
   enabled,
   own,
+  readOnly = false,
   onRead,
+  onRetry,
   onOpenOfficial,
   onSelect,
 }: {
@@ -36,12 +43,14 @@ export function SourceContents({
   error: string;
   enabled: boolean;
   own: boolean;
+  readOnly?: boolean;
   onRead(
     parentId?: string,
     page?: number,
     cursor?: string,
     parents?: ShareParent[],
   ): void;
+  onRetry?(): void;
   onOpenOfficial(): void;
   onSelect(files: RemoteFile[]): void;
 }) {
@@ -51,7 +60,13 @@ export function SourceContents({
     selected[0].parentId !== inspection.files[0]?.parentId;
   return (
     <Panel
-      title={own ? "查看资源分享内容" : "查看内容并选择转存文件"}
+      title={
+        readOnly
+          ? "文件内容"
+          : own
+            ? "查看资源分享内容"
+            : "查看内容并选择转存文件"
+      }
       extra={
         <div className="row">
           <Button quiet disabled={!enabled || loading} onClick={onOpenOfficial}>
@@ -60,26 +75,33 @@ export function SourceContents({
           </Button>
           <Button
             disabled={!enabled || loading}
+            aria-label={readOnly ? "刷新分享内容" : undefined}
+            title={readOnly ? "刷新分享内容" : undefined}
             onClick={() =>
               onRead("0", 1, undefined, [{ id: "0", name: "分享根目录" }])
             }
           >
-            <ArrowDownToLine size={14} />
-            {loading ? "正在读取…" : "读取分享内容"}
+            {readOnly ? <RefreshCw size={14} /> : <ArrowDownToLine size={14} />}
+            {readOnly ? null : loading ? "正在读取…" : "读取分享内容"}
           </Button>
         </div>
       }
     >
       <small>
-        {own
-          ? "可查看目录和文件信息；下方的本人网盘管理支持修改文件。"
-          : "展开文件夹查看资源，可只选需要的文件。转存完成后可管理本人副本、插入或替换广告。"}{" "}
+        {readOnly
+          ? "当前只浏览这条分享的目录与文件，不会修改分享者的文件。"
+          : own
+            ? "可查看目录和文件信息；下方的本人网盘管理支持修改文件。"
+            : "展开文件夹查看资源，可只选需要的文件。转存完成后可管理本人副本、插入或替换广告。"}{" "}
         如需官方验证，请先打开分享完成验证。
       </small>
       <QueryError
         error={error}
         loading={loading}
-        onRetry={() => onRead(parents.at(-1)?.id ?? "0", 1, undefined, parents)}
+        onRetry={
+          onRetry ??
+          (() => onRead(parents.at(-1)?.id ?? "0", 1, undefined, parents))
+        }
       />
       {inspection ? (
         <>
@@ -109,7 +131,7 @@ export function SourceContents({
             ))}
           </nav>
           {loading ? <Loading label="正在读取目录，保留上次结果…" /> : null}
-          {!own && selected.length ? (
+          {!own && !readOnly && selected.length ? (
             <div className="drive-browser-actions">
               <span>
                 待转存：{selected.length} 项
@@ -120,7 +142,7 @@ export function SourceContents({
               </Button>
             </div>
           ) : null}
-          {otherDirectory && !own ? (
+          {otherDirectory && !own && !readOnly ? (
             <Notice>
               一次从同一目录选择最多 100
               项。若要改选此目录内的文件，请先清空原选择。
@@ -131,7 +153,7 @@ export function SourceContents({
             files={inspection.files}
             selected={selected.map((f) => f.id)}
             disabled={loading}
-            selectable={!own && !otherDirectory}
+            selectable={!own && !readOnly && !otherDirectory}
             onSelect={(ids) =>
               onSelect(
                 ids

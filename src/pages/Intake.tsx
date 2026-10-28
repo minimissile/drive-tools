@@ -1,6 +1,10 @@
 import { IntakeOptionField } from "../resources/IntakeOptionField";
 import { useIntakeShare } from "../resources/useIntakeShare";
 import { chooseIntakeAccount } from "../resources/intake-share";
+import {
+  ResourceSimilarity,
+  useResourceSimilarity,
+} from "../resources/ResourceSimilarity";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { QueryError } from "../ui/QueryError";
 import { defaultResourceCategories } from "../../shared/intake";
@@ -114,6 +118,20 @@ export default function Intake() {
     ]);
   const inspectionRevision = useRef(0);
   const account = data!.accounts.find((a) => a.id === accountId);
+  const duplicateCopy = !priorCopy
+    ? existing?.copies.find(
+        (copy) =>
+          (data!.accounts.find((item) => item.id === copy.accountId)
+            ?.provider ?? existing.provider) === provider,
+      )
+    : undefined;
+  const similarity = useResourceSimilarity({
+    title,
+    provider,
+    excludeId: existing?.id,
+    originalTitle: priorCopy ? existing?.title : undefined,
+    invalidate: data?.resources,
+  });
   const imageInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (existing?.coverId && cover === undefined && !imageDraft.loading)
@@ -225,6 +243,7 @@ export default function Intake() {
   const [submitting, setSubmitting] = useState(false);
   const save = async (enqueue: boolean) => {
     if (isOwnResource && enqueue) return;
+    if (duplicateCopy || similarity.blocked) return;
     if (saveInFlight.current) return;
     saveInFlight.current = true;
     setSubmitting(true);
@@ -291,11 +310,17 @@ export default function Intake() {
               <>
                 {!title.trim() || !sourceText.trim() || !accountId
                   ? "保存前请填写资源标题、分享链接并选择账号。"
-                  : isOwnResource
-                    ? "自有资源直接入库，保留已有分享链接，不转存、不创建目录。"
-                    : selected.length
-                      ? `已选 ${selected.length} / 100 项，可创建转存任务。`
-                      : "资料可先保存为草稿；开始转存前请读取并选择文件。"}
+                  : duplicateCopy || similarity.duplicate
+                    ? "此类网盘已有这份资源，请编辑已有记录。"
+                    : similarity.loading
+                      ? "正在检查名称相似的资源…"
+                      : similarity.error
+                        ? "名称相似检查失败，请在标题下方重试后保存。"
+                        : isOwnResource
+                          ? "自有资源直接入库，保留已有分享链接，不转存、不创建目录。"
+                          : selected.length
+                            ? `已选 ${selected.length} / 100 项，可创建转存任务。`
+                            : "资料可先保存为草稿；开始转存前请读取并选择文件。"}
               </>
             }
           >
@@ -303,6 +328,8 @@ export default function Intake() {
               primary={isOwnResource}
               disabled={
                 submitting ||
+                !!duplicateCopy ||
+                similarity.blocked ||
                 inspectionLoading ||
                 imageDraft.loading ||
                 busy > 0 ||
@@ -323,6 +350,8 @@ export default function Intake() {
                 primary
                 disabled={
                   submitting ||
+                  !!duplicateCopy ||
+                  similarity.blocked ||
                   inspectionLoading ||
                   imageDraft.loading ||
                   busy > 0 ||
@@ -466,6 +495,19 @@ export default function Intake() {
                     placeholder="例如：自制AI办公练习清单"
                   />
                 </Field>
+                <ResourceSimilarity
+                  check={similarity}
+                  disabled={
+                    submitting ||
+                    imageDraft.loading ||
+                    !!draft.error ||
+                    !!imageDraft.error
+                  }
+                  onOpen={(id) => {
+                    select(id);
+                    navigate("library");
+                  }}
+                />
                 <div className="field-pair">
                   <Field as="div" label="分类" required>
                     <IntakeOptionField
@@ -576,10 +618,32 @@ export default function Intake() {
                   onChange={(e) => readImage(e.target.files?.[0])}
                 />
                 <small>
-                  JPG / PNG / WebP · 原图最大8MB，保存时自动转为200KB以内的WebP。
+                  JPG / PNG / WebP ·
+                  原图最大8MB，保存时自动转为200KB以内的WebP。
                 </small>
               </Panel>
               <Panel title={isOwnResource ? "资源归属" : "保存位置"}>
+                {duplicateCopy && existing ? (
+                  <Notice warning>
+                    此资源已存入{providerName(provider)}
+                    网盘，同类型网盘只保留一份。
+                    <Button
+                      size="compact"
+                      disabled={
+                        submitting ||
+                        imageDraft.loading ||
+                        !!draft.error ||
+                        !!imageDraft.error
+                      }
+                      onClick={() => {
+                        select(existing.id, duplicateCopy.id);
+                        navigate("library");
+                      }}
+                    >
+                      查看已有记录
+                    </Button>
+                  </Notice>
+                ) : null}
                 <div className="fields">
                   <Field label="网盘类型">
                     <Select

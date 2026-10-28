@@ -1,11 +1,9 @@
-import { useState } from "react";
 import type { OperationRun } from "../../shared/zhidao";
 import { operationLabels } from "../../shared/zhidao";
 import { templateUsesAi } from "../../shared/zhidao-generation";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { Dialog } from "../ui/Dialog";
-import { CheckboxField } from "../ui/CheckboxField";
 import { Button, Notice } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { useOperationAction } from "./hooks";
@@ -21,7 +19,6 @@ export function ResumeRunDialog({
   onResumed(): void;
 }) {
   const action = useOperationAction();
-  const [consent, setConsent] = useState(false);
   const { data } = useAppData();
   const { openSettings, navigate } = useAppNavigation();
   const accountId =
@@ -63,7 +60,6 @@ export function ResumeRunDialog({
           <Button
             primary
             disabled={
-              !consent ||
               !!action.pending ||
               !!aiIssue ||
               missingAccount ||
@@ -84,7 +80,7 @@ export function ResumeRunDialog({
               )
             }
           >
-            {action.pending ? "正在继续…" : "确认继续"}
+            {action.pending ? "正在继续…" : "继续任务"}
           </Button>
         </>
       }
@@ -166,17 +162,6 @@ export function ResumeRunDialog({
                   ? "将从已保存进度继续生成，可能产生新的 AI 费用。已生成的结果会保留。"
                   : "将从已保存进度继续。已有结果会保留，已授权的 AI 操作可能产生新的费用。"}
       </Notice>
-      <CheckboxField
-        checked={consent}
-        onChange={(event) => setConsent(event.target.checked)}
-        disabled={!!action.pending}
-        label={
-          webCollection
-            ? "我已核对任务和网页采集来源"
-            : "我已核对账号、任务内容和已提交结果"
-        }
-        hint="仅授权继续上方这一个任务，本次勾选不会保存。"
-      />
     </Dialog>
   );
 }

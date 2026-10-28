@@ -12,6 +12,13 @@ import {
 import type { Account, RemoteFile } from "../shared/types";
 import type { DriveShareResult } from "../shared/zhidao";
 import { DriveManagement } from "./drive-management";
+import { locateResourceParent } from "./drive-resource-location";
+import type { DriveCopyLocation } from "../shared/drive-files";
+import {
+  assertResourceUnique,
+  duplicateResourceError,
+  exactTitleResource,
+} from "./resource-duplicates";
 
 interface Dependencies {
   material: import("./insertion").InsertionService["materialDetail"];
@@ -40,7 +47,54 @@ export class DriveFiles {
   get isBusy() {
     return this.busy.size > 0 || this.management.isBusy;
   }
-  constructor(private d: Dependencies) { this.management = new DriveManagement(d); }
+  constructor(private d: Dependencies) {
+    this.management = new DriveManagement(d);
+  }
+  async locateCopy(copyId: string): Promise<DriveCopyLocation> {
+    const requested = this.d.repo.getCopy(copyId);
+    const found = await this.d.authenticated(
+      requested.accountId,
+      async (account, provider) => {
+        const copy = this.d.repo.getCopy(copyId);
+        if (copy.accountId !== account.id)
+          throw new AppError(
+            "COPY_MISMATCH",
+            "资源账号已变化，请重新打开资源。",
+          );
+        const directory = await locateResourceParent(
+          account,
+          provider,
+          copy,
+          this.management,
+        );
+        return { copy, directory, ownerUid: account.uid };
+      },
+    );
+    // Reuse the normal browser snapshot, including pending-write recovery and
+    // current provider capabilities, without nesting the account mutex.
+    const directory = await this.management.browse(
+      found.copy.accountId,
+      found.directory.path,
+    );
+    const account = this.d.repo.getAccount(found.copy.accountId);
+    if (
+      account.uid !== found.ownerUid ||
+      directory.folderId !== found.directory.folderId
+    )
+      throw new AppError("FILES_CHANGED", "账号或资源目录已变化，请重新定位。");
+    const files = found.copy.files.map((file) =>
+      directory.files.find(
+        (actual) =>
+          actual.id === file.id && actual.isDirectory === file.isDirectory,
+      ),
+    );
+    if (files.some((file) => !file))
+      throw new AppError(
+        "FILES_CHANGED",
+        "资源文件在定位期间发生变化，请重新读取。",
+      );
+    return { copyId, directory, files: files as RemoteFile[] };
+  }
   list(accountId: string, path: string) {
     return this.d.authenticated(accountId, async (account, provider) =>
       provider.list(
@@ -152,7 +206,8 @@ export class DriveFiles {
     try {
       const result: DriveShareResult = { urls: [], failures: [] };
       await this.d.authenticated(accountId, async (account, provider) => {
-        const { folderId: parent, files } = await this.management.resolveDirectory(account, provider, path);
+        const { folderId: parent, files } =
+          await this.management.resolveDirectory(account, provider, path);
         const selected = files.filter((f) => fileIds.includes(f.id));
         if (selected.length !== new Set(fileIds).size)
           throw new AppError("FILES_CHANGED", "所选文件已变化，请刷新目录。");
@@ -186,15 +241,30 @@ export class DriveFiles {
                 true,
               );
             if (!share) {
+              const duplicate = exactTitleResource(
+                this.d.db,
+                file.name,
+                account.provider,
+              );
+              if (duplicate)
+                throw duplicateResourceError(duplicate.title, account.provider);
               this.saveIntent(accountId, file.id, { state: "requested", file });
               sent = true;
               share = await provider.createShare(account, [file], file.name);
             }
-            this.saveIntent(accountId, file.id, {
-              state: "created",
-              file,
-              share: { id: share.id, url: share.url, ownerUid: share.ownerUid },
-            });
+            // Existing remote shares are reads, not fresh writes. Reject local
+            // duplicates before recording any recovery intent for their archive.
+            if (!sent) this.archivePlan(account, file, share);
+            if (sent || (intent && intent.state !== "verified"))
+              this.saveIntent(accountId, file.id, {
+                state: "created",
+                file,
+                share: {
+                  id: share.id,
+                  url: share.url,
+                  ownerUid: share.ownerUid,
+                },
+              });
             await this.d.secrets.set(
               `drive-share:${accountId}:${file.id}`,
               share.code,
@@ -213,7 +283,13 @@ export class DriveFiles {
                 "分享已创建但核验未完成，请稍后重新核对。",
                 true,
               );
-            const copyId = await this.archive(account, file, normalizedDirectory(path), parent, share);
+            const copyId = await this.archive(
+              account,
+              file,
+              normalizedDirectory(path),
+              parent,
+              share,
+            );
             this.saveIntent(accountId, file.id, {
               state: "verified",
               file,
@@ -263,6 +339,30 @@ export class DriveFiles {
       this.busy.delete(accountId);
     }
   }
+  private archivePlan(account: Account, file: RemoteFile, share: OwnShare) {
+    const prior = this.d.db.get<{ id: string; resource_id: string }>(
+      "SELECT id,resource_id FROM copies WHERE account_id=? AND share_url=?",
+      account.id,
+      share.url,
+    );
+    const oldResource = prior
+      ? this.d.repo.getResource(prior.resource_id)
+      : this.d.db.get<{ id: string; title: string; sourceUrl: string }>(
+          "SELECT id,title,source_url sourceUrl FROM resources WHERE source_url=?",
+          share.url,
+        );
+    const resourceId = oldResource?.id ?? id("resource");
+    const uniqueness = {
+      resourceId,
+      sourceUrl: oldResource?.sourceUrl ?? share.url,
+      title: oldResource?.title ?? file.name,
+      provider: account.provider,
+      accountId: account.id,
+      copyId: prior?.id,
+    };
+    assertResourceUnique(this.d.db, uniqueness);
+    return { prior, oldResource, resourceId, uniqueness };
+  }
   private async archive(
     account: Account,
     file: RemoteFile,
@@ -270,36 +370,35 @@ export class DriveFiles {
     folderId: string,
     share: OwnShare,
   ) {
-    const prior = this.d.db.get<{ id: string }>(
-      "SELECT id FROM copies WHERE account_id=? AND share_url=?",
-      account.id,
-      share.url,
+    const { prior, oldResource, resourceId, uniqueness } = this.archivePlan(
+      account,
+      file,
+      share,
     );
     if (prior) {
-      this.d.db.run(
-        "UPDATE copies SET share_verified_at=?,verified_at=?,files=?,directory=?,folder_id=?,owner_uid=?,share_id=?,share_owner_uid=?,error=NULL WHERE id=?",
-        now(),
-        now(),
-        JSON.stringify([file]),
-        parent,
-        folderId,
-        account.uid,
-        share.id,
-        share.ownerUid,
-        prior.id,
-      );
+      this.d.db.transaction(() => {
+        assertResourceUnique(this.d.db, uniqueness);
+        this.d.db.run(
+          "UPDATE copies SET share_verified_at=?,verified_at=?,files=?,directory=?,folder_id=?,owner_uid=?,share_id=?,share_owner_uid=?,error=NULL WHERE id=?",
+          now(),
+          now(),
+          JSON.stringify([file]),
+          parent,
+          folderId,
+          account.uid,
+          share.id,
+          share.ownerUid,
+          prior.id,
+        );
+      });
       return prior.id;
     }
-    const oldResource = this.d.db.get<{ id: string }>(
-      "SELECT id FROM resources WHERE source_url=?",
-      share.url,
-    );
-    const resourceId = oldResource?.id ?? id("resource"),
-      copyId = id("copy"),
+    const copyId = id("copy"),
       time = now();
     await this.d.secrets.set(`share:${copyId}`, share.code);
     await this.d.secrets.set(`source:${resourceId}`, share.code);
     this.d.db.transaction(() => {
+      assertResourceUnique(this.d.db, uniqueness);
       if (!oldResource)
         this.d.db.run(
           "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",

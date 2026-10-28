@@ -23,6 +23,7 @@ import type {
   ImportPreview,
   ShareInput,
   ShareInspection,
+  ShareCheck,
   TrafficQuery,
   TrafficResult,
 } from "./types";
@@ -171,7 +172,7 @@ export interface IpcCommands {
     undefined,
     { id: string; name: string; seq: number | null }[]
   >;
-  "copies.check": Contract<{ copyIds: string[] }>;
+  "copies.check": Contract<{ copyIds: string[] }, ShareCheck[]>;
   "copy.createShare": Contract<CopyId>;
   "copy.link": Contract<CopyId, { text: string }>;
   "copy.open": Contract<Id>;

@@ -3,7 +3,14 @@ import { ProviderIcon } from "../resources/ProviderIcon";
 import { Select } from "../ui/Select";
 import { DropdownMenu, MenuAction } from "../ui/DropdownMenu";
 import { useState } from "react";
-import { ArrowRight, BookOpen, Copy, ExternalLink, Pencil } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Copy,
+  FolderOpen,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import type { Resource, ResourceCopy } from "../../shared/types";
 import {
   useAppData,
@@ -23,11 +30,15 @@ export function ResourceDetail({
   copy,
   copies = resource.copies,
   inDialog = false,
+  onView,
+  onDelete,
 }: {
   resource: Resource;
   copy: ResourceCopy;
   copies?: ResourceCopy[];
   inDialog?: boolean;
+  onView(): void;
+  onDelete(): void;
 }) {
   const { data } = useAppData(),
     { select } = useAppSelection(),
@@ -44,6 +55,10 @@ export function ResourceDetail({
     );
   const moreActions = (
     <DropdownMenu label="更多资源操作">
+      <MenuAction onClick={onView}>
+        <FolderOpen size={14} />
+        查看网盘资源
+      </MenuAction>
       <MenuAction
         onClick={() =>
           !data!.settings.vaultPath
@@ -73,8 +88,9 @@ export function ResourceDetail({
       >
         拆分为多个链接
       </MenuAction>
-      <MenuAction onClick={() => edit(resource.id, "new")}>
-        另存到其他账号
+      <MenuAction disabled={busy > 0} onClick={onDelete}>
+        <Trash2 size={14} />
+        删除资源
       </MenuAction>
     </DropdownMenu>
   );
@@ -91,7 +107,7 @@ export function ResourceDetail({
       ) : null}
       <div className="resource-detail-body">
         <div className="resource-identity">
-          <ResourceKindIcon files={copy.files} />
+          <ResourceKindIcon files={copy.files} title={resource.title} />
           <div>
             <h3 className="detail-title">{resource.title}</h3>
             <small className="resource-meta">
@@ -184,12 +200,9 @@ export function ResourceDetail({
             {copy.shareUrl ?? "转存与核验完成后，生成本人分享链接。"}
           </div>
           <div className="resource-share-actions">
-            <Button
-              quiet
-              onClick={() => void command("copy.open", { id: copy.id })}
-            >
-              <ExternalLink size={14} />
-              网盘
+            <Button quiet onClick={onView}>
+              <FolderOpen size={14} />
+              查看网盘资源
             </Button>
             {copy.status !== "recorded" && copy.folderId ? (
               <RecoverShare copy={copy} />

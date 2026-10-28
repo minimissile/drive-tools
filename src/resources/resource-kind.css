@@ -9,11 +9,11 @@
   color: var(--blue);
   background: var(--blue-bg);
 }
-.resource-kind-icon[data-kind="folder"] {
+.resource-kind-icon[data-kind="archive"] {
   color: var(--amber);
   background: var(--amber-bg);
 }
-.resource-kind-icon[data-kind="unknown"] {
+.resource-kind-icon[data-kind="file"] {
   color: var(--muted);
   background: var(--bg);
 }

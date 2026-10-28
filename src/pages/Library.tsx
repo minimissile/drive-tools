@@ -2,13 +2,16 @@ import { ProviderIcon } from "../resources/ProviderIcon";
 import { Select } from "../ui/Select";
 import "../library/library.css";
 import { ResourceDetail } from "../library/ResourceDetail";
+import { ResourceDeleteDialog } from "../library/ResourceDeleteDialog";
+import { DriveResourceDialog } from "../drive-files/DriveResourceDialog";
+import type { DriveResourceTarget } from "../drive-files/DriveResourceDialog";
 import { Dialog } from "../ui/Dialog";
 import { QueryError } from "../ui/QueryError";
 import { SelectionCheckbox } from "../ui/SelectionCheckbox";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, FolderOpen, Plus, Trash2 } from "lucide-react";
 import {
   useAppActions,
   useAppActivity,
@@ -19,7 +22,6 @@ import {
 import {
   Button,
   Empty,
-  Header,
   Loading,
   LoadingState,
   Notice,
@@ -29,7 +31,7 @@ import { ResourceKindIcon, resourceFiles } from "../resources/ResourceKindIcon";
 import { providerName } from "../resources/labels";
 import { updateSelection } from "../lib/selection";
 import { Pagination } from "../ui/Pagination";
-import type { ResourcePage } from "../../shared/types";
+import type { Resource, ResourcePage } from "../../shared/types";
 import { readLibraryView, saveLibraryView } from "../library/view-state";
 const emptyPage: ResourcePage = { items: [], total: 0, page: 1, pageSize: 25 };
 export default function LibraryPage() {
@@ -138,44 +140,48 @@ export default function LibraryPage() {
   const copy = copies.find((c) => c.id === selectedCopyId) ?? copies[0];
   const compact = useMediaQuery("(max-width: 1100px)");
   const [detailOpen, setDetailOpen] = useState(false);
+  const [viewing, setViewing] = useState<DriveResourceTarget | null>(null);
+  const [deleting, setDeleting] = useState<Resource | null>(null);
+  const viewResource = (item: Resource, copyId?: string) => {
+    const chosen =
+      item.copies.find((c) => c.id === copyId) ??
+      item.copies.find((c) => accountId === "all" || c.accountId === accountId);
+    setViewing({ kind: "resource", resource: item, copy: chosen });
+  };
   useEffect(() => {
     if (!compact) setDetailOpen(false);
   }, [compact]);
   return (
     <div className="library-workspace">
-      <Header
-        title="让每份资源，产生内容。"
-        description="采集、转存与内容运营，从你的本地资源库开始。"
-        action={
-          <div className="row">
-            <Button quiet onClick={() => navigate("drive-files")}>
-              网盘文件
-            </Button>
-            <Button quiet onClick={() => navigate("bulk")}>
-              批量录入
-            </Button>
-            <Button onClick={() => navigate("resource-export")}>
-              AI 筛选导出
-            </Button>
-            <Button primary onClick={() => edit(null)}>
-              <Plus size={16} />
-              录入资源
-            </Button>
+      <div className="library-toolbar" aria-label="资源库概况与操作">
+        <div className="library-summary">
+          <div>
+            全部资源<strong>{data!.resourceTotals.resources}</strong>
           </div>
-        }
-      />
-      <div className="library-summary">
-        <div>
-          全部资源<strong>{data!.resourceTotals.resources}</strong>
+          <div>
+            已归档副本
+            <strong>{data!.resourceTotals.readyCopies}</strong>
+          </div>
+          <button className="stat-action" onClick={() => navigate("tasks")}>
+            需要处理<strong>{data!.resourceTotals.attentionJobs}</strong>
+            <ArrowRight size={14} />
+          </button>
         </div>
-        <div>
-          已归档副本
-          <strong>{data!.resourceTotals.readyCopies}</strong>
+        <div className="library-primary-actions">
+          <Button quiet onClick={() => navigate("drive-files")}>
+            网盘文件
+          </Button>
+          <Button quiet onClick={() => navigate("bulk")}>
+            批量录入
+          </Button>
+          <Button onClick={() => navigate("resource-export")}>
+            AI 筛选导出
+          </Button>
+          <Button primary onClick={() => edit(null)}>
+            <Plus size={16} />
+            录入资源
+          </Button>
         </div>
-        <button className="stat-action" onClick={() => navigate("tasks")}>
-          需要处理<strong>{data!.resourceTotals.attentionJobs}</strong>
-          <ArrowRight size={14} />
-        </button>
       </div>
       {data!.accounts.length === 0 ? (
         <Notice>
@@ -236,7 +242,10 @@ export default function LibraryPage() {
                 }}
                 items={[
                   { value: "all", label: "全部账号" },
-                  ...data!.accounts.map((a) => ({ value: a.id, label: a.alias })),
+                  ...data!.accounts.map((a) => ({
+                    value: a.id,
+                    label: a.alias,
+                  })),
                 ]}
               />
             </div>
@@ -336,6 +345,7 @@ export default function LibraryPage() {
                     }}
                   >
                     <ResourceKindIcon
+                      title={r.title}
                       files={resourceFiles(
                         r.copies,
                         accountId,
@@ -396,6 +406,32 @@ export default function LibraryPage() {
                       })}
                     </small>
                   </button>
+                  <div className="resource-row-actions">
+                    <Button
+                      quiet
+                      size="compact"
+                      aria-label={`查看${r.title}的网盘资源`}
+                      onClick={() =>
+                        viewResource(
+                          r,
+                          r.id === resource?.id ? selectedCopyId : undefined,
+                        )
+                      }
+                    >
+                      <FolderOpen size={15} />
+                      查看网盘
+                    </Button>
+                    <Button
+                      quiet
+                      size="compact"
+                      aria-label={`删除资源：${r.title}`}
+                      title="删除资源"
+                      disabled={busy > 0}
+                      onClick={() => setDeleting(r)}
+                    >
+                      <Trash2 size={15} />
+                    </Button>
+                  </div>
                 </div>
               ))
             ) : loading ? (
@@ -468,6 +504,8 @@ export default function LibraryPage() {
             resource={resource}
             copy={copy}
             copies={copies}
+            onView={() => viewResource(resource, copy.id)}
+            onDelete={() => setDeleting(resource)}
           />
         ) : null}
       </div>
@@ -484,8 +522,29 @@ export default function LibraryPage() {
             resource={resource}
             copy={copy}
             copies={copies}
+            onView={() => viewResource(resource, copy.id)}
+            onDelete={() => setDeleting(resource)}
           />
         </Dialog>
+      ) : null}
+      {viewing ? (
+        <DriveResourceDialog
+          target={viewing}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
+      {deleting ? (
+        <ResourceDeleteDialog
+          resource={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            setDetailOpen(false);
+            setChecked([]);
+            if (selectedResourceId === deleting.id) select("");
+            reload();
+          }}
+        />
       ) : null}
     </div>
   );

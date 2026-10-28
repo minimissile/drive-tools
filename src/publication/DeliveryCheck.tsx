@@ -46,7 +46,6 @@ export default function DeliveryCheck({
     channelProfiles[platform].positions[0] ?? "body",
   );
   const [note, setNote] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     let active = true;
     setLoadError("");
@@ -114,7 +113,6 @@ export default function DeliveryCheck({
           value={status}
           onValueChange={(nextValue) => {
             setStatus(nextValue as typeof status);
-            setConfirmed(false);
           }}
           items={[
             ...Object.entries(deliveryStatuses).map(([value, label]) => ({
@@ -131,7 +129,6 @@ export default function DeliveryCheck({
             value={position}
             onValueChange={(nextValue) => {
               setPosition(nextValue as LinkPosition);
-              setConfirmed(false);
             }}
             items={[
               ...linkPositionIds.map((p) => ({
@@ -159,28 +156,12 @@ export default function DeliveryCheck({
           maxLength={2000}
           onChange={(e) => {
             setNote(e.target.value);
-            setConfirmed(false);
           }}
           placeholder="例如：从文章阅读原文进入本人分享，文件与配套资料一致，保存入口可用。"
         />
       </Field>
-      <label className="checkbox">
-        <input
-          aria-label="确认实际入口验收结果"
-          type="checkbox"
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />
-        已核对实际文章，本次结果由本人确认
-      </label>
       <Button
-        disabled={
-          !loaded ||
-          !!loadError ||
-          busy > 0 ||
-          !confirmed ||
-          note.trim().length < 10
-        }
+        disabled={!loaded || !!loadError || busy > 0 || note.trim().length < 10}
         onClick={async () => {
           const result = await command(
             "publication.deliveryCheck",
@@ -189,13 +170,12 @@ export default function DeliveryCheck({
               status,
               position: status === "not_provided" ? null : position,
               note,
-              confirmed,
+              confirmed: true,
             },
             "入口验收已保存，文章发布状态保持不变。",
           );
           if (result) {
             setHistory((rows) => [result, ...rows].slice(0, 100));
-            setConfirmed(false);
           }
         }}
       >

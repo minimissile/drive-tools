@@ -37,6 +37,13 @@ module.exports = {
     : null,
   mac: {
     ...base.mac,
+    // Match macOS .lproj names, including the Chinese grammar variants.
+    electronLanguages: [
+      "zh_CN",
+      "zh_CN_FEMININE",
+      "zh_CN_MASCULINE",
+      "zh_CN_NEUTER",
+    ],
     extraResources: [
       {
         from: "build/pansou",
@@ -53,6 +60,8 @@ module.exports = {
   },
   win: {
     ...base.win,
+    // Windows locale .pak names use hyphens instead of underscores.
+    electronLanguages: ["zh-CN"],
     extraResources: [
       {
         from: "build/pansou",

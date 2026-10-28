@@ -69,11 +69,6 @@ export function WeiboDelivery({ detail }: { detail: WeiboMarketingDetail }) {
     };
   }, []);
   const [failure, setFailure] = useState("");
-  const [publishConfirmed, setPublishConfirmed] = useState(false);
-  useEffect(
-    () => setPublishConfirmed(false),
-    [run.id, run.stage, run.prepared?.fingerprint],
-  );
   const working = useDraftDeliveryStatus(draft);
   const binding = bindings.find((item) => item.id === options.bindingId);
   const account = weiboAccounts.find((item) => item.id === options.accountId);
@@ -333,36 +328,24 @@ export function WeiboDelivery({ detail }: { detail: WeiboMarketingDetail }) {
             ) : null}
           </div>
           {run.stage === "filled" ? (
-            <>
-              <label className="checkbox weibo-option">
-                <input
-                  type="checkbox"
-                  checked={publishConfirmed}
-                  disabled={busy > 0}
-                  onChange={(event) =>
-                    setPublishConfirmed(event.target.checked)
-                  }
-                />
-                我已核对官方发布框的账号、文案、图片、可见范围及内容声明
-              </label>
-              <Button
-                primary
-                disabled={busy > 0 || !publishConfirmed || !accountReady}
-                onClick={() => {
-                  setPublishConfirmed(false);
-                  void command("weibo.submit", { id: run.id, confirmed: true });
-                }}
-              >
-                <Send size={15} />
-                确认发布到微博
-              </Button>
-            </>
+            <Button
+              primary
+              disabled={
+                busy > 0 || !accountReady || working.blocked || !draft.reviewed
+              }
+              onClick={() => {
+                void command("weibo.submit", { id: run.id, confirmed: true });
+              }}
+            >
+              <Send size={15} />
+              发布到微博
+            </Button>
           ) : null}
           {run.stage === "ready" && dirty ? (
             <Notice warning>发布设置已有修改，请重新准备后再交接。</Notice>
           ) : null}
           <p className="weibo-handoff-note">
-            自动填写会使用该账号的官方发布器上传图片；核对后点击“确认发布到微博”，提交回执与单条链接会自动保存。遇到安全验证请在官方窗口完成；回执不明时先核对结果，避免重复发布。也可继续使用复制文案的人工交接方式。
+            自动填写会使用该账号的官方发布器上传图片；核对后点击“发布到微博”，提交回执与单条链接会自动保存。遇到安全验证请在官方窗口完成；回执不明时先核对结果，避免重复发布。也可继续使用复制文案的人工交接方式。
           </p>
         </div>
       ) : (
@@ -382,10 +365,8 @@ export function WeiboReceipt({ detail }: { detail: WeiboMarketingDetail }) {
     { busy } = useAppActivity(),
     { openSearch, openDraft } = useAppNavigation();
   const [url, setUrl] = useState(run.url ?? "");
-  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     setUrl(run.url ?? "");
-    setConfirmed(false);
   }, [run.id, run.url, run.stage]);
   if (
     !["filled", "uncertain", "handoff", "submitted", "published"].includes(
@@ -402,7 +383,6 @@ export function WeiboReceipt({ detail }: { detail: WeiboMarketingDetail }) {
     }
   }
   const resolve = (result: "submitted" | "published" | "not_submitted") => {
-    setConfirmed(false);
     void command("weibo.resolve", {
       id: run.id,
       result,
@@ -429,10 +409,7 @@ export function WeiboReceipt({ detail }: { detail: WeiboMarketingDetail }) {
           maxLength={2000}
           disabled={busy > 0 || !!run.url}
           placeholder={`https://weibo.com/${run.prepared!.uid}/微博ID`}
-          onChange={(event) => {
-            setUrl(event.target.value);
-            setConfirmed(false);
-          }}
+          onChange={(event) => setUrl(event.target.value)}
         />
       </Field>
       {urlIssue ? (
@@ -449,20 +426,10 @@ export function WeiboReceipt({ detail }: { detail: WeiboMarketingDetail }) {
           查看这条微博
         </Button>
       ) : null}
-      <label className="checkbox weibo-option">
-        <input
-          aria-label="已在微博核对当前图文的发布结果"
-          type="checkbox"
-          checked={confirmed}
-          disabled={busy > 0}
-          onChange={(event) => setConfirmed(event.target.checked)}
-        />
-        我已在微博核对这条图文的账号、配图和发布结果
-      </label>
       <div className="row weibo-actions">
         {run.stage !== "published" ? (
           <Button
-            disabled={busy > 0 || !confirmed || !url.trim() || !!urlIssue}
+            disabled={busy > 0 || !url.trim() || !!urlIssue}
             onClick={() => resolve("submitted")}
           >
             登记已提交 · 待核对
@@ -471,7 +438,7 @@ export function WeiboReceipt({ detail }: { detail: WeiboMarketingDetail }) {
         {run.options?.visibility !== "self" ? (
           <Button
             primary
-            disabled={busy > 0 || !confirmed || !url.trim() || !!urlIssue}
+            disabled={busy > 0 || !url.trim() || !!urlIssue}
             onClick={() => resolve("published")}
           >
             {run.stage === "published"
@@ -482,7 +449,7 @@ export function WeiboReceipt({ detail }: { detail: WeiboMarketingDetail }) {
         {["filled", "uncertain", "handoff"].includes(run.stage) ? (
           <Button
             quiet
-            disabled={busy > 0 || !confirmed || !!url.trim()}
+            disabled={busy > 0 || !!url.trim()}
             onClick={() => resolve("not_submitted")}
           >
             确认尚未发布，返回编辑

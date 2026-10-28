@@ -76,6 +76,12 @@ export interface ResourcePage {
   page: number;
   pageSize: number;
 }
+export interface SimilarResource {
+  id: string;
+  title: string;
+  provider: Provider;
+  similarity: number;
+}
 export interface ResourceTotals {
   resources: number;
   readyCopies: number;

@@ -1,4 +1,5 @@
 import { createResourceAnswerHandlers } from "./resource-answers";
+import { createResourceDeletionHandlers } from "./resource-deletion";
 import { createSmzdmHandlers } from "./smzdm";
 import { createDriveFilesHandlers } from "./drive-files";
 import { createDistributionHandlers } from "./distribution";
@@ -34,6 +35,7 @@ import { createWeiboStatisticsHandlers } from "./weibo-statistics";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createResourceDeletionHandlers(services),
     createSmzdmHandlers(services),
     createDriveFilesHandlers(services),
     createDistributionHandlers(services),
