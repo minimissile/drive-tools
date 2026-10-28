@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { LogIn, Star } from "lucide-react";
 import type { Account } from "../../shared/types";
 import { providerStatisticsNotes } from "../../shared/providers";
@@ -20,12 +20,10 @@ export function AccountEditor({
     { busy } = useAppActivity(),
     { data } = useAppData();
   const { run } = useAccountOperations();
-  const clearTrigger = useRef<HTMLButtonElement>(null);
   const latest = data?.accounts.find((a) => a.id === account.id) ?? account;
   const [alias, setAlias] = useState(account.alias),
     [directory, setDirectory] = useState(account.defaultDirectory),
-    [enabled, setEnabled] = useState(account.enabled),
-    [confirmClear, setConfirmClear] = useState(false);
+    [enabled, setEnabled] = useState(account.enabled);
   return (
     <Dialog
       title={`管理 ${latest.alias}`}
@@ -99,56 +97,24 @@ export function AccountEditor({
           移除本地会话并停用此账号，保留 UID
           和历史归属；不会删除网盘文件或撤销分享。
         </p>
-        {confirmClear ? (
-          <div
-            className="account-clear-confirm"
-            role="group"
-            aria-label="确认移除本地凭据"
-          >
-            <Notice warning>
-              移除后此账号会停用。重新启用、登录并核验后才能继续使用。
-            </Notice>
-            <div className="row">
-              <Button
-                autoFocus
-                disabled={busy > 0}
-                onClick={() => {
-                  setConfirmClear(false);
-                  requestAnimationFrame(() => clearTrigger.current?.focus());
-                }}
-              >
-                保留凭据
-              </Button>
-              <Button
-                className="account-clear-button"
-                disabled={busy > 0}
-                onClick={async () => {
-                  if (
-                    await command(
-                      "account.clear",
-                      { id: latest.id },
-                      "本地会话已移除，账号已停用；云端文件和分享保留。",
-                    )
-                  )
-                    onClose();
-                }}
-              >
-                确认移除本地凭据
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            quiet
-            size="compact"
-            ref={clearTrigger}
-            className="account-clear-button"
-            disabled={busy > 0}
-            onClick={() => setConfirmClear(true)}
-          >
-            移除本地凭据
-          </Button>
-        )}
+        <Button
+          quiet
+          size="compact"
+          className="account-clear-button"
+          disabled={busy > 0}
+          onClick={async () => {
+            if (
+              await command(
+                "account.clear",
+                { id: latest.id },
+                "本地会话已移除，账号已停用；云端文件和分享保留。",
+              )
+            )
+              onClose();
+          }}
+        >
+          移除本地凭据并停用账号
+        </Button>
       </div>
       <div className="actions">
         <Button disabled={busy > 0} onClick={onClose}>

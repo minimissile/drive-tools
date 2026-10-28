@@ -7,7 +7,6 @@ import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppData } from "../state";
 import { Dialog } from "../ui/Dialog";
 import { Button, Field, LoadingState, Notice } from "../ui/primitives";
-import { CheckboxField } from "../ui/CheckboxField";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import type { OtherAccount } from "./useOtherAccounts";
@@ -44,28 +43,35 @@ export function WeiboComposer({
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
   const [initialError, setInitialError] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState("");
   const lock = useRef(false);
   const initialLoaded = useRef(false);
   useEffect(() => {
     if (!initialPostId || initialLoaded.current || !history.data) return;
-    const selected = history.data.find(v => v.id === initialPostId);
-    if (!selected) { setInitialError("此微博草稿暂未找到，请重新读取；如已删除，请返回采集页检查去向记录。"); return; }
+    const selected = history.data.find((v) => v.id === initialPostId);
+    if (!selected) {
+      setInitialError(
+        "此微博草稿暂未找到，请重新读取；如已删除，请返回采集页检查去向记录。",
+      );
+      return;
+    }
     initialLoaded.current = true;
     setInitialError("");
     setPost(selected);
     if (!form.restored || form.value.id !== initialPostId)
-      form.update({ id:selected.id, text:selected.text, visibility:selected.visibility });
+      form.update({
+        id: selected.id,
+        text: selected.text,
+        visibility: selected.visibility,
+      });
   }, [initialPostId, history.data, form.restored, form.value.id, form.update]);
   const current =
     post ?? history.data?.find((item) => item.id === form.value.id) ?? null;
   const initializing = !!initialPostId && !initialLoaded.current;
-  const locked = initializing || (!!current && !["editing", "attention"].includes(current.stage));
+  const locked =
+    initializing ||
+    (!!current && !["editing", "attention"].includes(current.stage));
   const busy = !!pending;
-  useEffect(() => {
-    setConfirmed(false);
-  }, [current?.stage]);
   const work = async (label: string, action: () => Promise<WeiboPost>) => {
     if (lock.current) return;
     lock.current = true;
@@ -79,7 +85,6 @@ export function WeiboComposer({
         text: result.text,
         visibility: result.visibility,
       });
-      setConfirmed(false);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "微博操作失败，请重试。",
@@ -116,7 +121,19 @@ export function WeiboComposer({
           <Button disabled={busy} onClick={onClose}>
             关闭
           </Button>
-          {!locked ? <Button disabled={busy || history.loading || !!history.error || !form.value.text.trim()} onClick={()=>void work("正在保存草稿…", async()=>save())}>保存本地草稿</Button> : null}
+          {!locked ? (
+            <Button
+              disabled={
+                busy ||
+                history.loading ||
+                !!history.error ||
+                !form.value.text.trim()
+              }
+              onClick={() => void work("正在保存草稿…", async () => save())}
+            >
+              保存本地草稿
+            </Button>
+          ) : null}
           {current?.stage === "filled" ? (
             <Button disabled={busy} onClick={() => void upload()}>
               重新检查并填写
@@ -125,7 +142,7 @@ export function WeiboComposer({
           {current?.stage === "filled" ? (
             <Button
               primary
-              disabled={busy || !confirmed}
+              disabled={busy}
               onClick={() =>
                 void work("正在提交微博…", () =>
                   ipc("weiboPosts.submit", { id: current.id, confirmed: true }),
@@ -133,14 +150,15 @@ export function WeiboComposer({
               }
             >
               <Send size={15} />
-              确认发布到微博
+              {current.visibility === "self"
+                ? "发布到微博（仅自己可见）"
+                : "公开发布到微博"}
             </Button>
           ) : !locked ? (
             <Button
               primary
               disabled={
                 busy ||
-                !confirmed ||
                 !form.value.text.trim() ||
                 history.loading ||
                 !!history.error
@@ -161,13 +179,31 @@ export function WeiboComposer({
         直接使用已登录的官方网页，支持手写文案和 0–9 张本地图片，无需模型或付费
         API。网盘推广请从“微博图文营销”关联本人资料。
       </p>
-      {current?.source ? <Notice>来源：皮皮虾 · {current.source.author}，包含 {current.source.comments.length} 条评论。<Button size="compact" onClick={()=>void ipc("system.external", {url:current.source!.url})}>查看原帖</Button></Notice> : null}
+      {current?.source ? (
+        <Notice>
+          来源：皮皮虾 · {current.source.author}，包含{" "}
+          {current.source.comments.length} 条评论。
+          <Button
+            size="compact"
+            onClick={() =>
+              void ipc("system.external", { url: current.source!.url })
+            }
+          >
+            查看原帖
+          </Button>
+        </Notice>
+      ) : null}
       <QueryError
         error={history.error || initialError}
         loading={history.loading}
-        onRetry={() => {setInitialError(""); history.reload();}}
+        onRetry={() => {
+          setInitialError("");
+          history.reload();
+        }}
       />
-      {initializing && history.loading ? <LoadingState compact label="正在定位指定微博草稿…" /> : null}
+      {initializing && history.loading ? (
+        <LoadingState compact label="正在定位指定微博草稿…" />
+      ) : null}
       {history.data?.length && !initialPostId ? (
         <Field label="本地微博草稿与回执" as="div">
           <Select
@@ -193,7 +229,6 @@ export function WeiboComposer({
                     }
                   : empty,
               );
-              setConfirmed(false);
               setError("");
               setReceipt("");
             }}
@@ -213,7 +248,6 @@ export function WeiboComposer({
           disabled={busy || locked}
           onChange={(event) => {
             form.update({ text: event.target.value });
-            setConfirmed(false);
           }}
         />
       </Field>
@@ -228,7 +262,6 @@ export function WeiboComposer({
           ]}
           onValueChange={(visibility) => {
             form.update({ visibility: visibility as "self" | "public" });
-            setConfirmed(false);
           }}
         />
       </Field>
@@ -269,18 +302,6 @@ export function WeiboComposer({
       {error || form.error ? (
         <Notice danger>{error || form.error}</Notice>
       ) : null}
-      {!locked || current?.stage === "filled" ? (
-        <CheckboxField
-          checked={confirmed}
-          disabled={busy}
-          onChange={(event) => setConfirmed(event.target.checked)}
-          label={
-            current?.stage === "filled"
-              ? `我已核对官方窗口，确认以${form.value.visibility === "self" ? "仅自己可见" : "公开"}方式发布这条微博`
-              : "我已核对文案、图片和可见范围，可以填写并上传到此微博账号"
-          }
-        />
-      ) : null}
       {current?.url ? (
         <Button
           disabled={busy}
@@ -294,7 +315,12 @@ export function WeiboComposer({
           查看已提交的微博
         </Button>
       ) : null}
-      {current?.url ? <section aria-label="已发布微博数据"><h3>数据统计</h3><WeiboStatistics accountId={account.id} url={current.url} /></section> : null}
+      {current?.url ? (
+        <section aria-label="已发布微博数据">
+          <h3>数据统计</h3>
+          <WeiboStatistics accountId={account.id} url={current.url} />
+        </section>
+      ) : null}
       {current && ["filled", "uncertain"].includes(current.stage) ? (
         <details>
           <summary>核对提交结果或返回编辑</summary>
@@ -303,22 +329,16 @@ export function WeiboComposer({
               value={receipt}
               onChange={(event) => {
                 setReceipt(event.target.value);
-                setConfirmed(false);
               }}
               placeholder={`https://weibo.com/${current.uid}/微博ID`}
             />
           </Field>
-          {current.stage === "uncertain" ? (
-            <CheckboxField
-              label="我已在官方窗口核对实际发布结果"
-              checked={confirmed}
-              disabled={busy}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
-          ) : null}
+          <p className="muted">
+            请在官方窗口核对实际结果。已发布时登记微博链接；核实尚未发布后，可返回编辑。
+          </p>
           <div className="row">
             <Button
-              disabled={busy || !confirmed}
+              disabled={busy}
               onClick={() =>
                 void work("正在登记结果…", () =>
                   ipc("weiboPosts.resolve", {
@@ -329,7 +349,7 @@ export function WeiboComposer({
                 )
               }
             >
-              {receipt.trim() ? "登记实际微博链接" : "确认尚未发布，返回编辑"}
+              {receipt.trim() ? "登记实际微博链接" : "已核实未发布，返回编辑"}
             </Button>
           </div>
         </details>

@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { ipc } from "../api/client";
 import { Dialog } from "../ui/Dialog";
-import { CheckboxField } from "../ui/CheckboxField";
 import { Button, LoadingState, Notice } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import type {
@@ -27,13 +26,11 @@ export function BitBrowserCloseDialog({
   const query = useIpcQuery("bit.diagnose", command, {
     revision: environment?.revision,
   });
-  const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => setConfirmed(false), [environment?.revision]);
   const blocked = environment?.busy || !!query.data?.blockers.length;
   const close = async () => {
-    if (pending || blocked || !confirmed || !query.data) return;
+    if (pending || blocked || !query.data) return;
     setPending(true);
     setError("");
     try {
@@ -83,12 +80,6 @@ export function BitBrowserCloseDialog({
           窗口配置暂不可读；关闭请求仍可发送，实际状态请刷新列表核对。
         </Notice>
       ) : null}
-      <CheckboxField
-        checked={confirmed}
-        disabled={pending || blocked || !query.data}
-        onChange={(event) => setConfirmed(event.target.checked)}
-        label="我已保存网页内容并核对未完成操作，确认关闭此窗口"
-      />
       {error ? <Notice danger>{error}</Notice> : null}
       <div className="dialog-actions">
         <Button disabled={pending} onClick={onClose}>
@@ -96,10 +87,10 @@ export function BitBrowserCloseDialog({
         </Button>
         <Button
           primary
-          disabled={pending || blocked || !confirmed || !query.data}
+          disabled={pending || blocked || !query.data}
           onClick={() => void close()}
         >
-          {pending ? "正在请求关闭…" : "确认关闭窗口"}
+          {pending ? "正在请求关闭…" : "关闭窗口"}
         </Button>
       </div>
     </Dialog>

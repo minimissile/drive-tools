@@ -28,7 +28,6 @@ export function WeiboPublishingDialog({
     (raw) => z.object({ ruleNote: z.string().max(2000) }).parse(raw),
   );
   const { ruleNote } = note.value;
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const save = async () => {
@@ -36,7 +35,7 @@ export function WeiboPublishingDialog({
       id: account.id,
       allowLink,
       ruleNote,
-      confirmed,
+      confirmed: true,
     });
     if (!parsed.success) {
       setError(parsed.error.issues[0].message);
@@ -68,7 +67,6 @@ export function WeiboPublishingDialog({
         disabled={busy}
         onChange={(event) => {
           setAllowLink(event.target.checked);
-          setConfirmed(false);
         }}
         hint="仅在已实际核实此账号及所用网盘域名可发布时勾选；链接权限 30 天后需复核。"
       />
@@ -84,16 +82,9 @@ export function WeiboPublishingDialog({
           disabled={busy}
           onChange={(event) => {
             note.update({ ruleNote: event.target.value });
-            setConfirmed(false);
           }}
         />
       </Field>
-      <CheckboxField
-        label="我已在该微博账号核实图文发布能力，以上链接选择符合实际权限"
-        checked={confirmed}
-        disabled={busy}
-        onChange={(event) => setConfirmed(event.target.checked)}
-      />
       {error ? <Notice danger>{error}</Notice> : null}
       {note.error ? <Notice warning>{note.error}</Notice> : null}
       <div className="dialog-actions">
@@ -102,10 +93,10 @@ export function WeiboPublishingDialog({
         </Button>
         <Button
           primary
-          disabled={busy || !confirmed || ruleNote.trim().length < 10}
+          disabled={busy || ruleNote.trim().length < 10}
           onClick={() => void save()}
         >
-          {busy ? "正在核实身份并保存…" : "保存核实结果"}
+          {busy ? "正在核实身份并保存…" : "保存已核实的发布能力"}
         </Button>
       </div>
     </Dialog>
