@@ -15,9 +15,17 @@ export function createWebsiteAccountHandlers(
     "websiteAccounts.list": () => services.websiteAccounts.list(),
     "websiteAccounts.add": (object) => {
       const value = z
-        .object({ provider: websiteProviderSchema, alias: alias.optional(), environmentId: environmentIdSchema.optional() })
+        .object({
+          provider: websiteProviderSchema,
+          alias: alias.optional(),
+          environmentId: environmentIdSchema.optional(),
+        })
         .parse(object);
-      return services.websiteAccounts.add(value.provider, value.alias, value.environmentId);
+      return services.websiteAccounts.add(
+        value.provider,
+        value.alias,
+        value.environmentId,
+      );
     },
     "websiteAccounts.rename": (object) => {
       const value = id.extend({ alias }).parse(object);
@@ -29,6 +37,12 @@ export function createWebsiteAccountHandlers(
     },
     "websiteAccounts.check": (object) =>
       services.websiteAccounts.verify(id.parse(object).id),
+    "websiteAccounts.openDocument": (object) => {
+      const value = id
+        .extend({ url: z.string().trim().min(1).max(2048) })
+        .parse(object);
+      return services.websiteAccounts.openDocument(value.id, value.url);
+    },
     "websiteAccounts.weiboPublishing": (object) =>
       services.websiteAccounts.weiboPublishing(
         weiboPublishingSchema.parse(object),

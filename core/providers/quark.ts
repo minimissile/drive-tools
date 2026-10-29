@@ -12,11 +12,19 @@ import type {
   JsonObject,
   OwnShare,
   ProviderTransport,
+  ShareCreatedHandler,
 } from "./provider";
 import { normalizeRemoteFile, normalizedDirectory } from "./provider";
 import { parseShare } from "../links";
 import { normalizeShareStatistic, numericCount } from "./share-statistics";
 import { normalizeCapacity } from "./capacity";
+import type { ShareCreationOptions } from "../../shared/share-options";
+import {
+  actualShareExpiry,
+  newShareRequest,
+  privateShareOptions,
+  validateShareOptions,
+} from "./share-options";
 
 export class QuarkProvider implements DriveProvider {
   constructor(
@@ -98,7 +106,7 @@ export class QuarkProvider implements DriveProvider {
   private realNameRequired() {
     return new AppError(
       "USER_ACTION_REQUIRED",
-      `${this.label}要求当前账号完成实名认证后才能创建分享（32011）。请在${this.label}官方客户端或官网处理，再使用“恢复本人分享”。已保存文件无需重复转存。`,
+      `${this.label}要求当前账号完成实名认证后才能创建分享（32011）。请在${this.label}官方客户端或官网处理，再创建分享。已保存文件无需重复转存。`,
     );
   }
   async identity(account: Account) {
@@ -238,19 +246,46 @@ export class QuarkProvider implements DriveProvider {
       this.request(account, path, {}, body),
     );
   }
-  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
+  async manageFile(
+    account: Account,
+    input: import("../../shared/drive-files").ProviderFileMutation,
+  ) {
     if (input.action === "mkdir") {
-      await this.request(account, "file", {}, { pdir_fid: input.parentId, file_name: input.name, dir_path: "", dir_init_lock: false });
+      await this.request(
+        account,
+        "file",
+        {},
+        {
+          pdir_fid: input.parentId,
+          file_name: input.name,
+          dir_path: "",
+          dir_init_lock: false,
+        },
+      );
     } else if (input.action === "rename") {
-      await this.request(account, "file/rename", {}, { fid: input.file!.id, file_name: input.name });
+      await this.request(
+        account,
+        "file/rename",
+        {},
+        { fid: input.file!.id, file_name: input.name },
+      );
     } else {
-      const result = await this.request(account, "file/delete", {}, { action_type: 2, filelist: [input.file!.id], exclude_fids: [] });
+      const result = await this.request(
+        account,
+        "file/delete",
+        {},
+        { action_type: 2, filelist: [input.file!.id], exclude_fids: [] },
+      );
       if (result.data?.task_id) {
         for (let attempt = 0; attempt < 20; attempt++) {
           if (await this.poll(account, String(result.data.task_id))) return;
           await new Promise((resolve) => setTimeout(resolve, 800));
         }
-        throw new AppError("UNCERTAIN_REMOTE_RESULT", "删除已提交，结果待核对。", true);
+        throw new AppError(
+          "UNCERTAIN_REMOTE_RESULT",
+          "删除已提交，结果待核对。",
+          true,
+        );
       }
     }
   }
@@ -418,45 +453,110 @@ export class QuarkProvider implements DriveProvider {
       files.every((f) => fids.map(String).includes(f.id))
     );
   }
-  private async shareInfo(
+  private async shareDetails(
     account: Account,
     shareId: string,
-  ): Promise<OwnShare> {
+    ownerUid?: string,
+  ) {
     const result = await this.request(
       account,
       "share/password",
       {},
       { share_id: shareId },
     );
-    const identity = await this.identity(account);
+    const identity = ownerUid
+      ? { uid: ownerUid }
+      : await this.identity(account);
     const parsed = parseShare(
       String(result.data?.share_url ?? result.data?.url ?? ""),
     );
     if (parsed.provider !== this.id)
       throw new AppError("INVALID_OWN_SHARE", "返回的本人分享链接类型不正确。");
     return {
-      id: shareId,
-      url: parsed.url,
-      code: String(
-        result.data?.passcode ?? result.data?.pass_code ?? parsed.code ?? "",
-      ),
-      ownerUid: identity.uid,
+      share: {
+        id: shareId,
+        url: parsed.url,
+        code: String(
+          result.data?.passcode ?? result.data?.pass_code ?? parsed.code ?? "",
+        ),
+        ownerUid: identity.uid,
+      } satisfies OwnShare,
+      detail: result.data as JsonObject,
     };
   }
+  private async shareInfo(
+    account: Account,
+    shareId: string,
+  ): Promise<OwnShare> {
+    return (await this.shareDetails(account, shareId)).share;
+  }
   async createShare(account: Account, files: RemoteFile[], title: string) {
-    const result = await this.request(
+    return this.createNewShare(account, files, title);
+  }
+  async createShareWithOptions(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ) {
+    const settings = privateShareOptions(this.id, options);
+    const identity = await this.identity(account);
+    if (account.uid && identity.uid !== account.uid)
+      throw new AppError(
+        "ACCOUNT_UID_MISMATCH",
+        "当前登录账号与资源所属账号不一致，未创建分享。",
+      );
+    return this.createNewShare(
       account,
-      "share",
-      {},
-      { fid_list: files.map((f) => f.id), title, url_type: 1, expired_type: 1 },
+      files,
+      title,
+      settings,
+      onCreated,
+      identity.uid,
     );
+  }
+  private async createNewShare(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options?: ReturnType<typeof privateShareOptions>,
+    onCreated?: ShareCreatedHandler,
+    ownerUid?: string,
+  ): Promise<OwnShare> {
+    // QuarkPanTool and the UC batch-share implementation use these web-protocol values.
+    // https://github.com/ihmily/QuarkPanTool/blob/main/quark.py
+    // https://greasyfork.org/en/scripts/476388/code
+    const expiredType = options
+      ? ({ 0: 1, 1: 2, 7: 3, 30: 4 } as Record<number, number>)[
+          options.expiresInDays
+        ]
+      : 1;
+    const submit = () =>
+      this.request(
+        account,
+        "share",
+        {},
+        {
+          fid_list: files.map((file) => file.id),
+          title,
+          url_type: options ? 2 : 1,
+          expired_type: expiredType,
+          ...(options ? { passcode: options.extractionCode } : {}),
+        },
+      );
+    const result = options ? await newShareRequest(submit) : await submit();
     try {
-      let shareId = result.data?.share_id;
-      if (!shareId && result.data?.task_id) {
+      // UC may nest an immediately completed task in task_resp.data.
+      let shareId =
+        result.data?.share_id ?? result.data?.task_resp?.data?.share_id;
+      const taskId =
+        result.data?.task_id ?? result.data?.task_resp?.data?.task_id;
+      if (!shareId && taskId) {
         for (let attempt = 0; attempt < 30; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 1000));
           const task = await this.request(account, "task", {
-            task_id: result.data.task_id,
+            task_id: taskId,
             retry_index: attempt,
           });
           shareId = task.data?.share_id ?? task.data?.share?.share_id;
@@ -469,13 +569,62 @@ export class QuarkProvider implements DriveProvider {
           `${this.label}分享未返回ID，请先核对本人分享记录。`,
           true,
         );
-      const share = await this.shareInfo(account, String(shareId));
-      if (!(await this.verifyShare(account, share.id, files)))
+      if (onCreated && ownerUid)
+        await onCreated({
+          id: String(shareId),
+          url: "",
+          code: options?.extractionCode ?? "",
+          ownerUid,
+        });
+      const { share, detail } = await this.shareDetails(
+        account,
+        String(shareId),
+        ownerUid,
+      );
+      await onCreated?.(share);
+      const row = options
+        ? (await this.ownRows(account)).find(
+            (item) => String(item.share_id) === share.id,
+          )
+        : undefined;
+      if (
+        options &&
+        (!row ||
+          !this.shareSettingsMatch(
+            share,
+            detail,
+            row,
+            options,
+            options.extractionCode,
+          ))
+      )
+        throw new AppError(
+          "SHARE_OPTIONS_UNVERIFIED",
+          `${this.label}已返回新分享，但有效期或提取码未通过核对，请查看官方网盘分享记录。`,
+          true,
+        );
+      if (
+        !(options && row
+          ? await this.containsFiles(account, row, files)
+          : await this.verifyShare(account, share.id, files))
+      )
         throw new AppError(
           "OWNERSHIP_UNVERIFIED",
           "未在本人分享记录中确认目标文件，暂不允许分发。",
         );
-      return share;
+      return options
+        ? {
+            ...share,
+            expiresAt:
+              Number(detail.expired_type ?? row?.expired_type) === 1
+                ? null
+                : actualShareExpiry(
+                    detail.expired_at ??
+                      detail.expire_timestamp ??
+                      row?.expired_at,
+                  ),
+          }
+        : share;
     } catch (error) {
       throw new AppError(
         error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
@@ -483,6 +632,79 @@ export class QuarkProvider implements DriveProvider {
         true,
       );
     }
+  }
+  private shareSettingsMatch(
+    share: OwnShare,
+    detail: JsonObject,
+    row: JsonObject,
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    const expectedCode = options.extractionCode?.trim() || code;
+    const expectedType = (
+      { 0: 1, 1: 2, 7: 3, 30: 4 } as Record<number, number>
+    )[options.expiresInDays];
+    const actualType =
+      detail.expired_type == null || detail.expired_type === ""
+        ? row.expired_type
+        : detail.expired_type;
+    const actualUrlType =
+      detail.url_type == null || detail.url_type === ""
+        ? row.url_type
+        : detail.url_type;
+    return (
+      /^[A-Za-z0-9]{4}$/.test(share.code) &&
+      (!expectedCode || share.code === expectedCode) &&
+      (actualType == null ||
+        actualType === "" ||
+        Number(actualType) === expectedType) &&
+      (actualUrlType == null ||
+        actualUrlType === "" ||
+        Number(actualUrlType) === 2)
+    );
+  }
+  async verifyShareWithOptions(
+    account: Account,
+    shareId: string,
+    files: RemoteFile[],
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const { share, detail } = await this.shareDetails(account, shareId);
+    if (account.uid && share.ownerUid !== account.uid) return false;
+    const row = (await this.ownRows(account)).find(
+      (item) => String(item.share_id) === shareId,
+    );
+    return (
+      !!row &&
+      this.shareSettingsMatch(share, detail, row, options, code) &&
+      this.containsFiles(account, row, files)
+    );
+  }
+  async readCreatedShare(
+    account: Account,
+    shareId: string,
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const { share, detail } = await this.shareDetails(account, shareId);
+    if (account.uid && share.ownerUid !== account.uid) return null;
+    const row = (await this.ownRows(account)).find(
+      (item) => String(item.share_id) === shareId,
+    );
+    if (!row || !this.shareSettingsMatch(share, detail, row, options, code))
+      return null;
+    return {
+      ...share,
+      expiresAt:
+        Number(detail.expired_type ?? row.expired_type) === 1
+          ? null
+          : actualShareExpiry(
+              detail.expired_at ?? detail.expire_timestamp ?? row.expired_at,
+            ),
+    };
   }
   private async containsFiles(
     account: Account,

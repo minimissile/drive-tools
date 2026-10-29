@@ -294,6 +294,8 @@ export class BrowserEnvironments {
     verified = false,
   ) {
     const info = this.accountInfo(ref);
+    if (["feishu", "tencent-docs", "shimo"].includes(info.platform) && this.get(environmentId).engine !== "electron")
+      throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台当前使用内置浏览器保存会话，请选择内置环境。");
     if(info.platform === "smzdm" && this.get(environmentId).engine !== "electron")
       throw new AppError("SMZDM_NATIVE_SESSION","什么值得买单账号目前使用内置浏览器环境，请选择内置环境。");
     if (
@@ -474,6 +476,15 @@ export class BrowserEnvironments {
       this.stamp(ref).identityRevision,
       ref.kind,
       ref.id,
+    );
+  }
+  /** Confirm a local document workspace session without manufacturing an external UID. */
+  confirmSession(ref: EnvironmentAccountRef) {
+    if (ref.kind !== "website" || !["feishu", "tencent-docs", "shimo"].includes(this.accountInfo(ref).platform))
+      throw new AppError("ENVIRONMENT_SESSION_PLATFORM", "此平台需要核实真实账号身份。");
+    this.db.run(
+      "UPDATE browser_environment_accounts SET verified_revision=? WHERE kind=? AND account_id=?",
+      this.stamp(ref).identityRevision, ref.kind, ref.id,
     );
   }
   invalidateIdentity(ref: EnvironmentAccountRef) {

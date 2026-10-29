@@ -18,9 +18,16 @@ import type {
   EnvironmentAccountRef,
 } from "../../shared/browser-environments";
 import { platformSpecs } from "../../shared/platforms";
+import {
+  documentPlatformSpecs,
+  isDocumentProvider,
+} from "../../shared/document-platforms";
 
 export const environmentPlatformName = (platform: string) =>
-  ({ "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道" })[platform] ??
+  (isDocumentProvider(platform)
+    ? documentPlatformSpecs[platform].name
+    : undefined) ??
+  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道" }[platform] ??
   platformSpecs.find((spec) => spec.id === platform)?.name ??
   platform;
 

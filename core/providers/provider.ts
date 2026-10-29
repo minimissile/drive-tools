@@ -8,6 +8,7 @@ import type {
 import { AppError } from "../errors";
 import type { DriveCapacity } from "../../shared/drive-capacity";
 import type { ProviderShareStatsPage } from "../../shared/share-statistics";
+import type { ShareCreationOptions } from "../../shared/share-options";
 export type JsonObject = Record<string, any>;
 export interface ProviderTransport {
   ownShareCode?(accountId: string, shareId: string): Promise<string | null>;
@@ -34,13 +35,25 @@ export interface OwnShare {
   url: string;
   code: string;
   ownerUid: string;
+  /** Present only when the provider returned an actual expiry; null is permanent. */
+  expiresAt?: string | null;
 }
+/** May first report an ID with empty url, then report the complete returned link. */
+export type ShareCreatedHandler = (share: OwnShare) => Promise<void>;
 export interface TransferResult {
   taskId: string | null;
 }
 export interface DriveProvider {
-  manageFile?(account: Account, input: import("../../shared/drive-files").ProviderFileMutation): Promise<void>;
-  manage?(account: Account, action: "mkdir" | "rename" | "delete", path: string, name?: string): Promise<void>;
+  manageFile?(
+    account: Account,
+    input: import("../../shared/drive-files").ProviderFileMutation,
+  ): Promise<void>;
+  manage?(
+    account: Account,
+    action: "mkdir" | "rename" | "delete",
+    path: string,
+    name?: string,
+  ): Promise<void>;
   upload?(
     account: Account,
     parentId: string,
@@ -76,6 +89,27 @@ export interface DriveProvider {
     files: RemoteFile[],
     title: string,
   ): Promise<OwnShare>;
+  /** Always creates a new link with these settings; does not reuse an old share. */
+  createShareWithOptions?(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ): Promise<OwnShare>;
+  verifyShareWithOptions?(
+    account: Account,
+    shareId: string,
+    files: RemoteFile[],
+    options: ShareCreationOptions,
+    code?: string,
+  ): Promise<boolean>;
+  readCreatedShare?(
+    account: Account,
+    shareId: string,
+    options: ShareCreationOptions,
+    code?: string,
+  ): Promise<OwnShare | null>;
   findOwnShare(account: Account, files: RemoteFile[]): Promise<OwnShare | null>;
   recoverOwnShare(
     account: Account,

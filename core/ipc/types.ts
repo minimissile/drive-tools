@@ -37,6 +37,8 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  resourceCatalogs: import("../resource-catalog").ResourceCatalogs;
+  shareCreation: import("../share-creation").ShareCreation;
   resourceDeletion: import("../resource-deletion").ResourceDeletion;
   smzdm: import("../smzdm/service").SmzdmArticles;
   distribution: import("../distribution").Distribution;

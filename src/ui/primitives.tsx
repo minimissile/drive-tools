@@ -182,6 +182,7 @@ export function SearchField({
   className?: string;
   loading?: boolean;
 }) {
+  const input = useRef<HTMLInputElement>(null);
   return (
     <div className={`input-frame search ${className}`}>
       {loading ? (
@@ -190,6 +191,7 @@ export function SearchField({
         <Search size={16} aria-hidden="true" />
       )}
       <input
+        ref={input}
         aria-label={label}
         aria-busy={loading}
         type="search"
@@ -201,9 +203,13 @@ export function SearchField({
         <button
           type="button"
           aria-label="清空搜索"
-          onClick={() => onChange("")}
+          title="清空搜索"
+          onClick={() => {
+            onChange("");
+            input.current?.focus();
+          }}
         >
-          <X size={14} aria-hidden="true" />
+          <X size={16} aria-hidden="true" />
         </button>
       ) : null}
     </div>

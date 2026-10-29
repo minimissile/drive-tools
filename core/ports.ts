@@ -43,6 +43,7 @@ export interface AppPorts {
     verify?(account: import("../shared/website-accounts").WebsiteAccount): Promise<import("../shared/website-accounts").WebsiteSessionState>;
     open?(account: import("../shared/website-accounts").WebsiteAccount, expectedUid: string): Promise<void>;
     openPost?(account: import("../shared/website-accounts").WebsiteAccount, url: string): Promise<void>;
+    openDocument?(account: import("../shared/website-accounts").WebsiteAccount, url: string): Promise<void>;
   };
   zhidaoSession?: {
     isOpen?(): boolean;

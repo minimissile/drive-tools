@@ -12,7 +12,7 @@ import {
   useAppNavigation,
 } from "../state";
 import { Button, Empty, Header, Notice, Panel, Status } from "../ui/primitives";
-import { RecoverShare } from "../resources/components";
+import { CreateShare } from "../resources/CreateShareDialog";
 import { accountLabel, stageName } from "../resources/labels";
 import { formatTime } from "../lib/format";
 import type { Job } from "../../shared/types";
@@ -231,7 +231,7 @@ export default function Tasks() {
                     <FileText size={14} />
                     {logs === job.id ? "收起日志" : "查看日志"}
                   </Button>
-                  {paused && copy ? <RecoverShare copy={copy} /> : null}
+                  {paused && copy ? <CreateShare copy={copy} /> : null}
                   <Button quiet onClick={() => navigate("library")}>
                     资源库
                   </Button>

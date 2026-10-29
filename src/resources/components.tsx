@@ -4,37 +4,28 @@ import { SearchSelect } from "../ui/SearchSelect";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useState, type ReactNode } from "react";
 import { File, Plus } from "lucide-react";
-import {
-  useAppActions,
-  useAppActivity,
-  useAppData,
-  useAppNavigation,
-  useAppSelection,
-} from "../state";
+import { useAppData, useAppNavigation, useAppSelection } from "../state";
 import type { ResourceCopy } from "../../shared/types";
-import {
-  Button,
-  Empty,
-  Field,
-  LoadingState,
-  Notice,
-  Status,
-} from "../ui/primitives";
-import { Dialog } from "../ui/Dialog";
+import { Button, Empty, LoadingState, Status } from "../ui/primitives";
 import { accountLabel, stageName } from "./labels";
+import { copyShareStatus } from "../../shared/share-status";
 export function CopyStatus({ copy }: { copy: ResourceCopy }) {
-  const good = copy.status === "ready";
+  const { data } = useAppData();
+  const account = data?.accounts.find((item) => item.id === copy.accountId);
+  const check = data?.shareChecks.find((item) => item.copyId === copy.id);
+  const share = copyShareStatus(copy, account, check);
+  const displayShare = ["ready", "recorded"].includes(copy.status);
   return (
     <Status
       kind={
-        good
-          ? "good"
+        displayShare
+          ? share.kind
           : ["failed", "needs_review", "waiting_login"].includes(copy.status)
             ? "warning"
             : "normal"
       }
     >
-      {stageName(copy.status)}
+      {displayShare ? share.label : stageName(copy.status)}
     </Status>
   );
 }
@@ -129,75 +120,5 @@ export function Cover({
     <div className={`resource-cover placeholder ${large ? "large" : ""}`}>
       <File size={large ? 32 : 22} strokeWidth={1.5} aria-hidden="true" />
     </div>
-  );
-}
-export function RecoverShare({ copy }: { copy: ResourceCopy }) {
-  const { command } = useAppActions(),
-    { busy } = useAppActivity(),
-    [open, setOpen] = useState(false),
-    [text, setText] = useState(""),
-    [code, setCode] = useState("");
-  if (!copy.verifiedAt || !copy.files.length) return null;
-  return (
-    <>
-      <Button quiet onClick={() => setOpen(true)}>
-        恢复本人分享
-      </Button>
-      {open ? (
-        <Dialog
-          title="恢复本人分享"
-          onClose={() => setOpen(false)}
-          busy={busy > 0}
-        >
-          <Notice>
-            在原账号网盘中核对或创建分享，再粘贴到这里。应用会同时核验本人分享记录、目标文件与链接；来源链接不能使用。
-          </Notice>
-          <div className="row" style={{ margin: "16px 0" }}>
-            <Button
-              disabled={busy > 0}
-              onClick={async () => {
-                if (
-                  await command(
-                    "copy.createShare",
-                    { copyId: copy.id },
-                    "本人分享已核验并保存。",
-                  )
-                )
-                  setOpen(false);
-              }}
-            >
-              查找或新建本人分享
-            </Button>
-          </div>
-          <small>
-            先核验目标文件并查找已有有效分享；没有有效分享时创建一个新链接，不重新转存文件。
-          </small>
-          <Field label="本人分享链接">
-            <textarea value={text} onChange={(e) => setText(e.target.value)} />
-          </Field>
-          <Field label="提取码">
-            <input value={code} onChange={(e) => setCode(e.target.value)} />
-          </Field>
-          <div className="actions">
-            <Button
-              primary
-              disabled={!text || busy > 0}
-              onClick={async () => {
-                if (
-                  await command(
-                    "copy.recoverShare",
-                    { copyId: copy.id, text, code },
-                    "本人分享已核验并恢复。",
-                  )
-                )
-                  setOpen(false);
-              }}
-            >
-              核验并恢复
-            </Button>
-          </div>
-        </Dialog>
-      ) : null}
-    </>
   );
 }

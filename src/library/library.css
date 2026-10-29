@@ -251,8 +251,17 @@
 .resource-meta-separator {
   color: var(--muted);
 }
-.resource-row-copy .good-text {
+.resource-share-state {
+  color: var(--muted);
   font-size: 11px;
+}
+.resource-share-state[data-kind="good"],
+.resource-share-status[data-kind="good"] > span {
+  color: var(--green);
+}
+.resource-share-state[data-kind="warning"],
+.resource-share-status[data-kind="warning"] > span {
+  color: var(--amber);
 }
 .resource-date {
   flex: none;
@@ -358,29 +367,37 @@
   justify-content: space-between;
   gap: 8px;
 }
-.resource-share-actions {
+.resource-share-status {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-.resource-detail .notice {
-  padding: 8px 10px;
+  margin-top: var(--space-2);
+  color: var(--muted);
   font-size: 12px;
+  line-height: 1.7;
+}
+.resource-share-status time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.resource-share-message {
+  margin-top: var(--space-2);
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 .resource-detail-footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   flex: none;
   align-items: center;
   gap: var(--space-2);
   border-top: 1px solid var(--line);
   padding: 12px 20px;
   background: var(--surface);
-}
-.resource-copy-action {
-  grid-column: 1 / -1;
 }
 .private-source {
   border-top: 1px solid var(--line);

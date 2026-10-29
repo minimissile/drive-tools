@@ -1,12 +1,26 @@
 import { z } from "zod";
 
-export const websiteProviderSchema = z.enum(["baidu-marketing", "weibo", "zhihu", "smzdm"]);
+export const websiteProviderSchema = z.enum([
+  "baidu-marketing",
+  "weibo",
+  "zhihu",
+  "smzdm",
+  "feishu",
+  "tencent-docs",
+  "shimo",
+]);
 export type WebsiteProvider = z.infer<typeof websiteProviderSchema>;
 export const websiteProviderSpecs: Record<
   WebsiteProvider,
   { name: string; description: string }
 > = {
-  smzdm: {name: "什么值得买", description: "公众号文章整理与单账号发布"},
+  feishu: { name: "飞书", description: "资源清单文档与网页登录会话" },
+  "tencent-docs": {
+    name: "腾讯文档",
+    description: "资源清单表格与网页登录会话",
+  },
+  shimo: { name: "石墨文档", description: "资源清单文档与网页登录会话" },
+  smzdm: { name: "什么值得买", description: "公众号文章整理与单账号发布" },
   zhihu: { name: "知乎", description: "比特多账号养号与文章、回答发布" },
   weibo: { name: "微博", description: "资源推荐图文与微博发布" },
   "baidu-marketing": {
@@ -28,6 +42,8 @@ export interface WebsiteAccount {
   updatedAt: string;
 }
 export interface WebsiteSessionState {
+  /** A local browser session was observed; no external account UID was verified. */
+  sessionOnly?: boolean;
   hasSession: boolean;
   uid: string | null;
   windowOpen: boolean;
@@ -38,6 +54,7 @@ export interface WebsiteSessionState {
   checking?: boolean;
 }
 export interface WebsiteAccountView extends WebsiteAccount {
+  sessionOnly?: boolean;
   windowOpen: boolean;
   message: string;
   checking?: boolean;
@@ -71,6 +88,10 @@ export interface WebsiteAccountContract {
   >;
   "websiteAccounts.login": Contract<{ id: string }, boolean>;
   "websiteAccounts.check": Contract<{ id: string }, WebsiteAccountView>;
+  "websiteAccounts.openDocument": Contract<
+    { id: string; url: string },
+    { opened: boolean; url: string }
+  >;
   "websiteAccounts.weiboPublishing": Contract<
     z.infer<typeof weiboPublishingSchema>,
     WebsiteAccountView

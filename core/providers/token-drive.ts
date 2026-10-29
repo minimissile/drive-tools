@@ -24,7 +24,14 @@ import {
   type JsonObject,
   type OwnShare,
   type ProviderTransport,
+  type ShareCreatedHandler,
 } from "./provider";
+import type { ShareCreationOptions } from "../../shared/share-options";
+import {
+  actualShareExpiry,
+  newShareRequest,
+  validateShareOptions,
+} from "./share-options";
 
 const root = (id: string) => (id === "0" ? "" : id);
 
@@ -133,7 +140,8 @@ export class TokenDriveProvider implements DriveProvider {
           mapped.code,
         )
       )
-        mapped.uncertain = error.uncertain;
+        mapped.uncertain =
+          error.uncertain || (body !== undefined && error.status >= 500);
       // Only repeat read requests after an explicit authentication rejection.
       // An uncertain write is always left to the queue's ownership recovery.
       if (
@@ -365,15 +373,47 @@ export class TokenDriveProvider implements DriveProvider {
       );
     }
   }
-  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
+  async manageFile(
+    account: Account,
+    input: import("../../shared/drive-files").ProviderFileMutation,
+  ) {
     if (input.action === "mkdir") {
-      await this.request(account, "files", {}, { kind: "drive#folder", name: input.name, parent_id: root(input.parentId), space: "" });
+      await this.request(
+        account,
+        "files",
+        {},
+        {
+          kind: "drive#folder",
+          name: input.name,
+          parent_id: root(input.parentId),
+          space: "",
+        },
+      );
     } else if (input.action === "rename") {
-      await this.request(account, `files/${encodeURIComponent(input.file!.id)}`, {}, { name: input.name, ...(this.id === "xunlei" ? { space: "" } : {}) }, false, "PATCH");
+      await this.request(
+        account,
+        `files/${encodeURIComponent(input.file!.id)}`,
+        {},
+        { name: input.name, ...(this.id === "xunlei" ? { space: "" } : {}) },
+        false,
+        "PATCH",
+      );
     } else if (this.id === "xunlei") {
-      await this.request(account, `files/${encodeURIComponent(input.file!.id)}/trash`, { space: "" }, {}, false, "PATCH");
+      await this.request(
+        account,
+        `files/${encodeURIComponent(input.file!.id)}/trash`,
+        { space: "" },
+        {},
+        false,
+        "PATCH",
+      );
     } else {
-      await this.request(account, "files:batchTrash", {}, { ids: [input.file!.id] });
+      await this.request(
+        account,
+        "files:batchTrash",
+        {},
+        { ids: [input.file!.id] },
+      );
     }
   }
   async ensureFolder(account: Account, path: string) {
@@ -628,42 +668,77 @@ export class TokenDriveProvider implements DriveProvider {
     return false;
   }
   async createShare(account: Account, files: RemoteFile[], title: string) {
+    return this.createNewShare(account, files, title);
+  }
+  async createShareWithOptions(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ) {
+    return this.createNewShare(
+      account,
+      files,
+      title,
+      validateShareOptions(this.id, options),
+      onCreated,
+    );
+  }
+  private async createNewShare(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options?: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ): Promise<OwnShare> {
     const identity = await this.identity(account);
     if (account.uid && account.uid !== identity.uid)
       throw new AppError(
         "ACCOUNT_UID_MISMATCH",
         `${this.name}当前账号UID与原绑定不一致，未创建分享。`,
       );
-    const data = await this.request(
-      account,
-      "share",
-      {},
-      {
-        file_ids: files.map((f) => f.id),
-        share_to: this.id === "pikpak" ? "publiclink" : "copy",
-        title,
-        expiration_days: "-1",
-        ...(this.id === "pikpak"
-          ? { pass_code_option: "NOT_REQUIRED" }
-          : {
-              restore_limit: "-1",
-              params: { subscribe_push: "false", WithPassCodeInLink: "true" },
-            }),
-      },
-    );
+    const submit = () =>
+      this.request(
+        account,
+        "share",
+        {},
+        {
+          file_ids: files.map((f) => f.id),
+          share_to: this.id === "pikpak" ? "publiclink" : "copy",
+          title,
+          expiration_days: String(options?.expiresInDays || -1),
+          ...(this.id === "pikpak"
+            ? { pass_code_option: "NOT_REQUIRED" }
+            : {
+                restore_limit: "-1",
+                params: { subscribe_push: "false", WithPassCodeInLink: "true" },
+              }),
+        },
+      );
+    const data = options ? await newShareRequest(submit) : await submit();
     try {
+      if (onCreated && data.share_id && !data.share_url)
+        await onCreated({
+          id: String(data.share_id),
+          url: "",
+          code: String(data.pass_code ?? ""),
+          ownerUid: identity.uid,
+        });
       if (!data.share_id || !data.share_url)
         throw new AppError(
           "UNCERTAIN_SHARE_RESULT",
-          `${this.name}分享结果待核，请从本人分享记录恢复，不要重复创建。`,
+          `${this.name}分享结果待核，请核对本人分享记录，避免重复创建。`,
           true,
         );
       const share = this.shareInfo(data, identity.uid);
+      await onCreated?.(share);
       const row = (await this.ownRows(account)).find(
         (r) => String(r.share_id) === share.id,
       );
       if (
         !row ||
+        (options && !this.shareSettingsMatch({ ...row, ...data }, options)) ||
         !(await this.verified(
           account,
           { ...row, share_url: share.url },
@@ -677,7 +752,15 @@ export class TokenDriveProvider implements DriveProvider {
           `${this.name}新分享未通过本人记录及目标文件核验，暂不允许分发。`,
           true,
         );
-      return share;
+      const expiresAt = options
+        ? actualShareExpiry(
+            data.expiration_at ??
+              data.expiration_time ??
+              row.expiration_at ??
+              row.expiration_time,
+          )
+        : undefined;
+      return { ...share, ...(expiresAt ? { expiresAt } : {}) };
     } catch (error) {
       throw new AppError(
         error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
@@ -685,6 +768,74 @@ export class TokenDriveProvider implements DriveProvider {
         true,
       );
     }
+  }
+  private shareSettingsMatch(row: JsonObject, options: ShareCreationOptions) {
+    const days = row.expiration_days;
+    if (
+      days != null &&
+      days !== "" &&
+      Number(days) !== (options.expiresInDays || -1)
+    )
+      return false;
+    if (
+      this.id === "pikpak" &&
+      row.pass_code_option != null &&
+      row.pass_code_option !== "NOT_REQUIRED"
+    )
+      return false;
+    const expiry = actualShareExpiry(row.expiration_at ?? row.expiration_time);
+    const created = actualShareExpiry(row.create_time ?? row.created_at);
+    if (expiry && Date.parse(expiry) <= Date.now()) return false;
+    if (
+      expiry &&
+      options.expiresInDays > 0 &&
+      created &&
+      Math.abs(
+        Date.parse(expiry) -
+          Date.parse(created) -
+          options.expiresInDays * 86_400_000,
+      ) > 86_400_000
+    )
+      return false;
+    return true;
+  }
+  async verifyShareWithOptions(
+    account: Account,
+    shareId: string,
+    files: RemoteFile[],
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const identity = await this.identity(account);
+    if (account.uid && identity.uid !== account.uid) return false;
+    const row = (await this.ownRows(account)).find(
+      (item) => String(item.share_id) === shareId,
+    );
+    return (
+      !!row &&
+      this.shareSettingsMatch(row, options) &&
+      this.verified(account, row, files, identity.uid, code)
+    );
+  }
+  async readCreatedShare(
+    account: Account,
+    shareId: string,
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const identity = await this.identity(account);
+    if (account.uid && identity.uid !== account.uid) return null;
+    const row = (await this.ownRows(account)).find(
+      (item) => String(item.share_id) === shareId,
+    );
+    if (!row || !this.shareSettingsMatch(row, options)) return null;
+    const share = await this.knownShare(account, row, identity.uid, code);
+    const expiresAt = actualShareExpiry(
+      row.expiration_at ?? row.expiration_time,
+    );
+    return { ...share, ...(expiresAt ? { expiresAt } : {}) };
   }
   async findOwnShare(account: Account, files: RemoteFile[]) {
     const identity = await this.identity(account);
@@ -702,7 +853,7 @@ export class TokenDriveProvider implements DriveProvider {
         if (e instanceof AppError && e.code === "BAD_CODE")
           throw new AppError(
             "RECOVER_SHARE_MANUALLY",
-            `${this.name}已有分享需要提取码，请粘贴本人分享恢复，避免重复创建。`,
+            `${this.name}已有分享需要提取码，请到官方网盘核对并补全提取码，避免重复创建。`,
           );
         throw e;
       }

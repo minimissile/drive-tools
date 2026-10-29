@@ -34,6 +34,7 @@ export interface WorkbenchEntry extends NavigationEntry {
 export const sidebarEntries: NavigationEntry[] = [
   { page: "workbench", title: "工作台", Icon: LayoutDashboard },
   { page: "library", title: "资源库", Icon: Library, group: "内容资产" },
+  { page: "resource-catalog", title: "资源清单", Icon: ListChecks },
   { page: "traffic", title: "流量发现", Icon: Radar, group: "内容规划" },
   { page: "search", title: "搜索运营", Icon: Workflow },
   { page: "distribution", title: "内容分发", Icon: Share2 },

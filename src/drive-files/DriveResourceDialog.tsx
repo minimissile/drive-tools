@@ -99,8 +99,7 @@ function DriveResourceViewer({
       : "";
   const account = data?.accounts.find((item) => item.id === accountId);
   const knownOwn =
-    target.kind === "own" ||
-    !!(account?.uid && copy?.ownerUid === account.uid && copy.verifiedAt);
+    target.kind === "own" || !!(account?.uid && copy?.ownerUid === account.uid);
   const sourceText =
     resource?.sourceUrl ?? (target.kind === "share" ? target.sourceText : "");
   const sourceCode = target.kind === "share" ? target.code : undefined;
@@ -160,9 +159,29 @@ function DriveResourceViewer({
               });
             } else {
               if (!copy) throw new Error("此资源没有可定位的账号记录。");
-              const location = await ipc("drive.locateCopy", {
-                copyId: copy.id,
-              });
+              // A maintained resource may have a stale manifest. Its saved
+              // owner and exact folder ID still identify the directory to browse.
+              let recordedDirectory: DriveDirectory | null = null;
+              if (copy.folderId) {
+                try {
+                  recordedDirectory = await ipc("drive.directory", {
+                    accountId,
+                    path: copy.directory,
+                  });
+                } catch {
+                  // A moved or renamed directory can still be located by ID.
+                }
+              }
+              if (!current()) return;
+              const location =
+                recordedDirectory && recordedDirectory.folderId === copy.folderId
+                  ? {
+                      directory: recordedDirectory,
+                      files: recordedDirectory.files.filter((file) =>
+                        copy.files.some((expected) => expected.id === file.id),
+                      ),
+                    }
+                  : await ipc("drive.locateCopy", { copyId: copy.id });
               if (!current()) return;
               directory = location.directory;
               const only =
@@ -347,6 +366,7 @@ function DriveResourceViewer({
               initialSelected={activeContents.selected}
               workspace={data!.dataPath}
               copy={copy}
+              context="resource"
             />
           </>
         ) : ready && !query.error && !knownOwn && account ? (
@@ -368,6 +388,7 @@ function DriveResourceViewer({
             enabled
             own={false}
             readOnly
+            context="resource"
             onRead={(parentId, page, cursor, parents) =>
               void readShare(parentId, page, cursor, parents)
             }

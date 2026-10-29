@@ -1,15 +1,53 @@
 import type { WebsiteProvider } from "../shared/website-accounts";
+import {
+  documentHostMatches,
+  documentPlatformSpecs,
+  isDocumentProvider,
+} from "../shared/document-platforms";
 
 export const websiteLoginSpecs: Record<
   WebsiteProvider,
   { home: string; title: string; hosts: readonly string[] }
 > = {
-  smzdm: {home: "https://zhiyou.smzdm.com/user/login/", title: "什么值得买 · 官方登录", hosts: ["zhiyou.smzdm.com", "post.smzdm.com", "www.smzdm.com", "smzdm.com"]},
-  zhihu: { home: "https://www.zhihu.com/", title: "知乎 · 官方登录", hosts: ["www.zhihu.com", "zhihu.com", "zhuanlan.zhihu.com"] },
+  feishu: {
+    home: documentPlatformSpecs.feishu.home,
+    title: "飞书 · 官方文档",
+    hosts: documentPlatformSpecs.feishu.loginHosts,
+  },
+  "tencent-docs": {
+    home: documentPlatformSpecs["tencent-docs"].home,
+    title: "腾讯文档 · 官方文档",
+    hosts: documentPlatformSpecs["tencent-docs"].loginHosts,
+  },
+  shimo: {
+    home: documentPlatformSpecs.shimo.home,
+    title: "石墨文档 · 官方文档",
+    hosts: documentPlatformSpecs.shimo.loginHosts,
+  },
+  smzdm: {
+    home: "https://zhiyou.smzdm.com/user/login/",
+    title: "什么值得买 · 官方登录",
+    hosts: ["zhiyou.smzdm.com", "post.smzdm.com", "www.smzdm.com", "smzdm.com"],
+  },
+  zhihu: {
+    home: "https://www.zhihu.com/",
+    title: "知乎 · 官方登录",
+    hosts: ["www.zhihu.com", "zhihu.com", "zhuanlan.zhihu.com"],
+  },
   weibo: {
     home: "https://weibo.com/",
     title: "微博 · 官方登录",
-    hosts: ["weibo.com", "www.weibo.com", "passport.weibo.com", "login.sina.com.cn", "passport.sina.cn", "passport.weibo.cn", "m.weibo.cn", "weibo.cn", "security.weibo.com"],
+    hosts: [
+      "weibo.com",
+      "www.weibo.com",
+      "passport.weibo.com",
+      "login.sina.com.cn",
+      "passport.sina.cn",
+      "passport.weibo.cn",
+      "m.weibo.cn",
+      "weibo.cn",
+      "security.weibo.com",
+    ],
   },
   "baidu-marketing": {
     home: "https://qingge.baidu.com/login",
@@ -36,7 +74,9 @@ export function websiteNavigationAllowed(
       !url.username &&
       !url.password &&
       !url.port &&
-      websiteLoginSpecs[provider].hosts.includes(url.hostname)
+      (isDocumentProvider(provider)
+        ? documentHostMatches(url.hostname, websiteLoginSpecs[provider].hosts)
+        : websiteLoginSpecs[provider].hosts.includes(url.hostname))
     );
   } catch {
     return false;

@@ -1,6 +1,7 @@
 import { ProviderIcon } from "../resources/ProviderIcon";
 import { Select } from "../ui/Select";
 import "../library/library.css";
+import { copyShareStatus } from "../../shared/share-status";
 import { ResourceDetail } from "../library/ResourceDetail";
 import { ResourceDeleteDialog } from "../library/ResourceDeleteDialog";
 import { DriveResourceDialog } from "../drive-files/DriveResourceDialog";
@@ -386,17 +387,10 @@ export default function LibraryPage() {
                             {t}
                           </span>
                         ))}
-                        <span
-                          className={
-                            r.copies.some((c) => c.status === "ready")
-                              ? "good-text"
-                              : "muted"
-                          }
-                        >
-                          {r.copies.some((c) => c.status === "ready")
-                            ? "本人分享已就绪"
-                            : "等待归档"}
-                        </span>
+                        <ResourceShareState
+                          resource={r}
+                          accountId={accountId}
+                        />
                       </div>
                     </div>
                     <small className="resource-date">
@@ -547,5 +541,32 @@ export default function LibraryPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+function ResourceShareState({
+  resource,
+  accountId,
+}: {
+  resource: Resource;
+  accountId: string;
+}) {
+  const { data } = useAppData();
+  const statuses = resource.copies
+    .filter((copy) => accountId === "all" || copy.accountId === accountId)
+    .map((copy) =>
+      copyShareStatus(
+        copy,
+        data?.accounts.find((account) => account.id === copy.accountId),
+        data?.shareChecks.find((check) => check.copyId === copy.id),
+      ),
+    );
+  const status = ["valid", "invalid", "unavailable", "unchecked", "not_ready"]
+    .map((state) => statuses.find((item) => item.state === state))
+    .find(Boolean);
+  return (
+    <span className="resource-share-state" data-kind={status?.kind ?? "normal"}>
+      {status?.label ?? "等待归档"}
+    </span>
   );
 }

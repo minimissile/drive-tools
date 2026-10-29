@@ -25,6 +25,7 @@ const ZhidaoPublish = lazy(() => import("./zhidao/Publish"));
 const DriveFiles = lazy(() => import("./pages/DriveFiles"));
 const Accounts = lazy(() => import("./pages/Accounts"));
 const FingerprintBrowser = lazy(() => import("./pages/FingerprintBrowser"));
+const ResourceCatalog = lazy(() => import("./pages/ResourceCatalog"));
 const LibraryPage = lazy(() => import("./pages/Library"));
 const Intake = lazy(() => import("./pages/Intake"));
 const Tasks = lazy(() => import("./pages/Tasks"));
@@ -62,6 +63,7 @@ const surfaces = {
   "zhidao-accounts": Accounts,
   "drive-files": DriveFiles,
   library: LibraryPage,
+  "resource-catalog": ResourceCatalog,
   accounts: Accounts,
   "website-accounts": Accounts,
   "smzdm-accounts": Accounts,

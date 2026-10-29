@@ -19,7 +19,10 @@ import {
   type JsonObject,
   type ProviderTransport,
   type OwnShare,
+  type ShareCreatedHandler,
 } from "./provider";
+import type { ShareCreationOptions } from "../../shared/share-options";
+import { newShareRequest, validateShareOptions } from "./share-options";
 
 const api = "https://api.guangyapan.com";
 const root = (id: string) => (id === "0" ? "" : id);
@@ -156,18 +159,41 @@ export class GuangyaProvider implements DriveProvider {
     const data = await this.request(account, "/assets/v1/get_assets");
     return normalizeCapacity(data.totalSpaceSize, data.usedSpaceSize);
   }
-  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
-    const result = input.action === "mkdir"
-      ? await this.request(account, "/nd.bizuserres.s/v1/file/create_dir", { parentId: root(input.parentId), dirName: input.name }, true)
-      : input.action === "rename"
-        ? await this.request(account, "/nd.bizuserres.s/v1/file/rename", { fileId: input.file!.id, newName: input.name }, true)
-        : await this.request(account, "/nd.bizuserres.s/v1/file/delete_file", { fileIds: [input.file!.id] }, true);
+  async manageFile(
+    account: Account,
+    input: import("../../shared/drive-files").ProviderFileMutation,
+  ) {
+    const result =
+      input.action === "mkdir"
+        ? await this.request(
+            account,
+            "/nd.bizuserres.s/v1/file/create_dir",
+            { parentId: root(input.parentId), dirName: input.name },
+            true,
+          )
+        : input.action === "rename"
+          ? await this.request(
+              account,
+              "/nd.bizuserres.s/v1/file/rename",
+              { fileId: input.file!.id, newName: input.name },
+              true,
+            )
+          : await this.request(
+              account,
+              "/nd.bizuserres.s/v1/file/delete_file",
+              { fileIds: [input.file!.id] },
+              true,
+            );
     if (result.taskId) {
       for (let attempt = 0; attempt < 20; attempt++) {
         if (await this.poll(account, String(result.taskId))) return;
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
-      throw new AppError("UNCERTAIN_REMOTE_RESULT", "光鸭操作已提交，结果待核对。", true);
+      throw new AppError(
+        "UNCERTAIN_REMOTE_RESULT",
+        "光鸭操作已提交，结果待核对。",
+        true,
+      );
     }
   }
   private rows(data: JsonObject, parentId: string): RemoteFile[] {
@@ -578,24 +604,60 @@ export class GuangyaProvider implements DriveProvider {
     return identity.uid;
   }
   async createShare(account: Account, files: RemoteFile[], title: string) {
+    return this.createNewShare(account, files, title);
+  }
+  async createShareWithOptions(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ) {
+    validateShareOptions(this.id, options);
+    return this.createNewShare(account, files, title, options, onCreated);
+  }
+  private async createNewShare(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options?: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ): Promise<OwnShare> {
     const uid = await this.owner(account);
-    const result = await this.request(
-      account,
-      "/userres/v1/share_file",
-      {
-        fileIds: files.map((f) => f.id),
-        title,
-        validateDuration: 0,
-        autoFillCode: true,
-      },
-      true,
-    );
+    const submit = () =>
+      this.request(
+        account,
+        "/userres/v1/share_file",
+        {
+          fileIds: files.map((f) => f.id),
+          title,
+          validateDuration: 0,
+          autoFillCode: true,
+        },
+        true,
+      );
+    const result = options ? await newShareRequest(submit) : await submit();
     try {
-      const share = await this.ownInfo(account, result, uid),
-        row = (await this.ownRows(account)).find(
-          (r) => String(r.shareId ?? r.id) === share.id,
-        );
-      if (!row || !(await this.verified(account, row, files, uid, share.code)))
+      const createdId = result.shareId ?? result.id;
+      if (onCreated && createdId && !result.shareUrl)
+        await onCreated({
+          id: String(createdId),
+          url: "",
+          code: String(result.code ?? ""),
+          ownerUid: uid,
+        });
+      const share = await this.ownInfo(account, result, uid);
+      await onCreated?.(share);
+      const row = (await this.ownRows(account)).find(
+        (r) => String(r.shareId ?? r.id) === share.id,
+      );
+      if (
+        !row ||
+        (options &&
+          row.validateDuration != null &&
+          Number(row.validateDuration) !== 0) ||
+        !(await this.verified(account, row, files, uid, share.code))
+      )
         throw new AppError(
           "OWNERSHIP_UNVERIFIED",
           "光鸭新分享未通过本人记录及目标文件核验。",
@@ -608,6 +670,42 @@ export class GuangyaProvider implements DriveProvider {
         true,
       );
     }
+  }
+  async verifyShareWithOptions(
+    account: Account,
+    shareId: string,
+    files: RemoteFile[],
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const uid = await this.owner(account);
+    const row = (await this.ownRows(account)).find(
+      (item) => String(item.shareId ?? item.id) === shareId,
+    );
+    return (
+      !!row &&
+      (row.validateDuration == null || Number(row.validateDuration) === 0) &&
+      this.verified(account, row, files, uid, code)
+    );
+  }
+  async readCreatedShare(
+    account: Account,
+    shareId: string,
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const uid = await this.owner(account);
+    const row = (await this.ownRows(account)).find(
+      (item) => String(item.shareId ?? item.id) === shareId,
+    );
+    if (
+      !row ||
+      (row.validateDuration != null && Number(row.validateDuration) !== 0)
+    )
+      return null;
+    return this.ownInfo(account, row, uid, code);
   }
   async findOwnShare(account: Account, files: RemoteFile[]) {
     const uid = await this.owner(account),

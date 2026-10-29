@@ -29,12 +29,19 @@ import {
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { Dialog } from "../ui/Dialog";
-import { AccountBrowserChoice, type AccountBrowserSelection } from "./AccountBrowserChoice";
+import {
+  AccountBrowserChoice,
+  type AccountBrowserSelection,
+} from "./AccountBrowserChoice";
 import {
   clearAccountEnvironment,
   readAccountEnvironment,
 } from "./environment-navigation";
 import "./website-accounts.css";
+import {
+  documentPlatformSpecs,
+  isDocumentProvider,
+} from "../../shared/document-platforms";
 export default function OtherAccounts({
   initialProvider = "weibo",
 }: {
@@ -65,7 +72,11 @@ export default function OtherAccounts({
   const [statisticsAccountId, setStatisticsAccountId] = useState("");
   const [provider, setProvider] = useState<OtherProvider>(initialProvider);
   const singleSmzdm = provider === "smzdm";
-  const hasSmzdm = accounts.data.some((account) => account.provider === "smzdm");
+  const documentProvider = isDocumentProvider(provider);
+  const nativeOnly = singleSmzdm || documentProvider;
+  const hasSmzdm = accounts.data.some(
+    (account) => account.provider === "smzdm",
+  );
   const [newAlias, setNewAlias] = useState("");
   const initialEnvironment = useRef(readAccountEnvironment(data!.dataPath));
   const [browser, setBrowser] = useState<AccountBrowserSelection>({
@@ -76,7 +87,11 @@ export default function OtherAccounts({
     const id = initialEnvironment.current;
     if (!id || !accounts.environmentsReady) return;
     const env = accounts.environments.find((item) => item.id === id);
-    if (env) setBrowser({ fingerprint: env.engine === "bitbrowser", environmentId: id });
+    if (env)
+      setBrowser({
+        fingerprint: env.engine === "bitbrowser",
+        environmentId: id,
+      });
     clearAccountEnvironment(data!.dataPath, id);
     initialEnvironment.current = "";
   }, [data!.dataPath, accounts.environments, accounts.environmentsReady]);
@@ -88,9 +103,10 @@ export default function OtherAccounts({
   const validBrowser = (selection: AccountBrowserSelection) =>
     !selection.environmentId
       ? !selection.fingerprint
-      : accounts.environments.some((env) =>
-          env.id === selection.environmentId &&
-          env.engine === (selection.fingerprint ? "bitbrowser" : "electron"),
+      : accounts.environments.some(
+          (env) =>
+            env.id === selection.environmentId &&
+            env.engine === (selection.fingerprint ? "bitbrowser" : "electron"),
         );
   const [cookie, setCookie] = useState("");
   const [pending, setPending] = useState<string | null>(null),
@@ -123,19 +139,40 @@ export default function OtherAccounts({
     <div className="website-accounts-workspace">
       <Panel title="连接其他账号">
         <p className="muted">
-          这里统一管理微博、百度营销、百度知道、什么值得买等非网盘账号。选择平台后打开官方登录窗口，无需填写用户
+          这里统一管理飞书、腾讯文档、石墨文档、微博、百度营销等非网盘账号。选择平台后打开官方登录窗口，无需填写用户
           ID；完成扫码后点击“检查登录”。默认使用内置浏览器，多账号运营时可开启指纹浏览器关联。
         </p>
-        {singleSmzdm ? <Notice>什么值得买使用一个账号，通过独立内置浏览器保存登录状态。{hasSmzdm ? "请在下方已有账号中登录或检查身份。" : "完成官方登录后，点击下方账号的“检查登录”。"}</Notice> : <AccountBrowserChoice
-          value={browser}
-          onChange={(value) => { initialEnvironment.current = ""; setBrowser(value); }}
-          environments={accounts.environments}
-          disabled={!!pending || !accounts.environmentsReady}
-        />}
-        {!singleSmzdm && browser.fingerprint && accounts.environmentsReady && !accounts.environments.some((env) => env.engine === "bitbrowser") ? (
+        {documentProvider ? (
+          <Notice>
+            文档平台使用独立内置浏览器保存登录。检查登录只识别本机工作台会话；文档的公开访问权限需要在官方平台设置。
+          </Notice>
+        ) : singleSmzdm ? (
+          <Notice>
+            什么值得买使用一个账号，通过独立内置浏览器保存登录状态。
+            {hasSmzdm
+              ? "请在下方已有账号中登录或检查身份。"
+              : "完成官方登录后，点击下方账号的“检查登录”。"}
+          </Notice>
+        ) : (
+          <AccountBrowserChoice
+            value={browser}
+            onChange={(value) => {
+              initialEnvironment.current = "";
+              setBrowser(value);
+            }}
+            environments={accounts.environments}
+            disabled={!!pending || !accounts.environmentsReady}
+          />
+        )}
+        {!nativeOnly &&
+        browser.fingerprint &&
+        accounts.environmentsReady &&
+        !accounts.environments.some((env) => env.engine === "bitbrowser") ? (
           <Notice>
             暂无指纹浏览器环境，请先在“指纹浏览器”中接入环境。
-            <Button quiet onClick={() => navigate("browser-environments")}>配置指纹浏览器</Button>
+            <Button quiet onClick={() => navigate("browser-environments")}>
+              配置指纹浏览器
+            </Button>
           </Notice>
         ) : null}
         <div className="website-account-add">
@@ -146,6 +183,8 @@ export default function OtherAccounts({
               onValueChange={(v) => {
                 setProvider(v as OtherProvider);
                 setCookie("");
+                if (isDocumentProvider(v))
+                  setBrowser({ fingerprint: false, environmentId: "" });
               }}
               items={otherProviderItems}
             />
@@ -160,14 +199,22 @@ export default function OtherAccounts({
           </Field>
           <Button
             primary
-            disabled={!!pending || !accounts.ready || !!accounts.error || (singleSmzdm ? hasSmzdm : !accounts.environmentsReady || !validBrowser(browser))}
+            disabled={
+              !!pending ||
+              !accounts.ready ||
+              !!accounts.error ||
+              (singleSmzdm
+                ? hasSmzdm
+                : !nativeOnly &&
+                  (!accounts.environmentsReady || !validBrowser(browser)))
+            }
             onClick={() =>
               void run("add", async () => {
                 const account = await otherAccountActions.add(
                   provider,
                   newAlias,
                   cookie,
-                  singleSmzdm ? undefined : browser.environmentId || undefined,
+                  nativeOnly ? undefined : browser.environmentId || undefined,
                 );
                 setNewAlias("");
                 setCookie("");
@@ -187,19 +234,30 @@ export default function OtherAccounts({
             }
           >
             <Plus size={16} />
-            {pending === "add" ? "正在打开…" : singleSmzdm && hasSmzdm ? "已添加单账号" : "登录新账号"}
+            {pending === "add"
+              ? "正在打开…"
+              : singleSmzdm && hasSmzdm
+                ? "已添加单账号"
+                : "登录新账号"}
           </Button>
         </div>
-        {!singleSmzdm && browser.environmentId ? (
+        {!nativeOnly && browser.environmentId ? (
           <p className="muted">
-            新账号将关联到“{accounts.environments.find((env) => env.id === browser.environmentId)?.name ?? "原环境不可用"}”。
-            关联已有账号时，请点击下方账号的“环境”按钮。
+            新账号将关联到“
+            {accounts.environments.find(
+              (env) => env.id === browser.environmentId,
+            )?.name ?? "原环境不可用"}
+            ”。 关联已有账号时，请点击下方账号的“环境”按钮。
           </p>
-        ) : !singleSmzdm && !browser.fingerprint ? (
-          <p className="muted">登录时自动创建独立内置环境，保留此账号的登录状态。</p>
+        ) : !nativeOnly && !browser.fingerprint ? (
+          <p className="muted">
+            登录时自动创建独立内置环境，保留此账号的登录状态。
+          </p>
         ) : null}
         {provider === "zhihu" && !browser.fingerprint ? (
-          <Notice>内置浏览器支持知乎登录与身份检查；知乎的养号和自动发布任务目前仍需指纹浏览器环境。</Notice>
+          <Notice>
+            内置浏览器支持知乎登录与身份检查；知乎的养号和自动发布任务目前仍需指纹浏览器环境。
+          </Notice>
         ) : null}
         {provider === "baidu-zhidao" ? (
           <details>
@@ -248,7 +306,9 @@ export default function OtherAccounts({
                       {otherProviderName(account.provider)}
                       {account.uid
                         ? ` · UID ${account.uid}`
-                        : " · 尚未识别身份"}
+                        : isDocumentProvider(account.provider)
+                          ? " · 本机会话，平台身份未核实"
+                          : " · 尚未识别身份"}
                     </small>
                     <small>
                       环境：
@@ -263,7 +323,9 @@ export default function OtherAccounts({
                     kind={account.status === "connected" ? "good" : "warning"}
                   >
                     {account.checking
-                      ? "正在核实身份"
+                      ? isDocumentProvider(account.provider)
+                        ? "正在检查会话"
+                        : "正在核实身份"
                       : account.status === "connected"
                         ? "已识别会话"
                         : account.status === "expired"
@@ -295,9 +357,51 @@ export default function OtherAccounts({
                   ) : null}
                 </div>
                 <div className="website-account-actions">
-                  {account.provider === "smzdm" ? <Button disabled={!!pending} onClick={() => navigate("smzdm-workflow")}>文章分发</Button> : null}
-                  {account.provider === "smzdm" && account.status === "connected" ? <Button disabled={!!pending} onClick={()=>void run(account.key,()=>ipc("smzdm.openEditor"))}>官方编辑器</Button> : null}
-                  {account.provider === "zhihu" ? <Button disabled={!!pending} onClick={() => navigate("zhihu-operations")}>知乎运营</Button> : null}
+                  {isDocumentProvider(account.provider) &&
+                  account.status === "connected" ? (
+                    <Button
+                      disabled={!!pending}
+                      onClick={() =>
+                        void run(account.key, () =>
+                          ipc("websiteAccounts.openDocument", {
+                            id: account.id,
+                            url: documentPlatformSpecs[
+                              account.provider as keyof typeof documentPlatformSpecs
+                            ].home,
+                          }),
+                        )
+                      }
+                    >
+                      文档工作台
+                    </Button>
+                  ) : null}
+                  {account.provider === "smzdm" ? (
+                    <Button
+                      disabled={!!pending}
+                      onClick={() => navigate("smzdm-workflow")}
+                    >
+                      文章分发
+                    </Button>
+                  ) : null}
+                  {account.provider === "smzdm" &&
+                  account.status === "connected" ? (
+                    <Button
+                      disabled={!!pending}
+                      onClick={() =>
+                        void run(account.key, () => ipc("smzdm.openEditor"))
+                      }
+                    >
+                      官方编辑器
+                    </Button>
+                  ) : null}
+                  {account.provider === "zhihu" ? (
+                    <Button
+                      disabled={!!pending}
+                      onClick={() => navigate("zhihu-operations")}
+                    >
+                      知乎运营
+                    </Button>
+                  ) : null}
                   {account.provider === "weibo" && account.uid ? (
                     <Button
                       quiet
@@ -384,18 +488,26 @@ export default function OtherAccounts({
                   >
                     {account.checking ? "正在核实…" : "检查登录"}
                   </Button>
-                  {account.provider !== "smzdm" ? <Button
-                    quiet
-                    disabled={!!pending || !accounts.environmentsReady}
-                    onClick={() => {
-                      setFailure(null);
-                      setAssigning(account);
-                      const env = accounts.environments.find((item) => item.id === account.environmentId);
-                      setTargetBrowser({ fingerprint: env?.engine === "bitbrowser", environmentId: env?.id ?? "" });
-                    }}
-                  >
-                    环境
-                  </Button> : null}
+                  {account.provider !== "smzdm" &&
+                  !isDocumentProvider(account.provider) ? (
+                    <Button
+                      quiet
+                      disabled={!!pending || !accounts.environmentsReady}
+                      onClick={() => {
+                        setFailure(null);
+                        setAssigning(account);
+                        const env = accounts.environments.find(
+                          (item) => item.id === account.environmentId,
+                        );
+                        setTargetBrowser({
+                          fingerprint: env?.engine === "bitbrowser",
+                          environmentId: env?.id ?? "",
+                        });
+                      }}
+                    >
+                      环境
+                    </Button>
+                  ) : null}
                   <Button
                     quiet
                     disabled={!!pending}

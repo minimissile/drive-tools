@@ -14,6 +14,7 @@ import { AppError } from "./errors";
 import type { WeiboEditorPayload } from "../shared/weibo-publishing";
 import { weiboReceiptUrl } from "../shared/weibo-marketing";
 import type { BrowserEnvironments } from "./browser-environments";
+import { documentPlatformUrl, isDocumentProvider } from "../shared/document-platforms";
 
 type Row = {
   id: string;
@@ -77,6 +78,8 @@ export class WebsiteAccounts {
     return Promise.all(ids.map((row) => this.check(row.id)));
   }
   add(provider: WebsiteProvider, alias?: string, environmentId?: string) {
+    if (isDocumentProvider(provider) && environmentId && this.environments?.get(environmentId).engine !== "electron")
+      throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台目前使用内置浏览器保存会话，请选择内置环境。");
     if (provider === "smzdm") {
       if (this.db.get("SELECT id FROM website_accounts WHERE provider='smzdm'")) throw new AppError("SMZDM_SINGLE_ACCOUNT", "什么值得买仅连接一个账号，请使用已有账号或先移除旧连接。");
       if (environmentId && this.environments?.get(environmentId).engine !== "electron") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买文章发布目前使用内置浏览器，请关闭指纹浏览器选项。");
@@ -157,6 +160,7 @@ export class WebsiteAccounts {
         accountId,
       );
     if (fresh && state.hasSession && state.uid && !mismatch && !duplicate) this.environments?.confirm(ref, state.uid);
+    if (fresh && state.hasSession && state.sessionOnly && isDocumentProvider(account.provider)) this.environments?.confirmSession(ref);
     const uid =
       mismatch || duplicate || !state.hasSession ? account.uid : (state.uid ?? account.uid);
     const nickname =
@@ -165,7 +169,7 @@ export class WebsiteAccounts {
         : (account.nickname ?? null);
     const checkedAt = state.checkedAt ?? account.checkedAt ?? null;
     const status =
-      state.hasSession && uid && !mismatch && !duplicate
+      state.hasSession && (uid || (state.sessionOnly && isDocumentProvider(account.provider))) && !mismatch && !duplicate
         ? "connected"
         : state.expired || account.status === "expired"
           ? "expired"
@@ -200,6 +204,7 @@ export class WebsiteAccounts {
     );
     return {
       ...this.get(accountId),
+      sessionOnly: state.sessionOnly,
       windowOpen: state.windowOpen,
       checking: state.checking,
       publishing: publishing
@@ -217,7 +222,9 @@ export class WebsiteAccounts {
             ? "该平台身份已在其他账号中连接，请使用已有账号。"
             : state.error) ||
         (status === "connected"
-          ? account.provider === "weibo"
+          ? state.sessionOnly
+            ? "已识别本机文档工作台会话。未核实平台身份或开放平台授权；公开访问权限请在官方文档中设置。"
+            : account.provider === "weibo"
             ? "已核实微博身份，发布交接前会再次检查。"
             : "已识别本机会话，使用时由平台核验。"
           : status === "expired"
@@ -355,6 +362,17 @@ export class WebsiteAccounts {
       if (!this.ports.websiteSessions?.openPost) throw new AppError("WEIBO_PUBLISH_UNAVAILABLE", "当前窗口不支持微博回执，请使用源码桌面窗口。");
       await this.ports.websiteSessions.openPost(account, permalink);
       return true;
+    });
+  }
+  async openDocument(accountId: string, value: string) {
+    const account = this.get(accountId);
+    const url = documentPlatformUrl(account.provider, value);
+    if (!url) throw new AppError("DOCUMENT_URL_BLOCKED", "文档地址必须属于所选账号的 HTTPS 官方平台。");
+    return this.use(accountId, account.provider, async (current) => {
+      const sessions = this.sessions();
+      if (!sessions.openDocument) throw new AppError("DOCUMENT_SESSION_UNAVAILABLE", "当前环境不支持文档会话，请使用源码桌面窗口。");
+      await sessions.openDocument(current, url);
+      return { opened: true, url };
     });
   }
   async submitWeibo(accountId: string, payload: WeiboEditorPayload, before: () => Promise<void>) {

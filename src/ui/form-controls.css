@@ -127,19 +127,23 @@ textarea:disabled,
   display: grid;
   place-items: center;
   flex: none;
-  align-self: stretch;
-  width: 28px;
+  align-self: center;
+  width: var(--space-6);
+  height: var(--space-6);
   padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--muted);
 }
-.input-frame button:hover,
-.input-frame button:focus-visible {
+.input-frame button:hover:not(:disabled),
+.input-frame button:focus-visible:not(:disabled) {
   outline: none;
   background: var(--blue-bg);
   color: var(--blue);
+}
+.input-frame button:disabled {
+  color: var(--disabled-text);
 }
 .input-frame button:active:not(:disabled),
 .select-control:active:not(:disabled) {

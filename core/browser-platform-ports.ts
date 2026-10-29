@@ -23,6 +23,7 @@ import { weiboStatisticsReading } from "../shared/weibo-statistics";
 import { baiduKeywordPath, buildBaiduKeywordRequest } from "./baidu-keywords";
 import { buildBaiduResearchRequest } from "./baidu-research";
 import { verifyZhihu, zhihuBrowser } from "./zhihu/browser";
+import { isDocumentProvider } from "../shared/document-platforms";
 
 const webRef = (a: WebsiteAccount): EnvironmentAccountRef => ({
   kind: "website",
@@ -49,6 +50,7 @@ export function createBrowserPlatformPorts(
     environments.forAccount(ref).engine === "bitbrowser";
   const verify = async (a: WebsiteAccount) =>
     profile(webRef(a), async (context) => {
+      if (isDocumentProvider(a.provider)) throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台当前使用内置浏览器，请在账号管理关联内置环境。");
       if (a.provider === "smzdm") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买文章发布目前使用内置浏览器，请在账号管理关联内置环境。");
       let state: WebsiteSessionState;
       if (a.provider === "zhihu") state = await verifyZhihu(context);
@@ -112,6 +114,7 @@ export function createBrowserPlatformPorts(
       login: async (a) => {
         if (!isBit(webRef(a)))
           return (native.websiteSessions ?? missing()).login(a);
+        if (isDocumentProvider(a.provider)) throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台账号请使用内置浏览器环境。");
         if (a.provider === "smzdm") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买账号请使用内置浏览器环境。");
         await profile(webRef(a), async (context) => {
           const page = await pageFor(
@@ -174,6 +177,10 @@ export function createBrowserPlatformPorts(
             await pageFor(context, `panxu:receipt:${url}`, url)
           ).bringToFront();
         });
+      },
+      openDocument: async (a, url) => {
+        if (isBit(webRef(a))) throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台账号请使用内置浏览器环境。");
+        return native.websiteSessions?.openDocument?.(a, url) ?? missing();
       },
     },
     weiboPublisher: {

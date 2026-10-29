@@ -30,6 +30,7 @@ export function SourceContents({
   enabled,
   own,
   readOnly = false,
+  context = "page",
   onRead,
   onRetry,
   onOpenOfficial,
@@ -44,6 +45,7 @@ export function SourceContents({
   enabled: boolean;
   own: boolean;
   readOnly?: boolean;
+  context?: "page" | "resource";
   onRead(
     parentId?: string,
     page?: number,
@@ -87,14 +89,16 @@ export function SourceContents({
         </div>
       }
     >
-      <small>
-        {readOnly
-          ? "当前只浏览这条分享的目录与文件，不会修改分享者的文件。"
-          : own
-            ? "可查看目录和文件信息；下方的本人网盘管理支持修改文件。"
-            : "展开文件夹查看资源，可只选需要的文件。转存完成后可管理本人副本、插入或替换广告。"}{" "}
-        如需官方验证，请先打开分享完成验证。
-      </small>
+      {context === "page" ? (
+        <small>
+          {readOnly
+            ? "当前只浏览这条分享的目录与文件，不会修改分享者的文件。"
+            : own
+              ? "可查看目录和文件信息；下方的本人网盘管理支持修改文件。"
+              : "展开文件夹查看资源，可只选需要的文件。转存完成后可管理本人副本、插入或替换广告。"}{" "}
+          如需官方验证，请先打开分享完成验证。
+        </small>
+      ) : null}
       <QueryError
         error={error}
         loading={loading}
@@ -105,7 +109,10 @@ export function SourceContents({
       />
       {inspection ? (
         <>
-          <nav className="drive-breadcrumb" aria-label="来源分享目录">
+          <nav
+            className={`drive-breadcrumb ${context === "resource" ? "drive-resource-share-breadcrumb" : ""}`}
+            aria-label="来源分享目录"
+          >
             <Button
               quiet
               disabled={loading || parents.length <= 1}
@@ -154,6 +161,7 @@ export function SourceContents({
             selected={selected.map((f) => f.id)}
             disabled={loading}
             selectable={!own && !readOnly && !otherDirectory}
+            context={context}
             onSelect={(ids) =>
               onSelect(
                 ids

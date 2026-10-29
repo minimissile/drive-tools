@@ -1,3 +1,4 @@
+import { ResourceCatalogs } from "./resource-catalog";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
 import { SmzdmArticles } from "./smzdm/service";
 import { PipixSources } from "./pipix/service";
@@ -8,8 +9,10 @@ import { BrowserEnvironments } from "./browser-environments";
 import { BrowserEnvironmentQueue } from "./browser-environment-queue";
 import { ResourceAnswers } from "./resource-answers";
 import { ResourceDeletion } from "./resource-deletion";
+import { ShareCreation } from "./share-creation";
 import { assertResourceUnique } from "./resource-duplicates";
 import { resourceTags } from "./resource-tags";
+import { hasVerifiedShare } from "../shared/share-status";
 import { Distribution } from "./distribution";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
 import { coverFilePattern, saveResourceCover } from "./cover-assets";
@@ -76,6 +79,7 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly shareCreation: ShareCreation;
   readonly resourceDeletion: ResourceDeletion;
   readonly smzdm: SmzdmArticles;
   readonly distribution: Distribution;
@@ -101,6 +105,7 @@ export class AppService {
   readonly resourceExports: ResourceExports;
   readonly studio: StudioService;
   readonly resourceAnswers: ResourceAnswers;
+  readonly resourceCatalogs: ResourceCatalogs;
   readonly traffic: TrafficService;
   readonly bit: BitBrowser;
   readonly bitManagement: BitBrowserManagement;
@@ -320,7 +325,20 @@ export class AppService {
       hasRunningJobs: () => this.hasRunningJobs(),
       changed,
     });
+    this.shareCreation = new ShareCreation({
+      repo: this.repo,
+      secrets: this.secrets,
+      driveFiles: this.driveFiles,
+      hasRunningJobs: () => this.hasRunningJobs(),
+      assertIdle: (accountId) => this.assertNoActiveJobs(accountId, true),
+      assertMutable: (resourceId) => this.resourceDeletion.assertMutable(resourceId),
+      authenticated: (accountId, action) => this.authenticated(accountId, action),
+      changed,
+    });
+    this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
     this.handlers = createApplicationHandlers({
+      resourceCatalogs: this.resourceCatalogs,
+      shareCreation: this.shareCreation,
       resourceDeletion: this.resourceDeletion,
       smzdm: this.smzdm,
       distribution: this.distribution,
@@ -544,7 +562,9 @@ export class AppService {
     return this.handlers.invoke(method, object);
   }
 
-  private assertNoActiveJobs(accountId: string) {
+  private assertNoActiveJobs(accountId: string, allowShareCreation = false) {
+    if (!allowShareCreation && this.shareCreation?.busyAccount(accountId))
+      throw new AppError("ACTIVE_JOBS", "此账号正在创建新分享，请等待完成。");
     if (this.driveFiles?.busyAccount(accountId))
       throw new AppError("ACTIVE_JOBS", "此账号正在管理网盘文件，请等待完成。");
     if (this.insertion?.busyAccount(accountId))
@@ -838,6 +858,7 @@ export class AppService {
   }
   private hasRunningJobs() {
     return (
+      this.shareCreation?.isBusy ||
       this.smzdm.isBusy ||
       this.distribution.isBusy ||
       !!this.ports.distributionSessions?.isOpen() ||
@@ -855,6 +876,7 @@ export class AppService {
       this.insertion.isBusy ||
       this.studio.isBusy ||
       this.resourceAnswers.isBusy ||
+      this.resourceCatalogs.isBusy ||
       this.shareStatistics.isBusy ||
       !!this.db.get(
         "SELECT id FROM jobs WHERE stage IN ('queued','preflight','transferring','verifying','sharing','archiving') LIMIT 1",
@@ -862,14 +884,17 @@ export class AppService {
     );
   }
   private async checkShare(copyId: string): Promise<ShareCheck> {
-    const copy = this.repo.getCopy(copyId);
+    const requested = this.repo.getCopy(copyId);
     let status: ShareCheck["status"] = "unavailable",
       message = "";
     try {
-      const resource = this.repo.getResource(copy.resourceId);
       const valid = await this.authenticated(
-        copy.accountId,
+        requested.accountId,
         async (account, provider) => {
+          const copy = this.repo.getCopy(copyId);
+          const resource = this.repo.getResource(copy.resourceId);
+          if (copy.accountId !== account.id)
+            throw new AppError("COPY_MISMATCH", "资源所属账号已变化，请重新打开资源。");
           if (copy.status === "recorded" && resource.sourceKind === "owned") {
             await verifyRecordedOwnShare(
               this.repo,
@@ -879,8 +904,6 @@ export class AppService {
               resource,
               copy,
             );
-            this.notes.enqueue(copy.id);
-            await this.notes.flush();
             return true;
           }
           if (
@@ -896,18 +919,20 @@ export class AppService {
           )
             throw new AppError(
               "OWNERSHIP_UNVERIFIED",
-              "副本或本人分享归属尚未核验，请先完成转存或恢复分享。",
+              "资源或分享尚未完成归属核验，请先完成归档后检查有效性。",
             );
-          return provider.verifyShare(account, copy.shareId, copy.files);
+          const code = (await this.secrets.get(`share:${copy.id}`)) ?? "";
+          return provider.verifyShare(account, copy.shareId, copy.files, code);
         },
       );
       status = valid ? "valid" : "invalid";
       message = valid
         ? "本人分享记录与文件清单核验通过。"
-        : "本人分享已失效或文件不匹配，请恢复本人分享。";
+        : "原分享已失效或文件不匹配，可查看网盘并单独创建新分享。";
       this.db.run(
-        "UPDATE copies SET share_verified_at=? WHERE id=?",
+        "UPDATE copies SET share_verified_at=?,error=? WHERE id=?",
         valid ? now() : null,
+        valid ? null : message,
         copyId,
       );
     } catch (error) {
@@ -927,16 +952,7 @@ export class AppService {
 
   private assertOwnCopy(copy: ResourceCopy) {
     const account = this.account(copy.accountId);
-    if (
-      copy.status !== "ready" ||
-      !copy.verifiedAt ||
-      !copy.shareVerifiedAt ||
-      !copy.shareUrl ||
-      !copy.shareId ||
-      !account.uid ||
-      copy.ownerUid !== account.uid ||
-      copy.shareOwnerUid !== account.uid
-    )
+    if (!hasVerifiedShare(copy, account))
       throw new AppError(
         "OWNERSHIP_UNVERIFIED",
         "资源副本与本人分享尚未通过同账号UID核验，禁止分发。",

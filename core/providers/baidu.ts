@@ -6,17 +6,25 @@ import type {
   ShareInput,
   ShareInspection,
 } from "../../shared/types";
-import { AppError } from "../errors";
+import { AppError, safeMessage } from "../errors";
 import { parseShare } from "../links";
 import type {
   DriveProvider,
   JsonObject,
   OwnShare,
   ProviderTransport,
+  ShareCreatedHandler,
 } from "./provider";
 import { normalizeRemoteFile, normalizedDirectory } from "./provider";
 import { normalizeShareStatistic, numericCount } from "./share-statistics";
 import { normalizeCapacity } from "./capacity";
+import type { ShareCreationOptions } from "../../shared/share-options";
+import {
+  actualShareExpiry,
+  newShareRequest,
+  privateShareOptions,
+  validateShareOptions,
+} from "./share-options";
 
 // Parse only data literals. Remote HTML is never evaluated as JavaScript.
 export function extractBaiduShareData(html: string): JsonObject {
@@ -325,27 +333,78 @@ export class BaiduProvider implements DriveProvider {
     }
     return current || "/";
   }
-  async manageFile(account: Account, input: import("../../shared/drive-files").ProviderFileMutation) {
-    await this.manage(account, input.action, input.action === "mkdir" ? input.path : input.file!.path ?? input.path.replace(/\/$/, "") + "/" + input.file!.name, input.name);
+  async manageFile(
+    account: Account,
+    input: import("../../shared/drive-files").ProviderFileMutation,
+  ) {
+    await this.manage(
+      account,
+      input.action,
+      input.action === "mkdir"
+        ? input.path
+        : (input.file!.path ??
+            input.path.replace(/\/$/, "") + "/" + input.file!.name),
+      input.name,
+    );
   }
-  async manage(account: Account, action: "mkdir" | "rename" | "delete", path: string, name = "") {
+  async manage(
+    account: Account,
+    action: "mkdir" | "rename" | "delete",
+    path: string,
+    name = "",
+  ) {
     const target = normalizedDirectory(path);
-    if (action !== "mkdir" && target === "/") throw new AppError("ROOT_PROTECTED", "不能修改网盘根目录。");
-    if (action !== "delete" && (!name.trim() || /[\\/:*?"<>|\x00-\x1f]/.test(name) || [".", ".."].includes(name))) throw new AppError("INVALID_NAME", "名称不能为空或包含路径和特殊字符。");
+    if (action !== "mkdir" && target === "/")
+      throw new AppError("ROOT_PROTECTED", "不能修改网盘根目录。");
+    if (
+      action !== "delete" &&
+      (!name.trim() ||
+        /[\\/:*?"<>|\x00-\x1f]/.test(name) ||
+        [".", ".."].includes(name))
+    )
+      throw new AppError("INVALID_NAME", "名称不能为空或包含路径和特殊字符。");
     const token = (await this.sessionData(account)).token;
     if (action === "mkdir") {
-      const created = normalizedDirectory(target.replace(/\/$/, "") + "/" + name);
-      await this.request(account, "/api/create", { a: "commit", bdstoken: token }, { path: created, isdir: "1", block_list: "[]" });
+      const created = normalizedDirectory(
+        target.replace(/\/$/, "") + "/" + name,
+      );
+      await this.request(
+        account,
+        "/api/create",
+        { a: "commit", bdstoken: token },
+        { path: created, isdir: "1", block_list: "[]" },
+      );
       return;
     }
-    const result = await this.request(account, "/api/filemanager", { opera: action, async: 2, onnest: "fail", bdstoken: token }, { async: "1", filelist: JSON.stringify(action === "rename" ? [{ path: target, newname: name }] : [target]) });
-    if (Array.isArray(result.info) && result.info.some((v: any) => Number(v.errno ?? 0) !== 0)) throw new AppError("FILE_OPERATION_FAILED", "百度未完成文件操作，请核对网盘结果。");
+    const result = await this.request(
+      account,
+      "/api/filemanager",
+      { opera: action, async: 2, onnest: "fail", bdstoken: token },
+      {
+        async: "1",
+        filelist: JSON.stringify(
+          action === "rename" ? [{ path: target, newname: name }] : [target],
+        ),
+      },
+    );
+    if (
+      Array.isArray(result.info) &&
+      result.info.some((v: any) => Number(v.errno ?? 0) !== 0)
+    )
+      throw new AppError(
+        "FILE_OPERATION_FAILED",
+        "百度未完成文件操作，请核对网盘结果。",
+      );
     if (result.taskid) {
       for (let attempt = 0; attempt < 20; attempt++) {
         if (await this.poll(account, String(result.taskid))) return;
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      throw new AppError("UNCERTAIN_REMOTE_RESULT", "网盘操作尚未确认完成，请刷新目录核对，避免重复提交。", true);
+      throw new AppError(
+        "UNCERTAIN_REMOTE_RESULT",
+        "网盘操作尚未确认完成，请刷新目录核对，避免重复提交。",
+        true,
+      );
     }
   }
   async transfer(
@@ -451,36 +510,237 @@ export class BaiduProvider implements DriveProvider {
     files: RemoteFile[],
     _title: string,
   ): Promise<OwnShare> {
-    const session = await this.sessionData(account);
-    const code = randomBytes(3).toString("hex").slice(0, 4);
-    const result = await this.request(
+    return this.createNewShare(account, files, {
+      expiresInDays: 0,
+      extractionCode: randomBytes(3).toString("hex").slice(0, 4),
+    });
+  }
+  async createShareWithOptions(
+    account: Account,
+    files: RemoteFile[],
+    _title: string,
+    options: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ): Promise<OwnShare> {
+    return this.createNewShare(
       account,
-      "/share/set",
-      { bdstoken: session.token },
-      {
-        fid_list: JSON.stringify(files.map((f) => f.id)),
-        schannel: "4",
-        channel_list: "[]",
-        period: "0",
-        pwd: code,
-      },
+      files,
+      privateShareOptions(this.id, options),
+      true,
+      onCreated,
     );
-    const shareId = String(result.shareid ?? "");
-    if (!shareId || !result.link)
+  }
+  private async createNewShare(
+    account: Account,
+    files: RemoteFile[],
+    options: ReturnType<typeof privateShareOptions>,
+    verifyOptions = false,
+    onCreated?: ShareCreatedHandler,
+  ): Promise<OwnShare> {
+    const session = await this.sessionData(account);
+    const code = options.extractionCode;
+    const startedAt = Date.now();
+    const submit = () =>
+      this.request(
+        account,
+        "/share/set",
+        { bdstoken: session.token },
+        {
+          fid_list: JSON.stringify(files.map((f) => f.id)),
+          schannel: "4",
+          channel_list: "[]",
+          period: String(options.expiresInDays),
+          pwd: code,
+        },
+      );
+    const result = verifyOptions
+      ? await newShareRequest(submit)
+      : await submit();
+    try {
+      const shareId = String(result.shareid ?? "");
+      if (onCreated && shareId && !result.link)
+        await onCreated({ id: shareId, url: "", code, ownerUid: session.uid });
+      if (!shareId || !result.link)
+        throw new AppError(
+          "UNCERTAIN_SHARE_RESULT",
+          "百度未返回分享ID或链接，请先核对本人分享记录。",
+          true,
+        );
+      const parsed = parseShare(String(result.link));
+      if (parsed.provider !== this.id)
+        throw new AppError("INVALID_OWN_SHARE", "百度分享类型不匹配。");
+      const share: OwnShare = {
+        id: shareId,
+        url: parsed.url,
+        code,
+        ownerUid: session.uid,
+      };
+      await onCreated?.(share);
+      const row = (await this.ownRows(account)).find(
+        (item) =>
+          String(item.shareId ?? item.shareid) === shareId &&
+          this.matches(item, files) &&
+          Number(item.status ?? 0) === 0,
+      );
+      if (!row)
+        throw new AppError(
+          "OWNERSHIP_UNVERIFIED",
+          "百度本人分享记录未确认所选文件，禁止分发。",
+        );
+      const expiresAt = verifyOptions
+        ? await this.configuredShareExpiry(
+            account,
+            share,
+            files,
+            options,
+            row,
+            startedAt,
+          )
+        : undefined;
+      return { ...share, ...(expiresAt !== undefined ? { expiresAt } : {}) };
+    } catch (error) {
       throw new AppError(
-        "UNCERTAIN_SHARE_RESULT",
-        "百度未返回分享ID或链接，请先核对本人分享记录。",
+        error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
+        safeMessage(error),
         true,
       );
-    if (!(await this.verifyShare(account, shareId, files)))
+    }
+  }
+  private async configuredShareExpiry(
+    account: Account,
+    share: OwnShare,
+    files: RemoteFile[],
+    options: ShareCreationOptions,
+    row: JsonObject,
+    startedAt?: number,
+  ): Promise<string | null | undefined> {
+    const source = parseShare(share.url, share.code);
+    const actual: RemoteFile[] = [];
+    for (let page = 1; page <= 100; page++) {
+      const inspection = await this.inspect(account, source, "0", page);
+      actual.push(...inspection.files);
+      if (actual.length > files.length || (page === 100 && inspection.hasMore))
+        throw new AppError(
+          "SHARE_OPTIONS_UNVERIFIED",
+          "百度新分享文件清单未通过核对。",
+        );
+      if (!inspection.hasMore) break;
+    }
+    if (
+      actual.length !== files.length ||
+      new Set(actual.map((file) => file.id)).size !== files.length ||
+      !files.every((file) =>
+        actual.some(
+          (item) =>
+            item.id === file.id &&
+            item.name === file.name &&
+            item.isDirectory === file.isDirectory,
+        ),
+      )
+    )
       throw new AppError(
-        "OWNERSHIP_UNVERIFIED",
-        "百度本人分享记录未确认所选文件，禁止分发。",
+        "SHARE_OPTIONS_UNVERIFIED",
+        "百度新分享提取码或文件清单未通过核对。",
       );
-    const parsed = parseShare(String(result.link));
-    if (parsed.provider !== this.id)
-      throw new AppError("INVALID_OWN_SHARE", "百度分享类型不匹配。");
-    return { id: shareId, url: parsed.url, code, ownerUid: session.uid };
+    const rawExpiry = row.expiredTime ?? row.expired_time;
+    let expiresAt: string | null | undefined = actualShareExpiry(rawExpiry);
+    if (rawExpiry != null && rawExpiry !== "" && Number(rawExpiry) === 0)
+      expiresAt = null;
+    const created = actualShareExpiry(
+      row.ctime ?? row.created_at ?? row.create_time,
+    );
+    const origin = created ? Date.parse(created) : startedAt;
+    if (
+      (row.period != null &&
+        row.period !== "" &&
+        Number(row.period) !== options.expiresInDays) ||
+      (expiresAt === null && options.expiresInDays !== 0) ||
+      (expiresAt &&
+        (Date.parse(expiresAt) <= Date.now() ||
+          options.expiresInDays === 0 ||
+          (origin != null &&
+            Math.abs(
+              Date.parse(expiresAt) -
+                origin -
+                options.expiresInDays * 86_400_000,
+            ) > 86_400_000)))
+    )
+      throw new AppError(
+        "SHARE_OPTIONS_UNVERIFIED",
+        "百度新分享返回的有效期与设置不一致，请查看官方网盘分享记录。",
+      );
+    return expiresAt;
+  }
+  async verifyShareWithOptions(
+    account: Account,
+    shareId: string,
+    files: RemoteFile[],
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const identity = await this.identity(account);
+    if (account.uid && account.uid !== identity.uid) return false;
+    const row = (await this.ownRows(account)).find(
+      (item) =>
+        String(item.shareId ?? item.shareid) === shareId &&
+        this.matches(item, files) &&
+        Number(item.status ?? 0) === 0,
+    );
+    const expectedCode =
+      options.extractionCode?.trim() ||
+      code ||
+      String(row?.passwd ?? row?.pwd ?? "");
+    if (!row || !/^[A-Za-z0-9]{4}$/.test(expectedCode)) return false;
+    const parsed = parseShare(String(row.shortlink ?? row.link ?? ""));
+    await this.configuredShareExpiry(
+      account,
+      {
+        id: shareId,
+        url: parsed.url,
+        code: expectedCode,
+        ownerUid: identity.uid,
+      },
+      files,
+      options,
+      row,
+    );
+    return true;
+  }
+  async readCreatedShare(
+    account: Account,
+    shareId: string,
+    options: ShareCreationOptions,
+    code = "",
+  ) {
+    validateShareOptions(this.id, options);
+    const identity = await this.identity(account);
+    if (account.uid && account.uid !== identity.uid) return null;
+    const row = (await this.ownRows(account)).find(
+      (item) =>
+        String(item.shareId ?? item.shareid) === shareId &&
+        Number(item.status ?? 0) === 0,
+    );
+    if (!row) return null;
+    const parsed = parseShare(String(row.shortlink ?? row.link ?? ""));
+    if (parsed.provider !== this.id) return null;
+    const actualCode =
+      options.extractionCode?.trim() ||
+      code ||
+      String(row.passwd ?? row.pwd ?? "");
+    if (!/^[A-Za-z0-9]{4}$/.test(actualCode)) return null;
+    const rawExpiry = row.expiredTime ?? row.expired_time;
+    const expiresAt =
+      rawExpiry != null && rawExpiry !== "" && Number(rawExpiry) === 0
+        ? null
+        : actualShareExpiry(rawExpiry);
+    return {
+      id: shareId,
+      url: parsed.url,
+      code: actualCode,
+      ownerUid: identity.uid,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+    };
   }
   async findOwnShare(account: Account, files: RemoteFile[]) {
     const row = (await this.ownRows(account)).find(
@@ -497,7 +757,7 @@ export class BaiduProvider implements DriveProvider {
     if (row.public !== 1 && !row.passwd && !row.pwd)
       throw new AppError(
         "RECOVER_SHARE_MANUALLY",
-        "已找到本人私密分享，但接口未提供提取码。请在网盘中核对后使用“恢复本人分享”录入，避免分发不可访问的链接。",
+        "已找到本人私密分享，但接口未提供提取码。请到官方网盘核对并补全提取码，避免分发不可访问的链接。",
         true,
       );
     return {

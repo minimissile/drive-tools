@@ -18,6 +18,10 @@ import type {
   BrowserEnvironmentView,
 } from "../../shared/browser-environments";
 import { platformSpecs } from "../../shared/platforms";
+import {
+  documentPlatformSpecs,
+  isDocumentProvider,
+} from "../../shared/document-platforms";
 import "./browser-environments.css";
 import { EnvironmentEditor } from "./EnvironmentEditor";
 import { EnvironmentJobs } from "./EnvironmentJobs";
@@ -28,7 +32,8 @@ import type { BitBrowserProfile } from "../../shared/bitbrowser";
 export const environmentEngineLabel = (engine: BrowserEnvironment["engine"]) =>
   engine === "electron" ? "内置浏览器" : "比特浏览器";
 const platformName = (id: string) =>
-  ({ "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道" })[id] ??
+  (isDocumentProvider(id) ? documentPlatformSpecs[id].name : undefined) ??
+  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道" }[id] ??
   platformSpecs.find((p) => p.id === id)?.name ??
   id;
 

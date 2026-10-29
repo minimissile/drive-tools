@@ -4,7 +4,8 @@ import { Select } from "../ui/Select";
 import { DropdownMenu, MenuAction } from "../ui/DropdownMenu";
 import { useState } from "react";
 import {
-  ArrowRight,
+  Search,
+  ShieldCheck,
   BookOpen,
   Copy,
   FolderOpen,
@@ -20,8 +21,9 @@ import {
   useAppActions,
   useAppActivity,
 } from "../state";
-import { Button, Notice } from "../ui/primitives";
-import { CopyStatus, RecoverShare } from "../resources/components";
+import { Button } from "../ui/primitives";
+import { CreateShare } from "../resources/CreateShareDialog";
+import { copyShareStatus } from "../../shared/share-status";
 import { accountLabel, providerName } from "../resources/labels";
 import { formatSize } from "../lib/format";
 
@@ -43,43 +45,72 @@ export function ResourceDetail({
 }) {
   const { data } = useAppData(),
     { select } = useAppSelection(),
-    { navigate, edit, openSearch, openSettings } = useAppNavigation(),
+    { navigate, edit, openSearch } = useAppNavigation(),
     { command } = useAppActions(),
     { busy } = useAppActivity();
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const shareCheck = data!.shareChecks.find((c) => c.copyId === copy.id);
-  const inspectShare = () =>
-    command(
-      "copies.check",
-      { copyIds: [copy.id] },
-      "本人分享检查已完成，结果已记录到资源档案。",
-    );
+  const account = data!.accounts.find((item) => item.id === copy.accountId);
+  const share = copyShareStatus(copy, account, shareCheck);
+  const currentCheck =
+    shareCheck &&
+    (!copy.shareVerifiedAt ||
+      Date.parse(shareCheck.checkedAt) >= Date.parse(copy.shareVerifiedAt))
+      ? shareCheck
+      : undefined;
+  const checkedAt = currentCheck?.checkedAt ?? copy.shareVerifiedAt;
+  const shareMessage =
+    share.state === "valid"
+      ? null
+      : currentCheck?.status !== "valid"
+        ? currentCheck?.message || copy.error
+        : copy.error;
+  const inspectShare = () => command("copies.check", { copyIds: [copy.id] });
   const moreActions = (
     <DropdownMenu label="更多资源操作">
-      <MenuAction onClick={onView}>
-        <FolderOpen size={14} />
-        查看网盘资源
+      <MenuAction
+        disabled={!share.canCheck || busy > 0}
+        onClick={() => void inspectShare()}
+      >
+        <ShieldCheck size={14} />
+        检查有效性
+      </MenuAction>
+      <MenuAction onClick={() => edit(resource.id, copy.id)}>
+        <Pencil size={14} />
+        {copy.status === "draft" ? "继续录入" : "编辑资料"}
       </MenuAction>
       <MenuAction
-        onClick={() =>
-          !data!.settings.vaultPath
-            ? openSettings("notes")
-            : void command(
+        disabled={!share.canCopy}
+        onClick={() => {
+          select(resource.id, copy.id);
+          openSearch({ copyId: copy.id });
+        }}
+      >
+        <Search size={14} />
+        创建搜索选题
+      </MenuAction>
+      {data!.settings.vaultPath ? (
+        <>
+          <MenuAction
+            onClick={() =>
+              void command(
                 "notes.export",
                 { copyId: copy.id },
                 "笔记导出已处理，请查看同步状态。",
               )
-        }
-      >
-        <BookOpen size={14} />
-        {data!.settings.vaultPath ? "导出知识笔记" : "连接知识库"}
-      </MenuAction>
-      <MenuAction
-        disabled={copy.noteStatus !== "synced"}
-        onClick={() => void command("notes.open", { copyId: copy.id })}
-      >
-        打开笔记
-      </MenuAction>
+            }
+          >
+            <BookOpen size={14} />
+            导出知识笔记
+          </MenuAction>
+          <MenuAction
+            disabled={copy.noteStatus !== "synced"}
+            onClick={() => void command("notes.open", { copyId: copy.id })}
+          >
+            打开笔记
+          </MenuAction>
+        </>
+      ) : null}
       <MenuAction
         disabled={copy.status !== "ready"}
         onClick={() => {
@@ -101,10 +132,7 @@ export function ResourceDetail({
       {!inDialog ? (
         <div className="resource-detail-heading">
           <h2>资源档案</h2>
-          <div className="row compact">
-            <CopyStatus copy={copy} />
-            {moreActions}
-          </div>
+          <div className="row compact">{moreActions}</div>
         </div>
       ) : null}
       <div className="resource-detail-body">
@@ -126,12 +154,7 @@ export function ResourceDetail({
               </span>
               {resource.category}
             </small>
-            {inDialog ? (
-              <div className="row compact">
-                <CopyStatus copy={copy} />
-                {moreActions}
-              </div>
-            ) : null}
+            {inDialog ? <div className="row compact">{moreActions}</div> : null}
           </div>
         </div>
         {resource.tags.length ? (
@@ -143,11 +166,11 @@ export function ResourceDetail({
             ))}
           </div>
         ) : null}
-        <section className="resource-copy-section" aria-label="资源副本">
-          <h3>资源副本</h3>
+        <section className="resource-copy-section" aria-label="存储位置">
+          <h3>存储位置</h3>
           {copies.length > 1 ? (
             <Select
-              aria-label="档案账号副本"
+              aria-label="资源存储账号"
               value={copy.id}
               onValueChange={(nextValue) => select(resource.id, nextValue)}
               items={[
@@ -163,70 +186,63 @@ export function ResourceDetail({
             </p>
           )}
           <div className="property">
-            <span>目标文件</span>
+            <span>文件概况</span>
             <span>
-              {copy.files.length} 项 ·{" "}
-              {formatSize(copy.files.reduce((n, f) => n + (f.size ?? 0), 0))}
+              {copy.files.length ? (
+                <>
+                  {copy.files.length} 项
+                  {copy.files.every(
+                    (file) =>
+                      !file.isDirectory && typeof file.size === "number",
+                  )
+                    ? ` · ${formatSize(copy.files.reduce((n, file) => n + (file.size ?? 0), 0))}`
+                    : ""}
+                </>
+              ) : (
+                "文件清单待核验"
+              )}
             </span>
           </div>
-          <div className="property">
-            <span>知识笔记</span>
-            <span>
-              {(
-                {
-                  synced: "已同步",
-                  pending: "待同步",
-                  conflict: "外部修改冲突",
-                  failed: "导出失败",
-                  not_configured: "尚未配置Vault",
-                } as Record<string, string>
-              )[copy.noteStatus] ?? copy.noteStatus}
-            </span>
-          </div>
+          {data!.settings.vaultPath ? (
+            <div className="property">
+              <span>知识笔记</span>
+              <span>
+                {(
+                  {
+                    synced: "已同步",
+                    pending: "待同步",
+                    conflict: "外部修改冲突",
+                    failed: "导出失败",
+                    not_configured: "未同步",
+                  } as Record<string, string>
+                )[copy.noteStatus] ?? copy.noteStatus}
+              </span>
+            </div>
+          ) : null}
         </section>
         <section className="resource-share-section" aria-label="本人分享">
           <div className="resource-share-heading">
             <h3>本人分享链接</h3>
-            <Button
-              quiet
-              size="compact"
-              disabled={
-                !["ready", "recorded"].includes(copy.status) || busy > 0
-              }
-              onClick={() => void inspectShare()}
-            >
-              {copy.status === "recorded" ? "核验自有分享" : "检查此本人分享"}
-            </Button>
+            <CreateShare key={copy.id} copy={copy} />
           </div>
           <div className="link-box">
             {copy.shareUrl ?? "转存与核验完成后，生成本人分享链接。"}
           </div>
-          <div className="resource-share-actions">
-            <Button quiet onClick={onView}>
-              <FolderOpen size={14} />
-              查看网盘资源
-            </Button>
-            {copy.status !== "recorded" && copy.folderId ? (
-              <RecoverShare copy={copy} />
+          <div className="resource-share-status" data-kind={share.kind}>
+            <span>{share.label}</span>
+            {checkedAt ? (
+              <time dateTime={checkedAt}>
+                {new Date(checkedAt).toLocaleString("zh-CN", {
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
             ) : null}
           </div>
-          {copy.error ? <Notice warning>{copy.error}</Notice> : null}
-          {shareCheck ? (
-            <Notice warning={shareCheck.status !== "valid"}>
-              {shareCheck.message}
-              <br />
-              <small>
-                {new Date(shareCheck.checkedAt).toLocaleString("zh-CN")}
-              </small>
-            </Notice>
-          ) : null}
-          {copy.status === "ready" && !copy.shareVerifiedAt ? (
-            <Notice warning>本人分享待复核，请检查分享后再分发。</Notice>
-          ) : null}
-          {copy.status === "recorded" && !shareCheck ? (
-            <Notice>
-              自有资源已直接入库。点击“核验自有分享”确认账号归属后，可复用此链接进行内容交付，不会转存或新建分享。
-            </Notice>
+          {shareMessage ? (
+            <p className="resource-share-message">{shareMessage}</p>
           ) : null}
         </section>
         <section className="resource-copy-section" aria-label="资源说明">
@@ -268,9 +284,9 @@ export function ResourceDetail({
       </div>
       <div className="resource-detail-footer">
         <Button
-          className="resource-copy-action"
-          primary={copy.status === "ready"}
-          disabled={!copy.shareUrl || copy.status !== "ready" || busy > 0}
+          primary
+          title="复制时自动检查分享有效性"
+          disabled={!share.canCopy || busy > 0}
           onClick={async () => {
             const result = await command("copy.link", { copyId: copy.id });
             if (result)
@@ -284,23 +300,9 @@ export function ResourceDetail({
           <Copy size={14} />
           复制分享
         </Button>
-
-        <Button
-          disabled={copy.status !== "ready"}
-          onClick={() => {
-            select(resource.id, copy.id);
-            openSearch({ copyId: copy.id });
-          }}
-        >
-          创建搜索选题
-          <ArrowRight size={14} />
-        </Button>
-        <Button
-          primary={copy.status !== "ready"}
-          onClick={() => edit(resource.id, copy.id)}
-        >
-          <Pencil size={14} />
-          {copy.status === "draft" ? "继续录入" : "编辑资料"}
+        <Button onClick={onView}>
+          <FolderOpen size={14} />
+          查看网盘
         </Button>
       </div>
     </section>

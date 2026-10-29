@@ -8,6 +8,7 @@ import {
 
 export type OtherProvider = WebsiteProvider | "baidu-zhidao";
 export interface OtherAccount {
+  sessionOnly?: boolean;
   environmentId?: string;
   id: string;
   key: string;
@@ -35,7 +36,10 @@ export const otherProviderName = (provider: OtherProvider) =>
   otherProviderItems.find((item) => item.value === provider)!.label;
 
 export function useOtherAccounts() {
-  const environments = useIpcQuery("environments.list", undefined, { keepPrevious: true, refreshInterval: 2500 });
+  const environments = useIpcQuery("environments.list", undefined, {
+    keepPrevious: true,
+    refreshInterval: 2500,
+  });
   const websites = useIpcQuery("websiteAccounts.list", undefined, {
     keepPrevious: true,
     refreshInterval: 2500,
@@ -51,7 +55,11 @@ export function useOtherAccounts() {
   const data: OtherAccount[] = [
     ...(zhidao.data ?? []).map((account): OtherAccount => ({
       ...account,
-      environmentId: environments.data?.find((env) => env.accounts.some((ref) => ref.kind === "zhidao" && ref.id === account.id))?.id,
+      environmentId: environments.data?.find((env) =>
+        env.accounts.some(
+          (ref) => ref.kind === "zhidao" && ref.id === account.id,
+        ),
+      )?.id,
       provider: "baidu-zhidao",
       key: `zhidao:${account.id}`,
       windowOpen: false,
@@ -81,7 +89,12 @@ export function useOtherAccounts() {
 }
 
 export const otherAccountActions = {
-  async add(provider: OtherProvider, alias: string, cookie: string, environmentId?: string) {
+  async add(
+    provider: OtherProvider,
+    alias: string,
+    cookie: string,
+    environmentId?: string,
+  ) {
     const account =
       provider === "baidu-zhidao"
         ? await ipc("zhidao.account.add", {

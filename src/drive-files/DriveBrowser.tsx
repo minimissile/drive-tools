@@ -1,5 +1,13 @@
 import { useRef, useState } from "react";
-import { ArrowUp, FolderPlus, RefreshCw, Upload } from "lucide-react";
+import {
+  ArrowUp,
+  FolderPlus,
+  Pencil,
+  RefreshCw,
+  Replace,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { ipc } from "../api/client";
 import { useAppActions } from "../state";
 import {
@@ -31,6 +39,7 @@ export function DriveBrowser({
   copy,
   initialDirectory,
   initialSelected = [],
+  context = "page",
 }: {
   accountId: string;
   initialPath?: string;
@@ -40,6 +49,7 @@ export function DriveBrowser({
   /** A snapshot obtained by an explicit caller action, never an automatic remote read. */
   initialDirectory?: DriveDirectory;
   initialSelected?: string[];
+  context?: "page" | "resource";
 }) {
   const query = useDriveDirectory(accountId, initialPath, initialDirectory);
   const { directory, path, setPath, loading, error, mounted } = query;
@@ -150,35 +160,94 @@ export function DriveBrowser({
     }
   };
   const segments = directory?.path.split("/").filter(Boolean) ?? [];
+  const maintenanceActions = directory ? (
+    <div className="drive-selection-actions" aria-label="文件维护操作">
+      <strong>已选 {files.length} 项</strong>
+      <Button disabled={blocked} onClick={() => open("mkdir")}>
+        <FolderPlus size={14} />
+        新建文件夹
+      </Button>
+      <Button
+        disabled={blocked || !directory.capabilities.upload}
+        onClick={() => open("upload")}
+      >
+        <Upload size={14} />
+        插入广告
+      </Button>
+      <Button
+        disabled={
+          blocked || files.length !== 1 || !directory.capabilities.rename
+        }
+        onClick={() => open("rename")}
+      >
+        <Pencil size={14} />
+        重命名
+      </Button>
+      <Button
+        disabled={
+          blocked ||
+          files.length !== 1 ||
+          files[0]?.isDirectory ||
+          !/\.(txt|png|jpe?g|webp)$/i.test(files[0]?.name ?? "") ||
+          !directory.capabilities.rename ||
+          !directory.capabilities.upload
+        }
+        onClick={() => open("replace")}
+      >
+        <Replace size={14} />
+        替换广告
+      </Button>
+      <Button
+        disabled={blocked || !files.length || !directory.capabilities.delete}
+        onClick={() => open("delete")}
+      >
+        <Trash2 size={14} />
+        删除 / 清理广告
+      </Button>
+      {context === "page" ? (
+        <Button
+          quiet
+          disabled={loading || checking || sharing}
+          onClick={() => void read(directory.path)}
+          aria-label="刷新当前目录"
+          title="刷新当前目录"
+        >
+          <RefreshCw size={14} />
+        </Button>
+      ) : null}
+    </div>
+  ) : null;
   return (
-    <div className="drive-browser">
-      <Panel title="本人网盘目录">
-        <div className="drive-location">
-          <Field label="目录路径" hint="支持从根目录逐层浏览">
-            <input
-              aria-label="本人网盘目录路径"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="/"
-              disabled={loading || checking || sharing}
-            />
-          </Field>
-          <Button
-            primary
-            disabled={!accountId || loading || checking || sharing}
-            onClick={() => void read(path)}
-          >
-            {loading ? "正在读取…" : "读取目录"}
-          </Button>
-        </div>
-        <small>
-          读取后显示当前目录的全部文件，可按名称筛选。选择文件夹可进入下一层。
-        </small>
-      </Panel>
+    <div className="drive-browser" data-context={context}>
+      {context === "page" ? (
+        <Panel title="本人网盘目录">
+          <div className="drive-location">
+            <Field label="目录路径" hint="支持从根目录逐层浏览">
+              <input
+                aria-label="本人网盘目录路径"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder="/"
+                disabled={loading || checking || sharing}
+              />
+            </Field>
+            <Button
+              primary
+              disabled={!accountId || loading || checking || sharing}
+              onClick={() => void read(path)}
+            >
+              {loading ? "正在读取…" : "读取目录"}
+            </Button>
+          </div>
+          <small>
+            读取后显示当前目录的全部文件，可按名称筛选。选择文件夹可进入下一层。
+          </small>
+        </Panel>
+      ) : null}
       <Panel
-        title="文件内容"
+        title={context === "page" ? "文件内容" : undefined}
         extra={
-          directory ? (
+          context === "page" && directory ? (
             <small>
               {directory.files.length} 项 · {directory.path}
             </small>
@@ -192,47 +261,80 @@ export function DriveBrowser({
         />
         {directory ? (
           <>
-            <nav className="drive-breadcrumb" aria-label="本人网盘目录导航">
-              <Button
-                quiet
-                size="compact"
-                disabled={
-                  loading || checking || sharing || directory.path === "/"
-                }
-                onClick={() =>
-                  void read(
-                    directory.path.slice(0, directory.path.lastIndexOf("/")) ||
-                      "/",
-                  )
-                }
-              >
-                <ArrowUp size={14} />
-                上一级
-              </Button>
-              <Button
-                quiet
-                size="compact"
-                disabled={loading || checking || sharing}
-                onClick={() => void read("/")}
-              >
-                根目录
-              </Button>
-              {segments.map((s, i) => (
-                <span key={i}>
-                  /{" "}
-                  <Button
-                    quiet
-                    size="compact"
-                    disabled={loading || checking || sharing}
-                    onClick={() =>
-                      void read("/" + segments.slice(0, i + 1).join("/"))
-                    }
-                  >
-                    {s}
-                  </Button>
-                </span>
-              ))}
-            </nav>
+            <div
+              className={
+                context === "resource"
+                  ? "drive-directory-navigation"
+                  : undefined
+              }
+            >
+              <nav className="drive-breadcrumb" aria-label="本人网盘目录导航">
+                <Button
+                  quiet
+                  size="compact"
+                  disabled={
+                    loading || checking || sharing || directory.path === "/"
+                  }
+                  onClick={() =>
+                    void read(
+                      directory.path.slice(
+                        0,
+                        directory.path.lastIndexOf("/"),
+                      ) || "/",
+                    )
+                  }
+                >
+                  <ArrowUp size={14} />
+                  上一级
+                </Button>
+                <Button
+                  quiet
+                  size="compact"
+                  disabled={loading || checking || sharing}
+                  onClick={() => void read("/")}
+                >
+                  根目录
+                </Button>
+                {segments.map((s, i) => (
+                  <span key={i}>
+                    /{" "}
+                    {context === "resource" && i === segments.length - 1 ? (
+                      <span
+                        className="drive-current-directory"
+                        aria-current="page"
+                        title={directory.path}
+                      >
+                        {s}
+                      </span>
+                    ) : (
+                      <Button
+                        quiet
+                        size="compact"
+                        disabled={loading || checking || sharing}
+                        onClick={() =>
+                          void read("/" + segments.slice(0, i + 1).join("/"))
+                        }
+                      >
+                        {s}
+                      </Button>
+                    )}
+                  </span>
+                ))}
+              </nav>
+              {context === "resource" ? (
+                <Button
+                  quiet
+                  size="compact"
+                  disabled={loading || checking || sharing}
+                  aria-label="刷新当前目录"
+                  title="刷新当前目录"
+                  onClick={() => void read(directory.path)}
+                >
+                  <RefreshCw size={15} />
+                  刷新
+                </Button>
+              ) : null}
+            </div>
             {loading ? (
               <Loading label="正在读取，仍显示上次成功读取的目录…" />
             ) : null}
@@ -260,84 +362,42 @@ export function DriveBrowser({
                 {checkError ? <p role="alert">{checkError}</p> : null}
               </Notice>
             ) : null}
-            <div className="drive-selection-actions">
-              <strong>已选 {files.length} 项</strong>
-              <Button disabled={blocked} onClick={() => open("mkdir")}>
-                <FolderPlus size={14} />
-                新建文件夹
-              </Button>
-              <Button disabled={blocked} onClick={() => open("upload")}>
-                <Upload size={14} />
-                插入广告
-              </Button>
-              <Button
-                disabled={
-                  blocked ||
-                  files.length !== 1 ||
-                  !directory.capabilities.rename
-                }
-                onClick={() => open("rename")}
-              >
-                重命名
-              </Button>
-              <Button
-                disabled={
-                  blocked ||
-                  files.length !== 1 ||
-                  files[0]?.isDirectory ||
-                  !/\.(txt|png|jpe?g|webp)$/i.test(files[0]?.name ?? "") ||
-                  !directory.capabilities.rename ||
-                  !directory.capabilities.upload
-                }
-                onClick={() => open("replace")}
-              >
-                替换广告
-              </Button>
-              <Button
-                disabled={
-                  blocked || !files.length || !directory.capabilities.delete
-                }
-                onClick={() => open("delete")}
-              >
-                删除 / 清理广告
-              </Button>
-              <Button
-                quiet
-                disabled={loading || checking || sharing}
-                onClick={() => void read(directory.path)}
-                aria-label="刷新当前目录"
-              >
-                <RefreshCw size={14} />
-              </Button>
-            </div>
+            {context === "page" ? maintenanceActions : null}
             <FileTable
               key={`files:${directory.path}`}
               files={directory.files}
               selected={selected}
               onSelect={setSelected}
               disabled={loading || checking || sharing}
+              context={context}
+              directoryPath={directory.path}
+              toolbar={context === "resource" ? maintenanceActions : undefined}
               onOpen={(f) => void read(childPath(directory.path, f.name))}
             />
-            <DriveSharePanel
-              key={`share:${directory.path}`}
-              accountId={accountId}
-              path={directory.path}
-              selected={selected}
-              disabled={blocked}
-              mounted={mounted}
-              onBusyChange={setSharing}
-            />
-            {copy?.accountId === accountId &&
-            copy.folderId === directory.folderId &&
-            copy.directory === directory.path ? (
-              <CopyManifestPanel
-                copy={copy}
-                path={directory.path}
-                files={files}
-                disabled={blocked}
-                mounted={mounted}
-                onBusyChange={setSharing}
-              />
+            {context === "page" ? (
+              <>
+                <DriveSharePanel
+                  key={`share:${directory.path}`}
+                  accountId={accountId}
+                  path={directory.path}
+                  selected={selected}
+                  disabled={blocked}
+                  mounted={mounted}
+                  onBusyChange={setSharing}
+                />
+                {copy?.accountId === accountId &&
+                copy.folderId === directory.folderId &&
+                copy.directory === directory.path ? (
+                  <CopyManifestPanel
+                    copy={copy}
+                    path={directory.path}
+                    files={files}
+                    disabled={blocked}
+                    mounted={mounted}
+                    onBusyChange={setSharing}
+                  />
+                ) : null}
+              </>
             ) : null}
           </>
         ) : loading ? (

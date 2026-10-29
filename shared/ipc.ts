@@ -1,5 +1,7 @@
+import type { ResourceCatalogContract } from "./resource-catalog";
 import type { ResourceAnswerContract } from "./resource-answers";
 import type { ResourceDeletionContract } from "./resource-deletion";
+import type { ShareCreationContract } from "./share-creation";
 import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
@@ -73,6 +75,7 @@ export type SplitSummary = {
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
 export interface IpcContract
   extends
+    ResourceCatalogContract,
     SmzdmContract,
     DriveFilesContract,
     DistributionContract,
@@ -82,6 +85,7 @@ export interface IpcContract
     BitBrowserContract,
     ResourceAnswerContract,
     ResourceDeletionContract,
+    ShareCreationContract,
     IpcCommands,
     ZhidaoContract,
     BaiduKeywordContract,
@@ -187,6 +191,8 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "resourceCatalog.list",
+  "resourceCatalog.get",
   "secret.preview",
   "smzdm.list",
   "smzdm.get",
@@ -236,6 +242,8 @@ export const queryMethods = [
   "insertion.list",
   "insertion.get",
   "resource.get",
+  "share.creationOptions",
+  "share.creationResult",
   "resource.similar",
   "resource.deletePreview",
   "resource.intakeOptions",

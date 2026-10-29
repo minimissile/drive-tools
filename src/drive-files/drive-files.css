@@ -51,6 +51,37 @@
   gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
+.drive-file-table[data-context="resource"] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.drive-file-table[data-context="resource"] .drive-file-filters {
+  flex: none;
+  grid-template-columns: minmax(180px, 320px) 128px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.drive-file-table[data-context="resource"] .drive-file-count {
+  justify-self: end;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.drive-file-toolbar {
+  flex: none;
+  min-width: 0;
+}
+.drive-file-table[data-context="resource"] > .drive-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.drive-file-table[data-context="resource"] > .pagination {
+  flex: none;
+}
 .drive-table-scroll {
   overflow-x: auto;
 }
@@ -86,6 +117,30 @@
 .drive-table .drive-detail {
   width: 78px;
 }
+.drive-file-table[data-context="resource"] .drive-table th,
+.drive-file-table[data-context="resource"] .drive-table td {
+  padding: var(--space-2) var(--space-3);
+}
+.drive-file-table[data-context="resource"] .drive-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.drive-file-table[data-context="resource"] .drive-type {
+  width: 100px;
+}
+.drive-file-table[data-context="resource"] .drive-size {
+  width: 110px;
+}
+.drive-file-table[data-context="resource"] .drive-file-type,
+.drive-file-table[data-context="resource"] .drive-file-size {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.drive-file-table[data-context="resource"] .drive-file-size {
+  font-variant-numeric: tabular-nums;
+}
 .drive-file-name {
   display: flex;
   align-items: center;
@@ -114,6 +169,16 @@
 .drive-file-name span {
   overflow-wrap: anywhere;
 }
+.drive-file-table[data-context="resource"] .drive-file-name span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.modal.drive-file-detail-dialog {
+  width: 680px;
+  max-width: 100%;
+}
 .drive-file-metadata {
   display: grid;
   grid-template-columns: 85px minmax(0, 1fr);
@@ -126,6 +191,7 @@
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  user-select: text;
 }
 .drive-confirm-list {
   min-height: 1.8em;

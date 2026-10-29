@@ -1,0 +1,28 @@
+.create-share-identity {
+  display: grid;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.create-share-identity > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.create-share-dialog .select-control {
+  width: 100%;
+}
+.create-share-result {
+  display: grid;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.create-share-result .link-box {
+  margin: 0;
+}
+.create-share-result small {
+  color: var(--muted);
+}
+.create-share-warning {
+  color: var(--amber);
+  font-size: 12px;
+}

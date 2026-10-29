@@ -40,6 +40,7 @@ export type Page =
   | "drive-files"
   | "resource-answers"
   | "resource-export"
+  | "resource-catalog"
   | "library"
   | "accounts"
   | "website-accounts"
@@ -163,6 +164,7 @@ const pages: Page[] = [
   "drive-files",
   "resource-answers",
   "resource-export",
+  "resource-catalog",
   "library",
   "accounts",
   "website-accounts",

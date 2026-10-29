@@ -11,6 +11,8 @@ import { readLimited, readLimitedBytes } from "../core/http";
 import { createWeiboSessions } from "./weibo-session";
 import { createZhihuIdentitySession } from "./zhihu-session";
 import { createSmzdmSession } from "./smzdm-session";
+import { createDocumentSessions } from "./document-session";
+import { isDocumentProvider } from "../shared/document-platforms";
 import { browserSessionFetch } from "./browser-session-fetch";
 import {
   baiduKeywordPath,
@@ -35,7 +37,10 @@ type Context = {
   invalidSignature?: string;
   productOpened: boolean;
 };
-export function createWebsiteSessions(workspace: () => string, environmentProfile?: (account: WebsiteAccount) => Session) {
+export function createWebsiteSessions(
+  workspace: () => string,
+  environmentProfile?: (account: WebsiteAccount) => Session,
+) {
   const contexts = new Map<string, Context>();
   const key = (account: WebsiteAccount) =>
     createHash("sha256")
@@ -48,7 +53,9 @@ export function createWebsiteSessions(workspace: () => string, environmentProfil
     const id = key(account),
       old = contexts.get(id);
     if (old) return old;
-    const profile = environmentProfile?.(account) ?? session.fromPartition(`persist:panxu-website-${id}`);
+    const profile =
+      environmentProfile?.(account) ??
+      session.fromPartition(`persist:panxu-website-${id}`);
     const value: Context = {
       profile,
       uid: account.uid,
@@ -382,11 +389,15 @@ export function createWebsiteSessions(workspace: () => string, environmentProfil
           "BAIDU_DOWNLOAD_HOST",
           "百度返回了未受信任的下载地址，请在官方窗口核对。",
         );
-      const r = await browserSessionFetch(context(_account).profile, url.toString(), {
-        redirect: "error",
-        credentials: "omit",
-        signal: AbortSignal.timeout(45000),
-      });
+      const r = await browserSessionFetch(
+        context(_account).profile,
+        url.toString(),
+        {
+          redirect: "error",
+          credentials: "omit",
+          signal: AbortSignal.timeout(45000),
+        },
+      );
       if (!r.ok)
         throw new AppError(
           "BAIDU_DOWNLOAD_FAILED",
@@ -451,22 +462,65 @@ export function createWebsiteSessions(workspace: () => string, environmentProfil
   const weiboSessions = createWeiboSessions(workspace, environmentProfile);
   const zhihuIdentity = createZhihuIdentitySession(context);
   const smzdm = createSmzdmSession(context);
-  const adapter = (account: WebsiteAccount) => account.provider === "weibo" ? weiboSessions : baiduSessions;
+  const documents = createDocumentSessions(context, (account) =>
+    baiduSessions.login(account),
+  );
+  const adapter = (account: WebsiteAccount) =>
+    account.provider === "weibo" ? weiboSessions : baiduSessions;
   const sessions: NonNullable<AppPorts["websiteSessions"]> = {
-    isOpen: () => baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen(),
+    isOpen: () =>
+      baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen(),
     login: (account) => adapter(account).login(account),
-    status: (account) => account.provider === "smzdm" ? Promise.resolve(smzdm.status(account)) : account.provider === "zhihu" ? Promise.resolve(zhihuIdentity.status(account)) : adapter(account).status(account),
+    status: (account) =>
+      isDocumentProvider(account.provider)
+        ? Promise.resolve(documents.status(account))
+        : account.provider === "smzdm"
+          ? Promise.resolve(smzdm.status(account))
+          : account.provider === "zhihu"
+            ? Promise.resolve(zhihuIdentity.status(account))
+            : adapter(account).status(account),
     clear: (account) => adapter(account).clear(account),
-    invalidate: async (account) => account.provider === "smzdm" ? smzdm.invalidate(account) : account.provider === "zhihu" ? zhihuIdentity.invalidate(account) : adapter(account).invalidate(account),
-    verify: (account) => account.provider === "smzdm" ? smzdm.verify(account) : account.provider === "zhihu" ? zhihuIdentity.verify(account) : account.provider === "weibo" ? weiboSessions.verify(account) : baiduSessions.status(account),
+    invalidate: async (account) =>
+      isDocumentProvider(account.provider)
+        ? documents.invalidate(account)
+        : account.provider === "smzdm"
+          ? smzdm.invalidate(account)
+          : account.provider === "zhihu"
+            ? zhihuIdentity.invalidate(account)
+            : adapter(account).invalidate(account),
+    verify: (account) =>
+      isDocumentProvider(account.provider)
+        ? documents.verify(account)
+        : account.provider === "smzdm"
+          ? smzdm.verify(account)
+          : account.provider === "zhihu"
+            ? zhihuIdentity.verify(account)
+            : account.provider === "weibo"
+              ? weiboSessions.verify(account)
+              : baiduSessions.status(account),
+    openDocument: (account, url) => documents.openDocument(account, url),
     open: async (account, expectedUid) => {
-      if (account.provider !== "weibo") throw new AppError("WEBSITE_PUBLISH_UNSUPPORTED", "此平台暂未接入网站发布窗口。");
+      if (account.provider !== "weibo")
+        throw new AppError(
+          "WEBSITE_PUBLISH_UNSUPPORTED",
+          "此平台暂未接入网站发布窗口。",
+        );
       await weiboSessions.open(account, expectedUid);
     },
     openPost: async (account, url) => {
-      if (account.provider !== "weibo") throw new AppError("WEBSITE_PUBLISH_UNSUPPORTED", "此账号不支持微博回执。");
+      if (account.provider !== "weibo")
+        throw new AppError(
+          "WEBSITE_PUBLISH_UNSUPPORTED",
+          "此账号不支持微博回执。",
+        );
       await weiboSessions.openPost(account, url);
     },
   };
-  return { sessions, baiduKeywords, weiboPublisher: weiboSessions.publisher, weiboStatistics: weiboSessions.statistics, smzdm: smzdm.port };
+  return {
+    sessions,
+    baiduKeywords,
+    weiboPublisher: weiboSessions.publisher,
+    weiboStatistics: weiboSessions.statistics,
+    smzdm: smzdm.port,
+  };
 }

@@ -229,12 +229,11 @@ export function createSharingHandlers(
     },
     "copy.link": async (object) => {
       const { copyId } = z.object({ copyId: z.string() }).parse(object);
-      const copy = services.repo.getCopy(copyId),
-        account = services.assertOwnCopy(copy);
-      await services.authenticated(account.id, async (a, p) => {
-        if (!(await p.verifyShare(a, copy.shareId!, copy.files)))
-          throw new AppError("SHARE_INVALID", "本人分享未能通过有效性检查。");
-      });
+      const check = await services.checkShare(copyId);
+      if (check.status !== "valid")
+        throw new AppError("SHARE_INVALID", check.message);
+      const copy = services.repo.getCopy(copyId);
+      services.assertOwnCopy(copy);
       const code = await services.secrets.get(`share:${copy.id}`);
       return { text: `${copy.shareUrl}${code ? `\n提取码：${code}` : ""}` };
     },
