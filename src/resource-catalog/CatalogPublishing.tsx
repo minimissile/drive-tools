@@ -63,9 +63,11 @@ export function CatalogPublishing({
   const [publicConfirmed, setPublicConfirmed] = useState(false);
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
+  const [actionScope, setActionScope] = useState("handoff");
   const [showHistory, setShowHistory] = useState(false);
   const lock = useRef(false);
   const mounted = useRef(true);
+  const handoff = useRef<HTMLDivElement>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -105,10 +107,12 @@ export function CatalogPublishing({
     label: string,
     action: () => Promise<T>,
     done?: (value: T) => void,
+    scope = "handoff",
   ) => {
     if (lock.current) return;
     lock.current = true;
     setPending(label);
+    setActionScope(scope);
     setError("");
     try {
       const value = await action();
@@ -156,7 +160,13 @@ export function CatalogPublishing({
           "success",
         );
         onChanged();
+        requestAnimationFrame(() => {
+          if (!mounted.current) return;
+          handoff.current?.focus({ preventScroll: true });
+          handoff.current?.scrollIntoView({ block: "nearest" });
+        });
       },
+      publication?.id,
     );
   };
   const copyContent = () => {
@@ -219,11 +229,12 @@ export function CatalogPublishing({
       },
     );
   };
-  const copyLink = (value: string) =>
+  const copyLink = (value: string, scope: string) =>
     void run(
       "正在复制文档链接…",
       () => ipc("system.copyText", { text: value }),
       () => notify("已复制文档链接。", "success"),
+      scope,
     );
   const openPublication = (publication: CatalogPublication) =>
     void run(
@@ -234,6 +245,7 @@ export function CatalogPublishing({
           url: publication.url,
         }),
       () => notify("已打开关联账号的官方文档窗口。", "info"),
+      publication.id,
     );
 
   return (
@@ -331,7 +343,7 @@ export function CatalogPublishing({
         ) : null}
 
         {preparations.length ? (
-          <div className="catalog-handoff">
+          <div className="catalog-handoff" ref={handoff} tabIndex={-1}>
             <Field label="待登记的交接">
               <Select
                 aria-label="待登记交接版本"
@@ -479,8 +491,10 @@ export function CatalogPublishing({
             ) : null}
           </div>
         ) : null}
-        {pending ? <Loading label={pending} /> : null}
-        {error ? (
+        {pending && actionScope === "handoff" ? (
+          <Loading label={pending} />
+        ) : null}
+        {error && actionScope === "handoff" ? (
           <div role="alert">
             <Notice danger>{error}</Notice>
           </div>
@@ -525,7 +539,7 @@ export function CatalogPublishing({
                   <Button
                     quiet
                     disabled={!!pending}
-                    onClick={() => copyLink(publication.url)}
+                    onClick={() => copyLink(publication.url, publication.id)}
                   >
                     <ClipboardCopy size={14} />
                     复制访问链接
@@ -541,6 +555,14 @@ export function CatalogPublishing({
                     准备更新原文档
                   </Button>
                 </div>
+                {pending && actionScope === publication.id ? (
+                  <Loading label={pending} />
+                ) : null}
+                {error && actionScope === publication.id ? (
+                  <div role="alert">
+                    <Notice danger>{error}</Notice>
+                  </div>
+                ) : null}
                 {publication.needsUpdate ? (
                   <details className="catalog-publication-diff">
                     <summary>
@@ -603,13 +625,21 @@ export function CatalogPublishing({
                     <Button
                       quiet
                       disabled={!!pending}
-                      onClick={() => copyLink(receipt.url)}
+                      onClick={() => copyLink(receipt.url, "history")}
                     >
                       复制此版本文档链接
                     </Button>
                   </li>
                 ))}
               </ol>
+            ) : null}
+            {pending && actionScope === "history" ? (
+              <Loading label={pending} />
+            ) : null}
+            {error && actionScope === "history" ? (
+              <div role="alert">
+                <Notice danger>{error}</Notice>
+              </div>
             ) : null}
           </details>
         ) : null}
