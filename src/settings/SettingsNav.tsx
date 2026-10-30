@@ -4,6 +4,7 @@ const items = [
   ["settings-ai", "AI与预算"],
   ["settings-traffic", "5118接口"],
   ["settings-sources", "内容数据源"],
+  ["settings-resource-links", "固定入口"],
   ["settings-notes", "知识库"],
   ["settings-browser", "比特连接"],
   ["settings-bindings", "发布映射"],

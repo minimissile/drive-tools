@@ -156,11 +156,14 @@
   gap: 20px;
   font-size: 11px;
   color: var(--muted);
+  flex-wrap: wrap;
+  padding-block: var(--space-2);
 }
 .topbar > div {
   display: flex;
   align-items: center;
   gap: 13px;
+  min-width: 0;
 }
 .topbar strong {
   font-weight: 500;

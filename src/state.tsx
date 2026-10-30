@@ -1,3 +1,4 @@
+import { windowStorage } from "./storage/window-storage";
 import { TaskFocusProvider } from "./tasks/TaskFocus";
 import { stableContext } from "./lib/stable-context";
 import type { IpcMethod, IpcArguments, IpcValue } from "../shared/ipc";
@@ -31,6 +32,7 @@ import type {
 export type Page =
   | "distribution"
   | "workbench"
+  | "baidu-discovery"
   | "zhidao-mine"
   | "zhidao-collect"
   | "zhidao-qa"
@@ -155,6 +157,7 @@ export function useApp(): Store {
 const pages: Page[] = [
   "distribution",
   "workbench",
+  "baidu-discovery",
   "zhidao-mine",
   "zhidao-collect",
   "zhidao-qa",
@@ -189,7 +192,14 @@ const pages: Page[] = [
   "search",
 ];
 export type SettingsSection =
-  "sources" | "ai" | "traffic" | "notes" | "browser" | "bindings" | "maintenance";
+  | "sources"
+  | "resource-links"
+  | "ai"
+  | "traffic"
+  | "notes"
+  | "browser"
+  | "bindings"
+  | "maintenance";
 const WorkspaceStatus = stableContext("WorkspaceStatus", {
   loading: true,
   error: "",
@@ -204,7 +214,9 @@ function savedUi(): {
   activeAccounts?: Record<string, string>;
 } {
   try {
-    const data = JSON.parse(localStorage.getItem("panxu-ui-v1") ?? "{}");
+    const raw = windowStorage.getItem("panxu-ui-v1");
+    if (raw == null) return {};
+    const data = JSON.parse(raw);
     return {
       page: pages.includes(data.page) ? data.page : "workbench",
       editResourceId:
@@ -231,7 +243,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [saved] = useState(savedUi);
+  const [saved] = useState(() => {
+    const saved = savedUi();
+    const initial = window.panxu?.initialPage;
+    return !saved.page && initial && pages.includes(initial as Page)
+      ? { ...saved, page: initial as Page } : saved;
+  });
   const { notify, clearToast, begin, end } = useFeedbackActions();
   const [searchFocus, setSearchFocus] = useState<SearchFocus | null>(null);
   const [extraResource, setExtraResource] = useState<Resource | null>(null),
@@ -260,7 +277,7 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
   } = useSnapshot(selectedResourceId);
   useEffect(() => {
     try {
-      localStorage.setItem(
+      windowStorage.setItem(
         "panxu-ui-v1",
         JSON.stringify({
           page,
@@ -379,7 +396,7 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
   const openDraft = useCallback(
     (draft: Draft, destination: "studio" | "publish" = "studio") => {
       select(draft.resourceId, draft.copyId);
-      localStorage.setItem(
+      windowStorage.setItem(
         "panxu-studio-selection-v1",
         JSON.stringify({
           id: draft.id,
@@ -388,7 +405,7 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
           resourceId: draft.resourceId,
         }),
       );
-      localStorage.setItem("panxu-publish-draft", draft.id);
+      windowStorage.setItem("panxu-publish-draft", draft.id);
       setPage(destination);
     },
     [select],

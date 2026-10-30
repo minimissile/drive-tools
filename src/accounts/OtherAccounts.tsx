@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ipc } from "../api/client";
 import { useAppActions, useAppData, useAppNavigation } from "../state";
 import { prepareAutoAnswer } from "../zhidao/answer-draft";
@@ -7,8 +7,11 @@ import { WeiboPublishingDialog } from "./WeiboPublishingDialog";
 import { WeiboComposer } from "./WeiboComposer";
 import { PublishingAccounts } from "./PublishingAccounts";
 import { WeiboAccountStatistics } from "../weibo/Statistics";
-import { formatTime } from "../lib/format";
-import { Globe, LogIn, Plus } from "lucide-react";
+import { Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { PlatformIcon } from "../platforms/PlatformIcon";
+import { Tabs, TabList, TabPanel } from "../ui/Tabs";
+import { OtherAccountConnection } from "./OtherAccountConnection";
+import { OtherAccountRow, type OtherAccountAction } from "./OtherAccountRow";
 import {
   useOtherAccounts,
   otherAccountActions,
@@ -23,11 +26,9 @@ import {
   Field,
   LoadingState,
   Notice,
-  Panel,
-  Status,
+  SearchField,
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
-import { Select } from "../ui/Select";
 import { Dialog } from "../ui/Dialog";
 import {
   AccountBrowserChoice,
@@ -79,6 +80,10 @@ export default function OtherAccounts({
   );
   const [newAlias, setNewAlias] = useState("");
   const initialEnvironment = useRef(readAccountEnvironment(data!.dataPath));
+  const [adding, setAdding] = useState(!!initialEnvironment.current);
+  const formId = useId();
+  const [filter, setFilter] = useState<"all" | OtherProvider>("all");
+  const [query, setQuery] = useState("");
   const [browser, setBrowser] = useState<AccountBrowserSelection>({
     fingerprint: false,
     environmentId: "",
@@ -135,80 +140,179 @@ export default function OtherAccounts({
       accounts.reload();
     }
   };
+  const needle = query.trim().normalize("NFKC").toLocaleLowerCase();
+  const filtered = accounts.data.filter(
+    (account) =>
+      (filter === "all" || account.provider === filter) &&
+      `${account.alias} ${account.nickname ?? ""} ${account.uid ?? ""} ${otherProviderName(account.provider)}`
+        .normalize("NFKC")
+        .toLocaleLowerCase()
+        .includes(needle),
+  );
+  const changeProvider = (value: OtherProvider) => {
+    setProvider(value);
+    setCookie("");
+    if (isDocumentProvider(value))
+      setBrowser({ fingerprint: false, environmentId: "" });
+  };
+  const handleAction = (account: OtherAccount, action: OtherAccountAction) => {
+    switch (action) {
+      case "login":
+        void run(account.key, () => otherAccountActions.login(account));
+        break;
+      case "check":
+        void run(account.key, () => otherAccountActions.check(account));
+        break;
+      case "document":
+        if (isDocumentProvider(account.provider)) {
+          const url = documentPlatformSpecs[account.provider].home;
+          void run(account.key, () =>
+            ipc("websiteAccounts.openDocument", { id: account.id, url }),
+          );
+        }
+        break;
+      case "smzdm-workflow":
+        navigate("smzdm-workflow");
+        break;
+      case "smzdm-editor":
+        void run(account.key, () => ipc("smzdm.openEditor"));
+        break;
+      case "zhihu-operations":
+        navigate("zhihu-operations");
+        break;
+      case "weibo-statistics":
+        setStatisticsAccountId((current) =>
+          current === account.id ? "" : account.id,
+        );
+        break;
+      case "weibo-compose":
+        setComposerAccount(account);
+        break;
+      case "weibo-marketing":
+        navigate("weibo-marketing");
+        break;
+      case "weibo-publishing":
+        setPublishingAccount(account);
+        break;
+      case "zhidao-answer":
+        openAutoAnswer(account);
+        break;
+      case "zhidao-rights":
+        setFailure(null);
+        setRightsAccount(account);
+        break;
+      case "environment": {
+        setFailure(null);
+        setAssigning(account);
+        const env = accounts.environments.find(
+          (item) => item.id === account.environmentId,
+        );
+        setTargetBrowser({
+          fingerprint: env?.engine === "bitbrowser",
+          environmentId: env?.id ?? "",
+        });
+        break;
+      }
+      case "rename":
+        setFailure(null);
+        setEditing(account);
+        setAlias(account.alias);
+        break;
+      case "remove":
+        setFailure(null);
+        setRemoving(account);
+        break;
+    }
+  };
+  const clearFilters = () => {
+    setFilter("all");
+    setQuery("");
+  };
   return (
     <div className="website-accounts-workspace">
-      <Panel title="连接其他账号">
-        <p className="muted">
-          这里统一管理飞书、腾讯文档、石墨文档、微博、百度营销等非网盘账号。选择平台后打开官方登录窗口，无需填写用户
-          ID；完成扫码后点击“检查登录”。默认使用内置浏览器，多账号运营时可开启指纹浏览器关联。
+      <div className="accounts-list-toolbar">
+        <p className="accounts-overview">
+          {accounts.ready || accounts.data.length ? (
+            <>
+              <span>
+                {!accounts.ready ? "已读取 " : ""}
+                <strong>{accounts.data.length}</strong> 个平台账号
+              </span>
+              <span>
+                {
+                  accounts.data.filter(
+                    (account) => account.status === "connected",
+                  ).length
+                }{" "}
+                个已登录
+              </span>
+            </>
+          ) : (
+            <span>{accounts.error ? "账号读取未完成" : "正在读取账号…"}</span>
+          )}
         </p>
-        {documentProvider ? (
-          <Notice>
-            文档平台使用独立内置浏览器保存登录。检查登录只识别本机工作台会话；文档的公开访问权限需要在官方平台设置。
-          </Notice>
-        ) : singleSmzdm ? (
-          <Notice>
-            什么值得买使用一个账号，通过独立内置浏览器保存登录状态。
-            {hasSmzdm
-              ? "请在下方已有账号中登录或检查身份。"
-              : "完成官方登录后，点击下方账号的“检查登录”。"}
-          </Notice>
-        ) : (
-          <AccountBrowserChoice
-            value={browser}
-            onChange={(value) => {
+        <div className="accounts-toolbar-actions">
+          <SearchField
+            label="搜索其他账号"
+            value={query}
+            onChange={setQuery}
+            placeholder="搜索备注、平台或 UID"
+          />
+          <Button
+            quiet
+            size="compact"
+            title="刷新本地状态"
+            aria-label="刷新其他账号本地状态"
+            disabled={accounts.loading}
+            onClick={accounts.reload}
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+          </Button>
+          <Button
+            primary={!adding}
+            onClick={() => setAdding((open) => !open)}
+            aria-expanded={adding}
+            aria-controls={formId}
+          >
+            {adding ? (
+              <X size={15} aria-hidden="true" />
+            ) : (
+              <Plus size={16} aria-hidden="true" />
+            )}
+            {adding ? "收起添加" : "新增账号"}
+          </Button>
+        </div>
+      </div>
+      <div id={formId} hidden={!adding}>
+        {adding ? (
+          <OtherAccountConnection
+            provider={provider}
+            onProvider={changeProvider}
+            alias={newAlias}
+            onAlias={setNewAlias}
+            cookie={cookie}
+            onCookie={setCookie}
+            browser={browser}
+            onBrowser={(value) => {
               initialEnvironment.current = "";
               setBrowser(value);
             }}
             environments={accounts.environments}
-            disabled={!!pending || !accounts.environmentsReady}
-          />
-        )}
-        {!nativeOnly &&
-        browser.fingerprint &&
-        accounts.environmentsReady &&
-        !accounts.environments.some((env) => env.engine === "bitbrowser") ? (
-          <Notice>
-            暂无指纹浏览器环境，请先在“指纹浏览器”中接入环境。
-            <Button quiet onClick={() => navigate("browser-environments")}>
-              配置指纹浏览器
-            </Button>
-          </Notice>
-        ) : null}
-        <div className="website-account-add">
-          <Field label="账号平台">
-            <Select
-              aria-label="其他账号平台"
-              value={provider}
-              onValueChange={(v) => {
-                setProvider(v as OtherProvider);
-                setCookie("");
-                if (isDocumentProvider(v))
-                  setBrowser({ fingerprint: false, environmentId: "" });
-              }}
-              items={otherProviderItems}
-            />
-          </Field>
-          <Field label="账号备注（可选）">
-            <input
-              value={newAlias}
-              maxLength={60}
-              onChange={(e) => setNewAlias(e.target.value)}
-              placeholder="例如：运营主账号"
-            />
-          </Field>
-          <Button
-            primary
-            disabled={
-              !!pending ||
-              !accounts.ready ||
-              !!accounts.error ||
+            environmentsReady={accounts.environmentsReady}
+            hasSmzdm={hasSmzdm}
+            busy={!!pending}
+            canAdd={
+              !pending &&
+              accounts.ready &&
+              !accounts.error &&
               (singleSmzdm
-                ? hasSmzdm
-                : !nativeOnly &&
-                  (!accounts.environmentsReady || !validBrowser(browser)))
+                ? !hasSmzdm
+                : nativeOnly ||
+                  (accounts.environmentsReady && validBrowser(browser)))
             }
-            onClick={() =>
+            failure={failure?.id === "add" ? failure.text : undefined}
+            onConfigure={() => navigate("browser-environments")}
+            onAdd={() =>
               void run("add", async () => {
                 const account = await otherAccountActions.add(
                   provider,
@@ -218,6 +322,9 @@ export default function OtherAccounts({
                 );
                 setNewAlias("");
                 setCookie("");
+                setFilter(account.provider);
+                setQuery("");
+                setAdding(false);
                 accounts.reload();
                 try {
                   await otherAccountActions.login(account);
@@ -227,318 +334,137 @@ export default function OtherAccounts({
                     text:
                       cause instanceof Error
                         ? cause.message
-                        : "官方登录窗口未打开，请重试登录。",
+                        : "账号已添加，官方登录窗口未打开，请重试登录。",
                   });
                 }
               })
             }
-          >
-            <Plus size={16} />
-            {pending === "add"
-              ? "正在打开…"
-              : singleSmzdm && hasSmzdm
-                ? "已添加单账号"
-                : "登录新账号"}
-          </Button>
-        </div>
-        {!nativeOnly && browser.environmentId ? (
-          <p className="muted">
-            新账号将关联到“
-            {accounts.environments.find(
-              (env) => env.id === browser.environmentId,
-            )?.name ?? "原环境不可用"}
-            ”。 关联已有账号时，请点击下方账号的“环境”按钮。
-          </p>
-        ) : !nativeOnly && !browser.fingerprint ? (
-          <p className="muted">
-            登录时自动创建独立内置环境，保留此账号的登录状态。
-          </p>
+          />
         ) : null}
-        {provider === "zhihu" && !browser.fingerprint ? (
-          <Notice>
-            内置浏览器支持知乎登录与身份检查；知乎的养号和自动发布任务目前仍需指纹浏览器环境。
-          </Notice>
-        ) : null}
-        {provider === "baidu-zhidao" ? (
-          <details>
-            <summary>使用已有 Cookie（可选）</summary>
-            <Field label="百度知道 Cookie" hint="仅本次提交，不随表单恢复">
-              <input
-                type="password"
-                autoComplete="off"
-                value={cookie}
-                onChange={(e) => setCookie(e.target.value)}
-                maxLength={20000}
-              />
-            </Field>
-          </details>
-        ) : null}
-        {failure?.id === "add" ? <Notice danger>{failure.text}</Notice> : null}
-      </Panel>
-      <Panel
-        title="我的其他账号"
-        extra={
-          <Button quiet disabled={accounts.loading} onClick={accounts.reload}>
-            刷新本地状态
-          </Button>
-        }
+      </div>
+      <QueryError
+        error={accounts.error}
+        loading={accounts.loading}
+        onRetry={accounts.reload}
+      />
+      {!accounts.ready && !accounts.error && !accounts.data.length ? (
+        <LoadingState label="正在读取其他账号…" />
+      ) : null}
+      <Tabs<"all" | OtherProvider>
+        value={filter}
+        onChange={(value) => {
+          setFilter(value);
+          if (value !== "all" && !adding) changeProvider(value);
+        }}
       >
-        <QueryError
-          error={accounts.error}
-          loading={accounts.loading}
-          onRetry={accounts.reload}
-        />
-        {!accounts.ready && !accounts.error ? (
-          <LoadingState label="正在读取其他账号…" />
-        ) : null}
-        {accounts.data.length ? (
-          <div className="website-account-list">
-            {accounts.data.map((account) => (
-              <article className="website-account-row" key={account.key}>
-                <div className="website-account-identity">
-                  <Globe size={22} aria-hidden="true" />
-                  <div>
-                    <strong>{account.nickname || account.alias}</strong>
-                    {account.nickname && account.nickname !== account.alias ? (
-                      <small>{account.alias}</small>
-                    ) : null}
-                    <small>
-                      {otherProviderName(account.provider)}
-                      {account.uid
-                        ? ` · UID ${account.uid}`
-                        : isDocumentProvider(account.provider)
-                          ? " · 本机会话，平台身份未核实"
-                          : " · 尚未识别身份"}
-                    </small>
-                    <small>
-                      环境：
-                      {accounts.environments.find(
-                        (env) => env.id === account.environmentId,
-                      )?.name ?? "正在读取关联环境"}
-                    </small>
-                  </div>
-                </div>
-                <div className="website-account-state">
-                  <Status
-                    kind={account.status === "connected" ? "good" : "warning"}
-                  >
-                    {account.checking
-                      ? isDocumentProvider(account.provider)
-                        ? "正在检查会话"
-                        : "正在核实身份"
-                      : account.status === "connected"
-                        ? "已识别会话"
-                        : account.status === "expired"
-                          ? "需重新登录"
-                          : "待登录"}
-                  </Status>
-                  <small
-                    role={failure?.id === account.key ? "alert" : undefined}
-                  >
-                    {failure?.id === account.key
-                      ? failure.text
-                      : account.message}
-                  </small>
-                  <small>{account.detail}</small>
-                  {account.provider === "weibo" ? (
-                    <small>
-                      {account.checkedAt
-                        ? `上次核实：${formatTime(account.checkedAt)}`
-                        : "身份尚未经微博核实"}
-                      {account.publishing?.verifiedAt
-                        ? " · 已记录发布能力"
-                        : " · 发布能力待核实"}
-                    </small>
+        <div className="accounts-provider-filter">
+          <TabList
+            label="账号平台筛选"
+            items={[
+              [
+                "all",
+                <>
+                  全部平台
+                  {accounts.ready ? (
+                    <span className="account-filter-count">
+                      {accounts.data.length}
+                    </span>
                   ) : null}
-                  {account.provider === "baidu-zhidao" &&
-                  account.status === "connected" &&
-                  account.bulkPermission === false ? (
-                    <Notice warning>尚未开通发布权益，需先参与答题。</Notice>
-                  ) : null}
-                </div>
-                <div className="website-account-actions">
-                  {isDocumentProvider(account.provider) &&
-                  account.status === "connected" ? (
-                    <Button
-                      disabled={!!pending}
-                      onClick={() =>
-                        void run(account.key, () =>
-                          ipc("websiteAccounts.openDocument", {
-                            id: account.id,
-                            url: documentPlatformSpecs[
-                              account.provider as keyof typeof documentPlatformSpecs
-                            ].home,
-                          }),
-                        )
-                      }
-                    >
-                      文档工作台
-                    </Button>
-                  ) : null}
-                  {account.provider === "smzdm" ? (
-                    <Button
-                      disabled={!!pending}
-                      onClick={() => navigate("smzdm-workflow")}
-                    >
-                      文章分发
-                    </Button>
-                  ) : null}
-                  {account.provider === "smzdm" &&
-                  account.status === "connected" ? (
-                    <Button
-                      disabled={!!pending}
-                      onClick={() =>
-                        void run(account.key, () => ipc("smzdm.openEditor"))
-                      }
-                    >
-                      官方编辑器
-                    </Button>
-                  ) : null}
-                  {account.provider === "zhihu" ? (
-                    <Button
-                      disabled={!!pending}
-                      onClick={() => navigate("zhihu-operations")}
-                    >
-                      知乎运营
-                    </Button>
-                  ) : null}
-                  {account.provider === "weibo" && account.uid ? (
-                    <Button
-                      quiet
-                      aria-expanded={statisticsAccountId === account.id}
-                      onClick={() =>
-                        setStatisticsAccountId((current) =>
-                          current === account.id ? "" : account.id,
-                        )
-                      }
-                    >
-                      数据统计
-                    </Button>
-                  ) : null}
-                  {account.provider === "weibo" &&
-                  account.status === "connected" ? (
+                </>,
+              ],
+              ...otherProviderItems.map(
+                (item) =>
+                  [
+                    item.value as OtherProvider,
                     <>
-                      <Button
-                        disabled={!!pending || account.checking}
-                        onClick={() => setComposerAccount(account)}
-                      >
-                        发布微博
-                      </Button>
-                      <Button
-                        disabled={!!pending}
-                        onClick={() => navigate("weibo-marketing")}
-                      >
-                        微博图文
-                      </Button>
-                      <Button
-                        quiet
-                        disabled={!!pending || account.checking}
-                        onClick={() => setPublishingAccount(account)}
-                      >
-                        发布能力
-                      </Button>
-                    </>
+                      <PlatformIcon platform={item.value} size="small" />
+                      {item.label}
+                      {accounts.ready ? (
+                        <span className="account-filter-count">
+                          {
+                            accounts.data.filter(
+                              (account) => account.provider === item.value,
+                            ).length
+                          }
+                        </span>
+                      ) : null}
+                    </>,
+                  ] as const,
+              ),
+            ]}
+          />
+        </div>
+        <TabPanel value={filter}>
+          {filtered.length ? (
+            <div className="website-account-list" aria-label="其他平台账号列表">
+              <div className="website-account-column-head" aria-hidden="true">
+                <span>平台与账号</span>
+                <span>浏览器环境与状态</span>
+                <span>账号操作</span>
+              </div>
+              {filtered.map((account) => (
+                <OtherAccountRow
+                  key={account.key}
+                  account={account}
+                  environment={
+                    accounts.environments.find(
+                      (env) => env.id === account.environmentId,
+                    )?.name ??
+                    (accounts.environmentsReady
+                      ? "未关联浏览器环境"
+                      : "正在读取关联环境")
+                  }
+                  environmentsReady={accounts.environmentsReady}
+                  pending={pending}
+                  failure={
+                    failure?.id === account.key ? failure.text : undefined
+                  }
+                  statisticsOpen={statisticsAccountId === account.id}
+                  onAction={(action) => handleAction(account, action)}
+                >
+                  {account.provider === "weibo" &&
+                  statisticsAccountId === account.id ? (
+                    <WeiboAccountStatistics accountId={account.id} />
                   ) : null}
-                  {account.provider === "baidu-zhidao" &&
-                  account.status === "connected" ? (
-                    <Button
-                      disabled={!!pending}
-                      onClick={() => openAutoAnswer(account)}
-                    >
-                      自动答题
-                    </Button>
-                  ) : null}
-                  {account.provider === "baidu-zhidao" &&
-                  account.status === "connected" &&
-                  account.bulkPermission === false ? (
-                    <Button
-                      primary
-                      disabled={!!pending}
-                      onClick={() => {
-                        setFailure(null);
-                        setRightsAccount(account);
-                      }}
-                    >
-                      去获取资格
-                    </Button>
-                  ) : null}
+                </OtherAccountRow>
+              ))}
+            </div>
+          ) : accounts.ready && !accounts.error ? (
+            <div className="website-account-list">
+              <Empty
+                compact
+                title={
+                  accounts.data.length
+                    ? "没有找到匹配的账号"
+                    : "添加第一个平台账号"
+                }
+                action={
                   <Button
-                    disabled={!!pending}
-                    onClick={() =>
-                      void run(account.key, () =>
-                        otherAccountActions.login(account),
-                      )
+                    primary={!accounts.data.length}
+                    onClick={
+                      accounts.data.length
+                        ? clearFilters
+                        : () => setAdding(true)
                     }
                   >
-                    <LogIn size={14} />
-                    {pending === account.key
-                      ? "正在处理…"
-                      : account.windowOpen
-                        ? "返回登录窗口"
-                        : "登录 / 扫码"}
+                    {accounts.data.length ? "清除筛选" : "新增账号"}
                   </Button>
-                  <Button
-                    quiet
-                    disabled={!!pending || account.checking}
-                    onClick={() =>
-                      void run(account.key, () =>
-                        otherAccountActions.check(account),
-                      )
-                    }
-                  >
-                    {account.checking ? "正在核实…" : "检查登录"}
-                  </Button>
-                  {account.provider !== "smzdm" &&
-                  !isDocumentProvider(account.provider) ? (
-                    <Button
-                      quiet
-                      disabled={!!pending || !accounts.environmentsReady}
-                      onClick={() => {
-                        setFailure(null);
-                        setAssigning(account);
-                        const env = accounts.environments.find(
-                          (item) => item.id === account.environmentId,
-                        );
-                        setTargetBrowser({
-                          fingerprint: env?.engine === "bitbrowser",
-                          environmentId: env?.id ?? "",
-                        });
-                      }}
-                    >
-                      环境
-                    </Button>
-                  ) : null}
-                  <Button
-                    quiet
-                    disabled={!!pending}
-                    onClick={() => {
-                      setEditing(account);
-                      setAlias(account.alias);
-                    }}
-                  >
-                    备注
-                  </Button>
-                  <Button
-                    quiet
-                    disabled={!!pending}
-                    onClick={() => setRemoving(account)}
-                  >
-                    移除
-                  </Button>
-                </div>
-                {account.provider === "weibo" &&
-                statisticsAccountId === account.id ? (
-                  <WeiboAccountStatistics accountId={account.id} />
-                ) : null}
-              </article>
-            ))}
-          </div>
-        ) : accounts.ready && !accounts.error ? (
-          <Empty title="添加第一个其他账号">
-            点击“登录新账号”，在官方窗口完成登录。后续新增平台的登录状态也会在这里管理。
-          </Empty>
-        ) : null}
-      </Panel>
+                }
+              >
+                {accounts.data.length
+                  ? "试试其他备注或 UID，也可以切换平台查看。"
+                  : "选择平台，在官方窗口完成登录后检查登录状态。"}
+              </Empty>
+            </div>
+          ) : null}
+        </TabPanel>
+      </Tabs>
+      <p className="accounts-footnote">
+        <ShieldCheck size={15} aria-hidden="true" />
+        <span>
+          登录会话按浏览器环境保存。移除仅解除本地账号关系，保留环境登录数据与历史记录。
+        </span>
+      </p>
       <PublishingAccounts environments={accounts.environments} />
       {assigning ? (
         <Dialog

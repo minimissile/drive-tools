@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useDraftDeliveryStatus } from "./useDraftDeliveryStatus";
 import { useEffect, useState } from "react";
@@ -28,7 +29,7 @@ export function usePublicationPreparation(platform?: Platform) {
     { command, notify } = useAppActions(),
     { busy } = useAppActivity();
   const [draftId, setDraftId] = useState(
-      () => localStorage.getItem("panxu-publish-draft") ?? "",
+      () => windowStorage.getItem("panxu-publish-draft") ?? "",
     ),
     [bindingId, setBindingId] = useState(""),
     [includeLink, setIncludeLink] = useState(false),
@@ -44,7 +45,7 @@ export function usePublicationPreparation(platform?: Platform) {
   useEffect(() => {
     if (draft) {
       try {
-        localStorage.setItem("panxu-publish-draft", draft.id);
+        windowStorage.setItem("panxu-publish-draft", draft.id);
       } catch {}
     }
   }, [draft?.id]);

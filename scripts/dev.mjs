@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createServer as createNetServer } from "node:net";
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { context } from "esbuild";
@@ -15,6 +17,12 @@ if (!Number.isInteger(devPort) || devPort < 1024 || devPort > 65535)
   throw new Error("开发端口需为1024–65535之间的整数。");
 const devUrl = `http://127.0.0.1:${devPort}`;
 const output = join(root, "dist-dev");
+const descriptorPath = join(root, ".panxu-dev-session.json");
+const sessionToken = randomBytes(32).toString("hex");
+const sessionRequests = new Map();
+let sessions = [],
+  desktopReady = false,
+  cdpPort;
 const require = createRequire(import.meta.url);
 const states = new Map(),
   builds = [];
@@ -39,10 +47,16 @@ async function stop(code = 0) {
   // launch() checks stopping, so cancellation cannot open another desktop.
   await starting?.catch(() => {});
   await stopDevChild(child);
+  for (const request of sessionRequests.values()) {
+    clearTimeout(request.timer);
+    request.reject(new Error("开发后台已停止。"));
+  }
+  sessionRequests.clear();
   await Promise.allSettled([
     ...builds.map((b) => b.dispose()),
     server?.close(),
   ]);
+  if (releaseDevLock) await rm(descriptorPath, { force: true });
   try {
     await releaseDevLock?.();
   } catch (error) {
@@ -61,25 +75,36 @@ function launch() {
     PANXU_DEV_ROOT: root,
     PANXU_DEV_REVISION: String(revision),
     PANXU_DEV_BUILT_AT: new Date().toISOString(),
+    PANXU_DEV_SESSIONS: JSON.stringify(sessions),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   const args = [output];
-  // Optional test/debug endpoint; ordinary development opens no debugging port.
-  if (env.PANXU_DEV_CDP_PORT) {
-    if (!/^\d+$/.test(env.PANXU_DEV_CDP_PORT))
-      throw new Error("调试端口必须是数字。");
+  // Local development automation attaches to an existing window, never a second app.
+  if (cdpPort) {
     args.push(
-      `--remote-debugging-port=${env.PANXU_DEV_CDP_PORT}`,
+      `--remote-debugging-port=${cdpPort}`,
       "--remote-debugging-address=127.0.0.1",
     );
   }
   let ready = false;
+  desktopReady = false;
   const current = (child = spawn(devExecutable, args, {
     cwd: root,
     env,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
   }));
   current.on("message", (message) => {
+    if (child !== current) return;
+    if (message?.type === "panxu:dev-sessions") sessions = message.sessions;
+    if (message?.type === "panxu:session-result") {
+      const request = sessionRequests.get(message.requestId);
+      if (request) {
+        clearTimeout(request.timer);
+        sessionRequests.delete(message.requestId);
+        if (message.error) request.reject(new Error(message.error));
+        else request.resolve(message.value);
+      }
+    }
     if (message?.type === "panxu:dev-busy") {
       if (message.reason !== lastBusy)
         log(`后端已更新，等待安全重启：${message.reason}`);
@@ -89,6 +114,7 @@ function launch() {
     }
     if (message?.type === "panxu:dev-ready") {
       ready = true;
+      desktopReady = true;
       log(`开发窗口就绪 · 后端 #${message.revision} · PID ${current.pid}`);
     }
   });
@@ -99,6 +125,12 @@ function launch() {
   current.on("exit", (code) => {
     if (child !== current) return;
     child = undefined;
+    desktopReady = false;
+    for (const request of sessionRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error("开发后台正在重启，请稍后重试。"));
+    }
+    sessionRequests.clear();
     if (restartPending && !stopping) {
       restartPending = false;
       lastBusy = "";
@@ -111,6 +143,95 @@ function launch() {
       void stop(code ?? 0);
     }
   });
+}
+function sessionRequest(action, args) {
+  if (!desktopReady || !child?.connected || stopping)
+    return Promise.reject(new Error("开发窗口尚未就绪，请稍后重试。"));
+  return new Promise((resolve, reject) => {
+    const requestId = randomUUID();
+    const timer = setTimeout(() => {
+      sessionRequests.delete(requestId);
+      reject(new Error("会话窗口操作超时，请检查开发后台。"));
+    }, 15000);
+    sessionRequests.set(requestId, { resolve, reject, timer });
+    child.send(
+      { type: "panxu:session-request", requestId, action, args },
+      (error) => {
+        if (!error) return;
+        clearTimeout(timer);
+        sessionRequests.delete(requestId);
+        reject(error);
+      },
+    );
+  });
+}
+function sessionsMiddleware(request, response, next) {
+  if (request.url !== "/__panxu_dev/sessions") return next();
+  const provided = Buffer.from(String(request.headers.authorization ?? ""));
+  const expected = Buffer.from(`Bearer ${sessionToken}`);
+  if (
+    request.method !== "POST" ||
+    provided.length !== expected.length ||
+    !timingSafeEqual(provided, expected)
+  ) {
+    response.writeHead(403).end();
+    return;
+  }
+  let raw = "",
+    tooLarge = false;
+  request.setEncoding("utf8");
+  request.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > 8192) {
+      tooLarge = true;
+      raw = "";
+      response.writeHead(413).end();
+      request.destroy();
+    }
+  });
+  request.on("end", async () => {
+    if (tooLarge) return;
+    response.setHeader("Content-Type", "application/json");
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const input = JSON.parse(raw);
+      if (
+        ![
+          "dev.sessions",
+          "dev.session.open",
+          "dev.session.update",
+          "dev.session.close",
+          "dev.session.focus",
+        ].includes(input.action)
+      )
+        throw new Error("未知的会话操作。");
+      const value = await sessionRequest(input.action, input.args);
+      response.end(JSON.stringify({ value }));
+    } catch (error) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: error.message }));
+    }
+  });
+}
+async function debuggingPort() {
+  const requested = Number(process.env.PANXU_DEV_CDP_PORT || 0);
+  if (
+    !Number.isInteger(requested) ||
+    requested < 0 ||
+    requested > 65535 ||
+    (requested > 0 && requested < 1024)
+  )
+    throw new Error("调试端口需为0或1024–65535之间的整数。");
+  const socket = createNetServer();
+  await new Promise((resolve, reject) => {
+    socket.once("error", reject);
+    socket.listen(requested, "127.0.0.1", resolve);
+  });
+  const port = socket.address().port;
+  await new Promise((resolve, reject) =>
+    socket.close((error) => (error ? reject(error) : resolve())),
+  );
+  return port;
 }
 function requestRestart() {
   if (stopping || [...states.values()].some((v) => !v)) return;
@@ -148,6 +269,7 @@ async function start() {
     console.error(`开发启动锁失效：${error.message}`);
     void stop(1);
   });
+  cdpPort = await debuggingPort();
   await mkdir(output, { recursive: true });
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const productName = pkg.productName ?? pkg.build.productName;
@@ -177,12 +299,27 @@ async function start() {
   );
   server = await createServer({
     root,
-    server: { host: "127.0.0.1", port: devPort, strictPort: true },
+    server: {
+      host: "127.0.0.1",
+      port: devPort,
+      strictPort: true,
+      fs: {
+        deny: [
+          ".env",
+          ".env.*",
+          "*.{crt,pem}",
+          "**/.git/**",
+          "**/.panxu-dev-session.json",
+          "**/.panxu-dev-session.json.*.tmp",
+        ],
+      },
+    },
     configFile: join(root, "vite.config.ts"),
     plugins: [
       {
         name: "panxu-dev-identity",
         configureServer(vite) {
+          vite.middlewares.use(sessionsMiddleware);
           vite.middlewares.use((request, response, next) => {
             if (request.url !== "/__panxu_dev") return next();
             response.setHeader("Content-Type", "application/json");
@@ -196,6 +333,19 @@ async function start() {
     ],
   });
   await server.listen();
+  const descriptorTemporary = `${descriptorPath}.${process.pid}.tmp`;
+  await writeFile(
+    descriptorTemporary,
+    JSON.stringify({
+      root,
+      url: devUrl,
+      token: sessionToken,
+      cdpPort,
+      pid: process.pid,
+    }),
+    { mode: 0o600 },
+  );
+  await rename(descriptorTemporary, descriptorPath);
   const common = {
     absWorkingDir: root,
     bundle: true,

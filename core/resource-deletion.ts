@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { now, parseJson } from "./database";
 import { AppError, safeMessage } from "./errors";
+import { removeResourceRecords } from "./resource-records";
 import type { Repository } from "./repository";
 import type { DriveFiles } from "./drive-files";
 import type { Resource, RemoteFile } from "../shared/types";
@@ -86,6 +87,10 @@ export class ResourceDeletion {
   }
   private blockers(resourceId: string, allowedOperations: string[] = []) {
     const reasons: string[] = [];
+    if (this.db.get(
+      "SELECT id FROM resource_links WHERE resource_id=? AND (json_extract(data,'$.enabled')=1 OR json_extract(data,'$.operationId') IS NOT NULL) LIMIT 1",
+      resourceId,
+    )) reasons.push("此资源仍有启用或待核对的固定入口，请先在资源详情停用入口并完成同步，再删除本地记录。");
     if (
       this.db.get(
         "SELECT p.id FROM publications p JOIN drafts d ON d.id=p.draft_id WHERE d.resource_id=? LIMIT 1",
@@ -210,6 +215,38 @@ export class ResourceDeletion {
         reason,
       };
     });
+  }
+  accountResources(accountId: string) {
+    return this.db
+      .all<{ resource_id: string }>(
+        "SELECT DISTINCT resource_id FROM copies WHERE account_id=? ORDER BY resource_id",
+        accountId,
+      )
+      .map((row) => this.d.repo.getResource(row.resource_id));
+  }
+  accountBlockers(accountId: string) {
+    const reasons: string[] = [];
+    for (const resource of this.accountResources(accountId)) {
+      if (this.active.has(resource.id) || this.pending(resource.id))
+        reasons.push(`${resource.title}：已有资源删除操作待完成或核对。`);
+      reasons.push(
+        ...this.blockers(resource.id).map(
+          (reason) => `${resource.title}：${reason}`,
+        ),
+      );
+    }
+    return [...new Set(reasons)];
+  }
+  removeAccountResources(accountId: string) {
+    const blockers = this.accountBlockers(accountId);
+    if (blockers.length)
+      throw new AppError("ACCOUNT_RESOURCES_IN_USE", blockers.join(" "));
+    for (const resource of this.accountResources(accountId))
+      removeResourceRecords(
+        this.db,
+        resource,
+        resource.copies.filter((copy) => copy.accountId === accountId),
+      );
   }
   preview(resourceId: string): ResourceDeletePreview {
     const previous = this.pending(resourceId);
@@ -616,64 +653,7 @@ export class ResourceDeletion {
           : "本地资源及关联未发布稿件已删除，网盘文件保留。",
     };
     this.db.transaction(() => {
-      // Preserve keyword pools, topics and independent distribution receipts.
-      this.db.run(
-        "UPDATE pools SET resource_id=NULL WHERE resource_id=?",
-        resource.id,
-      );
-      this.db.run(
-        "UPDATE search_topics SET copy_id=NULL,split_item_id=NULL,archived=1,updated_at=? WHERE copy_id IN (SELECT id FROM copies WHERE resource_id=?) OR split_item_id IN (SELECT s.id FROM split_items s JOIN copies c ON c.id=s.copy_id WHERE c.resource_id=?)",
-        now(),
-        resource.id,
-        resource.id,
-      );
-      this.db.run(
-        "UPDATE distribution_task_sources SET active=0 WHERE resource_id=?",
-        resource.id,
-      );
-      this.db.run(
-        "UPDATE distribution_tasks SET status='skipped',message='资源已从本地资源库删除，未继续投稿。',updated_at=? WHERE status IN ('ready','blocked','waiting_login','waiting_rules','verifying') AND resource_id=? AND NOT EXISTS(SELECT 1 FROM distribution_task_sources s WHERE s.task_id=distribution_tasks.id AND s.active=1)",
-        now(),
-        resource.id,
-      );
-      for (const draft of this.db.all<{ id: string }>(
-        "SELECT id FROM drafts WHERE resource_id=?",
-        resource.id,
-      )) {
-        this.db.run("DELETE FROM studio_jobs WHERE draft_id=?", draft.id);
-        this.db.run("DELETE FROM studio_packages WHERE draft_id=?", draft.id);
-        this.db.run(
-          "DELETE FROM settings WHERE key=?",
-          `studio:working:${draft.id}`,
-        );
-      }
-      this.db.run("DELETE FROM drafts WHERE resource_id=?", resource.id);
-      for (const copy of resource.copies) {
-        for (const item of this.db.all<{ id: string }>(
-          "SELECT id FROM split_items WHERE copy_id=?",
-          copy.id,
-        ))
-          this.db.run("DELETE FROM secrets WHERE key=?", `split:${item.id}`);
-        this.db.run(
-          "DELETE FROM split_run_items WHERE run_id IN (SELECT id FROM split_runs WHERE copy_id=?) OR item_id IN (SELECT id FROM split_items WHERE copy_id=?)",
-          copy.id,
-          copy.id,
-        );
-        this.db.run("DELETE FROM split_runs WHERE copy_id=?", copy.id);
-        this.db.run("DELETE FROM split_items WHERE copy_id=?", copy.id);
-        this.db.run(
-          "DELETE FROM transfer_batch_items WHERE copy_id=?",
-          copy.id,
-        );
-        this.db.run("DELETE FROM outbox WHERE copy_id=?", copy.id);
-        this.db.run("DELETE FROM note_exports WHERE copy_id=?", copy.id);
-        this.db.run("DELETE FROM share_checks WHERE copy_id=?", copy.id);
-        this.db.run("DELETE FROM jobs WHERE copy_id=?", copy.id);
-        this.db.run("DELETE FROM secrets WHERE key=?", `share:${copy.id}`);
-      }
-      this.db.run("DELETE FROM copies WHERE resource_id=?", resource.id);
-      this.db.run("DELETE FROM secrets WHERE key=?", `source:${resource.id}`);
-      this.db.run("DELETE FROM resources WHERE id=?", resource.id);
+      removeResourceRecords(this.db, resource);
       this.db.setSetting(prefix + completed.operationId, {
         ...record,
         result: completed,

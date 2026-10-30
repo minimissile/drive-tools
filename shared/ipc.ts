@@ -1,7 +1,11 @@
 import type { ResourceCatalogContract } from "./resource-catalog";
+import type { BaiduDiscoveryContract } from "./baidu-discovery";
+import type { DevSessionContract } from "./dev-sessions";
 import type { ResourceAnswerContract } from "./resource-answers";
 import type { ResourceDeletionContract } from "./resource-deletion";
 import type { ShareCreationContract } from "./share-creation";
+import type { ResourceLinksContract } from "./resource-links";
+import type { AccountDeletionContract } from "./account-deletion";
 import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
@@ -75,6 +79,8 @@ export type SplitSummary = {
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
 export interface IpcContract
   extends
+    BaiduDiscoveryContract,
+    DevSessionContract,
     ResourceCatalogContract,
     SmzdmContract,
     DriveFilesContract,
@@ -86,6 +92,8 @@ export interface IpcContract
     ResourceAnswerContract,
     ResourceDeletionContract,
     ShareCreationContract,
+    ResourceLinksContract,
+    AccountDeletionContract,
     IpcCommands,
     ZhidaoContract,
     BaiduKeywordContract,
@@ -191,6 +199,13 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "baiduDiscovery.list",
+  "baiduDiscovery.get",
+  "account.deletePreview",
+  "dev.session",
+  "dev.sessions",
+  "resourceLinks.settings",
+  "resourceLinks.get",
   "resourceCatalog.list",
   "resourceCatalog.get",
   "secret.preview",

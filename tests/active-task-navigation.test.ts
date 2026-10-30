@@ -4,6 +4,26 @@ import { fixture } from "./helpers";
 import { activeTaskOptions } from "../src/tasks/active-task-options";
 import type { OperationRun } from "../shared/zhidao";
 import type { Job } from "../shared/types";
+import type { DiscoverySummary } from "../shared/baidu-discovery";
+
+test("百度采词进入公共任务切换器，定位对应任务并排除已完成任务", () => {
+  const run = {
+    id: "baidu1",
+    status: "running",
+    input: { seeds: ["画竹子教程"] },
+    completedCount: 1,
+    queryCount: 3,
+  } as DiscoverySummary;
+  const options = activeTaskOptions(
+    [],
+    [],
+    [run, { ...run, id: "done", status: "completed" }],
+  );
+  assert.equal(options.length, 1);
+  assert.equal(options[0].page, "baidu-discovery");
+  assert.deepEqual(options[0].focus, { id: "baidu1", kind: "baidu-discovery" });
+  assert.match(options[0].label, /1\/3/);
+});
 
 test("进行中运营任务不受历史分页限制，并排除完成/暂停任务及内部配置", async () => {
   const f = await fixture();

@@ -2,6 +2,7 @@ import { createResourceCatalogHandlers } from "./resource-catalog";
 import { createResourceAnswerHandlers } from "./resource-answers";
 import { createResourceDeletionHandlers } from "./resource-deletion";
 import { createShareCreationHandlers } from "./share-creation";
+import { createResourceLinksHandlers } from "./resource-links";
 import { createSmzdmHandlers } from "./smzdm";
 import { createDriveFilesHandlers } from "./drive-files";
 import { createDistributionHandlers } from "./distribution";
@@ -18,10 +19,12 @@ import { createResourcesHandlers } from "./resources";
 import { createResourceExportsHandlers } from "./resource-exports";
 import { createOperationsHandlers } from "./operations";
 import { createAccountHandlers } from "./account";
+import { createAccountDeletionHandlers } from "./account-deletion";
 import { createSharingHandlers } from "./sharing";
 import { createSettingsHandlers } from "./settings";
 import { createTrafficHandlers } from "./traffic";
 import { createBaiduKeywordHandlers } from "./baidu-keywords";
+import { createBaiduDiscoveryHandlers } from "./baidu-discovery";
 import { createBaiduResearchHandlers } from "./baidu-research";
 import { createWebsiteAccountHandlers } from "./website-accounts";
 import { createShareStatisticsHandlers } from "./share-statistics";
@@ -37,6 +40,9 @@ import { createWeiboStatisticsHandlers } from "./weibo-statistics";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createBaiduDiscoveryHandlers(services),
+    createAccountDeletionHandlers(services),
+    createResourceLinksHandlers(services),
     createResourceCatalogHandlers(services),
     createResourceDeletionHandlers(services),
     createShareCreationHandlers(services),

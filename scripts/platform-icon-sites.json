@@ -1,0 +1,112 @@
+{
+  "baidu-zhidao": {
+    "name": "百度知道",
+    "home": "https://zhidao.baidu.com/"
+  },
+  "baidu-marketing": {
+    "name": "百度营销",
+    "home": "https://qingge.baidu.com/login",
+    "icon": "https://cpdfe.cdn.bcebos.com/favicon.ico"
+  },
+  "weibo": {
+    "name": "微博",
+    "home": "https://weibo.com/"
+  },
+  "zhihu": {
+    "name": "知乎",
+    "home": "https://www.zhihu.com/"
+  },
+  "smzdm": {
+    "name": "什么值得买",
+    "home": "https://www.smzdm.com/"
+  },
+  "feishu": {
+    "name": "飞书",
+    "home": "https://feishu.cn/drive/home/"
+  },
+  "tencent-docs": {
+    "name": "腾讯文档",
+    "home": "https://docs.qq.com/"
+  },
+  "shimo": {
+    "name": "石墨文档",
+    "home": "https://shimo.im/"
+  },
+  "csdn": {
+    "name": "CSDN",
+    "home": "https://www.csdn.net/"
+  },
+  "xiaohongshu": {
+    "name": "小红书",
+    "home": "https://creator.xiaohongshu.com/"
+  },
+  "douyin": {
+    "name": "抖音",
+    "home": "https://creator.douyin.com/"
+  },
+  "kuaishou": {
+    "name": "快手",
+    "home": "https://cp.kuaishou.com/"
+  },
+  "wechat": {
+    "name": "公众号",
+    "home": "https://mp.weixin.qq.com/"
+  },
+  "tieba": {
+    "name": "百度贴吧",
+    "home": "https://tieba.baidu.com/"
+  },
+  "douban": {
+    "name": "豆瓣",
+    "home": "https://www.douban.com/"
+  },
+  "x": {
+    "name": "X / Twitter",
+    "home": "https://x.com/"
+  },
+  "bilibili": {
+    "name": "哔哩哔哩",
+    "home": "https://www.bilibili.com/"
+  },
+  "toutiao": {
+    "name": "今日头条",
+    "home": "https://mp.toutiao.com/"
+  },
+  "baijiahao": {
+    "name": "百家号",
+    "home": "https://baijiahao.baidu.com/"
+  },
+  "juejin": {
+    "name": "掘金",
+    "home": "https://juejin.cn/"
+  },
+  "51cto": {
+    "name": "51CTO",
+    "home": "https://www.51cto.com/"
+  },
+  "cnblogs": {
+    "name": "博客园",
+    "home": "https://www.cnblogs.com/"
+  },
+  "segmentfault": {
+    "name": "思否",
+    "home": "https://segmentfault.com/",
+    "icon": "https://static.segmentfault.com/main_site_next/prod/favicon.ico"
+  },
+  "oschina": {
+    "name": "开源中国",
+    "home": "https://www.oschina.net/"
+  },
+  "tencent": {
+    "name": "腾讯云开发者社区",
+    "home": "https://cloud.tencent.com/developer/"
+  },
+  "aliyun": {
+    "name": "阿里云开发者社区",
+    "home": "https://developer.aliyun.com/"
+  },
+  "jianshu": {
+    "name": "简书",
+    "home": "https://www.jianshu.com/"
+  }
+}

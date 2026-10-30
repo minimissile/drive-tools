@@ -1,6 +1,12 @@
-import { Flame, FolderSearch, FolderOpen } from "lucide-react";
+import { Flame, FolderSearch, FolderOpen, Search } from "lucide-react";
 
 export const discoveryEntries = [
+  {
+    page: "baidu-discovery",
+    title: "百度批量扩词",
+    description: "采集联想词与相关搜索，继续扩词、去重导出",
+    Icon: Search,
+  },
   {
     page: "zhidao-mine",
     title: "热门挖词",

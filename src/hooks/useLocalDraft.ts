@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useCallback, useRef, useState, useMemo } from "react";
 import { readDraft, writeDraft } from "../storage/local-draft";
 
@@ -9,7 +10,7 @@ export function useLocalDraft<T extends object>(
 ) {
   const storage = useMemo(() => {
     try {
-      return localStorage;
+      return windowStorage;
     } catch {
       return undefined;
     }

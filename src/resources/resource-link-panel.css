@@ -1,0 +1,75 @@
+.resource-link-panel {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.resource-link-heading,
+.resource-link-copy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.resource-link-heading h3 {
+  font-size: 12px;
+  color: var(--muted);
+}
+.resource-link-panel .status {
+  font-size: 11px;
+}
+.resource-link-panel .resource-link-url {
+  color: var(--text);
+  user-select: text;
+}
+.resource-link-copy-row {
+  margin-top: var(--space-2);
+}
+.resource-link-copy-row time {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.resource-link-target,
+.resource-link-setup p,
+.resource-link-note,
+.resource-link-warning {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.resource-link-target,
+.resource-link-setup p,
+.resource-link-note {
+  color: var(--muted);
+}
+.resource-link-target > span {
+  display: block;
+  margin-top: var(--space-1);
+}
+.resource-link-warning {
+  color: var(--amber);
+}
+.resource-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+}
+.resource-link-setup .button {
+  margin-top: var(--space-2);
+}
+.resource-link-panel > .loading {
+  margin-top: var(--space-2);
+  font-size: 12px;
+}
+.resource-link-target-dialog textarea {
+  resize: vertical;
+}
+.resource-link-target-dialog > .muted,
+.resource-link-target-dialog .dialog-body > .muted {
+  font-size: 12px;
+  line-height: 1.75;
+}

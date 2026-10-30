@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useState } from "react";
 import { z } from "zod";
 import {
@@ -73,7 +74,7 @@ export function ZhihuContents({
   const [storageError, setStorageError] = useState("");
   let storage: Storage | undefined;
   try {
-    storage = localStorage;
+    storage = windowStorage;
   } catch {
     /* Keep the current editor recoverable. */
   }

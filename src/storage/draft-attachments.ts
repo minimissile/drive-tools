@@ -1,3 +1,4 @@
+import { windowStorageKey } from "./window-storage";
 // Large form attachments stay out of the small synchronous preference store.
 let database: Promise<IDBDatabase> | undefined;
 function open() {
@@ -20,7 +21,7 @@ export async function readAttachment(
     const request = db
       .transaction("attachments")
       .objectStore("attachments")
-      .get(key);
+      .get(windowStorageKey(key));
     request.onsuccess = () =>
       resolve(
         typeof request.result === "string" || request.result === null
@@ -38,8 +39,8 @@ export async function writeAttachment(
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction("attachments", "readwrite");
     const store = transaction.objectStore("attachments");
-    if (value === undefined) store.delete(key);
-    else store.put(value, key);
+    if (value === undefined) store.delete(windowStorageKey(key));
+    else store.put(value, windowStorageKey(key));
     transaction.oncomplete = () => resolve();
     transaction.onabort = transaction.onerror = () => reject(transaction.error);
   });

@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { ipc } from "../api/client";
 import { useEffect, useRef, useState } from "react";
 import type { Draft } from "../../shared/types";
@@ -15,7 +16,7 @@ const key = (id: string) => `panxu-studio-working-v1:${id}`;
 function mirrored(id: string): StudioWorkingCopy | null {
   try {
     const result = studioWorkingCopy.safeParse(
-      JSON.parse(localStorage.getItem(key(id)) ?? "null"),
+      JSON.parse(windowStorage.getItem(key(id)) ?? "null"),
     );
     return result.success && result.data.draftId === id ? result.data : null;
   } catch {
@@ -43,7 +44,7 @@ export function useWorkingCopy(draft: Draft) {
     latest.current = record;
     let mirrorError = "";
     try {
-      localStorage.setItem(key(draft.id), JSON.stringify(record));
+      windowStorage.setItem(key(draft.id), JSON.stringify(record));
     } catch {
       mirrorError = "界面恢复副本写入失败，请完成保存后再关闭窗口。";
     }
@@ -107,7 +108,7 @@ export function useWorkingCopy(draft: Draft) {
   const clear = async () => {
     await Promise.all(writes.current);
     await ipc("studio.workingClear", { draftId: draft.id });
-    localStorage.removeItem(key(draft.id));
+    windowStorage.removeItem(key(draft.id));
     latest.current = null;
     if (mounted.current) {
       setSavedAt(0);

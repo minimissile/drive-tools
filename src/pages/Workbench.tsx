@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { ArrowRight, Plug, CircleCheck, CircleAlert } from "lucide-react";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
@@ -118,7 +119,7 @@ export default function Workbench() {
                   <button
                     key={run.id}
                     onClick={() => {
-                      localStorage.setItem(
+                      windowStorage.setItem(
                         `panxu-operation-focus:${data!.dataPath}:${run.kind}`,
                         JSON.stringify({ id: run.id }),
                       );

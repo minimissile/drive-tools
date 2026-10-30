@@ -21,6 +21,7 @@ export function createSharingHandlers(
     | "notes"
     | "ports"
     | "repo"
+    | "resourceLinks"
     | "secrets"
   >,
 ) {
@@ -142,6 +143,7 @@ export function createSharingHandlers(
         );
         services.notes.enqueue(copyId);
       });
+      await services.resourceLinks.afterShareSaved(copyId);
       await services.notes.flush();
       services.changed();
       return services.repo.getCopy(copyId);

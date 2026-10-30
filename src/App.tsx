@@ -16,7 +16,9 @@ import brandMark from "./assets/brand/panxu-mark.svg";
 import { sidebarEntries, sidebarPage } from "./navigation";
 import { ActiveTaskSwitcher } from "./tasks/ActiveTaskSwitcher";
 import { WorkbenchNavigation } from "./workbench/WorkbenchNavigation";
+import { SessionWindows } from "./dev/SessionWindows";
 const Workbench = lazy(() => import("./pages/Workbench"));
+const BaiduDiscovery = lazy(() => import("./pages/BaiduDiscovery"));
 const KeywordMining = lazy(() => import("./pages/KeywordMining"));
 const ResourceCollection = lazy(() => import("./pages/ResourceCollection"));
 const ZhidaoAnswers = lazy(() => import("./zhidao/Answers"));
@@ -55,6 +57,7 @@ function CsdnPublish() {
 const surfaces = {
   distribution: Distribution,
   workbench: Workbench,
+  "baidu-discovery": BaiduDiscovery,
   "zhidao-mine": KeywordMining,
   "zhidao-collect": ResourceCollection,
   "zhidao-qa": ZhidaoAnswers,
@@ -190,6 +193,7 @@ export default function App() {
             <WorkbenchNavigation />
           </div>
           <div className="topbar-task-actions">
+            <SessionWindows />
             <ActiveTaskSwitcher />
             <BusyStatus />
           </div>

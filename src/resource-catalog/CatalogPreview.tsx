@@ -100,7 +100,12 @@ export function CatalogPreview({ snapshot }: { snapshot: CatalogSnapshot }) {
                         <span>{(currentPage - 1) * 20 + index + 1}</span>
                         <strong>{item.title}</strong>
                       </div>
-                      {item.summary ? <p>{item.summary}</p> : null}
+                      {item.summary ? (
+                        <ResourceSummary
+                          text={item.summary}
+                          title={item.title}
+                        />
+                      ) : null}
                       {item.tags.length ? (
                         <div className="catalog-tags">
                           {item.tags.map((tag) => (
@@ -155,5 +160,26 @@ export function CatalogPreview({ snapshot }: { snapshot: CatalogSnapshot }) {
         预览、复制与导出均不包含来源链接、账号身份和内部保存路径。发布前请再核对资源分享及平台访问权限。
       </Notice>
     </section>
+  );
+}
+
+function ResourceSummary({ text, title }: { text: string; title: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > 100 || text.split("\n").length > 3;
+  return (
+    <div className="catalog-resource-summary">
+      <p data-collapsed={(long && !expanded) || undefined}>{text}</p>
+      {long ? (
+        <Button
+          quiet
+          size="compact"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "收起" : "展开"}说明：${title}`}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "收起说明" : "展开完整说明"}
+        </Button>
+      ) : null}
+    </div>
   );
 }

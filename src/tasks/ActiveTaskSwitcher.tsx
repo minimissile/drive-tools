@@ -14,11 +14,20 @@ export function ActiveTaskSwitcher() {
     keepPrevious: true,
     refreshInterval: 2000,
   });
-  const options = activeTaskOptions(runs.data ?? [], data?.jobs ?? []);
+  const discovery = useIpcQuery("baiduDiscovery.list", undefined, {
+    enabled: !!data,
+    keepPrevious: true,
+    refreshInterval: 2000,
+  });
+  const options = activeTaskOptions(
+    runs.data ?? [],
+    data?.jobs ?? [],
+    discovery.data ?? [],
+  );
   const label =
-    runs.loading && !runs.data
+    (runs.loading && !runs.data) || (discovery.loading && !discovery.data)
       ? "正在读取任务…"
-      : runs.error
+      : runs.error || discovery.error
         ? "任务读取失败"
         : options.length
           ? `进行中任务（${options.length}）`
@@ -38,11 +47,14 @@ export function ActiveTaskSwitcher() {
           navigate(task.page);
         }}
       />
-      {runs.error ? (
+      {runs.error || discovery.error ? (
         <Button
           quiet
           size="compact"
-          onClick={runs.reload}
+          onClick={() => {
+            runs.reload();
+            discovery.reload();
+          }}
           aria-label="重新读取进行中任务"
         >
           重试

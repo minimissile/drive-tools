@@ -1,4 +1,5 @@
 import { ResourceCatalogs } from "./resource-catalog";
+import { BaiduDiscovery } from "./baidu-discovery";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
 import { SmzdmArticles } from "./smzdm/service";
 import { PipixSources } from "./pipix/service";
@@ -9,7 +10,10 @@ import { BrowserEnvironments } from "./browser-environments";
 import { BrowserEnvironmentQueue } from "./browser-environment-queue";
 import { ResourceAnswers } from "./resource-answers";
 import { ResourceDeletion } from "./resource-deletion";
+import { AccountDeletion } from "./account-deletion";
+import { queryMethods } from "../shared/ipc";
 import { ShareCreation } from "./share-creation";
+import { ResourceLinks } from "./resource-links";
 import { assertResourceUnique } from "./resource-duplicates";
 import { resourceTags } from "./resource-tags";
 import { hasVerifiedShare } from "../shared/share-status";
@@ -79,6 +83,9 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly baiduDiscovery: BaiduDiscovery;
+  readonly accountDeletion: AccountDeletion;
+  readonly resourceLinks: ResourceLinks;
   readonly shareCreation: ShareCreation;
   readonly resourceDeletion: ResourceDeletion;
   readonly smzdm: SmzdmArticles;
@@ -129,6 +136,7 @@ export class AppService {
   ) {
     this.db = new Database(dbPath);
     this.repo = new Repository(this.db);
+    this.baiduDiscovery = new BaiduDiscovery(this.db,ports,changed);
     this.distribution = new Distribution(this.db, ports, async source => {
       const result = await this.invoke(source.splitItemId ? "split.link" : "copy.link", source.splitItemId ? { itemId: source.splitItemId } : { copyId: source.copyId }) as { text: string };
       return result.text;
@@ -153,6 +161,7 @@ export class AppService {
       this.notes,
       this.mutex,
       changed,
+      (copyId) => this.resourceLinks.afterShareSaved(copyId),
     );
     this.ai = new AiService(this.repo, this.secrets, changed);
     this.smzdm = new SmzdmArticles({
@@ -286,6 +295,8 @@ export class AppService {
       db: this.db,
       repo: this.repo,
       secrets: this.secrets,
+      afterResourceSaved: (resourceId) => this.resourceLinks.afterResourceSaved(resourceId),
+      afterShareSaved: (copyId) => this.resourceLinks.afterShareSaved(copyId),
       changed,
       authenticated: (id, action) => this.authenticated(id, action),
       assertNoActiveJobs: (id) => this.assertNoActiveJobs(id),
@@ -325,6 +336,24 @@ export class AppService {
       hasRunningJobs: () => this.hasRunningJobs(),
       changed,
     });
+    this.resourceLinks = new ResourceLinks({
+      repo: this.repo,
+      secrets: this.secrets,
+      fetch: this.ports.resourceLinksFetch,
+      changed: () => this.changed(),
+      authenticated: (accountId, action) => this.authenticated(accountId, action),
+      assertMutable: (resourceId) => this.resourceDeletion.assertMutable(resourceId),
+      assertIdle: (accountId) => this.assertNoActiveJobs(accountId),
+    });
+    this.accountDeletion = new AccountDeletion({
+      repo: this.repo,
+      resources: this.resourceDeletion,
+      hasRunningJobs: () =>
+        this.hasRunningJobs(true) || this.resourceDeletion.isBusy,
+      locked: (id, action) => this.mutex.run(id, action),
+      clearSession: (id) => this.ports.clearSession(id),
+      changed,
+    });
     this.shareCreation = new ShareCreation({
       repo: this.repo,
       secrets: this.secrets,
@@ -337,6 +366,9 @@ export class AppService {
     });
     this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
     this.handlers = createApplicationHandlers({
+      baiduDiscovery: this.baiduDiscovery,
+      accountDeletion: this.accountDeletion,
+      resourceLinks: this.resourceLinks,
       resourceCatalogs: this.resourceCatalogs,
       shareCreation: this.shareCreation,
       resourceDeletion: this.resourceDeletion,
@@ -407,6 +439,7 @@ export class AppService {
       activeOperations ||
       this.queue.isBusy ||
       this.resourceDeletion.isBusy ||
+      this.resourceLinks.isBusy ||
       this.hasRunningJobs() ||
       this.ports.collectionWebSession?.isOpen()
     )
@@ -553,6 +586,16 @@ export class AppService {
     });
   }
   async invoke(method: string, raw: unknown = undefined): Promise<unknown> {
+    if (
+      this.accountDeletion?.isBusy &&
+      method !== "snapshot" &&
+      method !== "account.remove" &&
+      !(queryMethods as readonly string[]).includes(method)
+    )
+      throw new AppError(
+        "ACCOUNT_DELETE_BUSY",
+        "正在清理本地账号，请等待完成后再操作。",
+      );
     if (this.switchingWorkspace && method !== "snapshot")
       throw new AppError(
         "WORKSPACE_SWITCHING",
@@ -819,6 +862,7 @@ export class AppService {
         }
       }
     });
+    if (!resourceExists) await this.resourceLinks.afterResourceSaved(resourceId);
     if (input.id) await this.notes.flush();
     this.changed();
     if (input.enqueue) {
@@ -856,8 +900,12 @@ export class AppService {
       this.changed();
     }
   }
-  private hasRunningJobs() {
+  private hasRunningJobs(ignoreAccountDeletion = false) {
     return (
+      (!ignoreAccountDeletion && this.accountDeletion?.isBusy) ||
+      this.baiduDiscovery.isBusy ||
+      !!this.ports.baiduDiscovery?.isOpen() ||
+      this.resourceLinks?.isBusy ||
       this.shareCreation?.isBusy ||
       this.smzdm.isBusy ||
       this.distribution.isBusy ||
@@ -946,6 +994,7 @@ export class AppService {
       checkedAt,
       message,
     );
+    if (status === "valid") await this.resourceLinks.afterShareSaved(copyId);
     this.changed();
     return { copyId, status, checkedAt, message };
   }
@@ -1157,6 +1206,7 @@ export class AppService {
     return folder;
   }
   close() {
+    this.baiduDiscovery.close();
     this.smzdm.close();
     this.distribution.close();
     this.pipix.close();

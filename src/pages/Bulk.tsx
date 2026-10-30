@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { Select } from "../ui/Select";
 import { z } from "zod";
 import { useLocalDraft } from "../hooks/useLocalDraft";
@@ -220,7 +221,7 @@ export default function Bulk({
                     onImported(report.copyIds);
                     return;
                   }
-                  localStorage.setItem(
+                  windowStorage.setItem(
                     "panxu-batch-seed",
                     JSON.stringify(report.copyIds.slice(0, 100)),
                   );

@@ -1,0 +1,191 @@
+{
+  "baidu-zhidao": {
+    "name": "百度知道",
+    "home": "https://zhidao.baidu.com/",
+    "icon": "https://www.baidu.com/favicon.ico?t=20171027",
+    "file": "baidu-zhidao.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "baidu-marketing": {
+    "name": "百度营销",
+    "home": "https://qingge.baidu.com/login",
+    "icon": "https://cpdfe.cdn.bcebos.com/favicon.ico",
+    "file": "baidu-marketing.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "weibo": {
+    "name": "微博",
+    "home": "https://weibo.com/",
+    "icon": "https://weibo.com/favicon.ico",
+    "file": "weibo.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "zhihu": {
+    "name": "知乎",
+    "home": "https://www.zhihu.com/",
+    "icon": "https://static.zhihu.com/heifetz/favicon.ico",
+    "file": "zhihu.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "smzdm": {
+    "name": "什么值得买",
+    "home": "https://www.smzdm.com/",
+    "icon": "https://www.smzdm.com/favicon.ico",
+    "file": "smzdm.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "feishu": {
+    "name": "飞书",
+    "home": "https://feishu.cn/drive/home/",
+    "icon": "https://www.feishu.cn/favicon.ico",
+    "file": "feishu.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "tencent-docs": {
+    "name": "腾讯文档",
+    "home": "https://docs.qq.com/",
+    "icon": "https://docs.idqqimg.com/tim/docs/desktop/favicon.ico",
+    "file": "tencent-docs.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "shimo": {
+    "name": "石墨文档",
+    "home": "https://shimo.im/",
+    "icon": "https://as.smgv.cn/from_qbox/favicon.ico",
+    "file": "shimo.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "csdn": {
+    "name": "CSDN",
+    "home": "https://www.csdn.net/",
+    "icon": "https://www.csdn.net/favicon.ico",
+    "file": "csdn.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "xiaohongshu": {
+    "name": "小红书",
+    "home": "https://creator.xiaohongshu.com/",
+    "icon": "https://www.xiaohongshu.com/favicon.ico",
+    "file": "xiaohongshu.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "douyin": {
+    "name": "抖音",
+    "home": "https://creator.douyin.com/",
+    "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/yvahlyj_upfbvk_zlp/ljhwZthlaukjlkulzlp/pc_creator/favicon_v2_7145ff0.ico",
+    "file": "douyin.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "kuaishou": {
+    "name": "快手",
+    "home": "https://cp.kuaishou.com/",
+    "icon": "https://p66-plat.wskwai.com/udata/pkg/fe/favicon.70ff1fcc.ico",
+    "file": "kuaishou.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "wechat": {
+    "name": "公众号",
+    "home": "https://mp.weixin.qq.com/",
+    "icon": "https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico",
+    "file": "wechat.png",
+    "fetchedAt": "2026-10-30"
+  },
+  "tieba": {
+    "name": "百度贴吧",
+    "home": "https://tieba.baidu.com/",
+    "icon": "https://tieba.baidu.com/favicon.ico",
+    "file": "tieba.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "douban": {
+    "name": "豆瓣",
+    "home": "https://www.douban.com/",
+    "icon": "https://www.douban.com/favicon.ico",
+    "file": "douban.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "x": {
+    "name": "X / Twitter",
+    "home": "https://x.com/",
+    "icon": "https://x.com/apple-touch-icon.png",
+    "file": "x.png",
+    "fetchedAt": "2026-10-30"
+  },
+  "bilibili": {
+    "name": "哔哩哔哩",
+    "home": "https://www.bilibili.com/",
+    "icon": "https://www.bilibili.com/favicon.ico",
+    "file": "bilibili.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "toutiao": {
+    "name": "今日头条",
+    "home": "https://mp.toutiao.com/",
+    "icon": "https://sf1-cdn-tos.toutiaostatic.com/obj/ttfe/pgcfe/sz/mp_logo.png",
+    "file": "toutiao.png",
+    "fetchedAt": "2026-10-30"
+  },
+  "baijiahao": {
+    "name": "百家号",
+    "home": "https://baijiahao.baidu.com/",
+    "icon": "https://bjhstatic.cdn.bcebos.com/favicon.ico",
+    "file": "baijiahao.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "juejin": {
+    "name": "掘金",
+    "home": "https://juejin.cn/",
+    "icon": "https://lf-web-assets.juejin.cn/obj/juejin-web/xitu_juejin_web/static/favicons/apple-touch-icon.png",
+    "file": "juejin.png",
+    "fetchedAt": "2026-10-30"
+  },
+  "51cto": {
+    "name": "51CTO",
+    "home": "https://www.51cto.com/",
+    "icon": "https://www.51cto.com/favicon.ico",
+    "file": "51cto.png",
+    "fetchedAt": "2026-10-30"
+  },
+  "cnblogs": {
+    "name": "博客园",
+    "home": "https://www.cnblogs.com/",
+    "icon": "https://assets.cnblogs.com/favicon_v3_3.ico",
+    "file": "cnblogs.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "segmentfault": {
+    "name": "思否",
+    "home": "https://segmentfault.com/",
+    "icon": "https://static.segmentfault.com/main_site_next/prod/favicon.ico",
+    "file": "segmentfault.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "oschina": {
+    "name": "开源中国",
+    "home": "https://www.oschina.net/",
+    "icon": "https://static.oschina.net/oschina/web/v2/favicon.ico",
+    "file": "oschina.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "tencent": {
+    "name": "腾讯云开发者社区",
+    "home": "https://cloud.tencent.com/developer/",
+    "icon": "https://cloudcache.tencent-cloud.com/qcloud/favicon.ico?t=201902181234",
+    "file": "tencent.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "aliyun": {
+    "name": "阿里云开发者社区",
+    "home": "https://developer.aliyun.com/",
+    "icon": "https://img.alicdn.com/tfs/TB1_ZXuNcfpK1RjSZFOXXa6nFXa-32-32.ico",
+    "file": "aliyun.ico",
+    "fetchedAt": "2026-10-30"
+  },
+  "jianshu": {
+    "name": "简书",
+    "home": "https://www.jianshu.com/",
+    "icon": "https://cdn2.jianshu.io/assets/favicons/favicon-e743bfb1821442341c3ab15bdbe804f7ad97676bd07a770ccc9483473aa76f06.ico",
+    "file": "jianshu.ico",
+    "fetchedAt": "2026-10-30"
+  }
+}

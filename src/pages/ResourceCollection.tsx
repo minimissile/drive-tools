@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { useAppData, useAppNavigation } from "../state";
@@ -34,14 +35,14 @@ export default function Collection() {
   const [handoff] = useState(() => {
     try {
       const key = `panxu-collect-handoff:${data!.dataPath}`,
-        value = JSON.parse(localStorage.getItem(key) ?? "[]");
+        value = JSON.parse(windowStorage.getItem(key) ?? "[]");
       return z.array(z.string()).parse(value).join("\n");
     } catch {
       return "";
     }
   });
   useEffect(() => {
-    localStorage.removeItem(`panxu-collect-handoff:${data!.dataPath}`);
+    windowStorage.removeItem(`panxu-collect-handoff:${data!.dataPath}`);
   }, [data!.dataPath]);
   const draft = useLocalDraft(
     `panxu-collection:${data!.dataPath}`,

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>资源清单 · 内存模拟验收</title>
+    <style>
+      #catalog-qa-controls { position:fixed;right:12px;bottom:12px;z-index:100000;max-width:560px;padding:10px 12px;border:1px solid #ccd4de;border-radius:8px;background:#fff;box-shadow:0 4px 18px #172b4d14;font:12px/1.6 system-ui;color:#39485b; }
+      #catalog-qa-controls strong { display:block;color:#1f3045; }
+      #catalog-qa-controls button { margin:5px 5px 0 0;padding:3px 8px;border:1px solid #ccd4de;border-radius:4px;background:white;color:#253d62;cursor:pointer; }
+      #catalog-qa-output { display:block;max-height:60px;overflow:auto;overflow-wrap:anywhere;margin-top:4px; }
+      #catalog-qa-badge { position:fixed;right:12px;top:3px;z-index:100000;font:11px/1.5 system-ui;color:#735725;background:#fff8e9;padding:1px 6px;border-radius:3px;pointer-events:none; }
+    </style>
+  </head>
+  <body>
+    <div id="catalog-qa-badge">内存模拟数据 · 无远端操作</div>
+    <aside id="catalog-qa-controls" aria-label="资源清单手动验收控制">
+      <strong>手动界面验收 · 当前真实源码组件</strong>
+      <span>所有数据及 UI 暂存仅留在此页面内存。复制、打开、导出仅记录模拟事件。</span>
+      <div>
+        <button data-scenario="normal">标准场景</button>
+        <button data-scenario="empty">清单空态</button>
+        <button data-scenario="no-resources">资源空态</button>
+        <button data-scenario="no-accounts">账号空态</button>
+        <button data-scenario="list-error">列表读取失败</button>
+        <button data-scenario="detail-error">详情读取失败</button>
+        <button data-scenario="account-error">账号读取失败</button>
+        <button id="catalog-qa-recover">恢复读取后可重试</button>
+        <button id="catalog-qa-hide">隐藏控制板</button>
+      </div>
+      <output id="catalog-qa-output" aria-live="polite">暂无模拟写入。</output>
+    </aside>
+    <div id="root"></div>
+    <script type="module" src="/scripts/qa-resource-catalog-browser.ts"></script>
+  </body>
+</html>

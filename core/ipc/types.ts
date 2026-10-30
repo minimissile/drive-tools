@@ -37,6 +37,9 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  baiduDiscovery: import("../baidu-discovery").BaiduDiscovery;
+  accountDeletion: import("../account-deletion").AccountDeletion;
+  resourceLinks: import("../resource-links").ResourceLinks;
   resourceCatalogs: import("../resource-catalog").ResourceCatalogs;
   shareCreation: import("../share-creation").ShareCreation;
   resourceDeletion: import("../resource-deletion").ResourceDeletion;

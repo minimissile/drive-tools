@@ -8,7 +8,7 @@ import { migrateDistribution } from "./distribution/migration";
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 26;
+export const databaseSchemaVersion = 27;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -75,6 +75,18 @@ export class Database {
     );
     if (version > databaseSchemaVersion) throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 26) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v27-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE resource_links(id TEXT PRIMARY KEY, resource_id TEXT NOT NULL UNIQUE REFERENCES resources(id) ON DELETE CASCADE, slug TEXT NOT NULL, base_url TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(base_url,slug));
+        PRAGMA user_version=27;
+      `));
+      return;
+    }
     if (version === 25) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v26-${randomUUID()}.bak`;
@@ -95,6 +107,7 @@ export class Database {
         UPDATE distribution_tasks SET status='superseded' WHERE status='skipped' AND submitted_at IS NULL AND message='尚未投稿的旧链接已被资源库中的新分享替换。';
         PRAGMA user_version=26;
       `));
+      this.migrate(false);
       return;
     }
     if (version === 24) {

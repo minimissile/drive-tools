@@ -1,4 +1,5 @@
 import type { Job } from "../../shared/types";
+import type { DiscoverySummary } from "../../shared/baidu-discovery";
 import { operationLabels, type OperationRun } from "../../shared/zhidao";
 import { stageName } from "../resources/labels";
 import { operationPage } from "../zhidao/navigation";
@@ -7,8 +8,17 @@ import type { TaskFocus } from "./TaskFocus";
 export function activeTaskOptions(
   runs: Omit<OperationRun, "config">[],
   jobs: Job[],
+  discovery: DiscoverySummary[] = [],
 ) {
   return [
+    ...discovery
+      .filter((run) => run.status === "running")
+      .map((run) => ({
+        value: `baidu-discovery:${run.id}`,
+        label: `百度批量扩词 · ${run.input.seeds[0]} · ${run.completedCount}/${run.queryCount}`,
+        page: "baidu-discovery" as Page,
+        focus: { id: run.id, kind: "baidu-discovery" } as TaskFocus,
+      })),
     ...runs
       .filter((run) => run.status === "running")
       .map((run) => ({

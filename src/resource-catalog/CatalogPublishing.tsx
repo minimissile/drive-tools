@@ -326,6 +326,11 @@ export function CatalogPublishing({
                 准备发布内容
               </Button>
             </div>
+            {provider === "shimo" ? (
+              <p className="muted">
+                石墨的公开分享受账号套餐与组织策略限制，请在官方文档中核对可用权限。
+              </p>
+            ) : null}
             {!availableAccounts.length ? (
               <Notice>
                 尚未连接{documentPlatformSpecs[provider].name}。请到“账号管理 →
@@ -546,9 +551,7 @@ export function CatalogPublishing({
                   </Button>
                   <Button
                     primary
-                    disabled={
-                      !!pending || archived || !detail.current.items.length
-                    }
+                    disabled={!!pending || archived}
                     onClick={() => prepare(publication)}
                   >
                     <RefreshCw size={14} />

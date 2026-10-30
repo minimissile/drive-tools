@@ -31,6 +31,8 @@ interface Dependencies {
     action: (account: Account, provider: DriveProvider) => Promise<T>,
   ): Promise<T>;
   assertNoActiveJobs(accountId: string): void;
+  afterResourceSaved?(resourceId: string): Promise<void>;
+  afterShareSaved?(copyId: string): Promise<void>;
 }
 interface Intent {
   state: "requested" | "created" | "verified" | "uncertain";
@@ -391,6 +393,7 @@ export class DriveFiles {
           prior.id,
         );
       });
+      await this.d.afterShareSaved?.(prior.id);
       return prior.id;
     }
     const copyId = id("copy"),
@@ -437,6 +440,8 @@ export class DriveFiles {
         time,
       );
     });
+    if (!oldResource) await this.d.afterResourceSaved?.(resourceId);
+    await this.d.afterShareSaved?.(copyId);
     return copyId;
   }
   reset(accountId: string, fileIds: string[]) {

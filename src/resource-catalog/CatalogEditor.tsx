@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useEffect, useRef, useState } from "react";
 import {
   catalogSaveSchema,
@@ -47,7 +48,7 @@ export function CatalogEditor({
   };
   const [form, setForm] = useState<CatalogSaveInput>(
     () =>
-      readDraft(localStorage, key, (value) => {
+      readDraft(windowStorage, key, (value) => {
         // Incomplete drafts are valid editing state; never restore IDs or consent from another object.
         const v = value as Partial<CatalogSaveInput>;
         if (
@@ -79,14 +80,14 @@ export function CatalogEditor({
   const lock = useRef(false),
     alive = useRef(true);
   const { notify } = useAppActions();
-  useEffect(
-    () => () => {
-      alive.current = false;
-    },
-    [],
-  );
   useEffect(() => {
-    setStorageError(!writeDraft(localStorage, key, form));
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    setStorageError(!writeDraft(windowStorage, key, form));
   }, [form, key]);
   const patch = (v: Partial<CatalogSaveInput>) =>
     setForm((old) => ({ ...old, ...v }));
@@ -103,7 +104,7 @@ export function CatalogEditor({
     try {
       const saved = await ipc("resourceCatalog.save", parsed.data);
       try {
-        localStorage.removeItem(key);
+        windowStorage.removeItem(key);
       } catch {
         /* durable save already succeeded */
       }

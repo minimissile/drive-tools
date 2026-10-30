@@ -1,0 +1,64 @@
+.resource-links-settings > .muted {
+  max-width: 75ch;
+  line-height: 1.8;
+  margin-bottom: var(--space-4);
+}
+.resource-links-settings-form {
+  display: grid;
+  gap: var(--space-4);
+}
+.resource-links-settings-form > .field + .field {
+  margin-top: 0;
+}
+.resource-links-auto {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.resource-links-auto label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.resource-links-auto p,
+.resource-links-settings-actions small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.resource-links-auto p {
+  margin-top: var(--space-1);
+}
+.resource-links-credential {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.resource-links-settings-hint {
+  color: var(--amber);
+  font-size: 12px;
+}
+.resource-links-connection {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.resource-links-settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.resource-links-settings-actions > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}

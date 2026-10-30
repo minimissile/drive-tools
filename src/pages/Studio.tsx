@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { Select } from "../ui/Select";
 import { SearchSelect } from "../ui/SearchSelect";
 import { useIpcQuery } from "../api/useIpcQuery";
@@ -43,14 +44,14 @@ interface StudioContext {
 }
 function readLocal<T>(key: string): T | null {
   try {
-    return JSON.parse(localStorage.getItem(key) ?? "null") as T | null;
+    return JSON.parse(windowStorage.getItem(key) ?? "null") as T | null;
   } catch {
     return null;
   }
 }
 function writeLocal(key: string, value: unknown) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    windowStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* Editor recovery also lives in SQLite. */
   }
@@ -275,7 +276,7 @@ function StudioPlatform({
     });
     if (draft) {
       try {
-        localStorage.setItem("panxu-publish-draft", draft.id);
+        windowStorage.setItem("panxu-publish-draft", draft.id);
       } catch {
         /* Explicit “准备发布” still carries the current draft. */
       }

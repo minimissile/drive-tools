@@ -1,0 +1,2 @@
+# Local development only. Replace with a random token of at least 32 visible ASCII characters.
+ADMIN_TOKEN=replace_with_a_random_token_before_local_use

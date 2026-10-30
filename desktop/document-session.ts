@@ -107,32 +107,105 @@ export function createDocumentSessions(
         if (event.isMainFrame && !websiteNavigationAllowed(provider, event.url))
           event.preventDefault();
       });
+      let loadFailed = false;
+      win.webContents.on(
+        "did-fail-load",
+        (_event, code, _description, _url, isMainFrame) => {
+          if (isMainFrame && code !== -3) loadFailed = true;
+        },
+      );
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      let finishPoll: (() => void) | undefined;
+      const clearPoll = () => {
+        clearTimeout(pollTimer);
+        pollTimer = undefined;
+        const finish = finishPoll;
+        finishPoll = undefined;
+        finish?.();
+      };
+      win.once("closed", clearPoll);
+      const pause = () =>
+        new Promise<void>((resolve) => {
+          finishPoll = resolve;
+          pollTimer = setTimeout(() => {
+            pollTimer = undefined;
+            finishPoll = undefined;
+            resolve();
+          }, 400);
+        });
       const timer = setTimeout(() => {
         if (!win.isDestroyed()) win.destroy();
       }, 30000);
       try {
-        await win.loadURL(spec.home);
-        const revision = entry.revision;
-        // Inspect the official workspace, without calling undocumented identity endpoints.
-        const workspaceVisible = (await win.webContents.executeJavaScript(`
-          new Promise(resolve => {
-            const inspect = () => {
-              const visible = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-              const controls = [...document.querySelectorAll('button, a, [role="button"], input')].filter(visible);
-              const login = controls.some(el => /^(?:登录|立即登录|扫码登录|微信登录|QQ登录|手机号登录|登 录|Log in|Sign in)$/i.test((el.innerText || el.getAttribute('aria-label') || '').trim())) ||
-                [...document.querySelectorAll('input[type="password"], [class*="qrcode"], [class*="qr-code"]')].some(visible);
-              const text = (document.body?.innerText || '').slice(0, 100000);
-              const workspace = /我的文档|我的空间|最近使用|最近访问|与我共享|共享给我|所有文件/.test(text) && /新建|导入|上传|回收站/.test(text);
-              resolve(!login && workspace);
-            };
-            setTimeout(inspect, 1500);
-          })
-        `)) as boolean;
+        try {
+          await win.loadURL(spec.home);
+        } catch (error) {
+          // SSO can abort the first navigation while its official redirect continues.
+          if (!isAbortedNavigation(error)) throw error;
+        }
+        const workspacePath =
+          provider === "feishu"
+            ? /^\/drive\/home(?:\/|$)/
+            : /^\/desktop(?:\/|$)/;
+        const workspaceTerms = {
+          feishu:
+            "云盘|我的文档库|我的空间|最近使用|最近访问|共享空间|My Space|My Library|Recent|Shared with me",
+          "tencent-docs":
+            "我的文档|我的文件|最近浏览|最近使用|最近访问|与我共享|共享给我|所有文件|My Documents|Recent|Shared with me|All Files",
+          shimo:
+            "最近文件|共享给我|我的收藏|工作台|我的空间|My Space|My Library|Recent|Shared with me",
+        }[provider];
+        const deadline = Date.now() + 8000;
+        let workspaceVisible = false;
+        let revision = entry.revision;
+        // Poll only visible workspace content. No undocumented identity endpoint is called,
+        // and every wait belongs to this temporary window's bounded lifecycle.
+        while (Date.now() < deadline) {
+          if (win.isDestroyed() || loadFailed)
+            throw new Error("Document workspace unavailable");
+          const candidate = documentPlatformUrl(
+            provider,
+            win.webContents.getURL(),
+          );
+          if (candidate && workspacePath.test(new URL(candidate).pathname)) {
+            revision = entry.revision;
+            try {
+              const probe = (await win.webContents.executeJavaScript(`
+                (() => {
+                  const visible = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+                  const controls = [...document.querySelectorAll('button, a, [role="button"], input')].filter(visible);
+                  const login = controls.some(el => /^(?:登录|立即登录|扫码登录|微信登录|QQ登录|手机号登录|登录\\s*[/／]\\s*注册|登 录|Log in|Sign in)$/i.test((el.innerText || el.getAttribute('aria-label') || '').trim())) ||
+                    [...document.querySelectorAll('input[type="password"], [class*="qrcode"], [class*="qr-code"]')].some(visible);
+                  const text = (document.body?.innerText || '').slice(0, 100000);
+                  const workspace = new RegExp(${JSON.stringify(workspaceTerms)}, 'i').test(text) &&
+                    /新建|导入|上传|回收站|\\b(?:New|Import|Upload|Trash|Recycle Bin)\\b/i.test(text);
+                  return { visible: !login && workspace, url: location.href };
+                })()
+              `)) as { visible: boolean; url: string };
+              if (
+                probe.visible &&
+                probe.url === win.webContents.getURL() &&
+                revision === entry.revision
+              ) {
+                workspaceVisible = true;
+                break;
+              }
+            } catch (error) {
+              // A read can lose its execution context during a normal SSO navigation.
+              if (win.isDestroyed() || loadFailed) throw error;
+            }
+          }
+          await pause();
+        }
+        if (win.isDestroyed() || loadFailed)
+          throw new Error("Document workspace unavailable");
         const destination = documentPlatformUrl(
           provider,
           win.webContents.getURL(),
         );
         const cookies = await ctx.profile.cookies.get({});
+        if (win.isDestroyed() || loadFailed)
+          throw new Error("Document workspace unavailable");
         const cookieNames: Record<typeof provider, RegExp> = {
           feishu: /^(?:session|session_list|sessionid)$/i,
           "tencent-docs": /^(?:TOK|DOC_SID|eas_sid)$/i,
@@ -148,7 +221,13 @@ export function createDocumentSessions(
             cookieNames[provider].test(cookie.name),
         );
         if (revision !== entry.revision) return status(account);
-        const hasSession = !!destination && workspaceVisible && hasCookie;
+        const hasSession =
+          !!destination &&
+          destination ===
+            documentPlatformUrl(provider, win.webContents.getURL()) &&
+          workspacePath.test(new URL(destination).pathname) &&
+          workspaceVisible &&
+          hasCookie;
         entry.state = {
           hasSession,
           uid: null,
@@ -170,6 +249,8 @@ export function createDocumentSessions(
         };
       } finally {
         clearTimeout(timer);
+        clearPoll();
+        win.removeListener("closed", clearPoll);
         if (!win.isDestroyed()) win.destroy();
       }
       return { ...status(account), checking: false };

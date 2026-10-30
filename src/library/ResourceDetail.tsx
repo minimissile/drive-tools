@@ -23,6 +23,7 @@ import {
 } from "../state";
 import { Button } from "../ui/primitives";
 import { CreateShare } from "../resources/CreateShareDialog";
+import { ResourceLinkPanel } from "../resources/ResourceLinkPanel";
 import { copyShareStatus } from "../../shared/share-status";
 import { accountLabel, providerName } from "../resources/labels";
 import { formatSize } from "../lib/format";
@@ -245,6 +246,11 @@ export function ResourceDetail({
             <p className="resource-share-message">{shareMessage}</p>
           ) : null}
         </section>
+        <ResourceLinkPanel
+          key={resource.id}
+          resourceId={resource.id}
+          revision={`${resource.updatedAt}:${copy.shareUrl}:${copy.shareVerifiedAt}`}
+        />
         <section className="resource-copy-section" aria-label="资源说明">
           <h3>资源说明</h3>
           <div className="resource-description">

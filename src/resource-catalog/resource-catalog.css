@@ -214,14 +214,24 @@
 .catalog-resource-table tr:last-child td {
   border-bottom: 0;
 }
-.catalog-resource-table td > p {
+.catalog-resource-summary {
   margin: var(--space-2) 0 0 28px;
   color: var(--muted);
+}
+.catalog-resource-summary p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.catalog-resource-summary p[data-collapsed] {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  white-space: pre-wrap;
+}
+.catalog-resource-summary > .button {
+  margin-top: var(--space-1);
+  padding-left: 0;
+  color: var(--blue);
 }
 .catalog-resource-name {
   display: flex;
@@ -338,7 +348,7 @@
 .catalog-publication-heading {
   flex-wrap: wrap;
 }
-.catalog-publication-heading h3 {
+.catalog-publication-heading strong {
   margin: 0;
   font-size: 14px;
 }
@@ -375,7 +385,7 @@
 .catalog-publication-history summary {
   cursor: pointer;
 }
-.catalog-publication-history ul {
+.catalog-publication-history ol {
   max-height: 250px;
   overflow-y: auto;
   padding-left: var(--space-5);

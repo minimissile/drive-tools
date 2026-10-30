@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { miningCategories, miningInput } from "../../shared/zhidao";
@@ -124,7 +125,7 @@ export default function Mining() {
                     "zhidao.mine.words",
                     { id: model.id, itemIds: selected },
                     (names) => {
-                      localStorage.setItem(
+                      windowStorage.setItem(
                         `panxu-collect-handoff:${data!.dataPath}`,
                         JSON.stringify(names),
                       );

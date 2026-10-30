@@ -1,5 +1,12 @@
 import { useEffect, useRef } from "react";
-import { ArrowRightLeft, LogIn, ShieldCheck, Star } from "lucide-react";
+import {
+  ArrowRightLeft,
+  LogIn,
+  ShieldCheck,
+  Star,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 import type { Account } from "../../shared/types";
 import { ProviderIcon } from "../resources/ProviderIcon";
 import { providerName } from "../resources/labels";
@@ -16,6 +23,7 @@ export function AccountRow({
   pending,
   onUse,
   onManage,
+  onDelete,
   onOperation,
   onLoginFocused,
 }: {
@@ -26,6 +34,7 @@ export function AccountRow({
   pending: AccountOperation | null;
   onUse(): void;
   onManage(): void;
+  onDelete(): void;
   onOperation(action: AccountOperation): void;
   onLoginFocused?(): void;
 }) {
@@ -83,9 +92,11 @@ export function AccountRow({
                 : "核验后读取本人 UID"}
             </span>
             <span>{account.resourceCopies ?? 0} 份副本</span>
-          </p>
-          <p className="account-verified">
-            最近核验：{formatTime(account.lastVerifiedAt)}
+            <span>
+              {account.lastVerifiedAt
+                ? `核验 ${formatTime(account.lastVerifiedAt)}`
+                : "尚未核验"}
+            </span>
           </p>
           {account.error ? (
             <p className="account-error">{account.error}</p>
@@ -101,9 +112,16 @@ export function AccountRow({
       <div className="account-action-cell">
         <div className="account-actions">
           {account.enabled && !current ? (
-            <Button size="compact" disabled={busy} onClick={onUse}>
+            <Button
+              quiet
+              size="compact"
+              disabled={busy}
+              className="account-icon-action"
+              onClick={onUse}
+              aria-label={`切换使用${account.alias}`}
+              title="用于后续新录入"
+            >
               <ArrowRightLeft size={14} aria-hidden="true" />
-              切换使用
             </Button>
           ) : null}
           {account.enabled && !connected ? (
@@ -115,7 +133,7 @@ export function AccountRow({
               onClick={() => onOperation("login")}
             >
               <LogIn size={14} aria-hidden="true" />
-              {pending === "login" ? "正在打开…" : "登录本人账号"}
+              {pending === "login" ? "正在打开…" : "登录"}
             </Button>
           ) : null}
           {account.enabled ? (
@@ -128,19 +146,29 @@ export function AccountRow({
               {pending === "verify" ? "正在核验…" : "核验登录"}
             </Button>
           ) : null}
-          <Button size="compact" quiet disabled={busy} onClick={onManage}>
-            管理
+          <Button
+            size="compact"
+            quiet
+            disabled={busy}
+            className="account-icon-action"
+            onClick={onManage}
+            aria-label={`管理${account.alias}`}
+            title="账号设置"
+          >
+            <Settings2 size={15} aria-hidden="true" />
+          </Button>
+          <Button
+            size="compact"
+            quiet
+            className="account-icon-action account-delete-trigger"
+            disabled={busy}
+            onClick={onDelete}
+            aria-label={`删除${account.alias}`}
+            title="删除账号及本地资源"
+          >
+            <Trash2 size={15} aria-hidden="true" />
           </Button>
         </div>
-        <p>
-          {!account.enabled
-            ? "可在管理中重新启用"
-            : !connected
-              ? "完成官方登录后，再核验本人 UID"
-              : current
-                ? "新录入将使用此账号"
-                : "已有任务仍绑定原账号"}
-        </p>
       </div>
     </article>
   );

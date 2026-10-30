@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { Select } from "../ui/Select";
 import { QueryError } from "../ui/QueryError";
 import { ipc } from "../api/client";
@@ -43,13 +44,13 @@ export default function Batch({
     [page, setPage] = useState(1),
     [copies, setCopies] = useState<string[]>(() => {
       try {
-        return JSON.parse(localStorage.getItem("panxu-batch-seed") ?? "[]");
+        return JSON.parse(windowStorage.getItem("panxu-batch-seed") ?? "[]");
       } catch {
         return [];
       }
     }),
     [batchId, setBatchId] = useState(
-      () => localStorage.getItem("panxu-batch-id") ?? "",
+      () => windowStorage.getItem("panxu-batch-id") ?? "",
     ),
     [batch, setBatch] = useState<TransferBatch | null>(null),
     [excluded, setExcluded] = useState<string[]>([]),
@@ -58,7 +59,7 @@ export default function Batch({
     if (seed) setCopies(seed.slice(0, 100));
   }, [seed]);
   useEffect(() => {
-    localStorage.removeItem("panxu-batch-seed");
+    windowStorage.removeItem("panxu-batch-seed");
   }, []);
   const {
     data: candidates,
@@ -92,7 +93,7 @@ export default function Batch({
     }
     let alive = true;
     setReadError("");
-    localStorage.setItem("panxu-batch-id", batchId);
+    windowStorage.setItem("panxu-batch-id", batchId);
     void ipc("batch.get", { id: batchId })
       .then((r) => {
         if (alive) setBatch(r);

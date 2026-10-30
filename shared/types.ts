@@ -405,6 +405,10 @@ export interface Result<T> {
   error?: { code: string; message: string };
 }
 export interface AppApi {
+  /** Stable identity for UI drafts; all windows still share one workspace/profile. */
+  readonly windowId?: string;
+  readonly initialPage?: string;
+  onDevSessionsChanged?(callback: () => void): () => void;
   invoke<T = unknown>(method: string, args?: unknown): Promise<T>;
   onChanged(callback: () => void): () => void;
   onUpdateChanged(

@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -40,7 +41,7 @@ export function useGenerationForm() {
         })
         .parse(
           JSON.parse(
-            localStorage.getItem(`panxu-template:${data!.dataPath}`) ?? "null",
+            windowStorage.getItem(`panxu-template:${data!.dataPath}`) ?? "null",
           ),
         );
     } catch {
@@ -164,7 +165,7 @@ export function useGenerationForm() {
         : "";
   const saveConfig = () => {
     try {
-      return writeDraft(localStorage, key, form.value);
+      return writeDraft(windowStorage, key, form.value);
     } catch {
       return false;
     }

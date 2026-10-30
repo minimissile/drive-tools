@@ -98,6 +98,9 @@ export function catalogDiff(
 }
 
 export function catalogDocument(snapshot: CatalogSnapshot) {
+  const emptyMessage = snapshot.items.length
+    ? ""
+    : "此清单暂时没有可访问资源，请稍后查看更新。";
   const rows = snapshot.items.map((item) => [
     item.title,
     item.category,
@@ -113,6 +116,7 @@ export function catalogDocument(snapshot: CatalogSnapshot) {
   const text = [
     snapshot.title,
     snapshot.introduction,
+    emptyMessage,
     ...snapshot.items.map((item, index) =>
       [
         `${index + 1}. ${item.title}`,
@@ -133,6 +137,7 @@ export function catalogDocument(snapshot: CatalogSnapshot) {
     [
       `# ${markdown(snapshot.title)}`,
       markdown(snapshot.introduction),
+      emptyMessage,
       ...snapshot.items.map((item, index) =>
         [
           `## ${index + 1}. ${markdown(item.title)}`,
@@ -149,7 +154,7 @@ export function catalogDocument(snapshot: CatalogSnapshot) {
     ]
       .filter(Boolean)
       .join("\n\n") + "\n";
-  const html = `<article><h1>${escapeHtml(snapshot.title)}</h1>${snapshot.introduction ? `<p>${escapeHtml(snapshot.introduction).replace(/\n/g, "<br>")}</p>` : ""}${snapshot.items
+  const html = `<article><h1>${escapeHtml(snapshot.title)}</h1>${snapshot.introduction ? `<p>${escapeHtml(snapshot.introduction).replace(/\n/g, "<br>")}</p>` : ""}${emptyMessage ? `<p>${emptyMessage}</p>` : ""}${snapshot.items
     .map(
       (item, index) =>
         `<section><h2>${index + 1}. ${escapeHtml(item.title)}</h2>${item.summary ? `<p>${escapeHtml(item.summary).replace(/\n/g, "<br>")}</p>` : ""}${item.tags.length ? `<p>标签：${escapeHtml(item.tags.join("、"))}</p>` : ""}${item.links.map((link) => `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.provider)} · 查看资源</a>${link.code ? `　提取码：${escapeHtml(link.code)}` : ""}</p>`).join("")}</section>`,
@@ -161,6 +166,7 @@ export function catalogDocument(snapshot: CatalogSnapshot) {
     html,
     rows: [
       ["资源名称", "分类", "资源说明", "标签", "本人分享链接与提取码"],
+      ...(emptyMessage ? [[emptyMessage, "", "", "", ""]] : []),
       ...rows,
     ],
   };
@@ -637,7 +643,7 @@ export class ResourceCatalogs {
           "更新必须使用原文档关联的平台账号。",
         );
       const snapshot = await this.snapshot(stored.catalog);
-      if (!snapshot.items.length)
+      if (!snapshot.items.length && !publication)
         throw new AppError(
           "CATALOG_EMPTY",
           "当前分类没有可公开的本人分享，请先在资源库完成分享核验。",
@@ -806,13 +812,13 @@ export class ResourceCatalogs {
   ) {
     return this.exclusive(catalogId, async () => {
       const stored = this.load(catalogId);
-      const snapshot = preparationId
-        ? this.storedSnapshot(
-            catalogId,
-            this.preparation(stored, preparationId).snapshotId,
-          )
+      const preparation = preparationId
+        ? this.preparation(stored, preparationId)
+        : null;
+      const snapshot = preparation
+        ? this.storedSnapshot(catalogId, preparation.snapshotId)
         : await this.snapshot(stored.catalog);
-      if (!snapshot.items.length)
+      if (!snapshot.items.length && !preparation?.publicationId)
         throw new AppError(
           "CATALOG_EMPTY",
           "清单尚无可公开资源，请先完成本人分享核验。",

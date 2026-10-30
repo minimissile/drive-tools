@@ -49,6 +49,23 @@ export function useIpcQuery<M extends IpcQueryMethod>(
   const [retry, setRetry] = useState(0);
   const reload = useCallback(() => setRetry((n) => n + 1), []);
   useEffect(() => {
+    if (!enabled || method.startsWith("dev.")) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = window.panxu?.onChanged(() => {
+      // One shared backend broadcasts mutations from all windows. Coalesce task
+      // progress bursts and keep this hook's stale-response protection intact.
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        reload();
+      }, 120);
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubscribe?.();
+    };
+  }, [enabled, method, reload]);
+  useEffect(() => {
     if (!enabled) return;
     let active = true;
     const parameters = input.current;

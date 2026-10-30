@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useEffect, useState } from "react";
 import { exportInput, type ExportInput } from "../../shared/resource-export";
 type EditorInput = Omit<ExportInput, "images"> & {
@@ -9,7 +10,7 @@ const editorMemory = new Map<string, EditorInput>();
 function savedEditor(key: string): EditorInput | null {
   if (editorMemory.has(key)) return editorMemory.get(key)!;
   try {
-    const raw = JSON.parse(localStorage.getItem(key) ?? "null");
+    const raw = JSON.parse(windowStorage.getItem(key) ?? "null");
     const parsed = exportInput.safeParse(raw ? { ...raw, images: [] } : null);
     return parsed.success
       ? {
@@ -60,7 +61,7 @@ export function useExportInput(dataPath: string) {
     };
     editorMemory.set(editorKey, value);
     try {
-      localStorage.setItem(
+      windowStorage.setItem(
         editorKey,
         JSON.stringify({
           ...value,

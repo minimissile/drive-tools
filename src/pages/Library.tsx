@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { ProviderIcon } from "../resources/ProviderIcon";
 import { Select } from "../ui/Select";
 import "../library/library.css";
@@ -43,7 +44,7 @@ export default function LibraryPage() {
     { busy } = useAppActivity();
   const listBody = useRef<HTMLDivElement>(null);
   const [initial] = useState(() =>
-    readLibraryView(localStorage, data!.dataPath),
+    readLibraryView(windowStorage, data!.dataPath),
   );
   const [query, setQuery] = useState(initial.query),
     deferredQuery = useDeferredValue(query),
@@ -72,7 +73,7 @@ export default function LibraryPage() {
     setChecked([]);
   };
   useEffect(() => {
-    saveLibraryView(localStorage, data!.dataPath, {
+    saveLibraryView(windowStorage, data!.dataPath, {
       query,
       category,
       accountId,

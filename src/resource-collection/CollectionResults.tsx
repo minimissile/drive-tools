@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { useEffect, useState } from "react";
 import {
   collectionDriveLabels,
@@ -140,7 +141,7 @@ export function CollectionResults({
                   rightsConfirmed: true,
                 },
                 (result) => {
-                  localStorage.setItem("panxu-batch-id", result.batchId);
+                  windowStorage.setItem("panxu-batch-id", result.batchId);
                   void refresh().catch(() =>
                     notify(
                       "资料已交给转存预检；列表刷新失败，请稍后刷新。",

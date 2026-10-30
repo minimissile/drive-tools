@@ -23,4 +23,4 @@
   min-width: 0;
 }
 .active-task-select { width: 220px; }
-.topbar > .topbar-task-actions { flex-shrink: 0; }
+.topbar > .topbar-task-actions { flex-shrink: 0; margin-left: auto; max-width: 100%; }

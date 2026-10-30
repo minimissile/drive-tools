@@ -27,7 +27,12 @@ export default function Capacity({
       aria-busy={refreshing}
     >
       <div className="capacity-heading">
-        <span>容量使用</span>
+        <div className="capacity-values">
+          <strong title={value ? `${value.usedBytes} 字节` : undefined}>
+            {value ? formatCapacity(value.usedBytes) : "—"}
+          </strong>
+          <span>/ {value ? formatCapacity(value.totalBytes) : "—"}</span>
+        </div>
         {stale && value ? <span className="tag">上次记录</span> : null}
         {onRefresh ? (
           <Button
@@ -51,21 +56,6 @@ export default function Capacity({
           </Button>
         ) : null}
       </div>
-      <div className="capacity-values">
-        <span>
-          已使用{" "}
-          <strong title={value ? `${value.usedBytes} 字节` : undefined}>
-            {value ? formatCapacity(value.usedBytes) : "—"}
-          </strong>
-        </span>
-        <span>
-          {" "}
-          / 总容量{" "}
-          <strong title={value ? `${value.totalBytes} 字节` : undefined}>
-            {value ? formatCapacity(value.totalBytes) : "—"}
-          </strong>
-        </span>
-      </div>
       {summary ? (
         <>
           <div
@@ -84,12 +74,12 @@ export default function Capacity({
                   : `已用 ${summary.percent > 0 && summary.percent < 0.1 ? "不足0.1" : Number(summary.percent.toFixed(1))}%`}
             </span>
           </div>
-          <p className="capacity-remaining">
-            剩余 {formatCapacity(summary.remainingBytes)}
-          </p>
         </>
       ) : null}
       <small className="capacity-status" role="status">
+        {summary ? (
+          <span>剩余 {formatCapacity(summary.remainingBytes)}</span>
+        ) : null}
         {record?.updatedAt
           ? `容量更新：${formatTime(record.updatedAt)}`
           : account.status === "connected"

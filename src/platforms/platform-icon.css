@@ -1,0 +1,27 @@
+.platform-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  overflow: hidden;
+  vertical-align: middle;
+  color: var(--muted);
+}
+.platform-icon--small {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+.platform-icon--large {
+  width: 36px;
+  height: 36px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.platform-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

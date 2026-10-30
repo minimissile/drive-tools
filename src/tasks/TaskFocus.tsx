@@ -9,7 +9,7 @@ import type { OperationKind } from "../../shared/zhidao";
 import { stableContext } from "../lib/stable-context";
 export interface TaskFocus {
   id: string;
-  kind: OperationKind | "job";
+  kind: OperationKind | "job" | "baidu-discovery";
 }
 const Context = stableContext<{
   focus: TaskFocus | null;

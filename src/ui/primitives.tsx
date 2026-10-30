@@ -38,7 +38,7 @@ export function Header({
   action,
 }: {
   title: string;
-  description: string;
+  description?: string;
   action?: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -53,7 +53,7 @@ export function Header({
         <h1 ref={heading} tabIndex={-1}>
           {title}
         </h1>
-        <p>{description}</p>
+        {description ? <p>{description}</p> : null}
       </div>
       {action}
     </header>

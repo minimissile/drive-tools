@@ -47,6 +47,7 @@ export class TransferQueue {
     private notes: NoteExporter,
     readonly mutex: AccountMutex,
     private changed: () => void,
+    private onShareSaved?: (copyId: string) => Promise<void>,
   ) {}
   start() {
     if (this.timer) return;
@@ -361,6 +362,7 @@ export class TransferQueue {
             jobId,
           );
         });
+        await this.onShareSaved?.(copy.id);
         await this.notes.flush();
         this.repo.log(jobId, "资源已归档；Obsidian导出状态独立记录。");
       }

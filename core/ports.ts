@@ -1,6 +1,9 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
+  baiduDiscovery?: import("../shared/baidu-discovery").BaiduDiscoveryPort;
+  /** Fixed-entry service requests use the desktop network stack when available. */
+  resourceLinksFetch?(url: string, init: RequestInit): Promise<Response>;
   smzdm?: import("../shared/smzdm").SmzdmPort;
   collectionWebSession?: {
     search(source: import("../shared/resource-collection").CollectionWebSource, keyword: string, page: number, signal: AbortSignal): Promise<{ status: number; body: string }>;

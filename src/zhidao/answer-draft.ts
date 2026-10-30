@@ -1,3 +1,4 @@
+import { windowStorage } from "../storage/window-storage";
 import { z } from "zod";
 import { readDraft, writeDraft } from "../storage/local-draft";
 import { answerStyle } from "../../shared/answer-styles";
@@ -35,11 +36,11 @@ export const answerDraftKey = (workspace: string) =>
 /** A navigation handoff restores text and account selection, never submission consent. */
 export function prepareAutoAnswer(workspace: string, accountId: string) {
   const key = answerDraftKey(workspace);
-  const previous = readDraft(localStorage, key, (v) =>
+  const previous = readDraft(windowStorage, key, (v) =>
     answerDraftSchema.parse(v),
   );
   if (
-    !writeDraft(localStorage, key, {
+    !writeDraft(windowStorage, key, {
       ...(previous ?? defaultAnswerDraft),
       mode: "auto",
       accountId,
