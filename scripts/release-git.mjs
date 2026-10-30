@@ -172,17 +172,22 @@ export async function pushReleaseSource(
 // Migration for a completed build created by the former build-only commands.
 // Reuse only when changes since that build are confined to release tooling and
 // documentation. Application/build-input edits require a build of the same version.
-export async function canReuseLegacyBuild(run, state) {
-  if (state.format !== 1 || state.status !== "complete") return false;
+export async function canReuseReleaseBuild(run, state) {
+  const legacy = state.format === 1 && state.status === "complete";
+  if (!legacy && !state.buildCommit) return false;
+  const baseline = legacy ? "HEAD" : state.buildCommit;
   const headTime =
     Number(
       (await run("git", ["log", "-1", "--format=%ct"], { capture: true }))
         .stdout,
     ) * 1000;
-  if (!Number.isFinite(headTime) || headTime > Date.parse(state.startedAt))
+  if (
+    legacy &&
+    (!Number.isFinite(headTime) || headTime > Date.parse(state.startedAt))
+  )
     return false;
   const modified = (
-    await run("git", ["diff", "HEAD", "--name-only", "-z"], { capture: true })
+    await run("git", ["diff", baseline, "--name-only", "-z"], { capture: true })
   ).stdout;
   const untracked = (
     await run("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
@@ -207,9 +212,11 @@ export async function canReuseLegacyBuild(run, state) {
   const { readFile } = await import("node:fs/promises");
   for (const path of ["package.json", "package-lock.json"]) {
     const previous = JSON.parse(
-      (await run("git", ["show", `HEAD:${path}`], { capture: true })).stdout,
+      (await run("git", ["show", `${baseline}:${path}`], { capture: true }))
+        .stdout,
     );
     const current = JSON.parse(await readFile(path, "utf8"));
+    if (!legacy && previous.version !== current.version) return false;
     for (const value of [previous, current]) {
       delete value.version;
       if (path === "package.json") delete value.scripts;

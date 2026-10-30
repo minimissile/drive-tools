@@ -10,7 +10,7 @@ import policy from "./release-policy.cjs";
 import updateConfig from "./update-config.cjs";
 import {
   assertCleanReleaseSource,
-  canReuseLegacyBuild,
+  canReuseReleaseBuild,
   commitReleaseSource,
   pushReleaseSource,
   releaseGitHubContext,
@@ -419,8 +419,7 @@ try {
   console.log(
     `${state.resumed ? "继续" : "开始"}${mode === "full" ? "全量" : "差分"}更新：${state.baseVersion} → ${state.targetVersion}`,
   );
-  const reuseLegacyBuild =
-    state.legacyBuild && (await canReuseLegacyBuild(run, state));
+  const reuseBuild = await canReuseReleaseBuild(run, state);
   const repository = updateConfig.getUpdateConfig().repository;
   assert.ok(repository, "缺少发行仓库配置。");
   const context = await releaseGitHubContext(run, repository);
@@ -446,7 +445,7 @@ try {
   state.format = 2;
   state.status = "pending";
   await saveState();
-  if (!remoteCommit && !reuseLegacyBuild && mode === "differential") {
+  if (!remoteCommit && !reuseBuild && mode === "differential") {
     const baseline = await prepareBaseline();
     state.baselineDirectory = baseline.directory;
   }
@@ -460,7 +459,7 @@ try {
     state.phase = "自动提交发行源码";
     await saveState();
     state.sourceCommit = await commitReleaseSource(run, state.targetVersion);
-    if (reuseLegacyBuild) {
+    if (reuseBuild) {
       state.buildCommit = state.sourceCommit;
       state.adoptedLegacyBuild = true;
       console.log(
@@ -469,7 +468,11 @@ try {
     }
     await saveState();
   }
-  const buildEnv = { ...commandEnv, PANXU_RELEASE_DIR: state.output };
+  const buildEnv = {
+    ...commandEnv,
+    PANXU_RELEASE_DIR: state.output,
+    PANXU_REQUIRE_SIGNING: "1",
+  };
   if (state.buildCommit !== state.sourceCommit) {
     state.phase = "签名打包与校验";
     await saveState();
