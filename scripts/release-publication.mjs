@@ -24,14 +24,43 @@ export async function publishRelease({
   const tag = `v${version}`;
   const gh = async (...args) =>
     (await run("gh", args, { capture: true, env })).stdout;
+  let releaseId;
   const getRelease = async () => {
     const result = await run(
       "gh",
-      ["api", `repos/${repository}/releases/tags/${tag}`],
+      [
+        "api",
+        releaseId
+          ? `repos/${repository}/releases/${releaseId}`
+          : `repos/${repository}/releases/tags/${tag}`,
+      ],
       { capture: true, optional: true, env },
     );
-    if (result.code === 0) return JSON.parse(result.stdout);
-    if (/HTTP 404|\(404\)/i.test(result.stderr)) return null;
+    if (result.code === 0) {
+      const found = JSON.parse(result.stdout);
+      releaseId = found.id;
+      return found;
+    }
+    if (/HTTP 404|\(404\)/i.test(result.stderr)) {
+      // GitHub's tag endpoint omits unpublished drafts. Discover them through
+      // the authenticated list, then use the immutable release ID for reads.
+      const pages = JSON.parse(
+        await gh(
+          "api",
+          "--paginate",
+          "--slurp",
+          `repos/${repository}/releases?per_page=100`,
+        ),
+      );
+      const matches = pages.flat().filter((entry) => entry.tag_name === tag);
+      assert.ok(
+        matches.length <= 1,
+        "同版本存在多个草稿，无法确定应续跑的发行记录。",
+      );
+      if (!matches.length) return null;
+      releaseId = matches[0].id;
+      return matches[0];
+    }
     throw new Error(result.stderr || "无法读取 GitHub 发行状态。");
   };
   const sums = new Map(
@@ -146,20 +175,33 @@ export async function publishRelease({
       "--title",
       `盘序 ${version}`,
     );
-  console.log(`上传 ${assets.length} 个发行附件：${tag}`);
-  await run(
-    "gh",
-    [
-      "release",
-      "upload",
-      tag,
-      "--repo",
-      repository,
-      "--clobber",
-      ...assets.map((asset) => join(output, asset.name)),
-    ],
-    { env },
-  );
+  release = await getRelease();
+  assert.equal(release?.draft, true, "无法确认待上传的草稿状态，未修改附件。");
+  const pendingAssets = assets.filter((asset) => {
+    const remote = release.assets.find((entry) => entry.name === asset.name);
+    return (
+      !remote ||
+      remote.state !== "uploaded" ||
+      remote.size !== asset.size ||
+      remote.digest !== `sha256:${asset.sha256}`
+    );
+  });
+  if (pendingAssets.length) {
+    console.log(`上传 ${pendingAssets.length} 个缺失或变化的发行附件：${tag}`);
+    await run(
+      "gh",
+      [
+        "release",
+        "upload",
+        tag,
+        "--repo",
+        repository,
+        "--clobber",
+        ...pendingAssets.map((asset) => join(output, asset.name)),
+      ],
+      { env },
+    );
+  } else console.log(`复用远端 ${assets.length} 个已上传且摘要一致的附件。`);
   release = await getRelease();
   assert.equal(
     release?.draft,

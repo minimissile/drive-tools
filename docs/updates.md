@@ -79,7 +79,7 @@ Apple 会员和 Windows 证书是两项独立资质。申请审核通过后仍�
 
 1. 本机单平台发行可直接运行下述 `release:full` 或 `release:differential`，自动升版、构建、推送并正式发布。手动固定版本或多平台流程才需要先统一版本与说明；只使用稳定 `x.y.z`。
 2. 完成检查并提交，推送与源码一致的 `v<version>` 标签。需要云端构建时手动触发 `.github/workflows/release-desktop.yml` 并选择对应标签，选择分支会被阻止；推送标签不会自动上传私钥或触发未配置凭据的构建。
-3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。当前 0.0.4 仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。0.0.1 的未公证交付属于上述历史例外。
+3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。当前发行计划仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。0.0.1 的未公证交付属于上述历史例外。
 4. 全部已启用平台成功后，核对版本、架构、文件大小、SHA512、ZIP、blockmap，再生成统一的 `SHA256SUMS.txt`。最终检查拒绝缺少已启用平台，也拒绝混入未启用平台的清单或安装包。
 5. 上传到公开仓库的**草稿 Release**，确认所有附件均存在。已公开的同版本不会覆盖；失败后可重跑同一草稿。
 6. 维护者下载验收后，在 GitHub 正式发布草稿并设为最新版本，客户端才会看到更新。不要设为 prerelease。
@@ -94,6 +94,12 @@ SHA256SUMS.txt
 ```
 
 输出按版本隔离在 `release/<version>/`，不会混入旧文件。最终草稿只由一个任务上传。Actions 临时 artifact（保留 14 天）用于构建与验收，不能充当客户端更新地址。[发布配置约定](https://www.electron.build/v26/docs/publish/)说明了包与清单的关系。
+
+## 0.0.5 一键发布记录
+
+2026-10-31 已通过 `release:differential` 正式发布 [0.0.5](https://github.com/minimissile/drive-tools/releases/tag/v0.0.5)，设为最新稳定版本。复用已有签名公证产物，自动提交及推送源码和 `v0.0.5` 标签，核对六个远端附件的集合、大小和 SHA256 后公开；续跑期间目标版本保持 0.0.5。构建对应提交为 `4908f8d30d3d15ed30d5f69e18da23c8ccb3f22b`。
+
+本轮实际完成包内 31 个生产包及 39 项必需依赖入口、签名、公证票据、Gatekeeper、更新清单及远端摘要核验；未运行功能自动化测试或本机安装重启验收。草稿查询按发行 ID 读取，重试复用摘要一致的远端附件。
 
 ## 本地发布脚本
 
