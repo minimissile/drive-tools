@@ -16,12 +16,34 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { Transform } from "node:stream";
 import { load } from "js-yaml";
+import { gt, valid } from "semver";
 
 // Download-chain integration test using published bytes, not newly built apps.
 // Real Mac download selection, GitHub provider paths, blockmaps, Range planner,
 // reconstruction, cache and SHA512 validation. Only the app environment, HTTP
 // origin/transport and final native installer handoff are isolated.
 // No Electron desktop instance, user database, signed bundle or release is changed.
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(`用法：npm run test:updates:differential -- <旧版本> <新版本>
+只在明确授权差分演练时执行；不启动桌面实例或安装应用。
+产物默认取 release/<版本>；PANXU_RELEASE_ROOT 可指定共同的发行根目录。
+报告默认写入 release-evidence/<新版本>/differential，可用 PANXU_QA_DIR 指定。`);
+  process.exit(0);
+}
+assert.equal(
+  process.argv.length,
+  4,
+  "必须显式提供旧版本和新版本，参见 --help。",
+);
+const [oldVersion, newVersion] = process.argv.slice(2);
+for (const version of [oldVersion, newVersion])
+  assert.ok(
+    valid(version) === version && /^\d+\.\d+\.\d+$/.test(version),
+    "必须使用稳定 x.y.z 版本。",
+  );
+assert.ok(gt(newVersion, oldVersion), "新版本必须高于旧版本。");
+process.chdir(resolve(import.meta.dirname, ".."));
+const artifactRoot = resolve(process.env.PANXU_RELEASE_ROOT ?? "release");
 const require = createRequire(import.meta.url);
 const { AppUpdater } = require("electron-updater/out/AppUpdater");
 const { MacUpdater } = require("electron-updater/out/MacUpdater");
@@ -34,16 +56,14 @@ const {
 const { HttpExecutor } = require("builder-util-runtime");
 assert.equal(process.platform, "darwin", "仅适用于 macOS 下载链。");
 assert.equal(process.arch, "arm64", "当前发行包仅有 ARM64。");
-const oldVersion = process.argv[2] ?? "0.0.1";
-const newVersion = process.argv[3] ?? "0.0.2";
-for (const version of [oldVersion, newVersion])
-  assert.match(version, /^\d+\.\d+\.\d+$/);
 const assets = (version) => ({
-  zip: resolve(`release/${version}/Panxu-Studio-${version}-mac-arm64.zip`),
-  blockmap: resolve(
-    `release/${version}/Panxu-Studio-${version}-mac-arm64.zip.blockmap`,
+  zip: join(artifactRoot, version, `Panxu-Studio-${version}-mac-arm64.zip`),
+  blockmap: join(
+    artifactRoot,
+    version,
+    `Panxu-Studio-${version}-mac-arm64.zip.blockmap`,
   ),
-  manifest: resolve(`release/${version}/latest-mac.yml`),
+  manifest: join(artifactRoot, version, "latest-mac.yml"),
 });
 const old = assets(oldVersion),
   target = assets(newVersion);

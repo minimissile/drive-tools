@@ -1,6 +1,6 @@
 {
   "name": "panxu-studio",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "description": "盘序 · 本地网盘内容营销工作台",
   "type": "module",
@@ -49,6 +49,11 @@
     "build:pansou": "node scripts/build-pansou.mjs",
     "release:mac": "node scripts/package-release.mjs --platform mac",
     "release:win": "node scripts/package-release.mjs --platform win",
+    "release:full": "node scripts/release-update.mjs --mode full",
+    "release:differential": "node scripts/release-update.mjs --mode differential",
+    "release:draft": "node scripts/release-update.mjs --resume --draft-only",
+    "verify:updates:all": "node scripts/verify-updates.mjs --all",
+    "test:updates:differential": "node scripts/verify-differential-update.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:setup:mac": "node scripts/configure-notary.mjs"
   },

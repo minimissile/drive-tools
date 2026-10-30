@@ -77,7 +77,7 @@ Apple 会员和 Windows 证书是两项独立资质。申请审核通过后仍�
 
 0.0.1 的历史例外：用户明确要求不等待 Apple 公证，该版本发布时使用同一 Developer ID 签名的 DMG/ZIP，并在说明中标注未公证、首次打开可能出现系统安全提示。`verify-release.mjs --allow-unnotarized` 仅跳过公证票据及 Gatekeeper 验收，仍强制验证签名和包内容；更新签名与哈希检查不变。默认发布入口及 CI 继续要求公证，0.0.2 已完成公证，不沿用该例外。
 
-1. 同步修改 `package.json` / `package-lock.json` 的版本，编写 `docs/releases/<version>.md`。只使用稳定 `x.y.z`。
+1. 本机单平台发行可直接运行下述 `release:full` 或 `release:differential`，自动升版、构建、推送并正式发布。手动固定版本或多平台流程才需要先统一版本与说明；只使用稳定 `x.y.z`。
 2. 完成检查并提交，推送与源码一致的 `v<version>` 标签。需要云端构建时手动触发 `.github/workflows/release-desktop.yml` 并选择对应标签，选择分支会被阻止；推送标签不会自动上传私钥或触发未配置凭据的构建。
 3. `release.config.json` 声明本次发行的平台，CI 据此生成矩阵。当前 0.0.4 仅发布 macOS Apple Silicon ARM64 签名公证 DMG 与 ZIP，不发布 Intel Mac 包；Windows x64 在签名齐备后加入后续版本。0.0.1 的未公证交付属于上述历史例外。
 4. 全部已启用平台成功后，核对版本、架构、文件大小、SHA512、ZIP、blockmap，再生成统一的 `SHA256SUMS.txt`。最终检查拒绝缺少已启用平台，也拒绝混入未启用平台的清单或安装包。
@@ -94,6 +94,68 @@ SHA256SUMS.txt
 ```
 
 输出按版本隔离在 `release/<version>/`，不会混入旧文件。最终草稿只由一个任务上传。Actions 临时 artifact（保留 14 天）用于构建与验收，不能充当客户端更新地址。[发布配置约定](https://www.electron.build/v26/docs/publish/)说明了包与清单的关系。
+
+## 本地发布脚本
+
+日常发行只需点击两个命令之一，无须另行修改版本、提交代码、创建标签或运行上传命令：
+
+```sh
+# 全量发行：自动递增次版本，例如 0.0.4 → 0.1.0
+npm run release:full
+# 差分更新：自动递增补丁版本，例如 0.0.4 → 0.0.5
+npm run release:differential
+```
+
+命令依次完成版本同步、缺失说明生成、当前工作区源码提交、签名公证与打包、产物校验、当前分支及版本标签推送、GitHub 附件上传与远端 SHA256 核验，最后正式公开为最新稳定版本。正式发布成功后，客户端即可检查到更新；不会自动运行功能测试。
+
+自动提交包含当前工作区全部未忽略改动。版本标签固定对应构建时的源码提交；构建期间源码变化会停止发布，重新点击同一命令会对同一目标版本重新构建。不会重置工作区、强制推送分支或覆盖已有版本标签；已公开版本只允许核对相同附件后完成续跑，不会替换附件。
+
+### 首次配置与平台范围
+
+本机须准备已登录且有仓库写入权限的 GitHub CLI、Git 提交身份以及对应平台的签名公证凭据。仓库取自 `update.config.json`，`origin` 必须指向同一仓库。若没有显式设置 `GH_TOKEN` / `GITHUB_TOKEN`，优先使用 gh 中已保存的仓库所有者凭据，不切换全局活动账号；已有代理环境变量或 Git 的 `http.proxy` 会继续使用。
+
+默认按本机系统选择平台、按发行配置选择架构，可显式指定 `--platform mac --arch arm64`。自动入口要求 `release.config.json` 只启用一个平台；多平台可使用下述固定版本流程。差分准备目前支持 macOS ARM64，实际签名须在对应系统执行。
+
+### 失败续跑与历史任务接续
+
+命令通过运行锁避免同一工作区并发发行，并在忽略目录 `release-evidence/auto-release.json` 记录目标版本、构建提交、产物目录及发布进度。签名、网络、推送或上传失败后，重新点击同一命令会继续同一版本，不再次升版。只有正式发布成功后的下一次运行才继续递增版本，即使源码没有变化也会生成下一版本。
+
+旧版命令已经打包完成但尚未发布的任务会先续发当前目标，不跳到新版本。仅文档、发布工具或版本脚本变化时可核验并复用旧产物；应用源码、依赖或构建输入改变时重建同一版本。若远端标签已经推送，则继续与该标签绑定的构建和附件，后续源码改动保留到下一版。
+
+### 差分基线与交付内容
+
+差分基线自动使用升版前版本，依次查找当前工作树 `release/<旧版本>/`、`release-evidence/baselines/<旧版本>/` 及 Git 主检出目录中的发行包；续跑优先复用记录目录。缺失时通过 gh 从官方 GitHub Release 下载同版本 ZIP、ZIP blockmap 与清单，核对清单版本、ZIP 大小和 SHA512、blockmap 结构及覆盖范围后缓存。
+
+可选 `--from-dir /path/to/release/0.0.4` 指定单个旧版本目录，显式目录不合格时停止，不换用其他来源。新版输出默认在 `release/<新版本>/`，可用 `PANXU_RELEASE_DIR` 指定；续跑不能更换输出目录。
+
+两种命令均交付完整签名安装包、更新包、blockmap 和清单。`full` 不强制客户端下载完整 ZIP；`differential` 先准备旧版基线，不生成独立 patch 或单功能包。客户端按缓存与网络条件优先差分，失败时回退全量；安装需要重启。
+
+### 只查看计划
+
+```sh
+npm run release:full -- --dry-run
+npm run release:differential -- --dry-run
+```
+
+预览仅读取本地版本及任务记录，不升版、不写文件、不联网、不提交、打包、上传或运行测试；输出不代表基线、凭据或产物已通过核验。
+
+### 可选草稿与手动固定版本流程
+
+`release:draft` 是可选的兼容入口：自动接续已记录任务并完成源码提交、标签推送及草稿上传，保留草稿；不额外升版。随后点击对应的 `release:full` / `release:differential` 即可正式公开同一版本。日常使用两个主命令时不需要这一额外步骤。
+
+`release:mac` / `release:win` 仍按当前固定版本签名打包，不自动升版、提交或发布。多平台须先统一版本与说明，再分别构建；全部产物齐全后通过 `verify:updates:all` 核对。底层 `node scripts/package-release.mjs --mode differential --platform mac --arch arm64 --from <旧版本>` 可准备固定版本差分基线，不自动下载缺失基线。
+
+CI 使用 `node scripts/draft-release.mjs` 上传草稿，继续强制校验 `GITHUB_REF=refs/tags/v<当前版本>`，独立于本机自动升版流程。
+
+只有用户明确要求差分专项时才执行以下命令，发布流程不会自动调用：
+
+```sh
+npm run test:updates:differential -- <旧版本> <新版本>
+# 两个版本位于其他共同发行根目录时
+PANXU_RELEASE_ROOT=/path/to/release npm run test:updates:differential -- <旧版本> <新版本>
+```
+
+专项使用本机回环服务核对下载、重建、摘要与回退，写入报告，不执行原生安装或桌面界面操作。`PANXU_RELEASE_ROOT` 是包含两个版本子目录的共同根目录，与单个旧版本的 `--from-dir` 不同。
 
 ## 全量、差分与独立功能更新
 
@@ -130,7 +192,7 @@ npm run verify:release
 npm run verify:updates
 npm run test:e2e:packaged
 # 所有已启用平台产物准备完毕后
-node scripts/verify-updates.mjs --all
+npm run verify:updates:all
 # 仅验收本机构建时，可显式限定架构；正式发布禁止缩小范围
 node scripts/verify-updates.mjs --arch=arm64
 ```

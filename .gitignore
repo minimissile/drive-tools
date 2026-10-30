@@ -31,3 +31,5 @@ playwright-report/
 /.panxu-dev.lock/
 /.panxu-dev-session.json
 /.panxu-dev-session.json.*.tmp
+/.panxu-release.lock/
+*.panxu-release-*.tmp
