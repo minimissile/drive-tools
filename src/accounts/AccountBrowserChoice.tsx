@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { BrowserEnvironmentView } from "../../shared/browser-environments";
-import { Field } from "../ui/primitives";
+import { environmentAllowsAccount } from "../../shared/browser-environment-sharing";
+import { Button, Field, Notice } from "../ui/primitives";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 
@@ -16,16 +17,25 @@ export function AccountBrowserChoice({
   environments,
   disabled,
   existing = false,
+  onConfigure,
+  platform,
 }: {
   value: AccountBrowserSelection;
   onChange: (value: AccountBrowserSelection) => void;
   environments: BrowserEnvironmentView[];
   disabled?: boolean;
   existing?: boolean;
+  onConfigure?(): void;
+  platform: string;
 }) {
   const hintId = useId();
   const choices = environments.filter(
-    (env) => env.engine === (value.fingerprint ? "bitbrowser" : "electron"),
+    (env) =>
+      env.engine === (value.fingerprint ? "bitbrowser" : "electron") &&
+      environmentAllowsAccount(env, {
+        kind: platform === "baidu-zhidao" ? "zhidao" : "website",
+        platform,
+      }),
   );
   const selected = choices.find((env) => env.id === value.environmentId);
   return (
@@ -63,7 +73,10 @@ export function AccountBrowserChoice({
                   ? "请选择指纹浏览器环境"
                   : "自动新建独立内置环境",
               },
-              ...choices.map((env) => ({ value: env.id, label: env.name })),
+              ...choices.map((env) => ({
+                value: env.id,
+                label: `${env.name}${env.accounts.some((a) => a.kind === "drive") ? " · 百度共用后台" : ""}`,
+              })),
               ...(value.environmentId && !selected
                 ? [
                     {
@@ -75,6 +88,22 @@ export function AccountBrowserChoice({
             ]}
           />
         </Field>
+      ) : null}
+      {value.fingerprint && !disabled && !choices.length ? (
+        <Notice>
+          暂无可用于此平台的指纹环境。网盘后台仅可与贴吧、知道共用。
+          {onConfigure ? (
+            <Button quiet onClick={onConfigure}>
+              配置指纹浏览器
+            </Button>
+          ) : null}
+        </Notice>
+      ) : null}
+      {selected?.accounts.some((a) => a.kind === "drive") ? (
+        <Notice>
+          与百度网盘共用此窗口的
+          IP、指纹和登录态，日常操作在后台串行执行。打开登录窗口会将共用环境切到可见模式；完成后请在网盘账号中转为后台，再检查各平台登录。
+        </Notice>
       ) : null}
     </div>
   );

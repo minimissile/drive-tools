@@ -64,15 +64,17 @@ export function DiscoveryForm({
     void onStart(parsed.data);
   };
   return (
-    <Panel title="批量采词" extra={<small>输入和采集设置自动暂存</small>}>
+    <Panel
+      title="采集设置"
+      className="baidu-discovery-config"
+      extra={<small>设置自动暂存</small>}
+    >
       <div className="baidu-discovery-form">
-        <Field
-          label="初始关键词"
-          hint={`每行一个，也支持逗号、分号 · 已去重 ${seeds.length} 个`}
-        >
+        <Field label="初始关键词" hint={`${seeds.length} 个 · 每行一词`}>
           <textarea
             aria-label="初始关键词"
-            rows={5}
+            title="每行一词，也支持逗号和分号分隔"
+            rows={3}
             maxLength={25000}
             placeholder={"画竹子教程\n水墨画入门\n国画竹子画法"}
             value={value.text}
@@ -102,7 +104,7 @@ export function DiscoveryForm({
             </div>
           </fieldset>
           <div className="baidu-discovery-options">
-            <Field label="查询词上限" hint="包含初始词，最多500词">
+            <Field label="查询上限" hint="最多500">
               <input
                 aria-label="查询词上限"
                 type="number"
@@ -114,7 +116,7 @@ export function DiscoveryForm({
                 }
               />
             </Field>
-            <Field label="查询间隔（秒）" hint="1.5–30秒">
+            <Field label="间隔（秒）" hint="1.5–30">
               <input
                 aria-label="查询间隔（秒）"
                 type="number"
@@ -148,20 +150,21 @@ export function DiscoveryForm({
               onValueChange={(depth) => draft.update({ depth: Number(depth) })}
             />
           </div>
+          <div className="baidu-discovery-actions">
+            <Button
+              primary
+              disabled={disabled || !seeds.length}
+              onClick={start}
+            >
+              <Play size={15} />
+              开始采集
+            </Button>
+          </div>
         </div>
       </div>
       {error || draft.error ? (
         <Notice danger>{error || draft.error}</Notice>
       ) : null}
-      <div className="baidu-discovery-actions">
-        <Button primary disabled={disabled || !seeds.length} onClick={start}>
-          <Play size={15} />
-          开始采集
-        </Button>
-        <small>
-          通过客户端内置浏览器采集。默认仅查询初始词，也可在结果中手动选择继续扩词。
-        </small>
-      </div>
     </Panel>
   );
 }

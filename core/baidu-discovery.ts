@@ -23,10 +23,12 @@ const wireWords = z.array(z.string().max(200)).max(100);
 export class BaiduDiscovery {
   private active?: {
     id: string;
+    run: DiscoveryRun;
     controller: AbortController;
     done: Promise<void>;
   };
   private closed = false;
+  private generatingMaterials = false;
   constructor(
     private db: Database,
     private ports: Pick<AppPorts, "baiduDiscovery">,
@@ -46,7 +48,7 @@ export class BaiduDiscovery {
     }
   }
   get isBusy() {
-    return !!this.active;
+    return !!this.active || this.generatingMaterials;
   }
   private browser() {
     if (!this.ports.baiduDiscovery)
@@ -64,7 +66,7 @@ export class BaiduDiscovery {
         completedCount: number;
         wordCount: number;
       }>(
-        `SELECT json_remove(value,'$.queries','$.words') AS metadata,
+        `SELECT json_remove(value,'$.queries','$.words','$.removedKeys','$.materialPool') AS metadata,
       json_array_length(value,'$.queries') AS queryCount,json_array_length(value,'$.words') AS wordCount,
       (SELECT count(*) FROM json_each(c.value,'$.queries') WHERE json_extract(value,'$.status')!='pending') AS completedCount
       FROM api_cache c WHERE key LIKE ? ORDER BY json_extract(value,'$.createdAt') DESC`,
@@ -72,7 +74,12 @@ export class BaiduDiscovery {
       )
       .map(({ metadata, ...counts }) => ({
         ...discoveryRunSchema
-          .omit({ queries: true, words: true })
+          .omit({
+            queries: true,
+            words: true,
+            removedKeys: true,
+            materialPool: true,
+          })
           .parse(JSON.parse(metadata)),
         ...counts,
       }));
@@ -135,6 +142,8 @@ export class BaiduDiscovery {
         message: "",
       })),
       words: [],
+      removedKeys: [],
+      materialPool: null,
       message: "准备打开百度采集窗口…",
       currentWord: "",
       limited: false,
@@ -153,7 +162,7 @@ export class BaiduDiscovery {
         if (this.active?.controller === controller) this.active = undefined;
         if (!this.closed) this.changed();
       });
-    this.active = { id: run.id, controller, done };
+    this.active = { id: run.id, run, controller, done };
   }
   private async work(run: DiscoveryRun, signal: AbortSignal) {
     try {
@@ -166,9 +175,11 @@ export class BaiduDiscovery {
         if (query.status !== "pending") continue;
         signal.throwIfAborted();
         if (!first) await delay(run.input.intervalMs, undefined, { signal });
+        if (this.queryRemoved(query)) continue;
         first = false;
         run.currentWord = query.word;
         for (const source of run.input.sources) {
+          if (this.queryRemoved(query)) break;
           if (query.completedSources.includes(source)) continue;
           signal.throwIfAborted();
           run.message = `正在采集「${query.word}」的${discoverySourceLabels[source]}…`;
@@ -177,11 +188,14 @@ export class BaiduDiscovery {
             await this.browser().read(source, query.word, signal),
           );
           signal.throwIfAborted();
+          if (this.queryRemoved(query)) break;
+          const removed = new Set(run.removedKeys);
           for (const raw of words) {
             const word = normalizeDiscoveryWord(raw),
               key = discoveryWordKey(word);
             if (
               !word ||
+              removed.has(key) ||
               word.length > 100 ||
               key === discoveryWordKey(query.word)
             )
@@ -230,8 +244,10 @@ export class BaiduDiscovery {
           query.completedSources.push(source);
           this.save(run); // Preserve the first source even if the second source needs verification.
         }
-        query.status = "completed";
-        query.message = "采集完成";
+        if (!this.queryRemoved(query)) {
+          query.status = "completed";
+          query.message = "采集完成";
+        }
         this.save(run);
         if (run.words.length >= 10000) break;
       }
@@ -337,6 +353,52 @@ export class BaiduDiscovery {
     await this.browser().open(
       runId ? this.get(runId).currentWord || undefined : undefined,
     );
+  }
+  removeWord(runId: string, key: string) {
+    const run = this.active?.id === runId ? this.active.run : this.get(runId);
+    if (!run.words.some((word) => word.key === key)) return this.get(runId);
+    run.words = run.words.filter((word) => word.key !== key);
+    if (!run.removedKeys.includes(key)) run.removedKeys.push(key);
+    for (const query of run.queries) {
+      if (query.status === "pending" && discoveryWordKey(query.word) === key) {
+        query.status = "skipped";
+        query.message = "手动删除，停止继续扩展此词";
+      }
+    }
+    this.save(run);
+    return this.get(runId);
+  }
+  private queryRemoved(query: DiscoveryRun["queries"][number]) {
+    return query.status === "skipped";
+  }
+  async generateMaterials(
+    runId: string,
+    brief: string,
+    generate: () => Promise<
+      Pick<
+        NonNullable<DiscoveryRun["materialPool"]>,
+        "entries" | "requestedCount" | "warnings"
+      >
+    >,
+  ) {
+    this.get(runId);
+    if (this.generatingMaterials)
+      throw new AppError(
+        "BAIDU_MATERIAL_BUSY",
+        "资料文案正在生成，请等待当前生成结束。",
+      );
+    this.generatingMaterials = true;
+    try {
+      const result = await generate();
+      const run = this.active?.id === runId ? this.active.run : this.get(runId);
+      const pool = { brief, ...result, createdAt: now() };
+      run.materialPool = pool;
+      this.save(run);
+      return pool;
+    } finally {
+      this.generatingMaterials = false;
+      this.changed();
+    }
   }
   closeBrowser() {
     this.assertIdle();

@@ -14,6 +14,7 @@ import { ProviderIcon } from "../resources/ProviderIcon";
 import { AddAccountForm } from "./AddAccountForm";
 import { AccountRow } from "./AccountRow";
 import { AccountEditor } from "./AccountEditor";
+import { DriveBrowserDialog } from "./DriveBrowserDialog";
 import { AccountDeleteDialog } from "./AccountDeleteDialog";
 import { useAccountOperations } from "./useAccountOperations";
 import "./accounts.css";
@@ -32,6 +33,7 @@ export default function DriveAccounts() {
   const { pending, run } = useAccountOperations();
   const accounts = data!.accounts;
   const [deleting, setDeleting] = useState<Account | null>(null);
+  const [browserAccount, setBrowserAccount] = useState<Account | null>(null);
   const [adding, setAdding] = useState(accounts.length === 0);
   const [newAccountId, setNewAccountId] = useState("");
   const formId = useId();
@@ -99,6 +101,7 @@ export default function DriveAccounts() {
               setQuery("");
               setNewAccountId(account.id);
               setAdding(false);
+              if (account.browser) setBrowserAccount(account);
             }}
           />
         ) : null}
@@ -169,6 +172,7 @@ export default function DriveAccounts() {
                     pending={pending?.id === a.id ? pending.action : null}
                     onUse={() => setActiveAccount(a.provider, a.id)}
                     onManage={() => setEditing(a)}
+                    onBrowser={() => setBrowserAccount(a)}
                     onDelete={() => setDeleting(a)}
                     onOperation={(action) => void run(a, action)}
                   />
@@ -235,6 +239,13 @@ export default function DriveAccounts() {
           key={editing.id}
           account={editing}
           onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {browserAccount ? (
+        <DriveBrowserDialog
+          key={browserAccount.id}
+          account={browserAccount}
+          onClose={() => setBrowserAccount(null)}
         />
       ) : null}
     </div>

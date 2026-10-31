@@ -5,13 +5,14 @@ import {
   collectionDriveLabels,
   collectionDriveType,
 } from "../../shared/resource-collection";
-import { Button, Field, Notice, Status } from "../ui/primitives";
+import { Button, Status } from "../ui/primitives";
 import { Dialog } from "../ui/Dialog";
 import "./operation-dialogs.css";
 import { SelectionCheckbox } from "../ui/SelectionCheckbox";
 import { updateSelection } from "../lib/selection";
 import { useOperationAction } from "./hooks";
 import { ItemEditor } from "./ItemEditor";
+import { ResolveItemDialog } from "./ResolveItemDialog";
 import {
   zhidaoContentIssue,
   zhidaoPublishLimit,
@@ -43,8 +44,7 @@ export function ResultTable({
   const [editing, setEditing] = useState<OperationItem | null>(null),
     [selectOnReview, setSelectOnReview] = useState(false),
     [resolving, setResolving] = useState<OperationItem | null>(null),
-    [deleting, setDeleting] = useState<OperationItem | null>(null),
-    [remoteId, setRemoteId] = useState("");
+    [deleting, setDeleting] = useState<OperationItem | null>(null);
   const pageIds = items.filter(selectable).map((i) => i.id);
   return (
     <>
@@ -296,7 +296,6 @@ export function ResultTable({
                           size="compact"
                           disabled={!!action.pending || running}
                           onClick={() => {
-                            setRemoteId("");
                             setResolving(item);
                           }}
                         >
@@ -379,112 +378,12 @@ export function ResultTable({
         />
       ) : null}
       {resolving ? (
-        <Dialog
-          title="核对平台提交结果"
+        <ResolveItemDialog
+          item={resolving}
+          publication={publication}
           onClose={() => setResolving(null)}
-          busy={!!action.pending}
-          footer={
-            <>
-              <Button
-                disabled={!!action.pending}
-                onClick={() => setResolving(null)}
-              >
-                取消
-              </Button>
-              <Button
-                disabled={!!action.pending}
-                onClick={() =>
-                  void action.run(
-                    "zhidao.resolve",
-                    { id: resolving.id, outcome: "retry", confirmed: true },
-                    () => {
-                      setResolving(null);
-                      onChanged();
-                    },
-                    "已记录未提交，可继续任务",
-                  )
-                }
-              >
-                已核对，确认未提交
-              </Button>
-              <Button
-                primary
-                disabled={!remoteId.trim() || !!action.pending}
-                onClick={() =>
-                  void action.run(
-                    "zhidao.resolve",
-                    {
-                      id: resolving.id,
-                      outcome: "submitted",
-                      remoteId: remoteId.trim(),
-                      confirmed: true,
-                    },
-                    () => {
-                      setResolving(null);
-                      onChanged();
-                    },
-                    "已登记平台结果",
-                  )
-                }
-              >
-                {action.pending === "zhidao.resolve"
-                  ? "正在登记…"
-                  : "登记已提交"}
-              </Button>
-            </>
-          }
-        >
-          <p className="operation-dialog-description">
-            {resolving.question || resolving.name}
-          </p>
-          <Notice warning>
-            此请求的远端结果未知。请先打开平台核对，再登记结果；确认未提交后继续任务才会重试。
-            {(resolving.uploadBatchSize ?? 0) > 1
-              ? ` 本批共${resolving.uploadBatchSize}条问答，核对结果会同时应用于整批。`
-              : ""}
-          </Notice>
-          <div>
-            <Button
-              disabled={!!action.pending}
-              onClick={() =>
-                publication
-                  ? void action.run("zhidao.publish.open", {
-                      id: resolving.runId,
-                    })
-                  : resolving.questionId
-                    ? void action.run("zhidao.answer.open", {
-                        id: resolving.id,
-                      })
-                    : void action.run("zhidao.open", {
-                        url: "https://zhidao.baidu.com/b/batch/batch-upload",
-                      })
-              }
-            >
-              {action.pending === "zhidao.answer.open" ||
-              action.pending === "zhidao.publish.open" ||
-              action.pending === "zhidao.open"
-                ? "正在打开…"
-                : "打开百度知道"}
-            </Button>
-          </div>
-          <Field
-            label={resolving.questionId ? "平台回答ID" : "上传任务ID"}
-            hint="确认平台已提交后，填写实际返回的ID。"
-          >
-            <input
-              aria-label={
-                resolving.questionId && !publication
-                  ? "平台回答ID"
-                  : "上传任务ID"
-              }
-              value={remoteId}
-              onChange={(e) => setRemoteId(e.target.value)}
-              maxLength={100}
-              disabled={!!action.pending}
-              placeholder="填写已核对的ID"
-            />
-          </Field>
-        </Dialog>
+          onChanged={onChanged}
+        />
       ) : null}
     </>
   );

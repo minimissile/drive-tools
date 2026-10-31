@@ -8,6 +8,7 @@ import type {
   RunStartInput,
   ZhidaoSettings,
   DriveShareResult,
+  AnswerLogPage,
 } from "./zhidao";
 import type { RemoteFile } from "./types";
 import type { CollectionDriveFilter } from "./resource-collection";
@@ -46,6 +47,7 @@ export interface ZhidaoContract {
     { id: string; page?: number; driveType?: CollectionDriveFilter },
     OperationDetail
   >;
+  "zhidao.answer.logs": Contract<{ id: string; page?: number }, AnswerLogPage>;
   "zhidao.start": Contract<RunStartInput, OperationRun>;
   "zhidao.pause": Contract<{ id: string }, OperationRun>;
   "zhidao.resume": Contract<{ id: string; authorized: true }, OperationRun>;

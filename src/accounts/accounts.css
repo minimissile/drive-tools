@@ -43,7 +43,7 @@
 }
 .account-connect-fields {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) auto;
+  grid-template-columns: 150px minmax(0, 1fr) 190px auto;
   align-items: end;
   gap: var(--space-3);
 }
@@ -52,6 +52,11 @@
 }
 .account-connect-fields > .button {
   align-self: end;
+}
+.account-create-browser {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
 }
 .provider-option {
   display: inline-flex;
@@ -197,6 +202,21 @@
   font-size: 11px;
   color: var(--amber);
   overflow-wrap: anywhere;
+}
+.account-browser-action {
+  max-width: 100%;
+  justify-content: flex-start;
+  margin-top: var(--space-1);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.account-browser-action > svg {
+  flex: none;
+}
+.account-browser-action > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .account-action-cell {
   min-width: 0;

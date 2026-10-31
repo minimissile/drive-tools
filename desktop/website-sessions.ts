@@ -10,6 +10,8 @@ import { AppError } from "../core/errors";
 import { readLimited, readLimitedBytes } from "../core/http";
 import { createWeiboSessions } from "./weibo-session";
 import { createZhihuIdentitySession } from "./zhihu-session";
+import { createWebsiteIdentitySession } from "./website-identity-session";
+import { tiebaIdentityScript } from "../core/tieba/identity";
 import { createSmzdmSession } from "./smzdm-session";
 import { createDocumentSessions } from "./document-session";
 import { isDocumentProvider } from "../shared/document-platforms";
@@ -461,6 +463,14 @@ export function createWebsiteSessions(
   };
   const weiboSessions = createWeiboSessions(workspace, environmentProfile);
   const zhihuIdentity = createZhihuIdentitySession(context);
+  const tiebaIdentity = createWebsiteIdentitySession(context, {
+    provider: "tieba",
+    label: "贴吧",
+    home: websiteLoginSpecs.tieba.home,
+    cookieNames: /^(?:BDUSS|BDUSS_BFESS|STOKEN|PTOKEN)$/,
+    cookieDomain: /(^|\.)baidu\.com$/,
+    script: tiebaIdentityScript(),
+  });
   const smzdm = createSmzdmSession(context);
   const documents = createDocumentSessions(context, (account) =>
     baiduSessions.login(account),
@@ -476,28 +486,34 @@ export function createWebsiteSessions(
         ? Promise.resolve(documents.status(account))
         : account.provider === "smzdm"
           ? Promise.resolve(smzdm.status(account))
-          : account.provider === "zhihu"
-            ? Promise.resolve(zhihuIdentity.status(account))
-            : adapter(account).status(account),
+          : account.provider === "tieba"
+            ? Promise.resolve(tiebaIdentity.status(account))
+            : account.provider === "zhihu"
+              ? Promise.resolve(zhihuIdentity.status(account))
+              : adapter(account).status(account),
     clear: (account) => adapter(account).clear(account),
     invalidate: async (account) =>
       isDocumentProvider(account.provider)
         ? documents.invalidate(account)
         : account.provider === "smzdm"
           ? smzdm.invalidate(account)
-          : account.provider === "zhihu"
-            ? zhihuIdentity.invalidate(account)
-            : adapter(account).invalidate(account),
+          : account.provider === "tieba"
+            ? tiebaIdentity.invalidate(account)
+            : account.provider === "zhihu"
+              ? zhihuIdentity.invalidate(account)
+              : adapter(account).invalidate(account),
     verify: (account) =>
       isDocumentProvider(account.provider)
         ? documents.verify(account)
         : account.provider === "smzdm"
           ? smzdm.verify(account)
-          : account.provider === "zhihu"
-            ? zhihuIdentity.verify(account)
-            : account.provider === "weibo"
-              ? weiboSessions.verify(account)
-              : baiduSessions.status(account),
+          : account.provider === "tieba"
+            ? tiebaIdentity.verify(account)
+            : account.provider === "zhihu"
+              ? zhihuIdentity.verify(account)
+              : account.provider === "weibo"
+                ? weiboSessions.verify(account)
+                : baiduSessions.status(account),
     openDocument: (account, url) => documents.openDocument(account, url),
     open: async (account, expectedUid) => {
       if (account.provider !== "weibo")

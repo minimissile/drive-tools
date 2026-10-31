@@ -120,7 +120,7 @@ export interface IpcCommands {
   "insertion.recheck": Contract<{ id: string }, InsertionRun>;
   "insertion.export": Contract<{ id: string }, string | null>;
 
-  "account.add": Contract<{ provider: Provider; alias: string }, Account>;
+  "account.add": Contract<{ provider: Provider; alias: string; browser?: import("./drive-browser").DriveAccountBrowserInput }, Account>;
   "account.capacity": Contract<Id, Account>;
   "account.check": Contract<Id>;
   "account.clear": Contract<Id>;

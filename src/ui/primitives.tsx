@@ -8,7 +8,13 @@ import {
   type ReactNode,
   type ComponentProps,
 } from "react";
-import { ArrowRight, LoaderCircle, Search, X } from "lucide-react";
+import {
+  ArrowRight,
+  LoaderCircle,
+  Search,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 export function Button({
   primary = false,
   quiet = false,
@@ -133,12 +139,14 @@ export function Empty({
   action,
   fill = false,
   compact = false,
+  icon,
 }: {
   title: string;
   children?: ReactNode;
   action?: ReactNode;
   fill?: boolean;
   compact?: boolean;
+  icon?: LucideIcon;
 }) {
   return (
     <DataState
@@ -148,6 +156,7 @@ export function Empty({
       fill={fill}
       compact={compact}
       className="empty"
+      icon={icon}
     >
       {children}
     </DataState>

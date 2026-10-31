@@ -37,6 +37,7 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  driveBrowsers: import("../drive-browser-sessions").DriveBrowserSessions;
   baiduDiscovery: import("../baidu-discovery").BaiduDiscovery;
   accountDeletion: import("../account-deletion").AccountDeletion;
   resourceLinks: import("../resource-links").ResourceLinks;
@@ -80,6 +81,7 @@ export interface HandlerServices {
   changed(): void;
   snapshot(resourceId?: string): AppSnapshot;
   account(id: string): Account;
+  lockedAccount<T>(id: string, action: () => Promise<T>): Promise<T>;
   authenticated<T>(
     id: string,
     action: (account: Account, provider: DriveProvider) => Promise<T>,

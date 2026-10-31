@@ -209,6 +209,9 @@ export class AccountDeletion {
             `account:capacity:${accountId}`,
             `intake:directories:${accountId}`,
           );
+          this.db.run("DELETE FROM browser_environment_accounts WHERE kind='drive' AND account_id=?", accountId);
+          this.db.run("DELETE FROM settings WHERE key=?", `drive-browser:${accountId}`);
+          this.db.run("DELETE FROM settings WHERE key=?", `drive-browser-mode:${accountId}`);
           this.db.run("DELETE FROM accounts WHERE id=?", accountId);
           const replacement =
             this.d.repo

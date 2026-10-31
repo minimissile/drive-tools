@@ -33,7 +33,7 @@ export const environmentEngineLabel = (engine: BrowserEnvironment["engine"]) =>
   engine === "electron" ? "内置浏览器" : "比特浏览器";
 const platformName = (id: string) =>
   (isDocumentProvider(id) ? documentPlatformSpecs[id].name : undefined) ??
-  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道" }[id] ??
+  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道", "drive-baidu": "百度网盘" }[id] ??
   platformSpecs.find((p) => p.id === id)?.name ??
   id;
 

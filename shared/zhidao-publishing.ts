@@ -4,6 +4,13 @@ export { zhidaoQuestionTitleLimit } from "./zhidao-content";
 export const zhidaoPublishLimit = 100;
 export const zhidaoTaskNameLimit = 15;
 
+export interface QuestionDraftInsertResult {
+  added: number;
+  duplicates: number;
+  titleIssues: number;
+  runId: string | null;
+}
+
 export function zhidaoContentIssue(item: { question: string; answer: string }) {
   return zhidaoQuestionIssue(item.question) || zhidaoAnswerIssue(item.answer);
 }

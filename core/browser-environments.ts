@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { isIP } from "node:net";
 import { Database, id, now } from "./database";
 import { AppError } from "./errors";
+import { environmentAllowsAccount } from "../shared/browser-environment-sharing";
 import type { SecretStore } from "./secrets";
 import type { AppPorts } from "./ports";
 import type {
@@ -29,14 +30,15 @@ export class BrowserEnvironments {
   private leases = new Map<string, symbol>();
   private leaseScope = new AsyncLocalStorage<Map<string, symbol>>();
   private guards: ((refs: EnvironmentAccountRef[]) => void)[] = [];
-  private externalConfiguration?: (
-    profileId: string,
-  ) => Promise<{
+  private externalConfiguration?: (profileId: string) => Promise<{
     signature: string;
     proxy: "direct" | "configured";
     stopWhileNetError: boolean;
   }>;
-  private externalNetwork?: (profileId: string) => Promise<string>;
+  private externalNetwork?: (
+    profileId: string,
+    headless?: boolean,
+  ) => Promise<string>;
   private externalIdle?: (profileId: string) => Promise<void>;
   private releaseListeners = new Set<() => void>();
   private queuedBusy: (environmentId: string) => boolean = () => false;
@@ -83,7 +85,7 @@ export class BrowserEnvironments {
   ) {
     this.externalIdle = reader;
   }
-  private async refreshExternal(environmentId: string) {
+  private async refreshExternal(environmentId: string, requireProxy = false) {
     const env = this.get(environmentId);
     if (env.engine !== "bitbrowser" || !this.externalConfiguration) return;
     const connectorKey = this.db.setting("bitUrl", "");
@@ -94,7 +96,7 @@ export class BrowserEnvironments {
       );
     const config = await this.externalConfiguration(env.profileId);
     if (
-      env.requireProxy &&
+      (env.requireProxy || requireProxy) &&
       (config.proxy !== "configured" || !config.stopWhileNetError)
     )
       throw new AppError(
@@ -221,6 +223,19 @@ export class BrowserEnvironments {
           realm: row.provider === "baidu-marketing" ? "baidu" : row.provider,
           uid: row.uid,
         };
+    } else if (ref.kind === "drive") {
+      const row = this.db.get<{
+        alias: string;
+        provider: string;
+        uid: string | null;
+      }>("SELECT alias,provider,uid FROM accounts WHERE id=?", ref.id);
+      if (row?.provider === "baidu")
+        return {
+          alias: row.alias,
+          platform: "drive-baidu",
+          realm: "drive-baidu",
+          uid: row.uid,
+        };
     } else if (ref.kind === "zhidao") {
       const row = this.db.get<{ data: string }>(
         "SELECT data FROM zhidao_accounts WHERE id=?",
@@ -282,7 +297,9 @@ export class BrowserEnvironments {
       revision: 1,
       proxy: engine === "electron" ? { mode: "direct" } : null,
       fingerprint: engine === "electron" ? "native" : "external",
-      ...(engine === "bitbrowser" ? { connectorKey: this.db.setting("bitUrl", "") } : {}),
+      ...(engine === "bitbrowser"
+        ? { connectorKey: this.db.setting("bitUrl", "") }
+        : {}),
       hasProxyCredentials: false,
       createdAt: time,
       updatedAt: time,
@@ -294,10 +311,38 @@ export class BrowserEnvironments {
     verified = false,
   ) {
     const info = this.accountInfo(ref);
-    if (["feishu", "tencent-docs", "shimo"].includes(info.platform) && this.get(environmentId).engine !== "electron")
-      throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台当前使用内置浏览器保存会话，请选择内置环境。");
-    if(info.platform === "smzdm" && this.get(environmentId).engine !== "electron")
-      throw new AppError("SMZDM_NATIVE_SESSION","什么值得买单账号目前使用内置浏览器环境，请选择内置环境。");
+    const related = this.refs(environmentId).filter(
+      (r) => r.kind !== ref.kind || r.id !== ref.id,
+    );
+    if (
+      !environmentAllowsAccount(
+        {
+          engine: this.get(environmentId).engine,
+          accounts: related.map((r) => ({ ...this.link(r), ...r })),
+        },
+        { kind: ref.kind, platform: info.platform },
+      )
+    )
+      throw new AppError(
+        "DRIVE_PROFILE_EXCLUSIVE",
+        "百度网盘后台环境仅可与贴吧、知道共用，其他平台请选择独立环境。",
+      );
+    if (
+      ["feishu", "tencent-docs", "shimo"].includes(info.platform) &&
+      this.get(environmentId).engine !== "electron"
+    )
+      throw new AppError(
+        "DOCUMENT_NATIVE_SESSION",
+        "文档平台当前使用内置浏览器保存会话，请选择内置环境。",
+      );
+    if (
+      info.platform === "smzdm" &&
+      this.get(environmentId).engine !== "electron"
+    )
+      throw new AppError(
+        "SMZDM_NATIVE_SESSION",
+        "什么值得买单账号目前使用内置浏览器环境，请选择内置环境。",
+      );
     if (
       ref.kind !== "binding" &&
       this.db.get(
@@ -340,6 +385,20 @@ export class BrowserEnvironments {
   }
   private migrateLegacy() {
     this.db.transaction(() => {
+      for (const row of this.db.all<{ id: string; alias: string }>(
+        "SELECT id,alias FROM accounts WHERE provider='baidu'",
+      )) {
+        const ref = { kind: "drive" as const, id: row.id };
+        if (!this.linkRow(ref))
+          this.attach(
+            ref,
+            this.register(
+              `${row.alias} · 内置环境`,
+              "electron",
+              `persist:panxu-${row.id}`,
+            ).id,
+          );
+      }
       for (const row of this.db.all<{
         id: string;
         provider: string;
@@ -399,7 +458,11 @@ export class BrowserEnvironments {
       }
     });
   }
-  registerAccount(ref: EnvironmentAccountRef, environmentId?: string) {
+  registerAccount(
+    ref: EnvironmentAccountRef,
+    environmentId?: string,
+    drivePolicy?: { requireProxy: boolean },
+  ) {
     if (
       environmentId &&
       (this.leases.has(environmentId) || this.queuedBusy(environmentId))
@@ -413,8 +476,23 @@ export class BrowserEnvironments {
       : this.register(
           `${this.accountInfo(ref).alias} · 环境`,
           "electron",
-          `persist:panxu-environment-${id("profile")}`,
+          ref.kind === "drive"
+            ? `persist:panxu-${ref.id}`
+            : `persist:panxu-environment-${id("profile")}`,
         );
+    if (drivePolicy) {
+      if (ref.kind !== "drive")
+        throw new AppError(
+          "DRIVE_BINDING_REQUIRED",
+          "只有网盘账号可以设置后台网络要求。",
+        );
+      if (environment.requireProxy !== drivePolicy.requireProxy)
+        this.persist({
+          ...environment,
+          requireProxy: drivePolicy.requireProxy,
+          revision: environment.revision + 1,
+        });
+    }
     this.attach(ref, environment.id);
     return environment;
   }
@@ -480,11 +558,21 @@ export class BrowserEnvironments {
   }
   /** Confirm a local document workspace session without manufacturing an external UID. */
   confirmSession(ref: EnvironmentAccountRef) {
-    if (ref.kind !== "website" || !["feishu", "tencent-docs", "shimo"].includes(this.accountInfo(ref).platform))
-      throw new AppError("ENVIRONMENT_SESSION_PLATFORM", "此平台需要核实真实账号身份。");
+    if (
+      ref.kind !== "website" ||
+      !["feishu", "tencent-docs", "shimo"].includes(
+        this.accountInfo(ref).platform,
+      )
+    )
+      throw new AppError(
+        "ENVIRONMENT_SESSION_PLATFORM",
+        "此平台需要核实真实账号身份。",
+      );
     this.db.run(
       "UPDATE browser_environment_accounts SET verified_revision=? WHERE kind=? AND account_id=?",
-      this.stamp(ref).identityRevision, ref.kind, ref.id,
+      this.stamp(ref).identityRevision,
+      ref.kind,
+      ref.id,
     );
   }
   invalidateIdentity(ref: EnvironmentAccountRef) {
@@ -510,6 +598,7 @@ export class BrowserEnvironments {
     environmentId: string,
     owner: string,
     action: () => Promise<T>,
+    options: { headless?: boolean; requireProxy?: boolean } = {},
   ): Promise<T> {
     const held = this.leases.get(environmentId);
     if (held && this.leaseScope.getStore()?.get(environmentId) === held)
@@ -525,12 +614,16 @@ export class BrowserEnvironments {
     this.leases.set(environmentId, token);
     try {
       return await this.leaseScope.run(scope, async () => {
-        await this.refreshExternal(environmentId);
+        await this.refreshExternal(environmentId, options.requireProxy);
         await this.ports.browserEnvironments?.prepare(
           await this.runtime(environmentId),
         );
-        if (this.get(environmentId).requireProxy)
-          await this.probeNetwork(environmentId);
+        if (this.get(environmentId).requireProxy || options.requireProxy)
+          await this.probeNetwork(
+            environmentId,
+            options.headless,
+            options.requireProxy,
+          );
         return action();
       });
     } finally {
@@ -578,21 +671,38 @@ export class BrowserEnvironments {
       await this.externalIdle?.(environment.profileId);
   }
   /** Window controls must also work when proxy/configuration checks are failing. */
-  async controlWindow<T>(environmentId: string, action: () => Promise<T>, expectedRevision?: number) {
+  async controlWindow<T>(
+    environmentId: string,
+    action: () => Promise<T>,
+    expectedRevision?: number,
+  ) {
     if (this.leases.has(environmentId) || this.queuedBusy(environmentId))
-      throw new AppError("ENVIRONMENT_BUSY", "此环境正在操作或排队，请在对应业务处理后再关闭窗口。");
+      throw new AppError(
+        "ENVIRONMENT_BUSY",
+        "此环境正在操作或排队，请在对应业务处理后再关闭窗口。",
+      );
     for (const guard of this.guards) guard(this.refs(environmentId));
     const env = this.get(environmentId);
     if (expectedRevision !== undefined && env.revision !== expectedRevision)
-      throw new AppError("ENVIRONMENT_CHANGED", "环境在确认期间发生变化，请重新检查后关闭。");
-    this.leases.set(environmentId, Symbol("window-control"));
+      throw new AppError(
+        "ENVIRONMENT_CHANGED",
+        "环境在确认期间发生变化，请重新检查后关闭。",
+      );
+    const token = Symbol("window-control"),
+      scope = new Map(this.leaseScope.getStore());
+    scope.set(environmentId, token);
+    this.leases.set(environmentId, token);
     try {
-      return await action();
+      return await this.leaseScope.run(scope, action);
     } finally {
       // Even an uncertain close result must revoke prepared browser operations.
       try {
         const current = this.get(environmentId);
-        this.persist({ ...current, revision: current.revision + 1, updatedAt: now() });
+        this.persist({
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: now(),
+        });
       } finally {
         this.leases.delete(environmentId);
         this.changed();
@@ -600,7 +710,11 @@ export class BrowserEnvironments {
       }
     }
   }
-  private async mutate<T>(ids: string[], action: () => Promise<T>) {
+  private async mutate<T>(
+    ids: string[],
+    action: () => Promise<T>,
+    associationOnly = false,
+  ) {
     const unique = [...new Set(ids)].sort();
     if (unique.some((id) => this.leases.has(id) || this.queuedBusy(id)))
       throw new AppError(
@@ -609,7 +723,11 @@ export class BrowserEnvironments {
       );
     for (const id of unique) this.leases.set(id, Symbol("configuration"));
     try {
-      for (const id of unique) await this.assertIdle(id);
+      for (const id of unique) {
+        if (associationOnly)
+          for (const guard of this.guards) guard(this.refs(id));
+        else await this.assertIdle(id);
+      }
       return await action();
     } finally {
       for (const id of unique) this.leases.delete(id);
@@ -623,9 +741,15 @@ export class BrowserEnvironments {
     );
   }
   private async saveWithinLease(input: EnvironmentSaveInput) {
-    if (input.engine === "bitbrowser" && input.expectedConnectorKey !== undefined &&
-      input.expectedConnectorKey !== this.db.setting("bitUrl", ""))
-      throw new AppError("BIT_CONNECTION_CHANGED", "比特连接地址已变化，请重新读取窗口列表后接入。");
+    if (
+      input.engine === "bitbrowser" &&
+      input.expectedConnectorKey !== undefined &&
+      input.expectedConnectorKey !== this.db.setting("bitUrl", "")
+    )
+      throw new AppError(
+        "BIT_CONNECTION_CHANGED",
+        "比特连接地址已变化，请重新读取窗口列表后接入。",
+      );
     const old = input.id ? this.get(input.id) : null;
     if (
       old &&
@@ -708,7 +832,9 @@ export class BrowserEnvironments {
       revision: 1,
       proxy: input.engine === "electron" ? { mode: "direct" } : null,
       fingerprint: input.engine === "electron" ? "native" : "external",
-      ...(input.engine === "bitbrowser" ? { connectorKey: this.db.setting("bitUrl", "") } : {}),
+      ...(input.engine === "bitbrowser"
+        ? { connectorKey: this.db.setting("bitUrl", "") }
+        : {}),
       hasProxyCredentials: false,
       createdAt: time,
       updatedAt: time,
@@ -728,7 +854,11 @@ export class BrowserEnvironments {
           password: input.proxyPassword,
         }),
       );
-    else if (input.clearProxyCredentials || input.proxy?.mode === "direct" || input.proxy?.mode === "socks5")
+    else if (
+      input.clearProxyCredentials ||
+      input.proxy?.mode === "direct" ||
+      input.proxy?.mode === "socks5"
+    )
       this.secrets.remove(`environment:${env.id}:proxy`);
     this.persist({
       ...env,
@@ -746,49 +876,91 @@ export class BrowserEnvironments {
     this.changed();
     return this.get(env.id);
   }
-  async bind(ref: EnvironmentAccountRef, environmentId?: string) {
+  async bind(
+    ref: EnvironmentAccountRef,
+    environmentId?: string,
+    drivePolicy?: { requireProxy: boolean },
+  ) {
+    if (drivePolicy && ref.kind !== "drive")
+      throw new AppError(
+        "DRIVE_BINDING_REQUIRED",
+        "只有网盘关联可以同步后台网络要求。",
+      );
     const old = this.link(ref);
-    if (old.environmentId === environmentId) return this.get(environmentId);
-    return this.mutate([old.environmentId, ...(environmentId ? [environmentId] : [])], async () => {
-      const related = this.db
-        .all<{ kind: EnvironmentAccountRef["kind"]; account_id: string }>(
-          "SELECT kind,account_id FROM browser_environment_accounts WHERE identity_id=?",
-          old.identityId,
-        )
-        .map((row) => ({ kind: row.kind, id: row.account_id }));
-      const target = this.db.transaction(() => {
-        // Create and attach together: a failed migration must not leave an empty environment.
-        const environment = environmentId
-          ? this.get(environmentId)
-          : this.register(
-              `${this.accountInfo(ref).alias} · 内置环境`,
-              "electron",
-              `persist:panxu-environment-${id("profile")}`,
-            );
-        for (const account of related) {
-          this.attach(account, environment.id);
-          if (account.kind === "binding") {
-            const env = environment;
-            const binding = this.db.get<{ platform: string; website_account_id: string | null }>(
-              "SELECT platform,website_account_id FROM browser_bindings WHERE id=?", account.id,
-            );
-            if (env.engine !== "bitbrowser" && !(binding?.platform === "weibo" && binding.website_account_id))
-              throw new AppError(
-                "ENVIRONMENT_ENGINE_UNSUPPORTED",
-                "此发布映射目前需要指纹环境。",
+    if (
+      old.environmentId === environmentId &&
+      (!drivePolicy ||
+        this.get(environmentId).requireProxy === drivePolicy.requireProxy)
+    )
+      return this.get(environmentId);
+    return this.mutate(
+      [old.environmentId, ...(environmentId ? [environmentId] : [])],
+      async () => {
+        const related = this.db
+          .all<{ kind: EnvironmentAccountRef["kind"]; account_id: string }>(
+            "SELECT kind,account_id FROM browser_environment_accounts WHERE identity_id=?",
+            old.identityId,
+          )
+          .map((row) => ({ kind: row.kind, id: row.account_id }));
+        const target = this.db.transaction(() => {
+          // Create and attach together: a failed migration must not leave an empty environment.
+          let environment = environmentId
+            ? this.get(environmentId)
+            : this.register(
+                `${this.accountInfo(ref).alias} · 内置环境`,
+                "electron",
+                ref.kind === "drive"
+                  ? `persist:panxu-${ref.id}`
+                  : `persist:panxu-environment-${id("profile")}`,
               );
+          if (
+            drivePolicy &&
+            environment.requireProxy !== drivePolicy.requireProxy
+          ) {
+            environment = this.persist({
+              ...environment,
+              requireProxy: drivePolicy.requireProxy,
+              revision: environment.revision + 1,
+              updatedAt: now(),
+            });
             this.db.run(
-              "UPDATE browser_bindings SET window_id=?,verified_at=NULL,last_checked_at=NULL WHERE id=?",
-              env.engine === "bitbrowser" ? env.profileId : "",
-              account.id,
+              "UPDATE browser_environment_identities SET revision=revision+1 WHERE environment_id=?",
+              environment.id,
             );
           }
-        }
-        return environment;
-      });
-      this.changed();
-      return this.get(target.id);
-    });
+          for (const account of related) {
+            this.attach(account, environment.id);
+            if (account.kind === "binding") {
+              const env = environment;
+              const binding = this.db.get<{
+                platform: string;
+                website_account_id: string | null;
+              }>(
+                "SELECT platform,website_account_id FROM browser_bindings WHERE id=?",
+                account.id,
+              );
+              if (
+                env.engine !== "bitbrowser" &&
+                !(binding?.platform === "weibo" && binding.website_account_id)
+              )
+                throw new AppError(
+                  "ENVIRONMENT_ENGINE_UNSUPPORTED",
+                  "此发布映射目前需要指纹环境。",
+                );
+              this.db.run(
+                "UPDATE browser_bindings SET window_id=?,verified_at=NULL,last_checked_at=NULL WHERE id=?",
+                env.engine === "bitbrowser" ? env.profileId : "",
+                account.id,
+              );
+            }
+          }
+          return environment;
+        });
+        this.changed();
+        return this.get(target.id);
+      },
+      ref.kind === "drive",
+    );
   }
   detach(ref: EnvironmentAccountRef) {
     this.db.run(
@@ -797,11 +969,18 @@ export class BrowserEnvironments {
       ref.id,
     );
   }
-  private async probeNetwork(environmentId: string) {
+  private async probeNetwork(
+    environmentId: string,
+    headless?: boolean,
+    requireProxy = false,
+  ) {
     const env = await this.runtime(environmentId);
+    headless ??=
+      this.refs(environmentId).some((r) => r.kind === "drive") &&
+      env.engine === "bitbrowser";
     const ip =
       env.engine === "bitbrowser"
-        ? await this.externalNetwork?.(env.profileId)
+        ? await this.externalNetwork?.(env.profileId, headless)
         : await this.ports.browserEnvironments?.checkNetwork?.(env);
     if (!ip || !isIP(ip))
       throw new AppError(
@@ -809,7 +988,7 @@ export class BrowserEnvironments {
         "未能确认环境实际出口 IP，已阻止任务继续；请检查网络后重试。",
       );
     const duplicate =
-      env.requireProxy &&
+      (env.requireProxy || requireProxy) &&
       this.list().find(
         (other) =>
           other.id !== env.id &&

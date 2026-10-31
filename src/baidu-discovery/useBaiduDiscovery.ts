@@ -44,11 +44,12 @@ export function useBaiduDiscovery(workspace: string) {
   const serverRun = detail.data?.id === id ? detail.data : null;
   const acceptedRun = accepted?.id === id ? accepted : null;
   const run =
-    acceptedRun && (!serverRun || acceptedRun.updatedAt > serverRun.updatedAt)
+    acceptedRun && (!serverRun || acceptedRun.updatedAt >= serverRun.updatedAt)
       ? acceptedRun
       : serverRun;
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
+  const [errorAction, setErrorAction] = useState("");
   const mounted = useRef(true);
   const inFlight = useRef(false);
   const { notify } = useFeedbackActions();
@@ -67,6 +68,7 @@ export function useBaiduDiscovery(workspace: string) {
     const version = navigationVersion.current;
     setPending(name);
     setError("");
+    setErrorAction(name);
     try {
       const next = await action();
       if (!mounted.current) return;
@@ -92,7 +94,12 @@ export function useBaiduDiscovery(workspace: string) {
     run,
     id,
     pending,
-    error: error || selection.error,
+    error: ["expand", "export", "removeWord"].includes(errorAction)
+      ? selection.error
+      : error || selection.error,
+    resultError: ["expand", "export", "removeWord"].includes(errorAction)
+      ? error
+      : "",
     running:
       run?.status === "running" ||
       history.data?.some((item) => item.status === "running") ||
@@ -108,6 +115,10 @@ export function useBaiduDiscovery(workspace: string) {
       perform(kind, () => ipc(`baiduDiscovery.${kind}`, { id })),
     expand: (words: string[]) =>
       perform("expand", () => ipc("baiduDiscovery.expand", { id, words })),
+    removeWord: (key: string) =>
+      perform("removeWord", () =>
+        ipc("baiduDiscovery.removeWord", { id, key }),
+      ),
     open: () =>
       perform("open", () =>
         ipc("baiduDiscovery.open", { id: id || undefined }),

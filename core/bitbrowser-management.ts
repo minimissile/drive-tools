@@ -137,6 +137,11 @@ export class BitBrowserManagement {
   open(input: BitProfileCommand) {
     return this.control(input, async () => {
       const env = this.environment(input.profileId);
+      const drive = env?.accounts.find((a) => a.kind === "drive");
+      if (drive) {
+        await this.deps.openAccount(drive);
+        return true;
+      }
       const action = () =>
         this.deps.bit.withProfile(
           input.profileId,

@@ -16,7 +16,8 @@ export const answerDraftSchema = z.object({
   count: z.number(),
   categories: z
     .array(z.enum(["emotion", "general", "education"]))
-    .default(["emotion"]),
+    .default(["emotion"])
+    .transform((categories) => [categories[0] ?? "emotion"]),
   intervalSeconds: z.number().default(30),
   instructions: z.string().default(""),
 });

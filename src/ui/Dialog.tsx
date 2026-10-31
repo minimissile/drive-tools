@@ -13,6 +13,7 @@ export interface DialogProps {
   busy?: boolean;
   className?: string;
   focus?: "first-control" | "container";
+  size?: "default" | "fullscreen";
 }
 
 /** Product dialog: protected focus, Escape, focus restoration and one close policy. */
@@ -24,6 +25,7 @@ export function Dialog({
   busy = false,
   className = "",
   focus = "first-control",
+  size = "default",
 }: DialogProps) {
   const popup = useRef<HTMLDivElement>(null);
   const setPopup = useToastHost(popup);
@@ -38,10 +40,12 @@ export function Dialog({
     >
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className="modal-backdrop" />
-        <BaseDialog.Viewport className="modal-viewport">
+        <BaseDialog.Viewport
+          className={`modal-viewport${size === "fullscreen" ? " modal-viewport--fullscreen" : ""}`}
+        >
           <BaseDialog.Popup
             ref={setPopup}
-            className={`modal ${footer != null ? "modal--structured" : ""} ${className}`}
+            className={`modal ${footer != null || size === "fullscreen" ? "modal--structured" : ""} ${size === "fullscreen" ? "modal--fullscreen" : ""} ${className}`}
             aria-busy={busy || undefined}
             initialFocus={(interaction) =>
               focus === "container" || interaction === "touch"
@@ -55,17 +59,19 @@ export function Dialog({
               <BaseDialog.Title>{title}</BaseDialog.Title>
               <BaseDialog.Close
                 render={<Button quiet className="dialog-close" />}
-                aria-label="关闭弹窗"
-                title="关闭"
+                aria-label={size === "fullscreen" ? "退出全屏" : "关闭弹窗"}
+                title={size === "fullscreen" ? "退出全屏（Esc）" : "关闭"}
                 disabled={busy}
               >
                 <X size={18} aria-hidden="true" />
               </BaseDialog.Close>
             </div>
-            {footer != null ? (
+            {footer != null || size === "fullscreen" ? (
               <>
                 <div className="dialog-body">{children}</div>
-                <div className="dialog-actions">{footer}</div>
+                {footer != null ? (
+                  <div className="dialog-actions">{footer}</div>
+                ) : null}
               </>
             ) : (
               children

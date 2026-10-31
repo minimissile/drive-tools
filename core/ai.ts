@@ -28,6 +28,12 @@ import {
   type AiPurpose,
 } from "../shared/ai-models";
 export type { AiModel } from "../shared/ai-models";
+type ResponseOptions = {
+  maxTokens?: number;
+  outputSchema?: z.ZodType;
+  retainResponse?: boolean;
+  normalizeResponse?(data: unknown): unknown;
+};
 
 const keywordSchema = z.object({
   keywords: z
@@ -248,8 +254,18 @@ export class AiService {
     instruction: string,
     input: unknown,
     images: string[] = [],
+    options: ResponseOptions = {},
   ) {
-    return this.generate(name, schema, instruction, input, 6500, images);
+    return this.generate(
+      name,
+      schema,
+      instruction,
+      input,
+      options.maxTokens ?? 6500,
+      images,
+      undefined,
+      options,
+    );
   }
   async draft(
     copyId: string,
@@ -335,6 +351,7 @@ export class AiService {
     maxTokens = 3500,
     images: string[] = [],
     invalidMessage?: string,
+    options: ResponseOptions = {},
   ): Promise<T> {
     const key = await this.secrets.get("openrouter");
     if (!key)
@@ -376,7 +393,9 @@ export class AiService {
         json_schema: {
           name,
           strict: true,
-          schema: z.toJSONSchema(schema, { target: "draft-7" }),
+          schema: z.toJSONSchema(options.outputSchema ?? schema, {
+            target: "draft-7",
+          }),
         },
       },
       provider: { require_parameters: true },
@@ -465,6 +484,18 @@ export class AiService {
         callId,
       );
       const raw = response.choices?.[0]?.message?.content;
+      if (options.retainResponse && typeof raw === "string")
+        this.repo.db.run(
+          "INSERT OR REPLACE INTO api_cache(key,value,expires_at) VALUES(?,?,?)",
+          `ai-response:${callId}`,
+          JSON.stringify({
+            model,
+            raw: raw.slice(0, 100000),
+            finishReason: response.choices?.[0]?.finish_reason ?? null,
+            createdAt: now(),
+          }),
+          new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        );
       const issues = this.repo.db.setting<Record<string, string>>(
         "ai:modelIssues",
         {},
@@ -486,20 +517,41 @@ export class AiService {
         );
       let data: unknown;
       try {
-        data = JSON.parse(raw);
+        const text = raw
+          .trim()
+          .replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, "$1");
+        data = JSON.parse(text);
       } catch {
         throw new AppError(
           "INVALID_AI_RESPONSE",
           "模型未按要求返回JSON，未保存生成内容；本次费用已记录。",
         );
       }
-      const parsed = schema.safeParse(data);
-      if (!parsed.success)
+      const parsed = schema.safeParse(
+        options.normalizeResponse ? options.normalizeResponse(data) : data,
+      );
+      if (!parsed.success) {
+        const details = parsed.error.issues
+          .slice(0, 3)
+          .map((issue) => {
+            const field = issue.path.map(String).join(".") || "返回内容";
+            const reason =
+              issue.code === "too_small"
+                ? "内容或数量不足"
+                : issue.code === "too_big"
+                  ? "内容或数量超过上限"
+                  : issue.code === "invalid_type"
+                    ? "字段类型不符"
+                    : "字段结构不符";
+            return `${field}：${reason}`;
+          })
+          .join("；");
         throw new AppError(
           invalidMessage ? "CREATIVE_PLAN_INVALID" : "INVALID_AI_RESPONSE",
           invalidMessage ??
-            "模型返回字段不符合要求，未保存生成内容；可更换模型或补充资料后重试。",
+            `模型返回字段不符合要求（${details}），未保存生成内容；本次费用已记录。`,
         );
+      }
       return parsed.data;
     } catch (error) {
       const existing = this.repo.db.get<{ status: string }>(
@@ -530,6 +582,12 @@ export class AiService {
           "UPDATE api_calls SET status=?,message=? WHERE id=?",
           rejected ? "failed" : "uncertain",
           `${aiPurposeDetails[purpose].label}：${model}；${safeMessage(error)}；${rejected ? "服务已拒绝生成，未取得实费" : "实际费用待核实"}（美元）。`,
+          callId,
+        );
+      else if (existing?.status === "success")
+        this.repo.db.run(
+          "UPDATE api_calls SET message=message||? WHERE id=?",
+          ` 返回内容校验未通过：${safeMessage(error)}`,
           callId,
         );
       throw error;

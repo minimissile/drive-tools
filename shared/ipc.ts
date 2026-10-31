@@ -14,6 +14,7 @@ import type { BrowserEnvironmentContract } from "./browser-environments";
 import type { BitBrowserContract } from "./bitbrowser";
 import type { IpcCommands } from "./ipc-commands";
 import type { DriveFilesContract } from "./drive-files";
+import type { DriveBrowserContract } from "./drive-browser";
 import type { ZhidaoContract } from "./zhidao-ipc";
 import type { BaiduKeywordContract } from "./baidu-keywords";
 import type { BaiduResearchContract } from "./baidu-research";
@@ -84,6 +85,7 @@ export interface IpcContract
     ResourceCatalogContract,
     SmzdmContract,
     DriveFilesContract,
+    DriveBrowserContract,
     DistributionContract,
     ZhihuContract,
     PipixContract,
@@ -246,6 +248,7 @@ export const queryMethods = [
   "zhidao.settings",
   "zhidao.runs",
   "zhidao.run",
+  "zhidao.answer.logs",
   "zhidao.targets",
   "zhidao.templates",
   "zhidao.publish.preview",

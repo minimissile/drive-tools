@@ -18,6 +18,7 @@ export function createEnvironmentStatus(deps: {
     account(ref: EnvironmentAccountRef): BitBrowserAccountState {
       const link = deps.environments.link(ref);
       let status = "disconnected";
+      if (ref.kind === "drive") status = deps.db.get<{ status: string }>("SELECT status FROM accounts WHERE id=?", ref.id)?.status ?? status;
       if (ref.kind === "website")
         status =
           deps.db.get<{ status: string }>(

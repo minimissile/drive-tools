@@ -1,5 +1,6 @@
 import { useIpcQuery } from "../api/useIpcQuery";
 import { ipc } from "../api/client";
+import { isDocumentProvider } from "../../shared/document-platforms";
 import {
   websiteProviderSpecs,
   type WebsiteProvider,
@@ -7,6 +8,13 @@ import {
 } from "../../shared/website-accounts";
 
 export type OtherProvider = WebsiteProvider | "baidu-zhidao";
+export const defaultOtherAccountBrowser = (provider: OtherProvider) => ({
+  fingerprint:
+    provider !== "baidu-marketing" &&
+    provider !== "smzdm" &&
+    !isDocumentProvider(provider),
+  environmentId: "",
+});
 export interface OtherAccount {
   sessionOnly?: boolean;
   environmentId?: string;
@@ -118,7 +126,7 @@ export const otherAccountActions = {
       ? ipc("zhidao.account.login", { id: account.id })
       : ipc("websiteAccounts.login", { id: account.id });
   },
-  check(account: OtherAccount) {
+  check(account: Pick<OtherAccount, "id" | "provider">) {
     return account.provider === "baidu-zhidao"
       ? ipc("zhidao.account.check", { id: account.id })
       : ipc("websiteAccounts.check", { id: account.id });

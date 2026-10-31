@@ -2,6 +2,8 @@ import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { providerIds, providerSpecs } from "../../shared/providers";
 import type { Account, Provider } from "../../shared/types";
+import type { NewDriveBrowserPreview } from "../../shared/drive-browser";
+import { DriveBrowserCreation } from "./DriveBrowserCreation";
 import {
   useAppActions,
   useAppActivity,
@@ -18,6 +20,8 @@ import { providerSchema } from "../../shared/schemas";
 const accountInput = z.object({
   provider: providerSchema,
   alias: z.string().max(60),
+  browserEngine: z.enum(["electron", "bitbrowser"]).default("electron"),
+  profileId: z.string().max(200).default(""),
 });
 
 export function AddAccountForm({
@@ -31,13 +35,27 @@ export function AddAccountForm({
   const { data } = useAppData();
   const editor = useLocalDraft(
     `panxu-account-input-v1:${data!.dataPath}`,
-    { provider: "quark" as Provider, alias: "" },
+    {
+      provider: "quark" as Provider,
+      alias: "",
+      browserEngine: "electron" as "electron" | "bitbrowser",
+      profileId: "",
+    },
     (value) => accountInput.parse(value),
   );
-  const { provider, alias } = editor.value;
-  const setProvider = (provider: Provider) => editor.update({ provider });
+  const { provider, alias, browserEngine, profileId } = editor.value;
+  const setProvider = (provider: Provider) => {
+    editor.update({ provider, browserEngine: "electron", profileId: "" });
+    setPreview(null);
+  };
   const setAlias = (alias: string) => editor.update({ alias });
   const [adding, setAdding] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [preview, setPreview] = useState<NewDriveBrowserPreview | null>(null);
+  const fingerprint = provider === "baidu" && browserEngine === "bitbrowser";
+  const validPreview =
+    fingerprint && preview?.profileId === profileId ? preview : null;
+  const disabled = busy > 0 || adding || reading;
   const hintId = useId();
   return (
     <form
@@ -46,13 +64,21 @@ export function AddAccountForm({
       aria-describedby={hintId}
       onSubmit={async (event) => {
         event.preventDefault();
-        if (adding || busy > 0 || !alias.trim()) return;
+        if (disabled || !alias.trim() || (fingerprint && !validPreview)) return;
         setAdding(true);
         try {
           const account = await command(
             "account.add",
-            { provider, alias },
-            "账号已建立，请在隔离窗口中完成登录并核验UID。",
+            {
+              provider,
+              alias,
+              browser: fingerprint
+                ? { engine: "bitbrowser", previewToken: validPreview!.token }
+                : { engine: "electron" },
+            },
+            fingerprint
+              ? "账号已创建并固定使用所选指纹环境。"
+              : "账号已创建并固定使用内置浏览器，请完成登录和核验。",
           );
           if (account) {
             setAlias("");
@@ -67,7 +93,7 @@ export function AddAccountForm({
     >
       <div className="account-connect-heading">
         <h2>添加本人账号</h2>
-        <p id={hintId}>添加别名后，在官方窗口登录，再核验本人 UID。</p>
+        <p id={hintId}>创建时确定浏览器方式，保存后不能切换或改绑。</p>
       </div>
       {editor.error ? <Notice warning>{editor.error}</Notice> : null}
       <div className="account-connect-fields">
@@ -75,7 +101,7 @@ export function AddAccountForm({
           <Select
             aria-label="新增账号网盘"
             value={provider}
-            disabled={busy > 0}
+            disabled={disabled}
             onValueChange={(value) => setProvider(value as Provider)}
             items={providerIds.map((id) => ({
               value: id,
@@ -94,16 +120,52 @@ export function AddAccountForm({
             placeholder="例如：夸克资料号、百度归档号"
             value={alias}
             maxLength={60}
-            disabled={busy > 0}
+            disabled={disabled}
             onChange={(e) => setAlias(e.target.value)}
             autoComplete="off"
           />
         </Field>
-        <Button type="submit" primary disabled={!alias.trim() || busy > 0}>
+        <Field label="浏览器方式">
+          <Select
+            aria-label="新增账号浏览器方式"
+            value={fingerprint ? "bitbrowser" : "electron"}
+            disabled={disabled}
+            onValueChange={(value) => {
+              editor.update({
+                browserEngine: value as "electron" | "bitbrowser",
+                profileId: "",
+              });
+              setPreview(null);
+            }}
+            items={[
+              { value: "electron", label: "内置浏览器" },
+              {
+                value: "bitbrowser",
+                label: "比特指纹浏览器",
+                disabled: provider !== "baidu",
+              },
+            ]}
+          />
+        </Field>
+        <Button
+          type="submit"
+          primary
+          disabled={!alias.trim() || disabled || (fingerprint && !validPreview)}
+        >
           <Plus size={16} aria-hidden="true" />
           {adding ? "正在添加…" : "添加账号"}
         </Button>
       </div>
+      {fingerprint ? (
+        <DriveBrowserCreation
+          profileId={profileId}
+          onProfileChange={(profileId) => editor.update({ profileId })}
+          preview={validPreview}
+          onPreview={setPreview}
+          disabled={busy > 0 || adding}
+          onBusy={setReading}
+        />
+      ) : null}
     </form>
   );
 }

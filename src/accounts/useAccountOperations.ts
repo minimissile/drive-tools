@@ -18,7 +18,9 @@ export function useAccountOperations() {
           "account.login",
           { id: account.id },
           {
-            text: "官方登录窗口已打开。完成登录后，请返回核验本人UID。",
+            text: account.browser
+              ? "关联的比特登录窗口已打开。完成登录后，请关闭此比特环境，再核验后台登录。"
+              : "官方登录窗口已打开。完成登录后，请返回核验本人UID。",
             tone: "info",
           },
         );

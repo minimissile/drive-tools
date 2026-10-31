@@ -98,6 +98,20 @@ export interface OperationDetail {
   page: number;
   pageSize: number;
   collection?: CollectionResultSummary;
+  answerAttention?: OperationItem[];
+}
+export interface AnswerLogEntry {
+  id: number;
+  level: "info" | "success" | "warning" | "error";
+  message: string;
+  createdAt: string;
+}
+export interface AnswerLogPage {
+  runId: string;
+  items: AnswerLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 export interface OperationsSummary {
   runs: OperationRun[];
@@ -143,8 +157,8 @@ export const answerInput = z
     categories: z
       .array(z.enum(["emotion", "general", "education"]))
       .min(1)
-      .max(3)
-      .default(["emotion", "general", "education"]),
+      .max(1, "一次只能选择一种答题分类，请重新选择后开始")
+      .default(["emotion"]),
     intervalSeconds: z.number().int().min(18).max(600).default(18),
     instructions: text.max(2000).default(""),
   })

@@ -10,6 +10,7 @@ import {
   readBaiduSuggestions,
 } from "../core/baidu-discovery-page";
 import { AppError } from "../core/errors";
+import { createBackgroundBrowserWindow } from "./background-browser-window";
 
 const allowed = (raw: string) => {
   try {
@@ -28,7 +29,7 @@ const allowed = (raw: string) => {
   }
 };
 
-/** One reusable, visible Chromium window; its persistent storage belongs to this workspace. */
+/** One background Chromium page; revealing it keeps the same workspace session. */
 export function createBaiduDiscoverySession(
   workspace: () => string,
 ): BaiduDiscoveryPort {
@@ -47,8 +48,7 @@ export function createBaiduDiscoverySession(
     profile.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
     );
-    const win = new BrowserWindow({
-      show: true,
+    const win = createBackgroundBrowserWindow({
       width: 1280,
       height: 900,
       title: "百度批量扩词 · 采集窗口",
@@ -85,16 +85,16 @@ export function createBaiduDiscoverySession(
     ) as Promise<ReturnType<typeof inspectBaiduRelated>>;
   const check = async (win: BrowserWindow) => {
     if ((await inspect(win)).kind === "verification") {
-      win.show();
-      win.focus();
       throw new AppError(
         "BAIDU_VERIFICATION",
-        "百度要求安全验证。请在采集窗口手动完成验证，再返回这里点击“继续采集”。",
+        "百度要求安全验证。请点击“查看异常页”完成验证，再继续采集。",
       );
     }
   };
   return {
-    isOpen: () => [...views.values()].some((win) => !win.isDestroyed()),
+    isOpen: () =>
+      busy ||
+      [...views.values()].some((win) => !win.isDestroyed() && win.isVisible()),
     async open(keyword) {
       const win = view();
       win.show();
@@ -113,8 +113,10 @@ export function createBaiduDiscoverySession(
           "BAIDU_BROWSER_BUSY",
           "百度采集窗口正在读取，请稍后继续。",
         );
-      busy = true;
       const win = view();
+      busy = true;
+      const timeout = new AbortController();
+      const reading = AbortSignal.any([signal, timeout.signal]);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const abort = () => {
         if (!win.isDestroyed()) win.destroy();
@@ -128,22 +130,25 @@ export function createBaiduDiscoverySession(
                 ? `https://www.baidu.com/s?wd=${encodeURIComponent(keyword)}`
                 : "https://www.baidu.com/";
             await win.loadURL(url);
-            signal.throwIfAborted();
+            reading.throwIfAborted();
             await check(win);
-            if (source === "suggest")
-              return (await win.webContents.executeJavaScript(
+            if (source === "suggest") {
+              const words = (await win.webContents.executeJavaScript(
                 `(() => {const __name = fn => fn;return (${readBaiduSuggestions.toString()})(${JSON.stringify(keyword)})})()`,
               )) as string[];
+              reading.throwIfAborted();
+              return words;
+            }
             await win.webContents.executeJavaScript(
               "window.scrollTo(0,document.documentElement.scrollHeight)",
             );
             const deadline = Date.now() + 15000;
             while (Date.now() < deadline) {
-              signal.throwIfAborted();
+              reading.throwIfAborted();
               await check(win);
               const result = await inspect(win);
               if (result.kind === "ready") return result.words;
-              await delay(500, undefined, { signal });
+              await delay(500, undefined, { signal: reading });
             }
             throw new AppError(
               "BAIDU_RELATED_MISSING",
@@ -152,13 +157,13 @@ export function createBaiduDiscoverySession(
           })(),
           new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => {
-              abort();
-              reject(
-                new AppError(
-                  "BAIDU_BROWSER_TIMEOUT",
-                  "百度页面加载超时，已保留结果，请检查网络后继续。",
-                ),
+              const error = new AppError(
+                "BAIDU_BROWSER_TIMEOUT",
+                "百度页面加载超时，已保留结果；可点击“查看异常页”检查后继续。",
               );
+              timeout.abort(error);
+              if (!win.isDestroyed()) win.webContents.stop();
+              reject(error);
             }, 45000);
           }),
         ]);

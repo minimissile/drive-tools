@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AppError } from "../errors";
 import {
   environmentAccountSchema,
   environmentIdSchema,
@@ -6,7 +7,7 @@ import {
 } from "../../shared/browser-environments";
 import type { HandlerMap, HandlerServices } from "./types";
 export function createBrowserEnvironmentHandlers(
-  s: Pick<HandlerServices, "environments" | "environmentQueue" | "bit">,
+  s: Pick<HandlerServices, "environments" | "environmentQueue" | "bit" | "driveBrowsers">,
 ) {
   return {
     "environments.list": () => s.environments.list(),
@@ -28,6 +29,7 @@ export function createBrowserEnvironmentHandlers(
           confirmed: z.literal(true),
         })
         .parse(input);
+      if (v.kind === "drive") throw new AppError("DRIVE_BINDING_REQUIRED", "百度网盘请在账号管理中读取并关联环境，以核实 UID 和后台运行方式。");
       return s.environments.bind({ kind: v.kind, id: v.id }, v.environmentId);
     },
     "environments.remove": (input) => {
@@ -40,6 +42,11 @@ export function createBrowserEnvironmentHandlers(
       const env = s.environments.get(
         z.object({ id: environmentIdSchema }).parse(input).id,
       );
+      const drive = s.environments.list().find((e) => e.id === env.id)?.accounts.find((a) => a.kind === "drive");
+      if (env.engine === "bitbrowser" && drive) {
+        await s.driveBrowsers.open(drive.id);
+        return true;
+      }
       if (env.engine === "bitbrowser")
         await s.environments.runEnvironment(env.id, "environment:open", () =>
           s.bit.withProfile(env.profileId, async () => {}),

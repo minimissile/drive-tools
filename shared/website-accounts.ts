@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const websiteProviderSchema = z.enum([
   "baidu-marketing",
+  "tieba",
   "weibo",
   "zhihu",
   "smzdm",
@@ -14,6 +15,10 @@ export const websiteProviderSpecs: Record<
   WebsiteProvider,
   { name: string; description: string }
 > = {
+  tieba: {
+    name: "百度贴吧",
+    description: "贴吧官方登录、账号身份与浏览器会话",
+  },
   feishu: { name: "飞书", description: "资源清单文档与网页登录会话" },
   "tencent-docs": {
     name: "腾讯文档",

@@ -103,6 +103,10 @@ export function createZhidaoHandlers(
       return s.zhidao.store.detail(v.id, v.page, v.driveType);
     },
     "zhidao.start": (input) => s.zhidao.start(runStartInput.parse(input)),
+    "zhidao.answer.logs": (input) => {
+      const v = z.object({ id: identifier, page: paging }).parse(input);
+      return s.zhidao.store.answerLogs(v.id, v.page);
+    },
     "zhidao.pause": (input) => s.zhidao.pause(objectId.parse(input).id),
     "zhidao.publish.open": (input) =>
       s.zhidao.openPublication(objectId.parse(input).id),

@@ -14,7 +14,10 @@ import { AppError } from "./errors";
 import type { WeiboEditorPayload } from "../shared/weibo-publishing";
 import { weiboReceiptUrl } from "../shared/weibo-marketing";
 import type { BrowserEnvironments } from "./browser-environments";
-import { documentPlatformUrl, isDocumentProvider } from "../shared/document-platforms";
+import {
+  documentPlatformUrl,
+  isDocumentProvider,
+} from "../shared/document-platforms";
 
 type Row = {
   id: string;
@@ -61,7 +64,13 @@ export class WebsiteAccounts {
         "WEBSITE_ACCOUNT_NOT_FOUND",
         "网站账号不存在或已移除，请重新选择。",
       );
-    return { ...view(row), environmentId: this.environments?.forAccount({ kind: "website", id: accountId }).id };
+    return {
+      ...view(row),
+      environmentId: this.environments?.forAccount({
+        kind: "website",
+        id: accountId,
+      }).id,
+    };
   }
   private sessions() {
     if (!this.ports.websiteSessions)
@@ -78,11 +87,29 @@ export class WebsiteAccounts {
     return Promise.all(ids.map((row) => this.check(row.id)));
   }
   add(provider: WebsiteProvider, alias?: string, environmentId?: string) {
-    if (isDocumentProvider(provider) && environmentId && this.environments?.get(environmentId).engine !== "electron")
-      throw new AppError("DOCUMENT_NATIVE_SESSION", "文档平台目前使用内置浏览器保存会话，请选择内置环境。");
+    if (
+      isDocumentProvider(provider) &&
+      environmentId &&
+      this.environments?.get(environmentId).engine !== "electron"
+    )
+      throw new AppError(
+        "DOCUMENT_NATIVE_SESSION",
+        "文档平台目前使用内置浏览器保存会话，请选择内置环境。",
+      );
     if (provider === "smzdm") {
-      if (this.db.get("SELECT id FROM website_accounts WHERE provider='smzdm'")) throw new AppError("SMZDM_SINGLE_ACCOUNT", "什么值得买仅连接一个账号，请使用已有账号或先移除旧连接。");
-      if (environmentId && this.environments?.get(environmentId).engine !== "electron") throw new AppError("SMZDM_NATIVE_SESSION", "什么值得买文章发布目前使用内置浏览器，请关闭指纹浏览器选项。");
+      if (this.db.get("SELECT id FROM website_accounts WHERE provider='smzdm'"))
+        throw new AppError(
+          "SMZDM_SINGLE_ACCOUNT",
+          "什么值得买仅连接一个账号，请使用已有账号或先移除旧连接。",
+        );
+      if (
+        environmentId &&
+        this.environments?.get(environmentId).engine !== "electron"
+      )
+        throw new AppError(
+          "SMZDM_NATIVE_SESSION",
+          "什么值得买文章发布目前使用内置浏览器，请关闭指纹浏览器选项。",
+        );
     }
     const time = now(),
       accountId = id("web");
@@ -99,15 +126,19 @@ export class WebsiteAccounts {
         "SELECT COUNT(*) n FROM website_accounts WHERE provider=?",
         provider,
       )!.n + 1;
-    this.db.transaction(() => { this.db.run(
-      "INSERT INTO website_accounts(id,provider,alias,uid,status,created_at,updated_at) VALUES(?,?,?,NULL,'disconnected',?,?)",
-      accountId,
-      provider,
-      alias?.trim() || `${websiteProviderSpecs[provider].name} ${ordinal}`,
-      time,
-      time,
-    );
-    this.environments?.registerAccount({ kind: "website", id: accountId }, environmentId);
+    this.db.transaction(() => {
+      this.db.run(
+        "INSERT INTO website_accounts(id,provider,alias,uid,status,created_at,updated_at) VALUES(?,?,?,NULL,'disconnected',?,?)",
+        accountId,
+        provider,
+        alias?.trim() || `${websiteProviderSpecs[provider].name} ${ordinal}`,
+        time,
+        time,
+      );
+      this.environments?.registerAccount(
+        { kind: "website", id: accountId },
+        environmentId,
+      );
     });
     this.changed();
     return this.get(accountId);
@@ -142,34 +173,48 @@ export class WebsiteAccounts {
         ? await sessions.verify(account)
         : await sessions.status(account);
     const ref = { kind: "website" as const, id: accountId };
-    if (!fresh && this.environments && !this.environments.identityCurrent(ref)) {
-      if(state.hasSession || !state.error)
+    if (
+      !fresh &&
+      this.environments &&
+      !this.environments.identityCurrent(ref)
+    ) {
+      if (state.hasSession || !state.error)
         state.error = "此环境的登录或配置已变化，请检查当前平台身份后再使用。";
       state.hasSession = false;
     }
-    const mismatch =
-      !!account.uid &&
-      !!state.uid &&
-      account.uid !== state.uid;
+    const mismatch = !!account.uid && !!state.uid && account.uid !== state.uid;
     const duplicate =
       !account.uid &&
       state.uid &&
       this.db.get<{ id: string }>(
         "SELECT id FROM website_accounts WHERE provider=? AND uid=? AND id<>?",
-        account.provider, state.uid,
+        account.provider,
+        state.uid,
         accountId,
       );
-    if (fresh && state.hasSession && state.uid && !mismatch && !duplicate) this.environments?.confirm(ref, state.uid);
-    if (fresh && state.hasSession && state.sessionOnly && isDocumentProvider(account.provider)) this.environments?.confirmSession(ref);
+    if (fresh && state.hasSession && state.uid && !mismatch && !duplicate)
+      this.environments?.confirm(ref, state.uid);
+    if (
+      fresh &&
+      state.hasSession &&
+      state.sessionOnly &&
+      isDocumentProvider(account.provider)
+    )
+      this.environments?.confirmSession(ref);
     const uid =
-      mismatch || duplicate || !state.hasSession ? account.uid : (state.uid ?? account.uid);
+      mismatch || duplicate || !state.hasSession
+        ? account.uid
+        : (state.uid ?? account.uid);
     const nickname =
       !mismatch && !duplicate && state.hasSession
         ? (state.nickname ?? account.nickname ?? null)
         : (account.nickname ?? null);
     const checkedAt = state.checkedAt ?? account.checkedAt ?? null;
     const status =
-      state.hasSession && (uid || (state.sessionOnly && isDocumentProvider(account.provider))) && !mismatch && !duplicate
+      state.hasSession &&
+      (uid || (state.sessionOnly && isDocumentProvider(account.provider))) &&
+      !mismatch &&
+      !duplicate
         ? "connected"
         : state.expired || account.status === "expired"
           ? "expired"
@@ -225,8 +270,8 @@ export class WebsiteAccounts {
           ? state.sessionOnly
             ? "已识别本机文档工作台会话。未核实平台身份或开放平台授权；公开访问权限请在官方文档中设置。"
             : account.provider === "weibo"
-            ? "已核实微博身份，发布交接前会再次检查。"
-            : "已识别本机会话，使用时由平台核验。"
+              ? "已核实微博身份，发布交接前会再次检查。"
+              : "已识别本机会话，使用时由平台核验。"
           : status === "expired"
             ? `${websiteProviderSpecs[account.provider].name}登录已失效，请重新登录并检查身份。`
             : state.windowOpen
@@ -241,13 +286,23 @@ export class WebsiteAccounts {
         "WEBSITE_ACCOUNT_BUSY",
         "此账号正在执行查询，请完成后再登录。",
       );
-    this.active.add(accountId);
-    try {
-      const action = async () => { this.environments?.invalidateIdentity({ kind: "website", id: accountId }); await this.sessions().login(account); };
-      if (this.environments) await this.environments.run({ kind: "website", id: accountId }, action); else await action();
-    } finally {
-      this.active.delete(accountId);
-    }
+    const ref = { kind: "website" as const, id: accountId };
+    const action = async () => {
+      this.active.add(accountId);
+      try {
+        this.environments?.invalidateIdentity(ref);
+        await this.sessions().login(account);
+      } finally {
+        this.active.delete(accountId);
+      }
+    };
+    if (!this.environments) await action();
+    else if (this.environments.forAccount(ref).engine === "bitbrowser")
+      await this.environments.controlWindow(
+        this.environments.forAccount(ref).id,
+        action,
+      );
+    else await this.environments.run(ref, action);
   }
   async verify(accountId: string) {
     this.get(accountId);
@@ -259,14 +314,21 @@ export class WebsiteAccounts {
     this.active.add(accountId);
     try {
       const action = () => this.check(accountId, true);
-      return this.environments ? await this.environments.run({ kind: "website", id: accountId }, action) : await action();
+      return this.environments
+        ? await this.environments.run(
+            { kind: "website", id: accountId },
+            action,
+          )
+        : await action();
     } finally {
       this.active.delete(accountId);
     }
   }
   remove(accountId: string) {
     const action = () => this.removeWithinEnvironment(accountId);
-    return this.environments ? this.environments.run({ kind: "website", id: accountId }, action) : action();
+    return this.environments
+      ? this.environments.run({ kind: "website", id: accountId }, action)
+      : action();
   }
   private async removeWithinEnvironment(accountId: string) {
     if (this.active.has(accountId))
@@ -349,17 +411,40 @@ export class WebsiteAccounts {
     });
   }
   async fillWeibo(accountId: string, payload: WeiboEditorPayload) {
-    return this.use(accountId, "weibo", async (account) => {
-      if (account.uid !== payload.uid) throw new AppError("WEIBO_ACCOUNT_MISMATCH", "微博身份与当前图文任务不一致。");
-      if (!this.ports.weiboPublisher) throw new AppError("WEIBO_PUBLISH_UNAVAILABLE", "请使用当前源码桌面窗口发布微博。");
-      const state = await this.ports.weiboPublisher.prepare(account, payload);
-      return { ...state, environment: this.environments?.stamp({ kind: "website", id: accountId }) };
-    }, "微博图文填写");
+    return this.use(
+      accountId,
+      "weibo",
+      async (account) => {
+        if (account.uid !== payload.uid)
+          throw new AppError(
+            "WEIBO_ACCOUNT_MISMATCH",
+            "微博身份与当前图文任务不一致。",
+          );
+        if (!this.ports.weiboPublisher)
+          throw new AppError(
+            "WEIBO_PUBLISH_UNAVAILABLE",
+            "请使用当前源码桌面窗口发布微博。",
+          );
+        const state = await this.ports.weiboPublisher.prepare(account, payload);
+        return {
+          ...state,
+          environment: this.environments?.stamp({
+            kind: "website",
+            id: accountId,
+          }),
+        };
+      },
+      "微博图文填写",
+    );
   }
   async openWeiboPost(accountId: string, url: string) {
     return this.use(accountId, "weibo", async (account) => {
       const permalink = weiboReceiptUrl(url, account.uid!);
-      if (!this.ports.websiteSessions?.openPost) throw new AppError("WEIBO_PUBLISH_UNAVAILABLE", "当前窗口不支持微博回执，请使用源码桌面窗口。");
+      if (!this.ports.websiteSessions?.openPost)
+        throw new AppError(
+          "WEIBO_PUBLISH_UNAVAILABLE",
+          "当前窗口不支持微博回执，请使用源码桌面窗口。",
+        );
       await this.ports.websiteSessions.openPost(account, permalink);
       return true;
     });
@@ -367,22 +452,54 @@ export class WebsiteAccounts {
   async openDocument(accountId: string, value: string) {
     const account = this.get(accountId);
     const url = documentPlatformUrl(account.provider, value);
-    if (!url) throw new AppError("DOCUMENT_URL_BLOCKED", "文档地址必须属于所选账号的 HTTPS 官方平台。");
+    if (!url)
+      throw new AppError(
+        "DOCUMENT_URL_BLOCKED",
+        "文档地址必须属于所选账号的 HTTPS 官方平台。",
+      );
     return this.use(accountId, account.provider, async (current) => {
       const sessions = this.sessions();
-      if (!sessions.openDocument) throw new AppError("DOCUMENT_SESSION_UNAVAILABLE", "当前环境不支持文档会话，请使用源码桌面窗口。");
+      if (!sessions.openDocument)
+        throw new AppError(
+          "DOCUMENT_SESSION_UNAVAILABLE",
+          "当前环境不支持文档会话，请使用源码桌面窗口。",
+        );
       await sessions.openDocument(current, url);
       return { opened: true, url };
     });
   }
-  async submitWeibo(accountId: string, payload: WeiboEditorPayload, before: () => Promise<void>) {
-    return this.use(accountId, "weibo", async (account) => {
-      if (account.uid !== payload.uid) throw new AppError("WEIBO_ACCOUNT_MISMATCH", "微博身份与当前图文任务不一致。");
-      if (!this.ports.weiboPublisher) throw new AppError("WEIBO_PUBLISH_UNAVAILABLE", "请使用当前源码桌面窗口发布微博。");
-      const assertEnvironment = () => this.environments?.assertStamp({ kind: "website", id: accountId }, payload.environment);
-      assertEnvironment();
-      return this.ports.weiboPublisher.submit(account, payload, async () => { assertEnvironment(); await before(); });
-    }, "微博提交");
+  async submitWeibo(
+    accountId: string,
+    payload: WeiboEditorPayload,
+    before: () => Promise<void>,
+  ) {
+    return this.use(
+      accountId,
+      "weibo",
+      async (account) => {
+        if (account.uid !== payload.uid)
+          throw new AppError(
+            "WEIBO_ACCOUNT_MISMATCH",
+            "微博身份与当前图文任务不一致。",
+          );
+        if (!this.ports.weiboPublisher)
+          throw new AppError(
+            "WEIBO_PUBLISH_UNAVAILABLE",
+            "请使用当前源码桌面窗口发布微博。",
+          );
+        const assertEnvironment = () =>
+          this.environments?.assertStamp(
+            { kind: "website", id: accountId },
+            payload.environment,
+          );
+        assertEnvironment();
+        return this.ports.weiboPublisher.submit(account, payload, async () => {
+          assertEnvironment();
+          await before();
+        });
+      },
+      "微博提交",
+    );
   }
   async open(accountId: string, expectedUid?: string) {
     return this.use(accountId, "weibo", async (account) => {
@@ -424,21 +541,32 @@ export class WebsiteAccounts {
     this.active.add(accountId);
     try {
       const actionWithIdentity = async () => {
-      const account = await this.check(accountId, provider !== "baidu-marketing");
-      if (account.provider !== provider)
-        throw new AppError(
-          "WEBSITE_PROVIDER_MISMATCH",
-          "所选账号不支持此功能，请重新选择。",
+        const account = await this.check(
+          accountId,
+          provider !== "baidu-marketing",
         );
-      if (account.status !== "connected")
-        throw new AppError(
-          "WEBSITE_LOGIN_REQUIRED",
-          account.message || "请先在账号管理中完成此网站账号的登录。",
-        );
-      return await action(account);
+        if (account.provider !== provider)
+          throw new AppError(
+            "WEBSITE_PROVIDER_MISMATCH",
+            "所选账号不支持此功能，请重新选择。",
+          );
+        if (account.status !== "connected")
+          throw new AppError(
+            "WEBSITE_LOGIN_REQUIRED",
+            account.message || "请先在账号管理中完成此网站账号的登录。",
+          );
+        return await action(account);
       };
       const ref = { kind: "website" as const, id: accountId };
-      return operationLabel && this.environmentQueue ? await this.environmentQueue.schedule([ref], operationLabel, actionWithIdentity) : this.environments ? await this.environments.run(ref, actionWithIdentity) : await actionWithIdentity();
+      return operationLabel && this.environmentQueue
+        ? await this.environmentQueue.schedule(
+            [ref],
+            operationLabel,
+            actionWithIdentity,
+          )
+        : this.environments
+          ? await this.environments.run(ref, actionWithIdentity)
+          : await actionWithIdentity();
     } finally {
       this.active.delete(accountId);
     }

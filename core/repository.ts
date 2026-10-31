@@ -30,6 +30,7 @@ export type Row = Record<string, any>;
 export class Repository {
   constructor(readonly db: Database) {}
   account(row: Row): Account {
+    const browser = this.db.setting<import("../shared/drive-browser").DriveBrowserBinding | null>(`drive-browser:${row.id}`, null);
     const capacity = accountCapacitySchema.safeParse(
       this.db.setting(`account:capacity:${row.id}`, null),
     );
@@ -44,6 +45,8 @@ export class Repository {
       defaultDirectory: row.default_directory,
       lastVerifiedAt: row.verified_at,
       error: row.error,
+      browserEngine: this.db.setting<"electron" | "bitbrowser">(`drive-browser-mode:${row.id}`, browser ? "bitbrowser" : "electron"),
+      browser: browser ? { environmentId: browser.environmentId, profileId: browser.profileId, profileName: browser.profileName, exitIp: browser.exitIp, requireProxy: browser.requireProxy } : null,
       capacity:
         capacity.success && capacity.data.ownerUid === row.uid
           ? capacity.data

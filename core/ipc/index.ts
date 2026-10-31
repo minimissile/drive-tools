@@ -5,6 +5,7 @@ import { createShareCreationHandlers } from "./share-creation";
 import { createResourceLinksHandlers } from "./resource-links";
 import { createSmzdmHandlers } from "./smzdm";
 import { createDriveFilesHandlers } from "./drive-files";
+import { createDriveBrowserHandlers } from "./drive-browser";
 import { createDistributionHandlers } from "./distribution";
 import { createPipixHandlers } from "./pipix";
 import { createZhihuHandlers } from "./zhihu";
@@ -48,6 +49,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createShareCreationHandlers(services),
     createSmzdmHandlers(services),
     createDriveFilesHandlers(services),
+    createDriveBrowserHandlers(services),
     createDistributionHandlers(services),
     createZhihuHandlers(services),
     createPipixHandlers(services),

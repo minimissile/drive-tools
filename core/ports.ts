@@ -2,6 +2,13 @@ import type { Account } from "../shared/types";
 
 export interface AppPorts {
   baiduDiscovery?: import("../shared/baidu-discovery").BaiduDiscoveryPort;
+  baiduShareReader?: {
+    inspect(source: import("../shared/types").ShareInput, parentId: string, page: number): Promise<import("../shared/types").ShareInspection>;
+    open(): Promise<void>;
+    /** Busy or visible sessions hold workspace changes; idle hidden pages do not. */
+    isOpen(): boolean;
+    close(force?: boolean): void;
+  };
   /** Fixed-entry service requests use the desktop network stack when available. */
   resourceLinksFetch?(url: string, init: RequestInit): Promise<Response>;
   smzdm?: import("../shared/smzdm").SmzdmPort;

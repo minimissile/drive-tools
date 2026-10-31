@@ -26,6 +26,7 @@ import { AppService, type AppPorts } from "../core/service";
 import { createZhidaoSession } from "./zhidao-session";
 import { createCollectionWebSession } from "./collection-web-session";
 import { createBaiduDiscoverySession } from "./baidu-discovery-session";
+import { createBaiduShareReader } from "./baidu-share-reader";
 import { createWebsiteSessions } from "./website-sessions";
 import { createDistributionSessions } from "./distribution-sessions";
 import { createEnvironmentSessions } from "./browser-environment-session";
@@ -159,17 +160,25 @@ async function providerResponse(
   init: RequestInit = {},
 ) {
   const url = allowedProviderUrl(accountId, text);
-  const requestSession = partition(accountId);
-  const referrer = providerRequestReferer(
-    service.repo.getAccount(accountId).provider,
-    url,
-  );
-  const response = await requestSession.fetch(url.href, {
-    ...init,
-    credentials: init.credentials ?? "include",
-    signal: AbortSignal.timeout(45_000),
-    headers: { Referer: referrer, ...init.headers },
-  });
+  let response: Response;
+  if (service.driveBrowsers.isBound(accountId)) {
+    const result = await service.driveBrowsers.request(accountId, url.href, init);
+    response = new Response(
+      [204, 205, 304].includes(result.status) ? null : result.body,
+      { status: result.status },
+    );
+  } else {
+    const referrer = providerRequestReferer(
+      service.repo.getAccount(accountId).provider,
+      url,
+    );
+    response = await partition(accountId).fetch(url.href, {
+      ...init,
+      credentials: init.credentials ?? "include",
+      signal: AbortSignal.timeout(45_000),
+      headers: { Referer: referrer, ...init.headers },
+    });
+  }
   if (![200, 201, 202, 204].includes(response.status)) {
     let detail = "";
     let remoteCode = "";
@@ -247,6 +256,7 @@ const transport: ProviderTransport = {
   },
   async setCookie(accountId, url, name, value) {
     allowedProviderUrl(accountId, url);
+    if (service.driveBrowsers.isBound(accountId)) return service.driveBrowsers.setCookie(accountId, url, name, value);
     await partition(accountId).cookies.set({
       url,
       name,
@@ -460,6 +470,7 @@ const ports: AppPorts = {
   },
   collectionWebSession: createCollectionWebSession(() => service.dataPath),
   baiduDiscovery: createBaiduDiscoverySession(() => service.dataPath),
+  baiduShareReader: createBaiduShareReader(() => service.dataPath),
   distributionSessions: createDistributionSessions(() => service.dataPath),
   browserEnvironments: environmentSessions,
   zhidaoSession: createZhidaoSession((id) => environmentSessions.profile({ kind: "zhidao", id })),
@@ -527,8 +538,9 @@ const ports: AppPorts = {
       rows,
     };
   },
-  login: (a) => openAccountWindow(a),
+  login: (a) => service.driveBrowsers.isBound(a.id) ? service.driveBrowsers.open(a.id) : openAccountWindow(a),
   async closeAccountWindow(accountId) {
+    if (service.driveBrowsers.isBound(accountId)) return;
     clearingSessions.add(accountId);
     try {
       const win = loginWindows.get(accountId);
@@ -542,6 +554,9 @@ const ports: AppPorts = {
     }
   },
   async clearSession(accountId) {
+    if (service.driveBrowsers.isBound(accountId)) {
+      await service.driveBrowsers.clearSession(accountId);
+    }
     clearingSessions.add(accountId);
     try {
       const win = loginWindows.get(accountId);
@@ -629,7 +644,7 @@ const ports: AppPorts = {
         "无法打开本地路径，请检查文件是否仍存在。",
       );
   },
-  openAccountPage: (a, url) => openAccountWindow(a, url),
+  openAccountPage: (a, url) => service.driveBrowsers.isBound(a.id) ? service.driveBrowsers.open(a.id, url) : openAccountWindow(a, url),
   async openExternal(url) {
     await shell.openExternal(url);
   },
@@ -728,6 +743,8 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
     if (
       running.length ||
       service.resourceLinks.isBusy ||
+      service.baiduDiscovery.isBusy ||
+      !!ports.baiduShareReader?.isOpen() ||
       service.accountDeletion.isBusy ||
       service.studio.isBusy ||
       service.websiteAccounts.isBusy ||
@@ -750,6 +767,12 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
         event.preventDefault();
         window!.hide();
       } else quitting = true;
+    }
+  });
+  window.once("closed", () => {
+    if (!windows.size) {
+      ports.baiduDiscovery?.close();
+      ports.baiduShareReader?.close(true);
     }
   });
   const devUrl = !app.isPackaged ? process.env.PANXU_DEV_URL : undefined;
@@ -1087,6 +1110,7 @@ else {
   app.on("before-quit", () => {
     quitting = true;
     service?.baiduDiscovery.close();
+    ports.baiduShareReader?.close(true);
     service?.distribution.close();
     service?.queue.stop();
     updater?.dispose();

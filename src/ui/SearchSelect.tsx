@@ -12,9 +12,12 @@ export function SearchSelect({
   label,
   items,
   value,
+  inputValue,
   onChange,
   onQueryChange,
   onOpenChange,
+  placeholder = "输入标题搜索资源…",
+  emptyMessage = "没有匹配资源，试试更短的关键词",
   loading = false,
   error = "",
   onRetry,
@@ -22,9 +25,12 @@ export function SearchSelect({
   label: string;
   items: SelectOption[];
   value: SelectOption;
+  inputValue?: string;
   onChange(value: string): void;
   onQueryChange?(query: string): void;
   onOpenChange?(open: boolean): void;
+  placeholder?: string;
+  emptyMessage?: string;
   loading?: boolean;
   error?: string;
   onRetry?(): void;
@@ -33,6 +39,7 @@ export function SearchSelect({
     <Combobox.Root
       items={items}
       value={value}
+      inputValue={inputValue}
       isItemEqualToValue={(a, b) => a.value === b.value}
       filter={onQueryChange ? null : undefined}
       onValueChange={(next) => {
@@ -52,7 +59,7 @@ export function SearchSelect({
       }}
     >
       <Combobox.InputGroup className="input-frame search-select">
-        <Combobox.Input aria-label={label} placeholder="输入标题搜索资源…" />
+        <Combobox.Input aria-label={label} placeholder={placeholder} />
         <Combobox.Trigger aria-label={`展开${label}`}>
           <ChevronsUpDown size={15} />
         </Combobox.Trigger>
@@ -78,7 +85,7 @@ export function SearchSelect({
             ) : null}
             {!loading && !error ? (
               <Combobox.Empty className="select-feedback">
-                没有匹配资源，试试更短的关键词
+                {emptyMessage}
               </Combobox.Empty>
             ) : null}
             <Combobox.List>

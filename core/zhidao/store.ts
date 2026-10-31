@@ -7,11 +7,16 @@ import type {
   OperationKind,
   OperationStatus,
   ZhidaoAccount,
+  AnswerLogEntry,
+  AnswerLogPage,
 } from "../../shared/zhidao";
 
 export class OperationsStore {
   constructor(readonly db: Database, private accountView?: (account: ZhidaoAccount) => ZhidaoAccount) {}
   recover() {
+    const interrupted = this.db.all<{ id: string }>(
+      "SELECT id FROM operation_runs WHERE kind='answer' AND status='running'",
+    );
     this.db.run(
       "UPDATE operation_runs SET status='paused',message='上次运行已中断，已保留结果；请核对后继续。',updated_at=? WHERE status='running'",
       now(),
@@ -19,6 +24,12 @@ export class OperationsStore {
     this.db.run(
       "UPDATE operation_items SET status='uncertain',data=json_set(data,'$.status','uncertain','$.message','提交过程被中断，请核对平台结果后处理。') WHERE status='submitting'",
     );
+    for (const run of interrupted)
+      this.answerLog(
+        run.id,
+        "warning",
+        "上次运行已中断，已保留回答和进度；请核对后继续。",
+      );
   }
   accounts(): ZhidaoAccount[] {
     return this.db
@@ -120,6 +131,7 @@ export class OperationsStore {
     message: string,
     done?: number,
   ) {
+    const previous = this.run(runId);
     this.db.run(
       "UPDATE operation_runs SET status=?,message=?,done=coalesce(?,done),updated_at=? WHERE id=?",
       status,
@@ -128,7 +140,38 @@ export class OperationsStore {
       now(),
       runId,
     );
+    if (
+      previous.kind === "answer" &&
+      (previous.status !== status || previous.message !== message ||
+        (done !== undefined && previous.done !== done))
+    )
+      this.answerLog(
+        runId,
+        status === "failed" ? "error" : status === "paused" ? "warning" : status === "completed" ? "success" : "info",
+        message,
+      );
     return this.run(runId);
+  }
+  answerLog(runId: string, level: AnswerLogEntry["level"], message: string) {
+    if (!message.trim()) return;
+    this.db.run(
+      "INSERT INTO zhidao_answer_logs(run_id,level,message,created_at) VALUES(?,?,?,?)",
+      runId, level, message.slice(0, 2000), now(),
+    );
+  }
+  answerLogs(runId: string, page = 1): AnswerLogPage {
+    if (this.run(runId).kind !== "answer")
+      throw new AppError("INVALID_RUN", "请选择智能问答记录。");
+    const total = this.db.get<{ n: number }>(
+      "SELECT count(*) n FROM zhidao_answer_logs WHERE run_id=?", runId,
+    )!.n;
+    const pageSize = 100;
+    const currentPage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+    const items = this.db.all<AnswerLogEntry>(
+      "SELECT id,level,message,created_at AS createdAt FROM zhidao_answer_logs WHERE run_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+      runId, pageSize, (currentPage - 1) * pageSize,
+    ).reverse();
+    return { runId, items, total, page: currentPage, pageSize };
   }
   config(runId: string, config: Record<string, unknown>) {
     this.db.run(
@@ -160,8 +203,9 @@ export class OperationsStore {
       runId,
       key,
     );
-    const item: OperationItem = old
-      ? { ...this.item(old.id), ...values }
+    const previous = old ? this.item(old.id) : null;
+    const item: OperationItem = previous
+      ? { ...previous, ...values }
       : {
           id: id("item"),
           runId,
@@ -194,6 +238,18 @@ export class OperationsStore {
       item.status,
       JSON.stringify(item),
     );
+    if (this.run(runId).kind === "answer" &&
+      (!previous || previous.status !== item.status || previous.message !== item.message)) {
+      const labels = {
+        pending: "待处理", ready: "回答已生成", failed: "回答失败",
+        submitted: "回答已提交", uncertain: "提交结果待核对", skipped: "已跳过",
+      };
+      this.answerLog(
+        runId,
+        item.status === "failed" ? "error" : ["uncertain", "skipped"].includes(item.status) ? "warning" : item.status === "submitted" ? "success" : "info",
+        `${labels[item.status]} · ${(item.question || item.name).slice(0, 180)}${item.message ? ` · ${item.message}` : ""}`,
+      );
+    }
     return item;
   }
   submitting(item: OperationItem) {
@@ -218,6 +274,12 @@ export class OperationsStore {
     }
     return {
       run,
+      ...(run.kind === "answer" ? {
+        answerAttention: this.db.all<{ data: string }>(
+          "SELECT data FROM operation_items WHERE run_id=? AND status IN ('ready','failed','uncertain') ORDER BY rowid",
+          runId,
+        ).map(row => parseJson<OperationItem>(row.data, {} as OperationItem)),
+      } : {}),
       items: this.db
         .all<{ data: string }>(
           "SELECT data FROM operation_items WHERE run_id=? ORDER BY rowid LIMIT 25 OFFSET ?",

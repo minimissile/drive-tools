@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ipc } from "../api/client";
+import { environmentAllowsAccount } from "../../shared/browser-environment-sharing";
 import { useAppActions, useAppData, useAppNavigation } from "../state";
 import { prepareAutoAnswer } from "../zhidao/answer-draft";
 import { ZhidaoRightsDialog } from "./ZhidaoRightsDialog";
@@ -17,6 +18,7 @@ import {
   otherAccountActions,
   otherProviderItems,
   otherProviderName,
+  defaultOtherAccountBrowser,
   type OtherAccount,
   type OtherProvider,
 } from "./useOtherAccounts";
@@ -84,10 +86,9 @@ export default function OtherAccounts({
   const formId = useId();
   const [filter, setFilter] = useState<"all" | OtherProvider>("all");
   const [query, setQuery] = useState("");
-  const [browser, setBrowser] = useState<AccountBrowserSelection>({
-    fingerprint: false,
-    environmentId: "",
-  });
+  const [browser, setBrowser] = useState<AccountBrowserSelection>(() =>
+    defaultOtherAccountBrowser(initialProvider),
+  );
   useEffect(() => {
     const id = initialEnvironment.current;
     if (!id || !accounts.environmentsReady) return;
@@ -105,12 +106,19 @@ export default function OtherAccounts({
     fingerprint: false,
     environmentId: "",
   });
-  const validBrowser = (selection: AccountBrowserSelection) =>
+  const validBrowser = (
+    selection: AccountBrowserSelection,
+    platform: OtherProvider = provider,
+  ) =>
     !selection.environmentId
       ? !selection.fingerprint
       : accounts.environments.some(
           (env) =>
             env.id === selection.environmentId &&
+            environmentAllowsAccount(env, {
+              kind: platform === "baidu-zhidao" ? "zhidao" : "website",
+              platform,
+            }) &&
             env.engine === (selection.fingerprint ? "bitbrowser" : "electron"),
         );
   const [cookie, setCookie] = useState("");
@@ -152,8 +160,7 @@ export default function OtherAccounts({
   const changeProvider = (value: OtherProvider) => {
     setProvider(value);
     setCookie("");
-    if (isDocumentProvider(value))
-      setBrowser({ fingerprint: false, environmentId: "" });
+    setBrowser(defaultOtherAccountBrowser(value));
   };
   const handleAction = (account: OtherAccount, action: OtherAccountAction) => {
     switch (action) {
@@ -314,6 +321,7 @@ export default function OtherAccounts({
             onConfigure={() => navigate("browser-environments")}
             onAdd={() =>
               void run("add", async () => {
+                const fingerprint = !nativeOnly && browser.fingerprint;
                 const account = await otherAccountActions.add(
                   provider,
                   newAlias,
@@ -322,19 +330,23 @@ export default function OtherAccounts({
                 );
                 setNewAlias("");
                 setCookie("");
+                setBrowser(defaultOtherAccountBrowser(provider));
                 setFilter(account.provider);
                 setQuery("");
                 setAdding(false);
                 accounts.reload();
                 try {
-                  await otherAccountActions.login(account);
+                  if (fingerprint) await otherAccountActions.check(account);
+                  else await otherAccountActions.login(account);
                 } catch (cause) {
                   setFailure({
                     id: account.key,
                     text:
                       cause instanceof Error
                         ? cause.message
-                        : "账号已添加，官方登录窗口未打开，请重试登录。",
+                        : fingerprint
+                          ? "账号已关联，登录核验未完成。请在此账号打开登录窗口处理后重新检查。"
+                          : "账号已添加，官方登录窗口未打开，请重试登录。",
                   });
                 }
               })
@@ -414,6 +426,11 @@ export default function OtherAccounts({
                       ? "未关联浏览器环境"
                       : "正在读取关联环境")
                   }
+                  environmentEngine={
+                    accounts.environments.find(
+                      (env) => env.id === account.environmentId,
+                    )?.engine
+                  }
                   environmentsReady={accounts.environmentsReady}
                   pending={pending}
                   failure={
@@ -477,10 +494,15 @@ export default function OtherAccounts({
             ”选择运行环境。同一环境可以保持多个不同平台的登录。
           </p>
           <AccountBrowserChoice
+            platform={assigning.provider}
             value={targetBrowser}
             onChange={setTargetBrowser}
             environments={accounts.environments}
             disabled={!!pending || !accounts.environmentsReady}
+            onConfigure={() => {
+              setAssigning(null);
+              navigate("browser-environments");
+            }}
             existing
           />
           <Notice warning>
@@ -509,7 +531,7 @@ export default function OtherAccounts({
               disabled={
                 !!pending ||
                 !accounts.environmentsReady ||
-                !validBrowser(targetBrowser) ||
+                !validBrowser(targetBrowser, assigning.provider) ||
                 targetBrowser.environmentId === assigning.environmentId
               }
               onClick={() =>

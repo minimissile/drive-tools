@@ -8,6 +8,33 @@ export async function browserPageRequest(
   init: RequestInit = {},
 ) {
   init.signal?.throwIfAborted();
+  const headers = new Headers(init.headers);
+  const requestedReferrer = headers.get("referer");
+  let referrer: string | undefined;
+  if (requestedReferrer) {
+    try {
+      const value = new URL(requestedReferrer);
+      if (
+        value.origin === new URL(page.url()).origin &&
+        !value.username &&
+        !value.password
+      )
+        referrer = value.href;
+    } catch {}
+  }
+  for (const name of [...headers.keys()])
+    if (
+      [
+        "cookie",
+        "origin",
+        "referer",
+        "host",
+        "user-agent",
+        "content-length",
+      ].includes(name) ||
+      name.startsWith("sec-")
+    )
+      headers.delete(name);
   const fields: {
     name: string;
     text?: string;
@@ -69,6 +96,8 @@ export async function browserPageRequest(
           body,
           redirect: "error",
           credentials: "include",
+          cache: input.cache,
+          referrer: input.referrer,
           signal: controller.signal,
         });
         const text = await response.text();
@@ -82,7 +111,9 @@ export async function browserPageRequest(
     {
       url,
       method: init.method ?? "GET",
-      headers: Object.fromEntries(new Headers(init.headers)),
+      headers: Object.fromEntries(headers),
+      cache: init.cache,
+      referrer,
       fields,
       body: init.body instanceof FormData ? undefined : init.body?.toString(),
     },

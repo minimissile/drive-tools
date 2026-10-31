@@ -33,7 +33,10 @@ export function AccountEditor({
     >
       <div className="account-editor-identity">
         <ProviderIcon provider={account.provider} size="medium" decorative />
-        <span>{providerName(account.provider)} · 登录会话独立隔离</span>
+        <span>
+          {providerName(account.provider)} ·{" "}
+          {latest.browser ? "比特后台环境" : "登录会话独立隔离"}
+        </span>
         {latest.enabled ? (
           <Button
             quiet
@@ -92,9 +95,13 @@ export function AccountEditor({
         <Notice>{providerStatisticsNotes[account.provider]}</Notice>
       ) : null}
       <div className="account-editor-security">
-        <strong>本地登录凭据</strong>
+        <strong>
+          {latest.browser ? "浏览器关联与本地凭据" : "本地登录凭据"}
+        </strong>
         <p>
-          移除本地会话并停用此账号，保留 UID
+          {latest.browser
+            ? "停用此账号并清理本地核验，保留固定的指纹环境及比特登录信息。保留 UID"
+            : "移除本地会话并停用此账号，保留 UID"}
           和历史归属；不会删除网盘文件或撤销分享。
         </p>
         <Button
@@ -107,13 +114,15 @@ export function AccountEditor({
               await command(
                 "account.clear",
                 { id: latest.id },
-                "本地会话已移除，账号已停用；云端文件和分享保留。",
+                latest.browser
+                  ? "账号已停用，本地核验已清理。固定的指纹环境、比特登录、云端文件和分享保留。"
+                  : "本地会话已移除，账号已停用；云端文件和分享保留。",
               )
             )
               onClose();
           }}
         >
-          移除本地凭据并停用账号
+          {latest.browser ? "停用账号并清理本地核验" : "移除本地凭据并停用账号"}
         </Button>
       </div>
       <div className="actions">

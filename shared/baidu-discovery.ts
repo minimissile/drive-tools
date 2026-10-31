@@ -68,12 +68,26 @@ export const discoveryRunSchema = z.object({
   input: discoveryInputSchema,
   queries: z.array(discoveryQuerySchema).max(500),
   words: z.array(discoveryWordSchema).max(10000),
+  removedKeys: z.array(z.string().max(200)).max(100000).default([]),
+  materialPool: z
+    .object({
+      brief: z.string().max(6000),
+      entries: z.array(z.string().min(1).max(2000)).min(1).max(10),
+      requestedCount: z.number().int().min(1).max(10).optional(),
+      warnings: z.array(z.string().max(300)).max(20).default([]),
+      createdAt: z.string(),
+    })
+    .nullable()
+    .default(null),
   message: z.string(),
   currentWord: z.string(),
   limited: z.boolean(),
 });
 export type DiscoveryRun = z.infer<typeof discoveryRunSchema>;
-export type DiscoverySummary = Omit<DiscoveryRun, "queries" | "words"> & {
+export type DiscoverySummary = Omit<
+  DiscoveryRun,
+  "queries" | "words" | "removedKeys" | "materialPool"
+> & {
   queryCount: number;
   completedCount: number;
   wordCount: number;
@@ -101,7 +115,31 @@ export interface BaiduDiscoveryContract {
     DiscoveryRun
   >;
   "baiduDiscovery.open": Contract<{ id?: string }, void>;
+  "baiduDiscovery.removeWord": Contract<
+    { id: string; key: string },
+    DiscoveryRun
+  >;
+  "baiduDiscovery.insertZhidao": Contract<
+    { id: string; keys?: string[]; links: string; materials: string[] },
+    import("./zhidao-publishing").QuestionDraftInsertResult
+  >;
+  "baiduDiscovery.generateMaterials": Contract<
+    {
+      id: string;
+      keys?: string[];
+      brief: string;
+      count: number;
+      authorized: true;
+    },
+    NonNullable<DiscoveryRun["materialPool"]>
+  >;
   "baiduDiscovery.closeBrowser": Contract<undefined, void>;
+  "baiduDiscovery.openShareBrowser": Contract<undefined, void>;
+  "baiduDiscovery.closeShareBrowser": Contract<undefined, void>;
+  "baiduDiscovery.inspectShare": Contract<
+    { sourceText: string; code?: string; parentId?: string; page?: number },
+    import("./types").ShareInspection
+  >;
   "baiduDiscovery.export": Contract<
     { id: string; words?: string[]; format: "csv" | "txt" },
     string | null

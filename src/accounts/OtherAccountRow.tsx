@@ -1,6 +1,7 @@
 import {
   ChartNoAxesCombined,
   FileText,
+  Fingerprint,
   LogIn,
   Monitor,
   Pencil,
@@ -39,6 +40,7 @@ export type OtherAccountAction =
 export function OtherAccountRow({
   account,
   environment,
+  environmentEngine,
   environmentsReady,
   pending,
   failure,
@@ -48,6 +50,7 @@ export function OtherAccountRow({
 }: {
   account: OtherAccount;
   environment: string;
+  environmentEngine?: "electron" | "bitbrowser";
   environmentsReady: boolean;
   pending: string | null;
   failure?: string;
@@ -172,7 +175,14 @@ export function OtherAccountRow({
       </div>
       <div className="website-account-state">
         <p className="website-account-environment">
-          <Monitor size={13} aria-hidden="true" />
+          {environmentEngine === "bitbrowser" ? (
+            <Fingerprint size={13} aria-hidden="true" />
+          ) : (
+            <Monitor size={13} aria-hidden="true" />
+          )}
+          {environmentEngine
+            ? `${environmentEngine === "bitbrowser" ? "指纹浏览器" : "内置浏览器"} · `
+            : ""}
           {environment}
         </p>
         {failure || account.message ? (

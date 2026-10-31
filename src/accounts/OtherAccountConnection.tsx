@@ -54,7 +54,13 @@ export function OtherAccountConnection({
     >
       <div className="account-connect-heading">
         <h2>连接新账号</h2>
-        <p>在官方窗口完成登录，再返回检查登录状态。</p>
+        <p>
+          {nativeOnly
+            ? "在官方窗口完成登录，再返回检查登录状态。"
+            : provider === "baidu-marketing"
+              ? "默认使用内置浏览器，在官方窗口登录后检查身份。"
+              : "默认关联指纹浏览器。选择可用环境后关联，读取已有登录身份。"}
+        </p>
       </div>
       <div className="website-account-add">
         <Field label="账号平台">
@@ -86,10 +92,12 @@ export function OtherAccountConnection({
         <Button primary disabled={!canAdd} onClick={onAdd}>
           <Plus size={15} aria-hidden="true" />
           {busy
-            ? "正在打开…"
+            ? "正在连接…"
             : provider === "smzdm" && hasSmzdm
               ? "已添加单账号"
-              : "登录新账号"}
+              : browser.fingerprint && !nativeOnly
+                ? "关联并检查登录"
+                : "登录新账号"}
         </Button>
       </div>
       {nativeOnly ? (
@@ -102,23 +110,14 @@ export function OtherAccountConnection({
         </p>
       ) : (
         <AccountBrowserChoice
+          platform={provider}
           value={browser}
           onChange={onBrowser}
           environments={environments}
           disabled={busy || !environmentsReady}
+          onConfigure={onConfigure}
         />
       )}
-      {!nativeOnly &&
-      browser.fingerprint &&
-      environmentsReady &&
-      !environments.some((env) => env.engine === "bitbrowser") ? (
-        <Notice>
-          暂无指纹浏览器环境。
-          <Button quiet onClick={onConfigure}>
-            配置指纹浏览器
-          </Button>
-        </Notice>
-      ) : null}
       {!nativeOnly && browser.environmentId ? (
         <p className="website-account-connect-hint">
           新账号将关联到“
@@ -130,6 +129,15 @@ export function OtherAccountConnection({
       {provider === "zhihu" && !browser.fingerprint ? (
         <p className="website-account-connect-hint">
           知乎养号和自动发布任务需关联指纹浏览器环境。
+        </p>
+      ) : null}
+      {provider === "baidu-zhidao" ? (
+        <p className="website-account-connect-hint">
+          登录检查、资格与额度、知道采集、自动答题和问答上传均使用所选环境的登录状态与网络。
+        </p>
+      ) : provider === "tieba" ? (
+        <p className="website-account-connect-hint">
+          连接后可打开贴吧、核验账号身份。发帖能力仍需在发布能力中单独配置。
         </p>
       ) : null}
       {provider === "baidu-zhidao" ? (

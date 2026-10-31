@@ -31,6 +31,8 @@ export interface Account {
   error: string | null;
   capacity?: AccountCapacity | null;
   resourceCopies?: number;
+  browserEngine?: "electron" | "bitbrowser";
+  browser?: Pick<import("./drive-browser").DriveBrowserBinding, "environmentId" | "profileId" | "profileName" | "exitIp" | "requireProxy"> | null;
 }
 export interface RemoteFile {
   id: string;

@@ -27,7 +27,7 @@ export const environmentPlatformName = (platform: string) =>
   (isDocumentProvider(platform)
     ? documentPlatformSpecs[platform].name
     : undefined) ??
-  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道" }[platform] ??
+  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道", "drive-baidu": "百度网盘" }[platform] ??
   platformSpecs.find((spec) => spec.id === platform)?.name ??
   platform;
 

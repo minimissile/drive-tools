@@ -219,6 +219,8 @@ test("重启只恢复断点，不自动发送请求；损坏任务不阻止应�
         },
       ],
       words: [],
+      removedKeys: [],
+      materialPool:null,
       message: "",
       currentWord: "画竹子教程",
       limited: false,

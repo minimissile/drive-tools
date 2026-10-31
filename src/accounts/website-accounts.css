@@ -63,6 +63,10 @@
   grid-column: 1 / -1;
   max-width: 560px;
 }
+.website-account-connect .account-browser-choice > .notice {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
 .website-account-list {
   background: var(--surface);
   border: 1px solid var(--line);

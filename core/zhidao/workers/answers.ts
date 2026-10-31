@@ -20,6 +20,7 @@ export async function runAnswers(
   const input = answerInput.parse(run.config);
   if (input.mode === "manual") {
     if (ctx.store.items(run.id).some((i) => i.status === "ready")) return;
+    ctx.progress(run, "正在生成回答…", 0);
     const result = await ctx.generateAnswer(input.question, input.style);
     signal.throwIfAborted();
     ctx.store.put(run.id, "manual", {
@@ -93,9 +94,21 @@ export async function runAnswers(
     if (!/^[\w-]{1,100}$/.test(qid) || !q.question) continue;
     if (isAnswered(q.answered)) {
       answered.add(qid, q.question);
+      ctx.store.answerLog(
+        run.id,
+        "info",
+        `已跳过平台标记已答的问题 · ${q.question.slice(0, 180)}`,
+      );
       continue;
     }
-    if (answered.has(qid, q.question)) continue;
+    if (answered.has(qid, q.question)) {
+      ctx.store.answerLog(
+        run.id,
+        "info",
+        `已跳过历史回答过的问题 · ${q.question.slice(0, 180)}`,
+      );
+      continue;
+    }
     let item = ctx.store.items(run.id).find((i) => i.key === qid);
     const storedStatus = item
       ? ctx.repo.db.get<{ status: string }>(

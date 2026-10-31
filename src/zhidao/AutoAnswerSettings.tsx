@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { useId } from "react";
 import type { ZhidaoAccount } from "../../shared/zhidao";
 import { Button, Empty, Field, Status } from "../ui/primitives";
-import { ShieldCheck, Shuffle } from "lucide-react";
+import { ShieldCheck, Shuffle, UserRound } from "lucide-react";
 import { Select } from "../ui/Select";
 import { answerCategories, answerDraftSchema } from "./answer-draft";
 
@@ -43,6 +43,7 @@ export function AutoAnswerSettings({
       {accounts?.length === 0 ? (
         <Empty
           title="先连接百度知道账号"
+          icon={UserRound}
           compact
           action={<Button onClick={onAccounts}>去登录账号</Button>}
         >
@@ -99,7 +100,7 @@ export function AutoAnswerSettings({
         </div>
       ) : null}
       <div className="answer-quantity-grid">
-        <Field label="目标回答数" hint="1–200条，默认30条">
+        <Field label="目标回答数">
           <input
             type="number"
             min={1}
@@ -109,13 +110,14 @@ export function AutoAnswerSettings({
             aria-describedby={invalidCount ? `${id}-count` : undefined}
             onChange={(e) => update({ count: Number(e.target.value) })}
           />
+          <small className="answer-field-help">1–200条，默认30条</small>
           {invalidCount ? (
             <p className="danger-text" id={`${id}-count`} role="alert">
               请输入1–200之间的整数。
             </p>
           ) : null}
         </Field>
-        <Field label="提交间隔（秒）" hint="18–600秒，每15条至少休息60秒">
+        <Field label="提交间隔（秒）">
           <input
             type="number"
             min={18}
@@ -127,6 +129,9 @@ export function AutoAnswerSettings({
               update({ intervalSeconds: Number(e.target.value) })
             }
           />
+          <small className="answer-field-help">
+            18–600秒，每15条至少休息60秒
+          </small>
           {invalidInterval ? (
             <p className="danger-text" id={`${id}-interval`} role="alert">
               请输入18–600之间的整数秒数。
@@ -134,38 +139,15 @@ export function AutoAnswerSettings({
           ) : null}
         </Field>
       </div>
-      <Field as="div" label="答题分类">
-        <div
-          className="answer-category-picks"
-          role="group"
-          aria-label="答题分类"
-        >
-          {answerCategories.map(({ value: category, label }) => (
-            <label
-              className="check"
-              key={category}
-              data-selected={value.categories.includes(category)}
-            >
-              <input
-                type="checkbox"
-                checked={value.categories.includes(category)}
-                onChange={(e) =>
-                  update({
-                    categories: e.target.checked
-                      ? [...value.categories, category]
-                      : value.categories.filter((c) => c !== category),
-                  })
-                }
-              />
-              {label}
-            </label>
-          ))}
-        </div>
-        {!value.categories.length ? (
-          <p className="danger-text" role="alert">
-            请至少选择一个答题分类。
-          </p>
-        ) : null}
+      <Field label="答题分类" hint="每次只回答一种类型的问题">
+        <Select
+          value={value.categories[0] ?? "emotion"}
+          disabled={busy}
+          onValueChange={(category) =>
+            update({ categories: [category as Draft["categories"][number]] })
+          }
+          items={[...answerCategories]}
+        />
       </Field>
       <div className="answer-sampling-note">
         <span>

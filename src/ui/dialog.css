@@ -3,6 +3,22 @@
   flex-direction: column;
   overflow: hidden;
 }
+.modal-viewport.modal-viewport--fullscreen {
+  padding: var(--space-3);
+}
+.modal.modal--fullscreen {
+  --dialog-padding: var(--space-5);
+  width: 100%;
+  max-width: none;
+  height: calc(100dvh - var(--space-3) * 2);
+  max-height: none;
+}
+.modal--fullscreen > .dialog-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 0;
+}
 .modal--structured .dialog-heading {
   position: relative;
   flex: none;

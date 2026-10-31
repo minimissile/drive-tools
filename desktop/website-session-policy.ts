@@ -9,6 +9,11 @@ export const websiteLoginSpecs: Record<
   WebsiteProvider,
   { home: string; title: string; hosts: readonly string[] }
 > = {
+  tieba: {
+    home: "https://tieba.baidu.com/",
+    title: "百度贴吧 · 官方登录",
+    hosts: ["tieba.baidu.com", "passport.baidu.com", "wappass.baidu.com"],
+  },
   feishu: {
     home: documentPlatformSpecs.feishu.home,
     title: "飞书 · 官方文档",

@@ -6,6 +6,7 @@ import {
   Star,
   Settings2,
   Trash2,
+  Fingerprint,
 } from "lucide-react";
 import type { Account } from "../../shared/types";
 import { ProviderIcon } from "../resources/ProviderIcon";
@@ -23,6 +24,7 @@ export function AccountRow({
   pending,
   onUse,
   onManage,
+  onBrowser,
   onDelete,
   onOperation,
   onLoginFocused,
@@ -34,6 +36,7 @@ export function AccountRow({
   pending: AccountOperation | null;
   onUse(): void;
   onManage(): void;
+  onBrowser(): void;
   onDelete(): void;
   onOperation(action: AccountOperation): void;
   onLoginFocused?(): void;
@@ -71,9 +74,11 @@ export function AccountRow({
                 ? "已停用"
                 : connected
                   ? "已登录"
-                  : account.status === "expired"
-                    ? "登录失效"
-                    : "尚未登录"}
+                  : account.browser && !account.lastVerifiedAt
+                    ? "后台待核验"
+                    : account.status === "expired"
+                      ? "登录失效"
+                      : "尚未登录"}
             </Status>
             {current && account.enabled ? (
               <span className="tag active">当前使用</span>
@@ -98,6 +103,24 @@ export function AccountRow({
                 : "尚未核验"}
             </span>
           </p>
+          {account.provider === "baidu" &&
+          account.browserEngine === "bitbrowser" ? (
+            <Button
+              size="compact"
+              quiet
+              disabled={busy}
+              className="account-browser-action"
+              onClick={onBrowser}
+              title={account.browser?.profileName}
+            >
+              <Fingerprint size={14} aria-hidden="true" />
+              <span>
+                比特后台 · {account.browser?.profileName ?? "原环境待恢复"}
+              </span>
+            </Button>
+          ) : account.provider === "baidu" ? (
+            <p className="account-identity-meta">内置浏览器 · 创建后固定</p>
+          ) : null}
           {account.error ? (
             <p className="account-error">{account.error}</p>
           ) : null}

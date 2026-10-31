@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const environmentIdSchema = z.string().regex(/^env_[\w-]{1,100}$/);
 export const environmentAccountSchema = z.object({
-  kind: z.enum(["website", "zhidao", "binding"]),
+  kind: z.enum(["website", "zhidao", "binding", "drive"]),
   id: z.string().min(1).max(150),
 });
 export type EnvironmentAccountRef = z.infer<typeof environmentAccountSchema>;

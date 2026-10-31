@@ -1,0 +1,75 @@
+.drive-browser-dialog {
+  max-width: 680px;
+}
+.drive-browser-dialog .dialog-body {
+  display: grid;
+  gap: var(--space-4);
+}
+.drive-browser-intro {
+  line-height: 1.7;
+}
+.drive-browser-current {
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--line);
+}
+.drive-browser-current p,
+.drive-browser-picker > .muted {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  margin-top: var(--space-2);
+}
+.drive-browser-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.drive-browser-detach {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.drive-browser-detach p {
+  margin-bottom: var(--space-3);
+}
+.drive-browser-detach .button + .button {
+  margin-left: var(--space-2);
+}
+.drive-browser-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.drive-browser-dialog h3 {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.drive-browser-picker .field,
+.drive-browser-picker .checkbox {
+  margin-top: var(--space-3);
+}
+.drive-browser-picker > .button {
+  margin-top: var(--space-3);
+}
+.drive-browser-preview {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}
+.drive-browser-preview dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+.drive-browser-preview dt {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+.drive-browser-preview dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}

@@ -20,6 +20,7 @@ import {
   operationItemReview,
   operationLabels,
   runStartInput,
+  answerInput,
   type OperationItem,
   type OperationRun,
   type OperationKind,
@@ -33,7 +34,10 @@ import { Pansou, pansouUrl } from "./pansou";
 import { Pansoo } from "../resource-collection/pansoo";
 import { Haisou } from "../resource-collection/haisou";
 import type { CollectionWebSource } from "../../shared/resource-collection";
-import { collectionDriveLabels, collectionDriveType } from "../../shared/resource-collection";
+import {
+  collectionDriveLabels,
+  collectionDriveType,
+} from "../../shared/resource-collection";
 import { answerInstruction } from "./answer-prompt";
 import { publicationFingerprint } from "./publishing";
 import {
@@ -71,7 +75,12 @@ export class ZhidaoOperations {
       pace?: number;
       verifyCopy?: (copyId: string) => Promise<void>;
       environments?: BrowserEnvironments;
-      schedule?<T>(refs: import("../../shared/browser-environments").EnvironmentAccountRef[], label: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T>;
+      schedule?<T>(
+        refs: import("../../shared/browser-environments").EnvironmentAccountRef[],
+        label: string,
+        action: () => Promise<T>,
+        signal?: AbortSignal,
+      ): Promise<T>;
     } = {},
   ) {
     this.fetcher = options.fetcher ?? sourceFetch;
@@ -80,8 +89,18 @@ export class ZhidaoOperations {
     this.environments = options.environments;
     this.schedule = options.schedule;
     this.store = new OperationsStore(repo.db, (account) => {
-      if (!this.environments || this.environments.identityCurrent({ kind: "zhidao", id: account.id })) return account;
-      return { ...account, status: "disconnected", bulkPermission: null, publishingRights: null, message: "环境登录或配置已变化，请重新检查知道身份和业务权益。" };
+      if (
+        !this.environments ||
+        this.environments.identityCurrent({ kind: "zhidao", id: account.id })
+      )
+        return account;
+      return {
+        ...account,
+        status: "disconnected",
+        bulkPermission: null,
+        publishingRights: null,
+        message: "环境登录或配置已变化，请重新检查知道身份和业务权益。",
+      };
     });
     this.store.recover();
     this.client = new ZhidaoClient(ports.zhidaoSession);
@@ -90,7 +109,12 @@ export class ZhidaoOperations {
     this.haisou = new Haisou(ports.collectionWebSession);
   }
   private environments?: BrowserEnvironments;
-  private schedule?: <T>(refs: import("../../shared/browser-environments").EnvironmentAccountRef[], label: string, action: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
+  private schedule?: <T>(
+    refs: import("../../shared/browser-environments").EnvironmentAccountRef[],
+    label: string,
+    action: () => Promise<T>,
+    signal?: AbortSignal,
+  ) => Promise<T>;
   get isBusy() {
     return this.active.size > 0 || this.accountPending.size > 0;
   }
@@ -121,7 +145,11 @@ export class ZhidaoOperations {
     };
   }
   async openCollectionSource(source: CollectionWebSource) {
-    if (!this.ports.collectionWebSession) throw new AppError("COLLECTION_WEB_UNAVAILABLE", "当前环境不支持网页采集会话。");
+    if (!this.ports.collectionWebSession)
+      throw new AppError(
+        "COLLECTION_WEB_UNAVAILABLE",
+        "当前环境不支持网页采集会话。",
+      );
     await this.ports.collectionWebSession.open(source);
     return true;
   }
@@ -142,17 +170,38 @@ export class ZhidaoOperations {
       checkedAt: null,
       message: "请登录后检查账号",
     };
-    this.repo.db.transaction(() => { this.store.saveAccount(account); this.environments?.registerAccount({ kind: "zhidao", id: account.id }, environmentId); });
+    this.repo.db.transaction(() => {
+      this.store.saveAccount(account);
+      this.environments?.registerAccount(
+        { kind: "zhidao", id: account.id },
+        environmentId,
+      );
+    });
     if (cookie) {
       if (!this.ports.zhidaoSession)
         throw new AppError("SESSION_UNAVAILABLE", "当前环境不支持账号会话。");
       try {
-        const action = async () => { this.environments?.invalidateIdentity({ kind: "zhidao", id: account.id }); await this.ports.zhidaoSession!.setCookie(account.id, cookie); };
-        if (this.environments) await this.environments.run({ kind: "zhidao", id: account.id }, action); else await action();
+        const action = async () => {
+          this.environments?.invalidateIdentity({
+            kind: "zhidao",
+            id: account.id,
+          });
+          await this.ports.zhidaoSession!.setCookie(account.id, cookie);
+        };
+        if (this.environments)
+          await this.environments.run(
+            { kind: "zhidao", id: account.id },
+            action,
+          );
+        else await action();
       } catch {
         // Imported cookies may share a realm with other platforms; never clear the environment.
         this.changed();
-        return this.store.saveAccount({ ...account, message: "账号已添加；Cookie 导入未完成，请使用官方登录窗口后检查身份。" });
+        return this.store.saveAccount({
+          ...account,
+          message:
+            "账号已添加；Cookie 导入未完成，请使用官方登录窗口后检查身份。",
+        });
       }
     }
     this.store.saveAccount(account);
@@ -185,18 +234,30 @@ export class ZhidaoOperations {
     this.assertAccountIdle(accountId);
     if (!this.ports.zhidaoSession)
       throw new AppError("SESSION_UNAVAILABLE", "当前环境不支持登录窗口。");
-    this.accountPending.add(accountId);
-    try {
-      const action = async () => { this.environments?.invalidateIdentity({ kind: "zhidao", id: accountId }); await this.ports.zhidaoSession!.login(accountId, page); };
-      if (this.environments) await this.environments.run({ kind: "zhidao", id: accountId }, action); else await action();
-      return true;
-    } finally {
-      this.accountPending.delete(accountId);
-    }
+    const ref = { kind: "zhidao" as const, id: accountId };
+    const action = async () => {
+      this.accountPending.add(accountId);
+      try {
+        this.environments?.invalidateIdentity(ref);
+        await this.ports.zhidaoSession!.login(accountId, page);
+      } finally {
+        this.accountPending.delete(accountId);
+      }
+    };
+    if (!this.environments) await action();
+    else if (this.environments.forAccount(ref).engine === "bitbrowser")
+      await this.environments.controlWindow(
+        this.environments.forAccount(ref).id,
+        action,
+      );
+    else await this.environments.run(ref, action);
+    return true;
   }
   check(accountId: string) {
     const action = () => this.checkWithinEnvironment(accountId);
-    return this.environments ? this.environments.run({ kind: "zhidao", id: accountId }, action) : action();
+    return this.environments
+      ? this.environments.run({ kind: "zhidao", id: accountId }, action)
+      : action();
   }
   private async checkWithinEnvironment(accountId: string) {
     const old = this.store.account(accountId);
@@ -218,7 +279,10 @@ export class ZhidaoOperations {
           "DUPLICATE_ACCOUNT",
           "此身份已在其他知道账号中，请使用原账号记录。",
         );
-      this.environments?.confirm({ kind: "zhidao", id: accountId }, identity.uid);
+      this.environments?.confirm(
+        { kind: "zhidao", id: accountId },
+        identity.uid,
+      );
       let bulkPermission: boolean | null = null;
       let publishingRights:
         import("../../shared/zhidao-publishing").ZhidaoPublishingRights | null =
@@ -273,7 +337,9 @@ export class ZhidaoOperations {
   }
   removeAccount(accountId: string) {
     const action = () => this.removeWithinEnvironment(accountId);
-    return this.environments ? this.environments.run({ kind: "zhidao", id: accountId }, action) : action();
+    return this.environments
+      ? this.environments.run({ kind: "zhidao", id: accountId }, action)
+      : action();
   }
   private async removeWithinEnvironment(accountId: string) {
     this.store.account(accountId);
@@ -332,7 +398,8 @@ export class ZhidaoOperations {
   async start(raw: RunStartInput) {
     const v = runStartInput.parse(raw);
     const config = { ...v.input };
-    if (v.kind === "collect" && !v.input.zhidao) Object.assign(config, { accountIds: [] });
+    if (v.kind === "collect" && !v.input.zhidao)
+      Object.assign(config, { accountIds: [] });
     this.assertAvailable(v.kind, config);
     if (v.kind === "publish") {
       if (
@@ -361,7 +428,11 @@ export class ZhidaoOperations {
         "AUTH_EXPIRED",
         "请先登录并检查百度知道账号，再开始自动答题。",
       );
-    if (v.kind === "answer" || (v.kind === "template" && templateUsesAi(v.input))) this.ai.assertTextConfigured("copy");
+    if (
+      v.kind === "answer" ||
+      (v.kind === "template" && templateUsesAi(v.input))
+    )
+      this.ai.assertTextConfigured("copy");
     const total =
       v.kind === "template"
         ? v.input.copyIds.length + v.input.resources.length
@@ -407,8 +478,12 @@ export class ZhidaoOperations {
     if (run.status === "completed")
       throw new AppError("RUN_COMPLETED", "任务已完成，请新建任务。");
     this.assertAvailable(run.kind, run.config);
-    if (run.kind === "answer") this.ai.assertTextConfigured("copy");
-    if (run.kind === "template" && templateUsesAi(run.config)) this.ai.assertTextConfigured("copy");
+    if (run.kind === "answer") {
+      answerInput.parse(run.config);
+      this.ai.assertTextConfigured("copy");
+    }
+    if (run.kind === "template" && templateUsesAi(run.config))
+      this.ai.assertTextConfigured("copy");
     if (run.kind === "publish") {
       const submitted = new Set(
         this.store
@@ -621,20 +696,54 @@ export class ZhidaoOperations {
     };
   }
   private async executeInEnvironments(run: OperationRun, signal: AbortSignal) {
-    const ids = [...new Set([typeof run.config.accountId === "string" ? run.config.accountId : "", ...(Array.isArray(run.config.accountIds) ? run.config.accountIds.map(String) : [])].filter(Boolean))].sort();
+    const ids = [
+      ...new Set(
+        [
+          typeof run.config.accountId === "string" ? run.config.accountId : "",
+          ...(Array.isArray(run.config.accountIds)
+            ? run.config.accountIds.map(String)
+            : []),
+        ].filter(Boolean),
+      ),
+    ].sort();
     const execute = (index: number): Promise<void> => {
-      if (index < ids.length && this.environments) return this.environments.run({ kind: "zhidao", id: ids[index] }, () => execute(index + 1));
+      if (index < ids.length && this.environments)
+        return this.environments.run({ kind: "zhidao", id: ids[index] }, () =>
+          execute(index + 1),
+        );
       if (this.environments) {
-        const stamps = run.config.environmentStamps as Record<string, import("../../shared/browser-environments").EnvironmentStamp> | undefined;
-        if (stamps) for (const accountId of ids) this.environments.assertStamp({ kind: "zhidao", id: accountId }, stamps[accountId]);
+        const stamps = run.config.environmentStamps as
+          | Record<
+              string,
+              import("../../shared/browser-environments").EnvironmentStamp
+            >
+          | undefined;
+        if (stamps)
+          for (const accountId of ids)
+            this.environments.assertStamp(
+              { kind: "zhidao", id: accountId },
+              stamps[accountId],
+            );
         else {
-          run.config.environmentStamps = Object.fromEntries(ids.map((accountId) => [accountId, this.environments!.stamp({ kind: "zhidao", id: accountId })]));
+          run.config.environmentStamps = Object.fromEntries(
+            ids.map((accountId) => [
+              accountId,
+              this.environments!.stamp({ kind: "zhidao", id: accountId }),
+            ]),
+          );
           this.store.config(run.id, run.config);
         }
       }
       return this.execute(run, signal);
     };
-    return this.schedule && ids.length ? this.schedule(ids.map((id) => ({ kind: "zhidao", id })), "百度知道运营任务", () => execute(ids.length), signal) : execute(0);
+    return this.schedule && ids.length
+      ? this.schedule(
+          ids.map((id) => ({ kind: "zhidao", id })),
+          "百度知道运营任务",
+          () => execute(ids.length),
+          signal,
+        )
+      : execute(0);
   }
   private async execute(run: OperationRun, signal: AbortSignal) {
     if (run.kind === "mine") await runMine(this.workerContext(), run, signal);
@@ -803,7 +912,8 @@ export class ZhidaoOperations {
       item.question !== input.question || item.answer !== input.answer;
     if (!changed && input.reviewed) {
       const issue = zhidaoContentIssue(input);
-      if (issue) throw new AppError("REVIEW_REQUIRED", `${issue}，再确认审核。`);
+      if (issue)
+        throw new AppError("REVIEW_REQUIRED", `${issue}，再确认审核。`);
     }
     return this.store.put(item.runId, item.key, {
       name: input.name,
@@ -844,13 +954,26 @@ export class ZhidaoOperations {
         "SESSION_UNAVAILABLE",
         "当前环境不支持打开账号问题页。",
       );
-    this.accountPending.add(accountId);
-    try {
-      await this.ports.zhidaoSession.openQuestion(accountId, item.questionId);
-      return true;
-    } finally {
-      this.accountPending.delete(accountId);
-    }
+    const ref = { kind: "zhidao" as const, id: accountId };
+    const action = async () => {
+      this.accountPending.add(accountId);
+      try {
+        await this.ports.zhidaoSession!.openQuestion!(
+          accountId,
+          item.questionId,
+        );
+      } finally {
+        this.accountPending.delete(accountId);
+      }
+    };
+    if (!this.environments) await action();
+    else if (this.environments.forAccount(ref).engine === "bitbrowser")
+      await this.environments.controlWindow(
+        this.environments.forAccount(ref).id,
+        action,
+      );
+    else await this.environments.run(ref, action);
+    return true;
   }
   resolve(itemId: string, outcome: "submitted" | "retry", remoteId = "") {
     const item = this.store.item(itemId);
@@ -956,7 +1079,15 @@ export class ZhidaoOperations {
             ]),
           ]
         : [
-            ["资源名称", "网盘链接", "提取码", "来源", "状态", "网盘类型", "采集渠道"],
+            [
+              "资源名称",
+              "网盘链接",
+              "提取码",
+              "来源",
+              "状态",
+              "网盘类型",
+              "采集渠道",
+            ],
             ...items.map((i) => [
               i.name,
               i.link,
@@ -1008,10 +1139,18 @@ export class ZhidaoOperations {
     };
   }
   async templateSources(copyIds: string[]) {
-    return Promise.all(copyIds.map(async (copyId) => {
-      const { copy, resource } = this.ownTarget(copyId);
-      return { title: resource.title, link: copy.shareUrl!, code: (await this.secrets.get(`share:${copyId}`)) ?? "", summary: resource.summary, image: "" };
-    }));
+    return Promise.all(
+      copyIds.map(async (copyId) => {
+        const { copy, resource } = this.ownTarget(copyId);
+        return {
+          title: resource.title,
+          link: copy.shareUrl!,
+          code: (await this.secrets.get(`share:${copyId}`)) ?? "",
+          summary: resource.summary,
+          image: "",
+        };
+      }),
+    );
   }
   templatesPage(page = 1) {
     return {

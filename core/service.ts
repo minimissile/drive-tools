@@ -1,6 +1,7 @@
 import { ResourceCatalogs } from "./resource-catalog";
 import { BaiduDiscovery } from "./baidu-discovery";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
+import { DriveBrowserSessions } from "./drive-browser-sessions";
 import { SmzdmArticles } from "./smzdm/service";
 import { PipixSources } from "./pipix/service";
 import { ZhihuOperations } from "./zhihu/service";
@@ -83,6 +84,7 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly driveBrowsers: DriveBrowserSessions;
   readonly baiduDiscovery: BaiduDiscovery;
   readonly accountDeletion: AccountDeletion;
   readonly resourceLinks: ResourceLinks;
@@ -216,8 +218,9 @@ export class AppService {
       return this.environments.run({ kind: "binding", id: binding.id }, action);
     });
     this.environments.setExternalConfigurationReader((profileId) => this.bit.environmentConfiguration(profileId));
-    this.environments.setExternalNetworkChecker((profileId) => this.bit.environmentExitIp(profileId));
+    this.environments.setExternalNetworkChecker((profileId, headless) => this.bit.environmentExitIp(profileId, headless));
     this.environments.setExternalIdleGuard((profileId) => this.bit.assertProfileIdle(profileId));
+    this.driveBrowsers = new DriveBrowserSessions({ repo: this.repo, bit: this.bit, environments: this.environments, locked: (id, action) => this.mutex.run(id, action), assertIdle: (id) => this.assertNoActiveJobs(id), changed });
     this.importer = new BulkImporter(this.repo, (input) =>
       this.saveResource(input),
     );
@@ -303,6 +306,7 @@ export class AppService {
     });
     this.environments.addGuard((refs) => {
       for (const ref of refs) {
+        if (ref.kind === "drive") this.assertNoActiveJobs(ref.id);
         if (ref.kind === "zhidao") this.zhidao.assertAccountIdle(ref.id);
         if (ref.kind === "website" && (this.websiteAccounts.isBusy || this.weiboPosts.isBusy || this.weibo.isBusy)) throw new AppError("ENVIRONMENT_BUSY", "此环境的平台任务正在执行，请完成后再修改。");
         if (ref.kind === "binding" && this.csdn.isBusy) throw new AppError("ENVIRONMENT_BUSY", "发布任务正在执行，请完成后再修改环境。");
@@ -322,6 +326,7 @@ export class AppService {
       accountState: (ref) => environmentStatus.account(ref),
       pendingOperations: (refs) => environmentStatus.pending(refs),
       openAccount: async (ref) => {
+        if (ref.kind === "drive") return this.driveBrowsers.open(ref.id).then(() => true);
         if (ref.kind === "website") return this.websiteAccounts.login(ref.id);
         if (ref.kind === "zhidao") return this.zhidao.login(ref.id);
         const binding = this.repo.bindings().find((binding) => binding.id === ref.id);
@@ -366,6 +371,8 @@ export class AppService {
     });
     this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
     this.handlers = createApplicationHandlers({
+      lockedAccount: (id, action) => this.mutex.run(id, action),
+      driveBrowsers: this.driveBrowsers,
       baiduDiscovery: this.baiduDiscovery,
       accountDeletion: this.accountDeletion,
       resourceLinks: this.resourceLinks,
@@ -476,6 +483,10 @@ export class AppService {
           "DUPLICATE_ACCOUNT",
           `此UID已绑定「${duplicate.alias}」，请使用该账号记录。`,
         );
+      if (account.provider === "baidu") {
+        if (!this.db.get("SELECT account_id FROM browser_environment_accounts WHERE kind='drive' AND account_id=?", account.id)) this.environments.registerAccount({ kind: "drive", id: account.id });
+        this.environments.confirm({ kind: "drive", id: account.id }, identity.uid);
+      }
       this.db.run(
         "UPDATE accounts SET uid=?,status=?,verified_at=?,error=NULL,updated_at=? WHERE id=?",
         identity.uid,
@@ -904,7 +915,9 @@ export class AppService {
     return (
       (!ignoreAccountDeletion && this.accountDeletion?.isBusy) ||
       this.baiduDiscovery.isBusy ||
+      this.driveBrowsers.isBusy ||
       !!this.ports.baiduDiscovery?.isOpen() ||
+      !!this.ports.baiduShareReader?.isOpen() ||
       this.resourceLinks?.isBusy ||
       this.shareCreation?.isBusy ||
       this.smzdm.isBusy ||
@@ -1207,6 +1220,7 @@ export class AppService {
   }
   close() {
     this.baiduDiscovery.close();
+    this.ports.baiduShareReader?.close(true);
     this.smzdm.close();
     this.distribution.close();
     this.pipix.close();

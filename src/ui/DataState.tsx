@@ -1,4 +1,9 @@
-import { AlertCircle, Folder, LoaderCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Folder,
+  LoaderCircle,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import "./data-state.css";
 
@@ -13,6 +18,7 @@ export function DataState({
   compact = false,
   fill = false,
   className = "",
+  icon,
 }: {
   kind: StateKind;
   title: string;
@@ -21,9 +27,15 @@ export function DataState({
   compact?: boolean;
   fill?: boolean;
   className?: string;
+  icon?: LucideIcon;
 }) {
   const Icon =
-    kind === "loading" ? LoaderCircle : kind === "error" ? AlertCircle : Folder;
+    icon ??
+    (kind === "loading"
+      ? LoaderCircle
+      : kind === "error"
+        ? AlertCircle
+        : Folder);
   return (
     <div
       className={`data-state data-state--${kind} ${compact ? "data-state--compact" : ""} ${className}`}
