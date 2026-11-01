@@ -1,0 +1,158 @@
+.photo-posts {
+  display: grid;
+  gap: var(--space-4);
+}
+.photo-posts .page-heading {
+  margin-bottom: 0;
+}
+.photo-posts .context-bar {
+  margin: 0;
+}
+.photo-post-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.photo-post-toolbar > :first-child {
+  width: min(390px, 45%);
+}
+.photo-post-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.85fr) minmax(460px, 1.4fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.photo-post-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: var(--space-2) 0;
+  background: var(--bg);
+}
+.photo-post-editor-actions > .photo-post-toolbar {
+  flex: 1;
+  min-width: 400px;
+}
+.photo-post-preview-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: var(--control-radius);
+}
+.photo-post-image-dialog {
+  width: min(720px, calc(100vw - 80px));
+}
+.photo-post-image-dialog > img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.photo-post-layout .panel {
+  padding: var(--space-4);
+  min-width: 0;
+}
+.photo-post-fields,
+.photo-post-results {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.photo-post-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.photo-post-fields .field {
+  margin: 0;
+}
+.photo-post-field-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--space-3);
+}
+.photo-post-channels {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.photo-post-channels legend {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+.photo-post-channels label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.photo-post-actions,
+.photo-post-platforms {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.photo-post-previews {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.photo-post-previews figure {
+  margin: 0;
+  min-width: 0;
+}
+.photo-post-previews canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+}
+.photo-post-previews figcaption {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: var(--space-2);
+}
+.photo-post-copy {
+  margin: var(--space-3) 0;
+  resize: vertical;
+  width: 100%;
+}
+.photo-post-result {
+  display: grid;
+  gap: var(--space-2);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+}
+.photo-post-exported {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--green);
+}
+.photo-post-fields > p {
+  margin: 0;
+  font-size: 12px;
+}
+@media (max-width: 1180px) {
+  .photo-post-layout {
+    grid-template-columns: minmax(320px, 0.9fr) minmax(390px, 1.1fr);
+  }
+  .photo-post-field-row {
+    grid-template-columns: 1fr;
+  }
+}

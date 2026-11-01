@@ -1,3 +1,4 @@
+import type { PhotoPostContract } from "./photo-posts";
 import type { ResourceCatalogContract } from "./resource-catalog";
 import type { BaiduDiscoveryContract } from "./baidu-discovery";
 import type { DevSessionContract } from "./dev-sessions";
@@ -16,6 +17,7 @@ import type { IpcCommands } from "./ipc-commands";
 import type { DriveFilesContract } from "./drive-files";
 import type { DriveBrowserContract } from "./drive-browser";
 import type { ZhidaoContract } from "./zhidao-ipc";
+import type { PageDiscoveryContract } from "./zhidao-page-discovery";
 import type { BaiduKeywordContract } from "./baidu-keywords";
 import type { BaiduResearchContract } from "./baidu-research";
 import type { WebsiteAccountContract } from "./website-accounts";
@@ -80,6 +82,7 @@ export type SplitSummary = {
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
 export interface IpcContract
   extends
+    PhotoPostContract,
     BaiduDiscoveryContract,
     DevSessionContract,
     ResourceCatalogContract,
@@ -98,6 +101,7 @@ export interface IpcContract
     AccountDeletionContract,
     IpcCommands,
     ZhidaoContract,
+    PageDiscoveryContract,
     BaiduKeywordContract,
     BaiduResearchContract,
     WebsiteAccountContract,
@@ -201,6 +205,8 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "photoPosts.list",
+  "photoPosts.get",
   "baiduDiscovery.list",
   "baiduDiscovery.get",
   "account.deletePreview",
@@ -243,6 +249,7 @@ export const queryMethods = [
   "baiduKeywords.latest",
   "baiduResearch.latest",
   "zhidao.activeRuns",
+  "zhidaoPages.latest",
   "zhidao.summary",
   "zhidao.accounts",
   "zhidao.settings",

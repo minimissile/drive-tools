@@ -3,6 +3,7 @@ import type { DriveShareResult } from "../../shared/zhidao";
 import { ipc } from "../api/client";
 import { useAppActions, useAppNavigation } from "../state";
 import { Button, Notice } from "../ui/primitives";
+import { usePublishingView } from "../zhidao/usePublishingView";
 
 export function DriveSharePanel({
   accountId,
@@ -21,6 +22,7 @@ export function DriveSharePanel({
 }) {
   const { notify, refresh } = useAppActions();
   const { navigate } = useAppNavigation();
+  const publishing = usePublishingView();
   const [result, setResult] = useState<DriveShareResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -97,8 +99,14 @@ export function DriveSharePanel({
         >
           {busy ? "正在分享与核验…" : "分别分享并归档"}
         </Button>
-        <Button quiet onClick={() => navigate("zhidao-templates")}>
-          去生成问答模板
+        <Button
+          quiet
+          onClick={() => {
+            publishing.update({ tab: "generate" });
+            navigate("zhidao-publish");
+          }}
+        >
+          去生成问答
         </Button>
       </div>
       {error ? <Notice danger>{error}</Notice> : null}

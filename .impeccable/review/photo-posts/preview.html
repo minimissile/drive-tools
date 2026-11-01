@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>资源图文 · 当前画布预览</title>
+<style>
+  body { margin:0; background:#f5f6f8; color:#263147; font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
+  main { max-width:1280px; padding:28px; margin:auto; }
+  h1 { font-size:22px; margin:0 0 6px; } p { margin:0 0 20px; color:#58657a; }
+  .gallery { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
+  figure { margin:0; } canvas { display:block; width:100%; height:auto; } figcaption { padding:10px 0; }
+  a { color:#244fb6; } #error { color:#b72b21; white-space:pre-wrap; }
+</style>
+<main>
+  <h1>资源图文 · 当前画布预览</h1>
+  <p>直接使用工作台渲染源码。以下为排版示例，未绑定真实领取口令，也未保存或发布任务。</p>
+  <div id="error"></div>
+  <div class="gallery" id="gallery"></div>
+</main>
+<script type="module">
+  import { loadPhotoFonts } from '/src/photo-posts/canvas.ts';
+  import { renderPhotoCard } from '/src/photo-posts/render.ts';
+  await loadPhotoFonts();
+  const form = {title:'人情世故\n指南',emphasis:'人情世故',coverStyle:'type',subtitle:'PDF 电子书\n文件清单与领取步骤',details:'人情世故指南.pdf\n文件格式：PDF\n领取步骤见下一页',audience:'',passphrase:'待填写中文口令',retrieval:'search',theme:'blue',platforms:['douyin','kuaishou','xiaohongshu']};
+  for (const [index,theme,label] of [[0,'blue','大字封面 · 电光蓝'],[1,'blue','资源详情'],[2,'blue','获取方式'],[0,'warm','大字封面 · 朱砂红']]) {
+    const figure=document.createElement('figure');
+    const canvas=document.createElement('canvas');
+    const caption=document.createElement('figcaption');
+    const errors=renderPhotoCard(canvas,index,{...form,theme},'夸克');
+    caption.textContent=label;
+    const link=document.createElement('a');
+    link.download=`${theme}-${index+1}.png`;link.href=canvas.toDataURL();link.textContent='保存原图';
+    caption.append(' · ',link);figure.append(canvas,caption);document.querySelector('#gallery').append(figure);
+    if(errors.length)document.querySelector('#error').textContent+=errors.join('；')+'\n';
+  }
+  const artwork = new Image();artwork.src='./reference-cover.webp';await artwork.decode();
+  const figure=document.createElement('figure'),canvas=document.createElement('canvas'),caption=document.createElement('figcaption');
+  const errors=renderPhotoCard(canvas,0,{...form,title:'兰香如故',emphasis:'兰香如故',coverStyle:'poster',subtitle:'内容清单与领取步骤',theme:'warm'},'迅雷',artwork);
+  const link=document.createElement('a');link.download='poster-cover.png';link.href=canvas.toDataURL();link.textContent='保存原图';
+  caption.textContent='原封面海报 · 用户参考作品（仅构图示意） · ';caption.append(link);figure.append(canvas,caption);document.querySelector('#gallery').append(figure);
+  if(errors.length)document.querySelector('#error').textContent+=errors.join('；')+'\n';
+</script>
+</html>

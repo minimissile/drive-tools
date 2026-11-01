@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { Pause, Play, RefreshCw } from "lucide-react";
-import type { DistributionPlatformSummary } from "../../shared/distribution";
+import { ExternalLink, Pause, Play, RefreshCw } from "lucide-react";
+import {
+  distributionBatchSize,
+  type DistributionPlatformSummary,
+} from "../../shared/distribution";
 import { ipc } from "../api/client";
 import { CheckboxField } from "../ui/CheckboxField";
 import { Button, Notice, Panel, Status } from "../ui/primitives";
@@ -11,6 +14,7 @@ const runNames = {
   scanning: "准备全库链接中",
   ready: "已准备好",
   running: "自动分发中",
+  waiting_verification: "待人工打码",
   pausing: "正在暂停",
   paused: "已暂停",
   blocked: "需要处理",
@@ -24,7 +28,13 @@ export function PlatformProgress({
   model: DistributionModel;
 }) {
   const [rights, setRights] = useState(false);
-  const running = ["scanning", "running", "pausing"].includes(item.run.state);
+  const waiting = item.run.state === "waiting_verification";
+  const running = [
+    "scanning",
+    "running",
+    "pausing",
+    "waiting_verification",
+  ].includes(item.run.state);
   const accepted = item.delivered;
   const percent = item.total ? Math.round((accepted / item.total) * 100) : 0;
   const canStart =
@@ -38,6 +48,7 @@ export function PlatformProgress({
         <h2>{item.platform.name} · 全库分发</h2>
         <Status
           kind={
+            waiting ||
             item.run.state === "blocked" ||
             (item.run.state === "completed" &&
               (item.failed > 0 || item.blocked > 0 || item.uncertain > 0))
@@ -74,7 +85,11 @@ export function PlatformProgress({
           <dd>{item.pending}</dd>
         </div>
         <div>
-          <dt>核验 / 提交中</dt>
+          <dt>
+            {item.platform.manualVerification
+              ? "核验 / 打码 / 提交中"
+              : "核验 / 提交中"}
+          </dt>
           <dd>{item.active}</dd>
         </div>
         <div>
@@ -122,6 +137,28 @@ export function PlatformProgress({
         />
       ) : null}
       <div className="row distribution-actions">
+        {waiting ? (
+          <>
+            <Button
+              primary
+              disabled={model.busy}
+              onClick={() =>
+                void model.run(() =>
+                  ipc("distribution.continue", {
+                    platformId: item.platform.id,
+                  }),
+                )
+              }
+            >
+              <Play size={14} />
+              提交本批
+            </Button>
+            <Button disabled={model.busy} onClick={() => void model.open()}>
+              <ExternalLink size={14} />
+              打开验证码窗口
+            </Button>
+          </>
+        ) : null}
         <Button
           disabled={model.busy || running}
           onClick={() =>
@@ -184,8 +221,16 @@ export function PlatformProgress({
         </Button>
       </div>
       <small className="muted">
-        每批最多 100 条，批次间隔 5
-        秒。新增或修复分享后重新准备可增量入队；热盘搜跳过同资源的重复链接变体。未提交的旧链接单列历史，不计入有效队列；提交与收录分别统计。
+        {item.platform.id === "yiso"
+          ? "每批 1 条，等待官网完成此链接处理，批次间隔 5 秒。"
+          : item.platform.manualVerification
+            ? `每批最多 ${distributionBatchSize(item.platform)} 条，共用一次人工验证码；等待打码期间可暂停，已填写验证码后点击“提交本批”。`
+            : `每批最多 ${distributionBatchSize(item.platform)} 条，批次间隔 5 秒。`}
+        新增或修复分享后重新准备可增量入队；
+        {item.platform.distinctResource
+          ? `${item.platform.name}跳过同资源的重复链接变体。`
+          : ""}
+        未提交的旧链接单列历史，不计入有效队列；提交与收录分别统计。
       </small>
     </Panel>
   );

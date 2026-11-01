@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RotateCcw, Save } from "lucide-react";
+import { FilePenLine, RotateCcw, Save } from "lucide-react";
 import {
   defaultGenerationRules,
   generationRules,
@@ -244,7 +244,7 @@ export function GenerationWorkbench({ onReady }: { onReady(): void }) {
           </div>
           <Button onClick={onReady}>审核并上传</Button>
         </div>
-        <RunPanel model={run}>
+        <RunPanel model={run} title="生成记录" emptyIcon={FilePenLine}>
           {(items) => (
             <ResultTable
               items={items}

@@ -33,14 +33,22 @@ export const generationTracks = {
       "先核对软件版本、系统要求和安装来源，按说明操作；重要文件先备份，遇到错误记录完整提示。",
   },
 } as const;
+export function generationTitleDefaults(
+  track: keyof typeof generationTracks,
+  mode: "template" | "ai",
+) {
+  return mode === "template"
+    ? { prefixes: "", suffixes: "有哪些内容和使用注意事项？" }
+    : { prefixes: generationTracks[track].prefixes, suffixes: "？" };
+}
 export const generationRuleValues = z.object({
   track: z
     .enum(["general", "study", "office", "design", "software"])
     .default("general"),
   mode: z.enum(["template", "ai"]).default("template"),
   style: answerStyle.default("清晰实用"),
-  prefixes: z.string().max(2000).default("如何使用\n怎么上手"),
-  suffixes: z.string().max(2000).default("？"),
+  prefixes: z.string().max(2000).default(""),
+  suffixes: z.string().max(2000).default("有哪些内容和使用注意事项？"),
   introTemplate: z.string().max(2000).default("{资源简介}\n\n{使用建议}"),
   keywords: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
   preferSummary: z.boolean().default(true),

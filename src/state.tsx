@@ -30,12 +30,14 @@ import type {
   Draft,
 } from "../shared/types";
 export type Page =
+  | "photo-posts"
   | "distribution"
   | "workbench"
   | "baidu-discovery"
   | "zhidao-mine"
   | "zhidao-collect"
   | "zhidao-qa"
+  | "zhidao-page-discovery"
   | "zhidao-templates"
   | "zhidao-publish"
   | "zhidao-accounts"
@@ -155,12 +157,14 @@ export function useApp(): Store {
   };
 }
 const pages: Page[] = [
+  "photo-posts",
   "distribution",
   "workbench",
   "baidu-discovery",
   "zhidao-mine",
   "zhidao-collect",
   "zhidao-qa",
+  "zhidao-page-discovery",
   "zhidao-templates",
   "zhidao-publish",
   "zhidao-accounts",

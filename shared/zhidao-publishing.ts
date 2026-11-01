@@ -1,4 +1,8 @@
-import { zhidaoQuestionIssue, zhidaoAnswerIssue } from "./zhidao-content";
+import {
+  zhidaoQuestionIssue,
+  zhidaoAnswerIssue,
+  zhidaoMethodAnswerIssue,
+} from "./zhidao-content";
 export { zhidaoQuestionTitleLimit } from "./zhidao-content";
 
 export const zhidaoPublishLimit = 100;
@@ -12,7 +16,11 @@ export interface QuestionDraftInsertResult {
 }
 
 export function zhidaoContentIssue(item: { question: string; answer: string }) {
-  return zhidaoQuestionIssue(item.question) || zhidaoAnswerIssue(item.answer);
+  return (
+    zhidaoQuestionIssue(item.question) ||
+    zhidaoAnswerIssue(item.answer) ||
+    zhidaoMethodAnswerIssue(item.question, item.answer)
+  );
 }
 
 export interface ZhidaoPublishingRights {

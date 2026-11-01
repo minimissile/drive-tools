@@ -37,6 +37,7 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  photoPosts: import("../photo-posts").PhotoPosts;
   driveBrowsers: import("../drive-browser-sessions").DriveBrowserSessions;
   baiduDiscovery: import("../baidu-discovery").BaiduDiscovery;
   accountDeletion: import("../account-deletion").AccountDeletion;
@@ -58,6 +59,7 @@ export interface HandlerServices {
   websiteAccounts: import("../website-accounts").WebsiteAccounts;
   driveFiles: import("../drive-files").DriveFiles;
   zhidao: import("../zhidao/service").ZhidaoOperations;
+  zhidaoPages: import("../zhidao/page-discovery/service").ZhidaoPageDiscovery;
   db: Database;
   repo: Repository;
   secrets: SecretStore;

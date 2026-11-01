@@ -18,10 +18,12 @@ import { ActiveTaskSwitcher } from "./tasks/ActiveTaskSwitcher";
 import { WorkbenchNavigation } from "./workbench/WorkbenchNavigation";
 import { SessionWindows } from "./dev/SessionWindows";
 const Workbench = lazy(() => import("./pages/Workbench"));
+const PhotoPosts = lazy(() => import("./pages/PhotoPosts"));
 const BaiduDiscovery = lazy(() => import("./pages/BaiduDiscovery"));
 const KeywordMining = lazy(() => import("./pages/KeywordMining"));
 const ResourceCollection = lazy(() => import("./pages/ResourceCollection"));
 const ZhidaoAnswers = lazy(() => import("./zhidao/Answers"));
+const ZhidaoPageDiscovery = lazy(() => import("./zhidao/PageDiscovery"));
 const ZhidaoTemplates = lazy(() => import("./zhidao/Templates"));
 const ZhidaoPublish = lazy(() => import("./zhidao/Publish"));
 const DriveFiles = lazy(() => import("./pages/DriveFiles"));
@@ -55,12 +57,14 @@ function CsdnPublish() {
   return <Publish platform="csdn" />;
 }
 const surfaces = {
+  "photo-posts": PhotoPosts,
   distribution: Distribution,
   workbench: Workbench,
   "baidu-discovery": BaiduDiscovery,
   "zhidao-mine": KeywordMining,
   "zhidao-collect": ResourceCollection,
   "zhidao-qa": ZhidaoAnswers,
+  "zhidao-page-discovery": ZhidaoPageDiscovery,
   "zhidao-templates": ZhidaoTemplates,
   "zhidao-publish": ZhidaoPublish,
   "zhidao-accounts": Accounts,

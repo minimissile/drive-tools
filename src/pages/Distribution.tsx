@@ -77,7 +77,11 @@ export default function DistributionPage() {
                   <span className="distribution-platform-name">
                     {platform.name}
                     <small>
-                      {platform.login === "required" ? "需登录" : "开放投稿页"}
+                      {platform.login === "required"
+                        ? "需登录"
+                        : platform.login === "not_required"
+                          ? "无需账号"
+                          : "开放投稿页"}
                     </small>
                   </span>
                   <span className="distribution-platform-host">

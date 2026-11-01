@@ -2,6 +2,7 @@ import { ResourceCatalogs } from "./resource-catalog";
 import { BaiduDiscovery } from "./baidu-discovery";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
 import { DriveBrowserSessions } from "./drive-browser-sessions";
+import { PhotoPosts } from "./photo-posts";
 import { SmzdmArticles } from "./smzdm/service";
 import { PipixSources } from "./pipix/service";
 import { ZhihuOperations } from "./zhihu/service";
@@ -19,12 +20,14 @@ import { assertResourceUnique } from "./resource-duplicates";
 import { resourceTags } from "./resource-tags";
 import { hasVerifiedShare } from "../shared/share-status";
 import { Distribution } from "./distribution";
+import { requirePermanentShare } from "./distribution/permanent-share";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
 import { coverFilePattern, saveResourceCover } from "./cover-assets";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
 import { WebsiteAccounts } from "./website-accounts";
 import { ZhidaoOperations } from "./zhidao/service";
+import { ZhidaoPageDiscovery } from "./zhidao/page-discovery/service";
 import { createApplicationHandlers } from "./ipc";
 import type { AppPorts } from "./ports";
 export type { AppPorts } from "./ports";
@@ -84,6 +87,7 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  readonly photoPosts: PhotoPosts;
   readonly driveBrowsers: DriveBrowserSessions;
   readonly baiduDiscovery: BaiduDiscovery;
   readonly accountDeletion: AccountDeletion;
@@ -104,6 +108,7 @@ export class AppService {
   readonly environmentQueue: BrowserEnvironmentQueue;
   readonly driveFiles: DriveFiles;
   readonly zhidao: ZhidaoOperations;
+  readonly zhidaoPages: ZhidaoPageDiscovery;
   readonly db: Database;
   readonly repo: Repository;
   readonly secrets: SecretStore;
@@ -139,8 +144,11 @@ export class AppService {
     this.db = new Database(dbPath);
     this.repo = new Repository(this.db);
     this.baiduDiscovery = new BaiduDiscovery(this.db,ports,changed);
-    this.distribution = new Distribution(this.db, ports, async source => {
+    this.distribution = new Distribution(this.db, ports, async (source, permanentOnly) => {
       const result = await this.invoke(source.splitItemId ? "split.link" : "copy.link", source.splitItemId ? { itemId: source.splitItemId } : { copyId: source.copyId }) as { text: string };
+      if (permanentOnly)
+        await this.authenticated(this.repo.getCopy(source.copyId).accountId, (account, provider) =>
+          requirePermanentShare(account, provider, source.shareId, result.text));
       return result.text;
     }, changed);
     this.secrets = new SecretStore(this.db, codec);
@@ -198,6 +206,7 @@ export class AppService {
         },
       },
     );
+    this.zhidaoPages = new ZhidaoPageDiscovery(this.db, this.ports.zhidaoPages, changed);
     this.ideas = new KeywordIdeas(this.repo, this.ai, changed);
     this.resourceExports = new ResourceExports(this.repo, this.ai, changed);
     this.studio = new StudioService(
@@ -209,6 +218,7 @@ export class AppService {
       changed,
     );
     this.resourceAnswers = new ResourceAnswers(this.repo,this.ai,this.studio,ports,changed);
+    this.photoPosts = new PhotoPosts({repo:this.repo,db:this.db,ports,changed,assertOwnCopy:copy=>this.assertOwnCopy(copy),checkShare:copyId=>this.checkShare(copyId)});
     this.traffic = new TrafficService(this.db, this.secrets, changed);
     this.bit = new BitBrowser(async () => ({
       url: this.db.setting("bitUrl", ""),
@@ -371,6 +381,7 @@ export class AppService {
     });
     this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
     this.handlers = createApplicationHandlers({
+      photoPosts: this.photoPosts,
       lockedAccount: (id, action) => this.mutex.run(id, action),
       driveBrowsers: this.driveBrowsers,
       baiduDiscovery: this.baiduDiscovery,
@@ -393,6 +404,7 @@ export class AppService {
       websiteAccounts: this.websiteAccounts,
       driveFiles: this.driveFiles,
       zhidao: this.zhidao,
+      zhidaoPages: this.zhidaoPages,
       db: this.db,
       repo: this.repo,
       secrets: this.secrets,
@@ -913,6 +925,7 @@ export class AppService {
   }
   private hasRunningJobs(ignoreAccountDeletion = false) {
     return (
+      this.photoPosts.isBusy || !!this.ports.photoPostBrowser?.isOpen() ||
       (!ignoreAccountDeletion && this.accountDeletion?.isBusy) ||
       this.baiduDiscovery.isBusy ||
       this.driveBrowsers.isBusy ||
@@ -934,6 +947,7 @@ export class AppService {
       this.pipix.isBusy ||
       this.csdn.isBusy ||
       this.zhidao.isBusy ||
+      this.zhidaoPages.isBusy ||
       this.insertion.isBusy ||
       this.studio.isBusy ||
       this.resourceAnswers.isBusy ||
@@ -1219,6 +1233,7 @@ export class AppService {
     return folder;
   }
   close() {
+    this.ports.photoPostBrowser?.close();
     this.baiduDiscovery.close();
     this.ports.baiduShareReader?.close(true);
     this.smzdm.close();
@@ -1228,6 +1243,7 @@ export class AppService {
     this.weibo.close();
     this.csdn.close();
     this.zhidao.close();
+    this.zhidaoPages.close();
     this.queue.stop();
     this.environmentQueue.close();
     this.db.close();

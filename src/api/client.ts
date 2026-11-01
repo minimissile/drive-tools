@@ -46,12 +46,14 @@ const reads = new Set<string>([
   "system.backupPreview",
 ]);
 export const shouldRefreshSnapshot = (method: string) =>
+  !method.startsWith("photoPosts.") &&
   !reads.has(method) &&
   !method.startsWith("resourceCatalog.") &&
   !method.startsWith("distribution.") &&
   !method.startsWith("smzdm.") &&
   !method.startsWith("baiduKeywords.") &&
   !method.startsWith("baiduResearch.") &&
+  !method.startsWith("zhidaoPages.") &&
   !method.startsWith("websiteAccounts.") &&
   !method.startsWith("updater.") &&
   !method.startsWith("dev.") &&

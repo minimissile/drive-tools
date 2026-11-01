@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { Button, Empty, LoadingState, Panel, Status } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
@@ -12,15 +13,29 @@ import { PublishAudit } from "./PublishAudit";
 export function RunPanel({
   model,
   children,
+  title = "任务与结果",
+  emptyTitle = "开始新任务，或打开历史记录",
+  emptyDescription = "已完成的结果和未完成进度都会保存在本机。",
+  emptyIcon,
 }: {
   model: OperationModel;
   children?: (items: OperationItem[]) => ReactNode;
+  title?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  emptyIcon?: LucideIcon;
 }) {
   const action = useOperationAction();
   const [resume, setResume] = useState<OperationRun | null>(null);
   const [stopping, setStopping] = useState("");
   const detail = model.detail.data;
   const history = model.history.data;
+  const historyLabel =
+    model.kind === "publish"
+      ? "选择发布记录"
+      : model.kind === "template"
+        ? "选择生成记录"
+        : "选择历史运营任务";
   const focusHost = useRef<HTMLElement>(null);
   useEffect(() => {
     if (detail?.run.id === stopping && detail.run.status !== "running")
@@ -36,8 +51,8 @@ export function RunPanel({
     <Panel
       ref={focusHost}
       tabIndex={-1}
-      aria-label="任务与结果"
-      title="任务与结果"
+      aria-label={title}
+      title={title}
       extra={
         <Button quiet size="compact" onClick={model.refresh}>
           刷新本地记录
@@ -54,11 +69,17 @@ export function RunPanel({
       ) : history ? (
         <>
           <Select
-            aria-label="选择历史运营任务"
+            aria-label={historyLabel}
             value={model.id}
             onValueChange={(id) => model.pick({ id })}
             items={[
-              { value: "", label: "选择历史任务" },
+              {
+                value: "",
+                label:
+                  model.kind === "publish" || model.kind === "template"
+                    ? historyLabel
+                    : "选择历史任务",
+              },
               ...(detail &&
               !history.items.some((run) => run.id === detail.run.id)
                 ? [{ value: detail.run.id, label: detail.run.title }]
@@ -87,9 +108,9 @@ export function RunPanel({
       />
       {model.id && !detail && !model.detail.error ? (
         <LoadingState label="正在打开任务结果…" />
-      ) : !model.id ? (
-        <Empty title="开始新任务，或打开历史记录" compact>
-          已完成的结果和未完成进度都会保存在本机。
+      ) : !model.id && history && !model.history.error ? (
+        <Empty title={emptyTitle} compact icon={emptyIcon}>
+          {emptyDescription}
         </Empty>
       ) : detail ? (
         <>

@@ -1,6 +1,12 @@
 import type { Page } from "../state";
-import { MessageSquareText, FilePenLine, Send } from "lucide-react";
+import { MessageSquareText, Send, Search } from "lucide-react";
 export const operationEntries = [
+  {
+    page: "zhidao-page-discovery",
+    title: "网盘回答发现",
+    description: "批量发现回答正文含网盘链接的百度知道页面",
+    Icon: Search,
+  },
   {
     page: "zhidao-qa",
     title: "智能问答",
@@ -8,15 +14,9 @@ export const operationEntries = [
     Icon: MessageSquareText,
   },
   {
-    page: "zhidao-templates",
-    title: "问答模板",
-    description: "用本人资源生成、编辑和导出问答",
-    Icon: FilePenLine,
-  },
-  {
     page: "zhidao-publish",
-    title: "发布任务",
-    description: "审核后上传模板，登记平台任务",
+    title: "问答发布",
+    description: "生成问答、审核上传，跟进发布与审核记录",
     Icon: Send,
   },
 ] as const satisfies readonly {
@@ -29,6 +29,6 @@ export const operationPage = {
   mine: "zhidao-mine",
   collect: "zhidao-collect",
   answer: "zhidao-qa",
-  template: "zhidao-templates",
+  template: "zhidao-publish",
   publish: "zhidao-publish",
 } as const;

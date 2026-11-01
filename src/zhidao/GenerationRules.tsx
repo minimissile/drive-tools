@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { answerStyleNames } from "../../shared/answer-styles";
 import {
   generationTracks,
+  generationTitleDefaults,
   type GenerationRules as Rules,
 } from "../../shared/zhidao-generation";
 import { Button, Field } from "../ui/primitives";
@@ -26,6 +27,19 @@ export function GenerationRuleFields({
       setWord("");
     }
   };
+  const changePreset = (patch: Partial<Pick<Rules, "track" | "mode">>) => {
+    const previous = generationTitleDefaults(value.track, value.mode);
+    onChange({
+      ...patch,
+      ...(value.prefixes === previous.prefixes &&
+      value.suffixes === previous.suffixes
+        ? generationTitleDefaults(
+            patch.track ?? value.track,
+            patch.mode ?? value.mode,
+          )
+        : {}),
+    });
+  };
   return (
     <>
       <section className="generation-rule-section">
@@ -36,10 +50,8 @@ export function GenerationRuleFields({
               value={value.track}
               disabled={disabled}
               onValueChange={(track) =>
-                onChange({
+                changePreset({
                   track: track as Rules["track"],
-                  prefixes: generationTracks[track as Rules["track"]].prefixes,
-                  suffixes: "？",
                 })
               }
               items={Object.entries(generationTracks).map(([key, track]) => ({
@@ -53,7 +65,7 @@ export function GenerationRuleFields({
               value={value.mode}
               disabled={disabled}
               onValueChange={(mode) =>
-                onChange({ mode: mode as Rules["mode"] })
+                changePreset({ mode: mode as Rules["mode"] })
               }
               items={[
                 { value: "template", label: "按模板整理 · 不调用AI" },
@@ -106,7 +118,7 @@ export function GenerationRuleFields({
           </Field>
         </div>
         <p className="generation-caption">
-          按资料组合前缀、名称和后缀，自动控制在49字内。默认使用自然问句，避免重复“求、免费、下载”等词。
+          按资料组合前缀、名称和后缀，自动控制在49字内。模板模式默认介绍资料内容；方法类问题需提供具体步骤，不能只配资料简介。
         </p>
       </details>
       <details className="generation-rule-section" open>

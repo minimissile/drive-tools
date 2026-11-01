@@ -85,7 +85,7 @@ export class DistributionStore {
         at,
       );
       this.db.run(
-        "UPDATE distribution_tasks SET status='ready',batch_id=NULL,updated_at=? WHERE status='verifying'",
+        "UPDATE distribution_tasks SET status='ready',batch_id=NULL,updated_at=? WHERE status IN ('verifying','waiting_verification')",
         at,
       );
       this.db.run(
@@ -94,11 +94,11 @@ export class DistributionStore {
         at,
       );
       this.db.run(
-        "UPDATE distribution_batches SET status='paused',completed_at=? WHERE status='preparing'",
+        "UPDATE distribution_batches SET status='paused',completed_at=? WHERE status IN ('preparing','waiting_verification')",
         at,
       );
       this.db.run(
-        "UPDATE distribution_runs SET state='paused',readiness=NULL,message=?,updated_at=? WHERE state IN ('running','scanning','pausing','ready')",
+        "UPDATE distribution_runs SET state='paused',readiness=NULL,message=?,updated_at=? WHERE state IN ('running','scanning','pausing','ready','waiting_verification')",
         "程序已重启。请准备全库链接并检查登录后继续；不会自动开始远端投稿。",
         at,
       );
@@ -175,7 +175,10 @@ export class DistributionStore {
           (counts.waiting_login ?? 0) +
           (counts.waiting_rules ?? 0),
         skipped: (counts.skipped ?? 0) + (counts.superseded ?? 0),
-        active: (counts.verifying ?? 0) + (counts.submitting ?? 0),
+        active:
+          (counts.verifying ?? 0) +
+          (counts.submitting ?? 0) +
+          (counts.waiting_verification ?? 0),
         resourceCount: this.db.get<{ n: number }>(
           "SELECT COUNT(DISTINCT resource_id) n FROM distribution_task_sources WHERE platform_id=?",
           platform.id,

@@ -56,14 +56,22 @@ export function PlatformRules({
       <dl className="distribution-facts">
         <div>
           <dt>登录要求</dt>
-          <dd>{platform.login === "required" ? "必须登录" : "未见登录门槛"}</dd>
+          <dd>
+            {platform.login === "required"
+              ? "必须登录"
+              : platform.login === "not_required"
+                ? "无需账号"
+                : "未见登录门槛"}
+          </dd>
         </div>
         <div>
           <dt>单批建议上限</dt>
           <dd>
             {platform.batchLimit
               ? `${platform.batchLimit.toLocaleString()} 条`
-              : "待登录核实"}
+              : platform.format === "unverified"
+                ? "待登录核实"
+                : "未公开"}
           </dd>
         </div>
         <div>
@@ -117,8 +125,17 @@ export function PlatformRules({
       <div className="distribution-session row spread">
         <div>
           <LockKeyhole size={14} />
-          <span>{item.alias || "单平台常用会话"}</span>
-          <small>独立保存登录 · 登录状态以官网为准</small>
+          <span>
+            {item.alias ||
+              (platform.login === "not_required"
+                ? "独立投稿会话"
+                : "单平台常用会话")}
+          </span>
+          <small>
+            {platform.login === "not_required"
+              ? "无需账号 · 安全验证在官网完成"
+              : "独立保存登录 · 登录状态以官网为准"}
+          </small>
         </div>
         <div className="row">
           {platform.loginUrl ? (
@@ -136,7 +153,11 @@ export function PlatformRules({
             size="compact"
             onClick={() => setEditing((value) => !value)}
           >
-            {editing ? "收起备注" : "账号与规则备注"}
+            {editing
+              ? "收起备注"
+              : platform.login === "not_required"
+                ? "会话与规则备注"
+                : "账号与规则备注"}
           </Button>
         </div>
       </div>
@@ -166,7 +187,9 @@ export function PlatformRules({
           }}
         >
           <Field
-            label="常用账号备注"
+            label={
+              platform.login === "not_required" ? "会话备注" : "常用账号备注"
+            }
             hint="只记昵称或用途，请勿填写密码和 Cookie"
           >
             <input

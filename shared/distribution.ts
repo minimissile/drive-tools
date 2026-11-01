@@ -1,10 +1,17 @@
 import { z } from "zod";
 
-export const distributionPlatformId = z.enum(["esoua", "panku8", "repanso"]);
+export const distributionPlatformId = z.enum([
+  "esoua",
+  "panku8",
+  "repanso",
+  "yiso",
+  "pikasoo",
+]);
 export type DistributionPlatformId = z.infer<typeof distributionPlatformId>;
 export const distributionStatus = z.enum([
   "ready",
   "verifying",
+  "waiting_verification",
   "submitting",
   "uncertain",
   "blocked",
@@ -30,6 +37,7 @@ export const distributionSubmittedStatuses: readonly DistributionStatus[] = [
 export const distributionStatusLabels: Record<DistributionStatus, string> = {
   ready: "待分发",
   verifying: "核验分享中",
+  waiting_verification: "待人工打码",
   submitting: "提交中",
   uncertain: "结果待核对",
   blocked: "分享未就绪",
@@ -50,7 +58,7 @@ export interface DistributionPlatform {
   host: string;
   submitUrl: string;
   loginUrl: string | null;
-  login: "required" | "not_observed";
+  login: "required" | "not_required" | "not_observed";
   format: "links" | "unverified";
   batchLimit: number | null;
   dailyLimit: number | null;
@@ -60,6 +68,11 @@ export interface DistributionPlatform {
   rules: string[];
   unknowns: string[];
   stages: DistributionStatus[];
+  supportedProviders?: readonly string[];
+  permanentOnly?: boolean;
+  distinctResource?: boolean;
+  manualVerification?: boolean;
+  localBatchLimit?: number;
 }
 const commonStages: DistributionStatus[] = [
   "ready",
@@ -159,8 +172,71 @@ export const distributionPlatforms: readonly DistributionPlatform[] = [
       "UC、光鸭、PikPak 等其他网盘未在投稿页明确列出，兼容性需另行确认。",
     ],
     stages: ["waiting_login", ...commonStages],
+    distinctResource: true,
+  },
+  {
+    id: "yiso",
+    name: "易搜",
+    host: "yiso.fun",
+    submitUrl: "https://yiso.fun/submit",
+    loginUrl: null,
+    login: "not_required",
+    format: "links",
+    batchLimit: null,
+    dailyLimit: null,
+    characterLimit: null,
+    checkedAt: "2026-10-31",
+    summary: "无需账号，逐条等待官网处理结果",
+    rules: [
+      "官网目前支持阿里、夸克、百度、迅雷；当前资源库可分发其中的夸克、百度和迅雷分享。",
+      "每行一个永久有效的分享链接；有提取码时必须拼接到 URL，否则不会收录。",
+      "相同链接只收录一次；同一份资源反复霸屏可能被拉黑，盘序跳过整份资源的重复链接变体。",
+      "每个会话只允许一个投稿页面。提交后必须等所有链接识别完成，不能立即关闭页面。",
+      "盘序每批只提交 1 条，取得对应链接的官网结果后再处理下一条，批次间隔 5 秒。",
+    ],
+    unknowns: [
+      "官网未公开单批和每日限额；本地逐条提交上限不代表平台配额。",
+      "仅发送已核实永久有效的分享；有限期或有效期无法核实的分享保留为未就绪，不自动建链。",
+      "真实投稿尚未验收；开头的成功提示不是最终回执，未知结果会暂停并保留官网页面供核对。",
+    ],
+    stages: commonStages,
+    supportedProviders: ["quark", "baidu", "xunlei"],
+    permanentOnly: true,
+    distinctResource: true,
+  },
+  {
+    id: "pikasoo",
+    name: "皮卡搜索",
+    host: "www.pikasoo.top",
+    submitUrl: "https://www.pikasoo.top/",
+    loginUrl: null,
+    login: "not_required",
+    format: "links",
+    batchLimit: null,
+    localBatchLimit: 100,
+    dailyLimit: null,
+    characterLimit: null,
+    checkedAt: "2026-10-31",
+    summary: "支持批量链接，每批由你手动输入验证码",
+    rules: [
+      "从首页“分享投稿”打开投稿表单，多个链接以换行分隔。",
+      "同一批多行链接与一个验证码一起提交；验证码错误时官网会刷新，需要重新输入。",
+      "收录范围为阿里、夸克、百度、天翼、蓝奏；当前资源库发送其中的夸克和百度分享。",
+      "盘序自动填写本批链接，你在官网窗口输入验证码后，回盘序点击“提交本批”。",
+      "官网每隔一段时间处理收录；本地“已提交”只表示整批投稿已被接受，不代表逐条收录。",
+    ],
+    unknowns: [
+      "官网未公开单批数量、字数、每日限额及收录时限；盘序本地每批最多 100 条，不代表平台配额。",
+      "批量上限及真实投稿尚未实测；遇未知回执会暂停，不自动重投。",
+    ],
+    stages: ["waiting_verification", ...commonStages],
+    supportedProviders: ["quark", "baidu"],
+    manualVerification: true,
   },
 ];
+export function distributionBatchSize(platform: DistributionPlatform) {
+  return Math.min(100, platform.batchLimit ?? platform.localBatchLimit ?? 1);
+}
 export function distributionPlatform(
   id: DistributionPlatformId,
 ): DistributionPlatform {
@@ -181,6 +257,7 @@ export type DistributionRunState =
   | "scanning"
   | "ready"
   | "running"
+  | "waiting_verification"
   | "pausing"
   | "paused"
   | "blocked"
@@ -269,6 +346,8 @@ export interface DistributionSubmitResult {
     | "uncertain";
   message: string;
   receipt: string;
+  /** Only a definite captcha rejection may safely put this batch back into the queue. */
+  notAccepted?: boolean;
 }
 export const distributionListInput = z.object({
   platformId: distributionPlatformId,
@@ -308,6 +387,10 @@ export interface DistributionContract {
     value: boolean;
   };
   "distribution.pause": {
+    args: { platformId: DistributionPlatformId };
+    value: boolean;
+  };
+  "distribution.continue": {
     args: { platformId: DistributionPlatformId };
     value: boolean;
   };

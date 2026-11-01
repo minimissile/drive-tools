@@ -1,3 +1,4 @@
+import { createPhotoPostHandlers } from "./photo-posts";
 import { createResourceCatalogHandlers } from "./resource-catalog";
 import { createResourceAnswerHandlers } from "./resource-answers";
 import { createResourceDeletionHandlers } from "./resource-deletion";
@@ -13,6 +14,7 @@ import { createBrowserEnvironmentHandlers } from "./browser-environments";
 import { createBitBrowserHandlers } from "./bitbrowser";
 import { createInsertionHandlers } from "./insertion";
 import { createZhidaoHandlers } from "./zhidao";
+import { createZhidaoPageDiscoveryHandlers } from "./zhidao-page-discovery";
 import { createIpcRegistry } from "./registry";
 import type { HandlerServices } from "./types";
 import { createWorkspaceHandlers } from "./workspace";
@@ -41,6 +43,7 @@ import { createWeiboStatisticsHandlers } from "./weibo-statistics";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createPhotoPostHandlers(services),
     createBaiduDiscoveryHandlers(services),
     createAccountDeletionHandlers(services),
     createResourceLinksHandlers(services),
@@ -61,6 +64,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createWeiboHandlers(services),
     createCsdnHandlers(services),
     createZhidaoHandlers(services),
+    createZhidaoPageDiscoveryHandlers(services),
     createWorkspaceHandlers(services),
     createResourcesHandlers(services),
     createResourceExportsHandlers(services),

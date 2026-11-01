@@ -1,4 +1,4 @@
-import { windowStorage } from "../storage/window-storage";
+import { useTaskFocus } from "../tasks/TaskFocus";
 import { ArrowRight, Plug, CircleCheck, CircleAlert } from "lucide-react";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
@@ -30,6 +30,7 @@ import { useWorkbenchPosition } from "../workbench/useWorkbenchPosition";
 export default function Workbench() {
   const { data } = useAppData(),
     { navigate, edit, openSettings } = useAppNavigation();
+  const { request } = useTaskFocus();
   const summary = useIpcQuery("zhidao.summary", undefined, {
     refreshInterval: 3000,
     keepPrevious: true,
@@ -119,10 +120,7 @@ export default function Workbench() {
                   <button
                     key={run.id}
                     onClick={() => {
-                      windowStorage.setItem(
-                        `panxu-operation-focus:${data!.dataPath}:${run.kind}`,
-                        JSON.stringify({ id: run.id }),
-                      );
+                      request({ id: run.id, kind: run.kind });
                       navigate(operationPage[run.kind]);
                     }}
                   >

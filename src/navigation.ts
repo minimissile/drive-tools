@@ -45,6 +45,7 @@ export const sidebarEntries: NavigationEntry[] = [
     group: "运营复盘",
   },
   { page: "accounts", title: "账号管理", Icon: Users, group: "工作空间" },
+  { page: "photo-posts", title: "资源图文营销", Icon: NotebookPen },
   { page: "browser-environments", title: "指纹浏览器", Icon: Fingerprint },
   { page: "settings", title: "连接与设置", Icon: Plug },
 ];
@@ -82,6 +83,7 @@ export const resourceOperations: WorkbenchEntry[] = [
   },
 ];
 export const contentOperations: WorkbenchEntry[] = [
+  {page:"photo-posts",title:"资源图文营销",description:"补填中文口令，制作三张图并交付到抖音、快手、小红书",Icon:NotebookPen},
   { page: "pipix-sources", title: "皮皮虾采集", description: "采集图文与评论，共用于知乎、微博等渠道草稿", Icon: Library },
   {page:"resource-answers", title:"资源问答", description:"围绕问题和资源生成文字、图片与图文，逐版校准", Icon:NotebookPen},
   {

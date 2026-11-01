@@ -157,9 +157,13 @@ function TaskRow({
       ? "good"
       : ["failed", "rejected"].includes(task.status)
         ? "danger"
-        : ["uncertain", "blocked", "waiting_login", "waiting_rules"].includes(
-              task.status,
-            )
+        : [
+              "uncertain",
+              "blocked",
+              "waiting_login",
+              "waiting_rules",
+              "waiting_verification",
+            ].includes(task.status)
           ? "warning"
           : "normal";
   return (

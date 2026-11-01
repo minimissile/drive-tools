@@ -9,6 +9,7 @@ export interface ShareSource {
   title: string;
   provider: string;
   shareUrl: string | null;
+  shareId: string | null;
   shareVersion: number;
   eligible: number;
 }
@@ -32,7 +33,7 @@ export function shareSourcePage(
   return kind === "copy"
     ? db.all<ShareSource>(
         `SELECT c.rowid sourceRow,'copy:'||c.id shareRecordId,c.resource_id resourceId,c.id copyId,
-      NULL splitItemId,r.title title,r.provider provider,c.share_url shareUrl,c.share_version shareVersion,
+      NULL splitItemId,r.title title,r.provider provider,c.share_url shareUrl,c.share_id shareId,c.share_version shareVersion,
       (${copyEligible}) eligible FROM copies c ${joins} WHERE c.rowid>? AND c.rowid<=? ORDER BY c.rowid LIMIT 250`,
         after,
         ceiling,
@@ -40,7 +41,7 @@ export function shareSourcePage(
     : db.all<ShareSource>(
         `SELECT s.rowid sourceRow,'split:'||s.id shareRecordId,c.resource_id resourceId,c.id copyId,
       s.id splitItemId,COALESCE(json_extract(s.file,'$.name'),r.title) title,r.provider provider,
-      s.share_url shareUrl,s.share_version shareVersion,(${splitEligible}) eligible
+      s.share_url shareUrl,s.share_id shareId,s.share_version shareVersion,(${splitEligible}) eligible
       FROM split_items s JOIN copies c ON c.id=s.copy_id ${joins} WHERE s.rowid>? AND s.rowid<=? ORDER BY s.rowid LIMIT 250`,
         after,
         ceiling,

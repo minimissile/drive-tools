@@ -14,6 +14,8 @@ import {
   distributionReceipt,
   type DistributionFormState,
 } from "./distribution-page";
+import { yisoPageScript, type YisoPageResult } from "./yiso-distribution-page";
+import { PikasooDistributionSession } from "./pikasoo-distribution-session";
 import type {
   DistributionReadiness,
   DistributionSubmitResult,
@@ -25,6 +27,7 @@ export function createDistributionSessions(
 ): NonNullable<AppPorts["distributionSessions"]> {
   const windows = new Map<string, BrowserWindow>();
   const workers = new Set<BrowserWindow>();
+  let yisoWorker: BrowserWindow | undefined;
   const profile = (platformId: DistributionPlatformId) => {
     const key = createHash("sha256")
       .update(`${workspace()}\0distribution\0${platformId}`)
@@ -37,10 +40,22 @@ export function createDistributionSessions(
     value.setPermissionCheckHandler(() => false);
     return { key, profile: value };
   };
+  const pikasoo = new PikasooDistributionSession(
+    () => profile("pikasoo"),
+    (url) => allowedNavigation("pikasoo", url),
+  );
   const withWorker = async <T>(
     platformId: DistributionPlatformId,
-    action: (window: BrowserWindow) => Promise<T>,
+    action: (window: BrowserWindow, assertActive: () => void) => Promise<T>,
   ): Promise<T> => {
+    if (platformId === "yiso") {
+      const existing = windows.get(profile(platformId).key);
+      if (yisoWorker || (existing && !existing.isDestroyed()))
+        throw new AppError(
+          "DISTRIBUTION_PAGE_BUSY",
+          "易搜只允许一个投稿页，请关闭已打开的易搜官网窗口后重新准备。",
+        );
+    }
     const reader = new BrowserWindow({
       show: false,
       width: 1120,
@@ -54,6 +69,7 @@ export function createDistributionSessions(
       },
     });
     workers.add(reader);
+    if (platformId === "yiso") yisoWorker = reader;
     reader.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     reader.webContents.on("will-navigate", (event, url) => {
       if (!allowedNavigation(platformId, url)) event.preventDefault();
@@ -62,9 +78,16 @@ export function createDistributionSessions(
       if (!allowedNavigation(platformId, url)) event.preventDefault();
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
     try {
       return await Promise.race([
-        action(reader),
+        action(reader, () => {
+          if (!active)
+            throw new AppError(
+              "DISTRIBUTION_TIMEOUT",
+              "平台处理窗口已超时，未继续发送。",
+            );
+        }),
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(
             () =>
@@ -79,9 +102,35 @@ export function createDistributionSessions(
         }),
       ]);
     } finally {
+      active = false;
       if (timer) clearTimeout(timer);
+      // Let the official page release its one-page registration through its own unload handler.
+      // Unknown submissions retain the actual page, so its processing is not interrupted.
+      if (
+        platformId === "yiso" &&
+        !reader.isDestroyed() &&
+        windows.get(profile(platformId).key) !== reader
+      ) {
+        let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            reader.loadURL("https://yiso.fun/"),
+            new Promise<void>((resolve) => {
+              releaseTimer = setTimeout(resolve, 5000);
+            }),
+          ]);
+        } catch {
+        } finally {
+          if (releaseTimer) clearTimeout(releaseTimer);
+        }
+      }
       workers.delete(reader);
-      if (!reader.isDestroyed()) reader.destroy();
+      if (yisoWorker === reader) yisoWorker = undefined;
+      if (
+        !reader.isDestroyed() &&
+        windows.get(profile(platformId).key) !== reader
+      )
+        reader.destroy();
     }
   };
   const loadForm = async (
@@ -94,19 +143,34 @@ export function createDistributionSessions(
       message: "平台表单未加载。",
     };
     for (let attempt = 0; attempt < 40; attempt++) {
+      if (platformId === "yiso")
+        await window.webContents.executeJavaScript(yisoPageScript("dismiss"));
       state = (await window.webContents.executeJavaScript(
-        distributionFormScript(),
+        platformId === "yiso"
+          ? yisoPageScript("inspect")
+          : distributionFormScript(),
       )) as DistributionFormState;
       if (state.status !== "unavailable") return state;
       await wait(250);
     }
     return state;
   };
+  const retainYiso = (window: BrowserWindow) => {
+    if (window.isDestroyed()) return;
+    const key = profile("yiso").key;
+    if (windows.get(key) === window) return;
+    windows.set(key, window);
+    window.on("closed", () => {
+      if (windows.get(key) === window) windows.delete(key);
+    });
+  };
   return {
     isOpen: () =>
+      pikasoo.isOpen() ||
       workers.size > 0 ||
       [...windows.values()].some((window) => !window.isDestroyed()),
     async inspect(platformId) {
+      if (platformId === "pikasoo") return pikasoo.inspect();
       if (distributionPlatform(platformId).format === "unverified")
         return {
           status: "rules_required",
@@ -121,9 +185,25 @@ export function createDistributionSessions(
         checkedAt: new Date().toISOString(),
       } as DistributionReadiness;
     },
-    async submit(platformId, text, beforeSubmit, signal) {
-      return withWorker(platformId, async (window) => {
+    async continue(platformId) {
+      if (platformId !== "pikasoo")
+        throw new AppError(
+          "DISTRIBUTION_NOT_WAITING",
+          "该平台当前没有人工验证码批次。",
+        );
+      return pikasoo.continue();
+    },
+    async submit(platformId, text, beforeSubmit, signal, onWaiting) {
+      if (platformId === "pikasoo")
+        return pikasoo.submit(
+          text,
+          beforeSubmit,
+          signal,
+          onWaiting ?? (() => {}),
+        );
+      return withWorker(platformId, async (window, assertActive) => {
         const state = await loadForm(window, platformId);
+        assertActive();
         signal.throwIfAborted();
         if (state.status !== "ready")
           return {
@@ -136,6 +216,56 @@ export function createDistributionSessions(
             message: state.message,
             receipt: "",
           } as DistributionSubmitResult;
+        if (platformId === "yiso") {
+          await window.webContents.executeJavaScript(
+            yisoPageScript("fill", text),
+          );
+          await wait(100);
+          assertActive();
+          signal.throwIfAborted();
+          await beforeSubmit();
+          retainYiso(window);
+          try {
+            await window.webContents.executeJavaScript(
+              yisoPageScript("submit", text),
+            );
+            // The official page performs the request. No debugger, API reconstruction or token reads.
+            for (let attempt = 0; attempt < 140; attempt++) {
+              const result = (await window.webContents.executeJavaScript(
+                yisoPageScript("result", text),
+              )) as YisoPageResult;
+              if (
+                result?.status === "accepted" ||
+                result?.status === "rejected"
+              ) {
+                // A timed-out outer worker already returned an unknown result to the ledger.
+                // Keep its page available even if this late observer subsequently sees success.
+                if (workers.has(window)) windows.delete(profile("yiso").key);
+                return result;
+              }
+              if (result && result.status !== "ready") {
+                retainYiso(window);
+                return {
+                  status: "uncertain",
+                  message: `${result.message} 已保留官网页面，请打开投稿页核对，禁止自动重投。`,
+                  receipt: "",
+                };
+              }
+              // Once clicked, pause waits for this link's outcome instead of cancelling its request.
+              await wait(250);
+            }
+          } catch (error) {
+            retainYiso(window);
+            throw error;
+          }
+          retainYiso(window);
+          return {
+            status: "uncertain",
+            message:
+              "易搜未返回此链接的最终处理结果。官网页面已保留，请打开投稿页核对后关闭，禁止自动重投。",
+            receipt: "",
+          };
+        }
         await window.webContents.executeJavaScript(
           distributionFillScript(text),
         );
@@ -231,6 +361,12 @@ export function createDistributionSessions(
       });
     },
     async open(platformId, page) {
+      if (platformId === "pikasoo") return pikasoo.open();
+      if (platformId === "yiso" && yisoWorker)
+        throw new AppError(
+          "DISTRIBUTION_PAGE_BUSY",
+          "易搜正在检查或提交链接，请暂停并等待本条结果后再打开投稿页。",
+        );
       const platform = distributionPlatform(platformId);
       const { key, profile: browserProfile } = profile(platformId);
       const target =

@@ -5,6 +5,7 @@ import {
 import type { z } from "zod";
 import {
   distributionPlatform,
+  distributionBatchSize,
   type DistributionPlatformId,
   type DistributionTask,
   type DistributionReadiness,
@@ -31,7 +32,10 @@ export class Distribution {
   constructor(
     private db: Database,
     private ports: AppPorts,
-    private link: (source: ShareSource) => Promise<string>,
+    private link: (
+      source: ShareSource,
+      permanentOnly: boolean,
+    ) => Promise<string>,
     private changed: () => void,
   ) {
     this.store = new DistributionStore(db);
@@ -111,6 +115,18 @@ export class Distribution {
     }
     return true;
   }
+  async continue(platformId: DistributionPlatformId) {
+    if (
+      !this.jobs.has(platformId) ||
+      this.store.run(platformId).state !== "waiting_verification" ||
+      !this.ports.distributionSessions?.continue
+    )
+      throw new AppError(
+        "DISTRIBUTION_NOT_WAITING",
+        "当前没有等待人工打码的批次，请刷新进度。",
+      );
+    return this.ports.distributionSessions.continue(platformId);
+  }
   retry(platformId: DistributionPlatformId) {
     this.assertIdle(platformId);
     let updated = 0;
@@ -148,7 +164,15 @@ export class Distribution {
         "DISTRIBUTION_FINISHED",
         "已收录记录不能改回待分发或失败。",
       );
-    if (["ready", "blocked", "verifying", "submitting"].includes(task.status))
+    if (
+      [
+        "ready",
+        "blocked",
+        "verifying",
+        "waiting_verification",
+        "submitting",
+      ].includes(task.status)
+    )
       throw new AppError(
         "DISTRIBUTION_NOT_SENT",
         "这条记录尚未完成自动提交，请先启动分发；未发出的任务不能回填成功。",
@@ -357,7 +381,7 @@ export class Distribution {
       }
       const tasks = this.store.next(
         platformId,
-        Math.min(100, platform.batchLimit ?? 1, remaining),
+        Math.min(distributionBatchSize(platform), remaining),
       );
       if (!tasks.length) {
         this.store.state(
@@ -375,7 +399,18 @@ export class Distribution {
         for (const task of tasks) {
           signal.throwIfAborted();
           try {
-            if (platformId === "repanso") {
+            if (
+              platform.supportedProviders &&
+              !platform.supportedProviders.includes(task.provider)
+            ) {
+              this.store.event(
+                task.id,
+                "skipped",
+                `${platform.name}投稿页未列出此网盘，已跳过；原资源和分享保持不变。`,
+              );
+              continue;
+            }
+            if (platform.distinctResource) {
               if (
                 this.store.resourceConflict(
                   task.id,
@@ -385,13 +420,13 @@ export class Distribution {
                 this.store.event(
                   task.id,
                   "skipped",
-                  "热盘搜禁止同一资源生成多个链接重复提交；已跳过此链接变体，保留资源与分享 ID 记录。",
+                  `${platform.name}禁止同一资源重复投稿；已跳过此链接变体，保留资源与分享 ID 记录。`,
                 );
                 continue;
               }
             }
             const source = this.current(task),
-              raw = await this.link(source);
+              raw = await this.link(source, !!platform.permanentOnly);
             if (this.closed) return;
             signal.throwIfAborted();
             this.current(task);
@@ -461,10 +496,31 @@ export class Distribution {
                 "本批将超过平台每日限额，已停止发送。",
               );
             this.store.sent(batchId, ready);
+            this.store.state(
+              platformId,
+              "running",
+              `正在提交本批 ${ready.length} 条链接，等待官网回执…`,
+            );
             sent = true;
             this.changed();
           },
           signal,
+          () => {
+            if (this.closed) throw new AppError("CLOSED", "工作空间已关闭。");
+            signal.throwIfAborted();
+            const message = `本批 ${ready.length} 条链接已填入官网。请在验证码窗口手动输入验证码，然后回盘序点击“提交本批”。`;
+            this.db.transaction(() => {
+              for (const task of ready)
+                this.store.event(task.id, "waiting_verification", message);
+              this.db.run(
+                "UPDATE distribution_batches SET status='waiting_verification',message=? WHERE id=?",
+                message,
+                batchId,
+              );
+              this.store.state(platformId, "waiting_verification", message);
+            });
+            this.changed();
+          },
         );
         if (this.closed) return;
         if (response.status === "accepted" && !sent)
@@ -475,13 +531,15 @@ export class Distribution {
         const status =
           response.status === "accepted"
             ? "submitted"
-            : response.status === "uncertain"
-              ? sent
-                ? "uncertain"
-                : "ready"
-              : sent
-                ? "failed"
-                : "ready";
+            : response.notAccepted
+              ? "ready"
+              : response.status === "uncertain"
+                ? sent
+                  ? "uncertain"
+                  : "ready"
+                : sent
+                  ? "failed"
+                  : "ready";
         this.store.finishBatch(
           batchId,
           ready,
@@ -490,7 +548,18 @@ export class Distribution {
           response.receipt,
         );
         this.changed();
-        if (response.status !== "accepted") {
+        const retryVerification =
+          response.status === "verification_required" &&
+          response.notAccepted &&
+          platform.manualVerification;
+        if (retryVerification) {
+          this.store.state(
+            platformId,
+            "running",
+            "本批验证码未通过，官网未接受投稿；正在准备重新打码…",
+          );
+        }
+        if (response.status !== "accepted" && !retryVerification) {
           this.store.state(
             platformId,
             "blocked",
@@ -519,7 +588,9 @@ export class Distribution {
             ? "已暂停，尚未发送的记录保留待分发。"
             : safeMessage(error);
         const outstanding = tasks.filter((task) =>
-          ["verifying", "submitting"].includes(this.store.get(task.id).status),
+          ["verifying", "waiting_verification", "submitting"].includes(
+            this.store.get(task.id).status,
+          ),
         );
         this.store.finishBatch(
           batchId,

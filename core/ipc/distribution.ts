@@ -23,6 +23,8 @@ export function createDistributionHandlers(
       ),
     "distribution.pause": (object) =>
       services.distribution.pause(platformInput.parse(object).platformId),
+    "distribution.continue": (object) =>
+      services.distribution.continue(platformInput.parse(object).platformId),
     "distribution.retry": (object) =>
       services.distribution.retry(platformInput.parse(object).platformId),
     "distribution.resolve": (object) =>

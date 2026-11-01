@@ -6,7 +6,8 @@ export function usePublishingView() {
   const { data } = useAppData();
   return useLocalDraft(
     `panxu-zhidao-publish-view:${data!.dataPath}`,
-    { tab: "generate" as "generate" | "upload" },
-    (raw) => z.object({ tab: z.enum(["generate", "upload"]) }).parse(raw),
+    { tab: "generate" as "generate" | "upload" | "history" },
+    (raw) =>
+      z.object({ tab: z.enum(["generate", "upload", "history"]) }).parse(raw),
   );
 }

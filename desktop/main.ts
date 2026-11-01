@@ -26,12 +26,14 @@ import { AppService, type AppPorts } from "../core/service";
 import { createZhidaoSession } from "./zhidao-session";
 import { createCollectionWebSession } from "./collection-web-session";
 import { createBaiduDiscoverySession } from "./baidu-discovery-session";
+import { createZhidaoPageDiscovery } from "./zhidao-page-discovery";
 import { createBaiduShareReader } from "./baidu-share-reader";
 import { createWebsiteSessions } from "./website-sessions";
 import { createDistributionSessions } from "./distribution-sessions";
 import { createEnvironmentSessions } from "./browser-environment-session";
 import { readTableBytes } from "../core/table-files";
 import { QuarkProvider } from "../core/providers/quark";
+import { createPhotoPostSessions } from "./photo-post-session";
 import { UcProvider } from "../core/providers/uc";
 import { PikPakProvider } from "../core/providers/pikpak";
 import { GuangyaProvider } from "../core/providers/guangya";
@@ -470,8 +472,10 @@ const ports: AppPorts = {
   },
   collectionWebSession: createCollectionWebSession(() => service.dataPath),
   baiduDiscovery: createBaiduDiscoverySession(() => service.dataPath),
+  zhidaoPages: createZhidaoPageDiscovery(() => service.dataPath),
   baiduShareReader: createBaiduShareReader(() => service.dataPath),
   distributionSessions: createDistributionSessions(() => service.dataPath),
+  photoPostBrowser: createPhotoPostSessions(() => service.dataPath),
   browserEnvironments: environmentSessions,
   zhidaoSession: createZhidaoSession((id) => environmentSessions.profile({ kind: "zhidao", id })),
   baiduKeywords: websiteSessions.baiduKeywords,
@@ -753,6 +757,7 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
       service.weibo.isBusy ||
       service.csdn.isBusy ||
       service.zhidao.isBusy ||
+      service.zhidaoPages.isBusy ||
       service.driveFiles.isBusy
     ) {
       const choice = dialog.showMessageBoxSync(window!, {
@@ -773,6 +778,7 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
     if (!windows.size) {
       ports.baiduDiscovery?.close();
       ports.baiduShareReader?.close(true);
+      ports.zhidaoPages?.close();
     }
   });
   const devUrl = !app.isPackaged ? process.env.PANXU_DEV_URL : undefined;
@@ -1110,6 +1116,7 @@ else {
   app.on("before-quit", () => {
     quitting = true;
     service?.baiduDiscovery.close();
+    service?.zhidaoPages.close();
     ports.baiduShareReader?.close(true);
     service?.distribution.close();
     service?.queue.stop();

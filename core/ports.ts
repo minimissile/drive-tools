@@ -1,7 +1,13 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
+  photoPostBrowser?: {
+    open(platform: import("../shared/photo-posts").PhotoPlatform): Promise<void>;
+    isOpen(): boolean;
+    close(): void;
+  };
   baiduDiscovery?: import("../shared/baidu-discovery").BaiduDiscoveryPort;
+  zhidaoPages?: import("../shared/zhidao-page-discovery").PageDiscoveryPort;
   baiduShareReader?: {
     inspect(source: import("../shared/types").ShareInput, parentId: string, page: number): Promise<import("../shared/types").ShareInspection>;
     open(): Promise<void>;
@@ -21,7 +27,8 @@ export interface AppPorts {
     open(platformId: import("../shared/distribution").DistributionPlatformId, page: "submit" | "login"): Promise<void>;
     isOpen(): boolean;
     inspect(platformId: import("../shared/distribution").DistributionPlatformId): Promise<import("../shared/distribution").DistributionReadiness>;
-    submit(platformId: import("../shared/distribution").DistributionPlatformId, text: string, beforeSubmit: () => Promise<void>, signal: AbortSignal): Promise<import("../shared/distribution").DistributionSubmitResult>;
+    submit(platformId: import("../shared/distribution").DistributionPlatformId, text: string, beforeSubmit: () => Promise<void>, signal: AbortSignal, onWaiting?: () => void): Promise<import("../shared/distribution").DistributionSubmitResult>;
+    continue?(platformId: import("../shared/distribution").DistributionPlatformId): Promise<boolean>;
   };
   zhihu?: import("../shared/zhihu").ZhihuBrowserPort;
   browserEnvironments?: {

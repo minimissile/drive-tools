@@ -835,7 +835,15 @@ export class TokenDriveProvider implements DriveProvider {
     const expiresAt = actualShareExpiry(
       row.expiration_at ?? row.expiration_time,
     );
-    return { ...share, ...(expiresAt ? { expiresAt } : {}) };
+    const permanent =
+      row.expiration_days != null &&
+      row.expiration_days !== "" &&
+      Number(row.expiration_days) === -1 &&
+      expiresAt === undefined;
+    return {
+      ...share,
+      ...(expiresAt ? { expiresAt } : permanent ? { expiresAt: null } : {}),
+    };
   }
   async findOwnShare(account: Account, files: RemoteFile[]) {
     const identity = await this.identity(account);
