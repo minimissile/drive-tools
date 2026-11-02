@@ -34,6 +34,15 @@ export class QuarkProvider implements DriveProvider {
   private get label() {
     return this.id === "uc" ? "UC" : "夸克";
   }
+  async readFile(account: Account, file: RemoteFile, maxBytes: number) {
+    if (!this.transport.fileBytes)
+      throw new AppError("UNSUPPORTED", "当前环境不能读取文件正文。");
+    const result = await this.request(account, "file/download", {}, { fids: [file.id] });
+    const item = Array.isArray(result.data) ? result.data.find((v: JsonObject) => String(v.fid) === file.id) : null;
+    if (!item?.download_url)
+      throw new AppError("DOWNLOAD_UNAVAILABLE", "网盘未返回此文件的读取地址，请检查登录或使用本地文件。");
+    return this.transport.fileBytes(account.id, String(item.download_url), maxBytes);
+  }
   private url(path: string, query: Record<string, string | number> = {}) {
     const url = new URL(
       `https://${this.id === "uc" ? "pc-api.uc.cn" : "drive-pc.quark.cn"}/1/clouddrive/${path}`,

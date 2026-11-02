@@ -39,6 +39,8 @@ const reads = new Set<string>([
   "bit.health",
   "bit.windows",
   "share.parse",
+  "share.validate",
+  "share.validationPage",
   "drive.locateCopy",
   "system.copyText",
   "system.external",

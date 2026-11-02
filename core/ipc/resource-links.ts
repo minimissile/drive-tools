@@ -5,17 +5,18 @@ export function createResourceLinksHandlers(
   services: Pick<HandlerServices, "resourceLinks">,
 ) {
   const resource = z.object({ resourceId: z.string().min(1).max(100) });
+  const configuration = z.object({
+    enabled: z.boolean(),
+    baseUrl: z.string().max(500),
+    token: z.string().max(512).optional(),
+  });
   return {
     "resourceLinks.settings": () => services.resourceLinks.settings(),
     "resourceLinks.configure": (input) =>
-      services.resourceLinks.configure(
-        z
-          .object({
-            enabled: z.boolean(),
-            baseUrl: z.string().max(500),
-            token: z.string().max(512).optional(),
-          })
-          .parse(input),
+      services.resourceLinks.configure(configuration.parse(input)),
+    "resourceLinks.migrateService": (input) =>
+      services.resourceLinks.migrateService(
+        configuration.omit({ token: true }).parse(input),
       ),
     "resourceLinks.checkConnection": () =>
       services.resourceLinks.checkConnection(),
@@ -48,7 +49,11 @@ export function createResourceLinksHandlers(
       services.resourceLinks.refresh(resource.parse(input).resourceId),
     "resourceLinks.recover": (input) =>
       services.resourceLinks.recover(resource.parse(input).resourceId),
-    "resourceLinks.copy": (input) =>
-      services.resourceLinks.copy(resource.parse(input).resourceId),
+    "resourceLinks.copy": (input) => {
+      const value = resource
+        .extend({ kind: z.enum(["landing", "redirect"]).optional() })
+        .parse(input);
+      return services.resourceLinks.copy(value.resourceId, value.kind);
+    },
   } satisfies HandlerMap;
 }

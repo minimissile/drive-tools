@@ -83,7 +83,7 @@ export async function verifyRecordedOwnShare(
       "OWNERSHIP_UNVERIFIED",
       "未能确认此链接属于所选账号，本地资料已保留。",
     );
-  await secrets.set(`share:${copy.id}`, share.code);
+  await secrets.set(`share:${copy.id}`, share.code, { preserveEmpty: true });
   repo.db.run(
     "UPDATE copies SET status='ready',files=?,owner_uid=?,verified_at=?,share_id=?,share_url=?,share_owner_uid=?,share_version=share_version+1,share_verified_at=?,error=NULL,updated_at=? WHERE id=? AND status='recorded'",
     JSON.stringify(files),

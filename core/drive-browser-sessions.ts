@@ -20,6 +20,7 @@ import {
 } from "../shared/providers";
 import { browserPageRequest } from "./browser-page-request";
 import { findEnvironmentPage, officialBrowserPage } from "./browser-pages";
+import { initializeAccountAlias } from "./account-alias";
 
 interface Dependencies {
   repo: Repository;
@@ -421,7 +422,13 @@ export class DriveBrowserSessions {
             "INSERT INTO accounts(id,provider,alias,uid,is_default,status,verified_at,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             accountId,
             "baidu",
-            alias,
+            initializeAccountAlias(
+              this.db,
+              accountId,
+              "baidu",
+              alias,
+              result.state.nickname,
+            ),
             v.uid,
             Number(isDefault),
             result.state.headless ? "connected" : "expired",

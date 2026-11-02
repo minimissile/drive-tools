@@ -4,25 +4,22 @@ import {
   CircleX,
   Link2,
   LoaderCircle,
-  RefreshCw,
 } from "lucide-react";
-import { Button } from "../ui/primitives";
 import type { IntakeShareValidation } from "./useIntakeShare";
+import type { ReactNode } from "react";
 
 export function IntakeShareStatus({
   id,
   error,
   parsing,
   validation,
-  hasValue,
-  onRetry,
+  recovery,
 }: {
   id: string;
   error: string;
   parsing: boolean;
   validation: IntakeShareValidation | null;
-  hasValue: boolean;
-  onRetry(): void;
+  recovery?: ReactNode;
 }) {
   const state = error
     ? "invalid"
@@ -53,7 +50,7 @@ export function IntakeShareStatus({
         aria-atomic="true"
       >
         <Icon
-          size={15}
+          size={16}
           className={state === "checking" ? "spin" : undefined}
           aria-hidden="true"
         />
@@ -62,19 +59,8 @@ export function IntakeShareStatus({
           {message}
         </span>
       </span>
-      {hasValue ? (
-        <Button
-          quiet
-          size="compact"
-          disabled={state === "checking"}
-          aria-label={
-            state === "idle" ? "检查网盘分享链接" : "重新检查网盘分享链接"
-          }
-          title={state === "idle" ? "检查链接" : "重新检查"}
-          onClick={onRetry}
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-        </Button>
+      {recovery ? (
+        <div className="intake-share-recovery">{recovery}</div>
       ) : null}
     </div>
   );

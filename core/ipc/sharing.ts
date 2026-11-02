@@ -4,7 +4,7 @@ import { now } from "../database";
 import { AppError, safeMessage } from "../errors";
 import { parseShare } from "../links";
 import { assertManifest } from "../providers/provider";
-import type { ShareCheck } from "../../shared/types";
+import type { ShareCheck, ShareValidationResult } from "../../shared/types";
 
 import type { HandlerServices, HandlerMap, IpcHandler } from "./types";
 
@@ -25,6 +25,23 @@ export function createSharingHandlers(
     | "secrets"
   >,
 ) {
+  const validationInput = z.object({
+    sourceText: z.string().min(1).max(8000),
+    code: z.string().max(30).optional(),
+    accountId: z.string().min(1).optional(),
+    resourceId: z.string().optional(),
+  });
+  const validationSource = async (input: z.infer<typeof validationInput>) => {
+    const source = parseShare(input.sourceText, input.code);
+    if (
+      !source.code &&
+      input.resourceId &&
+      services.repo.getResource(input.resourceId).sourceUrl === source.url
+    )
+      source.code =
+        (await services.secrets.get(`source:${input.resourceId}`)) ?? "";
+    return source;
+  };
   const restoreOwnShare: IpcHandler = async (object, method) => {
     const { copyId, text, code } = z
       .object({
@@ -121,7 +138,9 @@ export function createSharingHandlers(
         copy.shareId !== share.id ||
         copy.shareUrl !== parsedShare.url ||
         (await services.secrets.get(`share:${copyId}`)) !== share.code;
-      await services.secrets.set(`share:${copyId}`, share.code);
+      await services.secrets.set(`share:${copyId}`, share.code, {
+        preserveEmpty: true,
+      });
       services.db.transaction(() => {
         services.db.run(
           "UPDATE copies SET status=?,share_id=?,share_url=?,share_owner_uid=?,share_version=share_version+?,share_verified_at=?,error=NULL WHERE id=?",
@@ -158,6 +177,78 @@ export function createSharingHandlers(
         })
         .parse(object);
       return parseShare(text, code);
+    },
+    "share.validate": async (object): Promise<ShareValidationResult> => {
+      const input = validationInput.parse(object);
+      const source = await validationSource(input);
+      try {
+        let result;
+        if (source.provider === "baidu") {
+          // Public-link access is independent of the account used for a later transfer.
+          if (!services.ports.baiduShareReader)
+            throw new AppError(
+              "BROWSER_UNAVAILABLE",
+              "当前客户端未提供百度分享读取器，请等待源码后台更新后重试。",
+            );
+          result = await services.ports.baiduShareReader.inspect(
+            source,
+            "0",
+            1,
+          );
+        } else {
+          if (!input.accountId)
+            throw new AppError(
+              "ACCOUNT_REQUIRED",
+              "请选择对应网盘账号后检查链接。",
+            );
+          result = await services.authenticated(
+            input.accountId,
+            async (account, provider) => {
+              if (account.provider !== source.provider)
+                throw new AppError(
+                  "CROSS_PROVIDER_UNSUPPORTED",
+                  "请选择与分享相同网盘的账号。",
+                );
+              return provider.inspect(account, source, "0", 1);
+            },
+          );
+        }
+        return {
+          status: "valid",
+          checkedAt: now(),
+          message: result.files.length
+            ? "链接有效，可读取分享内容。"
+            : "链接有效，分享中暂无文件。",
+        };
+      } catch (error) {
+        const errorCode = error instanceof AppError ? error.code : undefined;
+        return {
+          status: errorCode === "SHARE_EXPIRED" ? "invalid" : "unavailable",
+          checkedAt: now(),
+          message: safeMessage(error),
+          errorCode,
+          accountId: source.provider !== "baidu" ? input.accountId : undefined,
+          canOpenPage:
+            source.provider === "baidu" &&
+            [
+              "SHARE_VERIFICATION",
+              "SHARE_LOGIN",
+              "SHARE_PAGE_UNREADY",
+              "SHARE_BROWSER_TIMEOUT",
+              "SHARE_DIRECTORY_ERROR",
+              "SHARE_DIRECTORY_CHANGED",
+            ].includes(errorCode ?? ""),
+        };
+      }
+    },
+    "share.validationPage": async (object) => {
+      const source = await validationSource(validationInput.parse(object));
+      if (source.provider !== "baidu" || !services.ports.baiduShareReader)
+        throw new AppError(
+          "BROWSER_UNAVAILABLE",
+          "当前链接没有可查看的百度读取页面，请重新检查。",
+        );
+      await services.ports.baiduShareReader.open(source);
     },
     "share.open": async (object) => {
       const input = z

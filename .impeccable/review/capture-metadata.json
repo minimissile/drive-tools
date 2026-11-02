@@ -1,0 +1,98 @@
+{
+  "capturedAt": "2026-11-02T03:28:25.661Z",
+  "method": "isolated system Chrome / Playwright / deviceScaleFactor 1",
+  "records": [
+    {
+      "path": ".impeccable/review/article-1440.png",
+      "actual": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "contentWidth": 1440
+      },
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5"
+    },
+    {
+      "path": ".impeccable/review/article-full.png",
+      "actual": {
+        "width": 1440,
+        "height": 2409
+      },
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "contentWidth": 1440
+      },
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5"
+    },
+    {
+      "path": ".impeccable/review/article-1366.png",
+      "actual": {
+        "width": 1366,
+        "height": 768
+      },
+      "layout": {
+        "width": 1366,
+        "height": 768,
+        "contentWidth": 1366
+      },
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5"
+    },
+    {
+      "path": ".impeccable/review/article-sources-1366.png",
+      "actual": {
+        "width": 1366,
+        "height": 768
+      },
+      "layout": {
+        "width": 1366,
+        "height": 768,
+        "contentWidth": 1366
+      },
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5#evidence-doc-1-p3"
+    },
+    {
+      "path": ".impeccable/review/catalog-1440.png",
+      "actual": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "contentWidth": 1440
+      },
+      "url": "https://panxu.site/"
+    },
+    {
+      "path": ".impeccable/review/about-desktop.png",
+      "actual": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "contentWidth": 1440
+      },
+      "url": "https://panxu.site/about"
+    },
+    {
+      "path": ".impeccable/review/about-full.png",
+      "actual": {
+        "width": 1440,
+        "height": 1098
+      },
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "contentWidth": 1440
+      },
+      "url": "https://panxu.site/about"
+    }
+  ],
+  "errors": []
+}

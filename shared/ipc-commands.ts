@@ -23,6 +23,7 @@ import type {
   ImportPreview,
   ShareInput,
   ShareInspection,
+  ShareValidationResult,
   ShareCheck,
   TrafficQuery,
   TrafficResult,
@@ -120,7 +121,14 @@ export interface IpcCommands {
   "insertion.recheck": Contract<{ id: string }, InsertionRun>;
   "insertion.export": Contract<{ id: string }, string | null>;
 
-  "account.add": Contract<{ provider: Provider; alias: string; browser?: import("./drive-browser").DriveAccountBrowserInput }, Account>;
+  "account.add": Contract<
+    {
+      provider: Provider;
+      alias?: string;
+      browser?: import("./drive-browser").DriveAccountBrowserInput;
+    },
+    Account
+  >;
   "account.capacity": Contract<Id, Account>;
   "account.check": Contract<Id>;
   "account.clear": Contract<Id>;
@@ -319,6 +327,19 @@ export interface IpcCommands {
     resourceId?: string;
   }>;
   "share.parse": Contract<{ text: string; code?: string }, ShareInput>;
+  "share.validate": Contract<
+    {
+      sourceText: string;
+      code?: string;
+      accountId?: string;
+      resourceId?: string;
+    },
+    ShareValidationResult
+  >;
+  "share.validationPage": Contract<
+    { sourceText: string; code?: string; resourceId?: string },
+    void
+  >;
   "shareStats.export": Contract<ShareStatsFilter, string | null>;
   "shareStats.refresh": Contract<
     { accountIds: string[] },
@@ -334,6 +355,10 @@ export interface IpcCommands {
   >;
   "split.recover": Contract<{ itemId: string; text: string; code?: string }>;
   "split.start": Contract<StartItems, { created: number; reused: number }>;
+  "split.archive": Contract<
+    Id & { itemIds: string[] },
+    { created: number; reused: number }
+  >;
   "studio.assetExport": Contract<{ name: string }>;
   "studio.create": Contract<z.input<typeof studioCreateInput>, Draft>;
   "studio.models": Contract<undefined, MediaModel[]>;

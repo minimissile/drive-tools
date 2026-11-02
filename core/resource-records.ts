@@ -51,8 +51,14 @@ export function removeResourceRecords(
     for (const item of db.all<{ id: string }>(
       "SELECT id FROM split_items WHERE copy_id=?",
       copy.id,
-    ))
+    )) {
       db.run("DELETE FROM secrets WHERE key=?", `split:${item.id}`);
+      db.run("DELETE FROM settings WHERE key=?", `split-archive:${item.id}`);
+    }
+    db.run(
+      "DELETE FROM settings WHERE key LIKE 'split-archive:%' AND json_valid(value) AND json_extract(value,'$.copyId')=?",
+      copy.id,
+    );
     db.run(
       "DELETE FROM split_run_items WHERE run_id IN (SELECT id FROM split_runs WHERE copy_id=?) OR item_id IN (SELECT id FROM split_items WHERE copy_id=?)",
       copy.id,

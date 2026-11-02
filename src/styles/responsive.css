@@ -162,19 +162,6 @@
   .panel {
     padding: 16px;
   }
-  .stepper {
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    font-size: 10px;
-  }
-  .stepper > div {
-    gap: 5px;
-  }
-  .stepper b {
-    width: 19px;
-    height: 19px;
-  }
   .task-header {
     flex-direction: column;
     gap: 8px;

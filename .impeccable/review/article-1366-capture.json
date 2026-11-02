@@ -1,0 +1,20 @@
+{
+  "capturedAt": "2026-11-01T19:05:06.440Z",
+  "method": "isolated system Chrome / Playwright / deviceScaleFactor 1",
+  "records": [
+    {
+      "path": ".impeccable/review/article-1366.png",
+      "actual": {
+        "width": 1366,
+        "height": 768
+      },
+      "layout": {
+        "width": 1366,
+        "height": 768,
+        "contentWidth": 1366
+      },
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5"
+    }
+  ],
+  "errors": []
+}

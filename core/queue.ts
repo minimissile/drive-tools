@@ -467,7 +467,9 @@ export class TransferQueue {
         "FOREIGN_SHARE_BLOCKED",
         "建分享结果与来源相同或网盘类型错误，未保存为本人分享。",
       );
-    await this.secrets.set(`share:${copyId}`, share.code);
+    await this.secrets.set(`share:${copyId}`, share.code, {
+      preserveEmpty: true,
+    });
     this.repo.db.run(
       "UPDATE copies SET share_id=?,share_url=?,share_owner_uid=?,share_version=share_version+1,share_verified_at=?,error=NULL WHERE id=?",
       share.id,

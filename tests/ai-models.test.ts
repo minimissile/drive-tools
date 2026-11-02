@@ -220,6 +220,57 @@ test("local AI preflight validates saved configuration without decrypting or req
     await f.cleanup();
   }
 });
+
+test("editorial model overrides validate the catalog and preserve other workflows' defaults", async () => {
+  const f = await fixture();
+  try {
+    await f.app.secrets.set("openrouter", "test-editorial-key");
+    f.app.db.setSetting("model", "default-copy");
+    f.app.db.setSetting("modelCatalog", [
+      text("default-copy"),
+      text("reviewer"),
+    ]);
+    const payloads: any[] = [];
+    const ai = new AiService(
+      f.app.repo,
+      f.app.secrets,
+      () => {},
+      async (_url, init) => {
+        payloads.push(JSON.parse(String(init?.body)));
+        return {
+          usage: { cost: 0.001 },
+          choices: [{ message: { content: '{"ok":true}' } }],
+        };
+      },
+    );
+    await ai.resourceExport(
+      "resource_landing_review",
+      z.object({ ok: z.boolean() }),
+      "检查内容",
+      {},
+      [],
+      { model: "reviewer", jsonMode: true },
+    );
+    assert.equal(payloads[0].model, "reviewer");
+    assert.deepEqual(payloads[0].response_format, { type: "json_object" });
+    assert(payloads[0].messages[0].content.includes("输出JSON结构"));
+    assert.equal(ai.modelFor("copy"), "default-copy");
+    await assert.rejects(
+      ai.resourceExport(
+        "resource_landing_write",
+        z.object({ ok: z.boolean() }),
+        "写作",
+        {},
+        [],
+        { model: "unknown-model" },
+      ),
+      { code: "MODEL_REQUIRED" },
+    );
+    assert.equal(payloads.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
 test("known provider rejections are retained and excluded from recommendations without automatic retries", async () => {
   const f = await fixture();
   try {

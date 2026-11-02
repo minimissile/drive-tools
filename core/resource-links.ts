@@ -47,6 +47,11 @@ const tokenKey = "resource-links:token";
 const codeKey = (id: string) => `resource-links:code:${id}`;
 const operationKey = (id: string) => `resource-links:operation:${id}`;
 const controlCharacters = /[\u0000-\u001f\u007f]/;
+interface ServiceConfiguration {
+  enabled: boolean;
+  baseUrl: string;
+  token?: string;
+}
 const writeSchema = z.object({
   operationId: z.string().uuid(),
   expectedRevision: z.number().int().min(0).max(2_147_483_646),
@@ -66,7 +71,7 @@ const writeSchema = z.object({
 });
 
 /** Drive filenames can exceed the intake form limit; only the public display name is shortened. */
-function publicTitle(value: string) {
+export function publicTitle(value: string) {
   const text = value
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
@@ -199,11 +204,17 @@ export class ResourceLinks {
         : "",
     };
   }
-  async configure(input: {
-    enabled: boolean;
-    baseUrl: string;
-    token?: string;
-  }) {
+  private async configurationToken(value?: string) {
+    const token =
+      value === undefined ? await this.d.secrets.get(tokenKey) : value.trim();
+    if (token && (!/^[\x21-\x7e]{32,512}$/.test(token) || /\s/.test(token)))
+      throw new AppError(
+        "INVALID_TOKEN",
+        "管理令牌需为32至512位非空白字符，请填写服务的管理令牌。",
+      );
+    return token;
+  }
+  async configure(input: ServiceConfiguration) {
     if (this.isBusy)
       throw new AppError(
         "RESOURCE_LINK_BUSY",
@@ -222,15 +233,7 @@ export class ResourceLinks {
           "RESOURCE_LINK_SERVICE_CHANGED",
           "已有固定入口绑定当前服务。请保留此服务地址，避免已经发布的入口失去维护连接。",
         );
-      const token =
-        input.token === undefined
-          ? await this.d.secrets.get(tokenKey)
-          : input.token.trim();
-      if (token && (!/^[\x21-\x7e]{32,512}$/.test(token) || /\s/.test(token)))
-        throw new AppError(
-          "INVALID_TOKEN",
-          "管理令牌需为32至512位非空白字符，请填写 Worker 的管理令牌。",
-        );
+      const token = await this.configurationToken(input.token);
       if (input.enabled && (!baseUrl || !token))
         throw new AppError(
           "RESOURCE_LINK_NOT_CONFIGURED",
@@ -241,6 +244,122 @@ export class ResourceLinks {
       this.db.setSetting(configKey, { enabled: input.enabled, baseUrl });
       this.d.changed();
       return await this.settings();
+    } finally {
+      this.configuring = false;
+    }
+  }
+  /** Adopt a new origin only after it proves access to the exact existing mappings. */
+  async migrateService(input: Omit<ServiceConfiguration, "token">) {
+    if (this.isBusy)
+      throw new AppError(
+        "RESOURCE_LINK_BUSY",
+        "固定入口仍在同步，请完成后再迁移服务地址。",
+      );
+    this.configuring = true;
+    try {
+      const previous = this.config();
+      const baseUrl = serviceUrl(input.baseUrl);
+      const token = await this.configurationToken();
+      if (!token)
+        throw new AppError(
+          "RESOURCE_LINK_NOT_CONFIGURED",
+          "迁移前请先保存原服务管理令牌。",
+        );
+      const rows = this.db.all<{ id: string; base_url: string; data: string }>(
+        "SELECT id,base_url,data FROM resource_links ORDER BY id",
+      );
+      for (const row of rows) {
+        const record = JSON.parse(row.data) as LinkRecord;
+        if (
+          row.base_url !== previous.baseUrl ||
+          record.baseUrl !== previous.baseUrl
+        )
+          throw new AppError(
+            "RESOURCE_LINK_SERVICE_CHANGED",
+            "已有入口的服务地址不一致，请先核对原配置。",
+          );
+        if (record.operationId)
+          throw new AppError(
+            "RESOURCE_LINK_PENDING",
+            "仍有入口同步结果待核对，请先完成原操作再迁移。",
+          );
+        this.d.assertMutable(record.resourceId);
+      }
+      const connection = await this.requestUsingToken(
+        baseUrl,
+        "/api/connection",
+        "GET",
+        undefined,
+        token,
+      );
+      if (
+        !z
+          .object({
+            service: z.literal("panxu-resource-links"),
+            version: z.literal(1),
+          })
+          .safeParse(connection).success
+      )
+        throw new AppError(
+          "RESOURCE_LINK_RESPONSE",
+          "新地址不是兼容的固定入口服务，原配置继续保留。",
+        );
+      for (const row of rows) {
+        const record = JSON.parse(row.data) as LinkRecord;
+        const value = await this.requestUsingToken(
+          baseUrl,
+          `/api/links/${record.id}`,
+          "GET",
+          undefined,
+          token,
+        );
+        if (!value && record.revision === 0) continue;
+        const remote = this.remote({ ...record, baseUrl }, value);
+        if (
+          remote.revision !== record.revision ||
+          remote.targetUrl !== record.targetUrl ||
+          remote.enabled !== record.enabled ||
+          !!remote.code !== record.hasCode
+        )
+          throw new AppError(
+            "RESOURCE_LINK_MIGRATION_MISMATCH",
+            "新地址中的入口数据与本地不一致，请先核对云端状态；原配置未修改。",
+          );
+      }
+      this.db.transaction(() => {
+        if (JSON.stringify(this.config()) !== JSON.stringify(previous))
+          throw new AppError(
+            "RESOURCE_LINK_SERVICE_CHANGED",
+            "服务配置在迁移期间发生变化，请重新读取后再试。",
+          );
+        for (const row of rows) {
+          const latest = this.db.get<{ data: string }>(
+            "SELECT data FROM resource_links WHERE id=?",
+            row.id,
+          );
+          if (latest?.data !== row.data)
+            throw new AppError(
+              "RESOURCE_LINK_BUSY",
+              "入口在迁移期间发生变化，原配置已保留。",
+            );
+          const record = JSON.parse(row.data) as LinkRecord;
+          this.db.run(
+            "UPDATE resource_links SET base_url=?,data=? WHERE id=?",
+            baseUrl,
+            JSON.stringify({ ...record, baseUrl }),
+            row.id,
+          );
+        }
+        this.db.setSetting(configKey, { enabled: input.enabled, baseUrl });
+        this.db.setSetting("resource-links:last-migration", {
+          from: previous.baseUrl,
+          to: baseUrl,
+          count: rows.length,
+          at: now(),
+        });
+      });
+      this.d.changed();
+      return this.settings();
     } finally {
       this.configuring = false;
     }
@@ -262,6 +381,15 @@ export class ResourceLinks {
         "RESOURCE_LINK_NOT_CONFIGURED",
         "请先在连接与设置中保存固定入口管理令牌。",
       );
+    return this.requestUsingToken(baseUrl, path, method, payload, token);
+  }
+  private async requestUsingToken(
+    baseUrl: string,
+    path: string,
+    method: string,
+    payload: unknown,
+    token: string,
+  ) {
     let response: Response;
     let text: string;
     try {
@@ -276,7 +404,7 @@ export class ResourceLinks {
         },
         ...(payload ? { body: JSON.stringify(payload) } : {}),
       });
-      text = await readLimited(response, 32_768);
+      text = await readLimited(response, path.startsWith("/api/pages/") ? 262_144 : 32_768);
     } catch (cause) {
       if (cause instanceof AppError) throw cause;
       const error = new AppError(
@@ -301,7 +429,7 @@ export class ResourceLinks {
     if (
       response.status === 404 &&
       method === "GET" &&
-      path.startsWith("/api/links/")
+      (path.startsWith("/api/links/") || path.startsWith("/api/pages/")) && value === null
     )
       return null;
     if (!response.ok) {
@@ -311,7 +439,7 @@ export class ResourceLinks {
       const rejectedBeforeWrite =
         method === "PUT" &&
         failure.success &&
-        ((response.status === 400 &&
+        ((path.startsWith("/api/pages/") && response.status >= 400 && response.status < 500 && response.status !== 429) || (response.status === 400 &&
           ["INVALID_INPUT", "INVALID_ID", "INVALID_JSON"].includes(
             failure.data.error.code,
           )) ||
@@ -325,14 +453,20 @@ export class ResourceLinks {
             failure.data.error.code === "BODY_TOO_LARGE") ||
           (response.status === 415 &&
             failure.data.error.code === "JSON_REQUIRED"));
-      const message =
+      const pageMessage = failure.success && path.startsWith("/api/pages/") ? ({
+        DUPLICATE_PAGE: "云端已有相同正文的页面，请补充此资源的独有内容后再发布。",
+        PAGE_QUALITY_REQUIRED: "落地页未通过质量检查或与资源不符，请重新生成并核对。",
+        PAGE_VERSION_CONFLICT: "资源或页面的云端版本已变化，请读取云端状态后再发布。",
+        INVALID_PAGE: "落地页内容结构不符合服务要求，请重新生成或检查编辑内容。",
+      } as Record<string,string>)[failure.data.error.code] : undefined;
+      const message = pageMessage ?? (
         response.status === 401 || response.status === 403
-          ? "管理令牌未通过验证，请检查 Worker 配置和本机保存的令牌。"
+          ? "管理令牌未通过验证，请检查服务配置和本机保存的令牌。"
           : response.status === 409
             ? "云端入口已发生变化，未覆盖新版本。请先读取云端状态后再更新。"
             : response.status === 429
               ? "固定入口服务暂时达到使用限制，请稍后重试原操作。"
-              : "固定入口服务请求未完成，请检查部署和用量后重试原操作。";
+              : "固定入口服务请求未完成，请检查部署和用量后重试原操作。");
       throw new AppError(
         rejectedBeforeWrite
           ? "RESOURCE_LINK_REJECTED"
@@ -364,6 +498,16 @@ export class ResourceLinks {
         "此地址不是兼容的盘序固定入口服务，请检查部署。",
       );
     return { message: "固定入口服务和管理令牌连接正常。" };
+  }
+  /** Landing content shares the resource fence and the existing authenticated transport. */
+  withLandingLock<T>(resourceId: string, action: () => Promise<T>) {
+    return this.exclusive(resourceId, action);
+  }
+  async landingCloud(resourceId: string, method: "GET" | "PUT", input?: unknown) {
+    const record = this.record(resourceId);
+    if (!record || record.revision < 1) throw new AppError("RESOURCE_LINK_NOT_READY", "请先创建并同步此资源的固定入口。");
+    this.assertSettled(record);
+    return this.request(record.baseUrl, `/api/pages/${record.id}`, method, input);
   }
   private currentCopy(resource: Resource) {
     return (
@@ -422,7 +566,7 @@ export class ResourceLinks {
       currentTargetIssue: !current
         ? "本人分享尚未完成核验，可先创建待更新的固定入口。"
         : currentCodeMissing && !record?.targetUrl
-          ? "本机未保存此分享的提取码，固定入口会先保持待更新。请使用“绑定当前本人分享”联网核验，或填写本人链接与提取码。"
+          ? "点击“绑定当前本人分享”联网核验并恢复提取码；无需提取码的分享也可直接绑定。"
           : null,
     };
   }
@@ -750,7 +894,24 @@ export class ResourceLinks {
           "OWNERSHIP_UNVERIFIED",
           "此分享未通过本人归属及资源文件核验，固定入口未更新。",
         );
-      return { url: parsed.url, code: parsed.code, copy };
+      const current = this.d.repo.getCopy(copy.id);
+      if (
+        current.accountId !== account.id ||
+        current.ownerUid !== account.uid ||
+        !current.verifiedAt ||
+        JSON.stringify(current.files) !== JSON.stringify(copy.files)
+      )
+        throw new AppError(
+          "RESOURCE_CHANGED",
+          "资源文件或所属账号已变化，请重新打开资源后绑定。",
+        );
+      // Explicit online recovery can establish an empty code. Never copy a new
+      // independent target's code back onto the resource's original share.
+      if (current.shareUrl === parsed.url && current.shareId === share.id)
+        await this.d.secrets.set(`share:${current.id}`, parsed.code, {
+          preserveEmpty: true,
+        });
+      return { url: parsed.url, code: parsed.code, copy: current };
     });
   }
   async setTarget(resourceId: string, text: string, code = "") {
@@ -857,14 +1018,16 @@ export class ResourceLinks {
       return this.context(resourceId);
     });
   }
-  async copy(resourceId: string) {
+  async copy(resourceId: string, kind: "landing" | "redirect" = "landing") {
     const { link } = await this.context(resourceId);
     if (!link || !link.enabled || link.revision < 1 || !link.syncedAt)
       throw new AppError(
         "RESOURCE_LINK_NOT_READY",
         "固定入口尚未同步或已停用，请先完成维护。",
       );
-    return { text: link.url };
+    const url = new URL(link.url);
+    if (kind === "redirect") url.pathname = `/go/${link.slug}`;
+    return { text: url.toString() };
   }
   async recover(resourceId: string) {
     return this.exclusive(resourceId, async () => {

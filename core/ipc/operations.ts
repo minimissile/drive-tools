@@ -176,6 +176,25 @@ export function createOperationsHandlers(
       void services.queue.pump();
       return result;
     },
+    "split.archive": async (object) => {
+      const input = z
+        .object({
+          id: z.string().min(1),
+          itemIds: z.array(z.string().min(1)).min(1).max(100),
+        })
+        .parse(object);
+      const run = services.operations.split(input.id);
+      await services.ports.closeAccountWindow(
+        services.repo.getCopy(run.copyId).accountId,
+      );
+      const result = services.operations.startSplit(
+        input.id,
+        input.itemIds,
+        true,
+      );
+      void services.queue.pump();
+      return result;
+    },
     "split.link": async (object) => {
       const i = z
           .object({

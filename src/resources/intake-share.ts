@@ -4,13 +4,15 @@ export function chooseIntakeAccount(
   active: Record<string, string>,
   provider: Provider,
 ) {
+  const enabled = accounts.filter((a) => a.provider === provider && a.enabled);
+  const connected = enabled.filter((a) => a.status === "connected");
   return (
-    accounts.find(
-      (a) => a.id === active[provider] && a.provider === provider && a.enabled,
-    )?.id ??
-    accounts.find((a) => a.provider === provider && a.enabled && a.isDefault)
-      ?.id ??
-    accounts.find((a) => a.provider === provider && a.enabled)?.id ??
+    connected.find((a) => a.id === active[provider])?.id ??
+    connected.find((a) => a.isDefault)?.id ??
+    connected[0]?.id ??
+    enabled.find((a) => a.id === active[provider])?.id ??
+    enabled.find((a) => a.isDefault)?.id ??
+    enabled[0]?.id ??
     ""
   );
 }
@@ -23,7 +25,8 @@ export function intakeDestination(
   const keep =
     share.provider === input.provider &&
     accounts.some(
-      (a) => a.id === input.accountId && a.provider === share.provider,
+      (a) =>
+        a.id === input.accountId && a.provider === share.provider && a.enabled,
     );
   const accountId = keep
     ? input.accountId

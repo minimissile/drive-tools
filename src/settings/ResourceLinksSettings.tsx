@@ -92,6 +92,10 @@ function ResourceLinksForm({
     draft.value.enabled !== saved.enabled ||
     draft.value.baseUrl.trim() !== saved.baseUrl ||
     !!token.trim();
+  const migrating =
+    !!saved.baseUrl &&
+    !!draft.value.baseUrl.trim() &&
+    draft.value.baseUrl.trim().replace(/\/$/, "") !== saved.baseUrl;
   const disabled = !!pending || reading || readError;
   const needsConfiguration =
     draft.value.enabled &&
@@ -103,17 +107,27 @@ function ResourceLinksForm({
     setError("");
     setConnection("");
     try {
-      const next = await ipc("resourceLinks.configure", {
+      const configuration = {
         enabled: draft.value.enabled,
         baseUrl: draft.value.baseUrl.trim(),
-        ...(token.trim() ? { token: token.trim() } : {}),
-      });
+      };
+      const next = migrating
+        ? await ipc("resourceLinks.migrateService", configuration)
+        : await ipc("resourceLinks.configure", {
+            ...configuration,
+            ...(token.trim() ? { token: token.trim() } : {}),
+          });
       if (!alive.current) return;
       setSaved(next);
       setToken("");
       draft.update({ enabled: next.enabled, baseUrl: next.baseUrl });
       draft.clear();
-      notify("固定入口配置已保存。", "success");
+      notify(
+        migrating
+          ? "已核对现有资源并迁移服务地址，新复制的入口使用新域名。"
+          : "固定入口配置已保存。",
+        "success",
+      );
     } catch (cause) {
       if (alive.current)
         setError(
@@ -176,7 +190,7 @@ function ResourceLinksForm({
           aria-label="领取页服务地址"
           autoComplete="off"
           spellCheck={false}
-          placeholder="https://your-service.workers.dev"
+          placeholder="https://your-service.pages.dev"
           value={draft.value.baseUrl}
           disabled={disabled}
           onChange={(event) => {
@@ -188,9 +202,11 @@ function ResourceLinksForm({
       <Field
         label={saved.configured ? "更换管理令牌（可选）" : "管理令牌"}
         hint={
-          saved.configured
-            ? "留空保留已保存令牌；新令牌不会暂存"
-            : "使用领取页服务的管理令牌，仅在本机加密保存"
+          migrating
+            ? "迁移复用已保存令牌，确保新地址连接同一份入口数据"
+            : saved.configured
+              ? "留空保留已保存令牌；新令牌不会暂存"
+              : "使用领取页服务的管理令牌，仅在本机加密保存"
         }
       >
         <input
@@ -199,7 +215,7 @@ function ResourceLinksForm({
           autoComplete="new-password"
           spellCheck={false}
           value={token}
-          disabled={disabled}
+          disabled={disabled || migrating}
           placeholder={
             saved.configured ? "留空保留现有令牌" : "填写服务的管理令牌"
           }
@@ -219,6 +235,11 @@ function ResourceLinksForm({
       {needsConfiguration ? (
         <p className="resource-links-settings-hint">
           启用前请填写服务地址与管理令牌。
+        </p>
+      ) : null}
+      {migrating ? (
+        <p className="resource-links-settings-hint">
+          迁移前会核对新服务中的现有入口。资源短码保留，已发布链接中的旧域名需要更新。
         </p>
       ) : null}
       {connection ? (
@@ -251,7 +272,13 @@ function ResourceLinksForm({
           onClick={() => void save()}
         >
           <Save size={14} />
-          {pending === "save" ? "正在保存…" : "保存固定入口配置"}
+          {pending === "save"
+            ? migrating
+              ? "正在核对并迁移…"
+              : "正在保存…"
+            : migrating
+              ? "核对并迁移服务"
+              : "保存固定入口配置"}
         </Button>
       </footer>
     </div>

@@ -203,35 +203,35 @@
   color: var(--amber);
   overflow-wrap: anywhere;
 }
-.account-browser-action {
-  max-width: 100%;
-  justify-content: flex-start;
-  margin-top: var(--space-1);
-  overflow: hidden;
-  white-space: nowrap;
+.account-browser-status {
+  align-items: center;
+  gap: var(--space-1);
 }
-.account-browser-action > svg {
+.account-browser-status > svg {
   flex: none;
 }
-.account-browser-action > span {
+.account-browser-status > span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .account-action-cell {
   min-width: 0;
 }
 .account-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.account-action-group {
+  display: flex;
   justify-content: flex-end;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 .account-actions .button {
   white-space: nowrap;
 }
-.account-actions > .account-icon-action {
+.account-action-group > .account-icon-action {
   width: var(--control-compact-height);
   padding: 0;
   flex: none;
@@ -382,11 +382,14 @@
   }
   .account-action-cell {
     grid-column: 1 / -1;
-    display: flex;
+    padding-left: 52px;
+  }
+  .account-actions {
+    flex-direction: row;
     flex-wrap: wrap;
+    justify-content: flex-start;
     align-items: center;
     gap: var(--space-2) var(--space-4);
-    padding-left: 52px;
   }
 }
 @container accounts (max-width: 570px) {

@@ -22,25 +22,43 @@
   gap: var(--space-2);
 }
 .intake-source-hint {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-2);
 }
+.intake-source-hint > .tag {
+  line-height: 18px;
+}
 .intake-share-status {
-  display: flex;
-  flex: 1;
-  align-items: flex-start;
-  gap: var(--space-2);
+  display: grid;
+  gap: var(--space-1);
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
 }
-.intake-share-status-message {
-  display: inline-flex;
+.intake-share-recovery {
+  display: flex;
   align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  flex-wrap: wrap;
+  padding-left: 22px;
+}
+.intake-recovery-account {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.intake-share-status-message {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
   gap: 6px;
-  padding-block: 3px;
+  padding-block: 2px;
+  line-height: 20px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -59,12 +77,6 @@
 }
 .intake-share-status[data-state="unavailable"] {
   color: var(--amber);
-}
-.intake-share-status > .button {
-  flex: none;
-  width: 28px;
-  height: 26px;
-  padding: 0;
 }
 .intake-summary-field {
   display: flex;

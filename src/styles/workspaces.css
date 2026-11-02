@@ -81,41 +81,6 @@
   gap: 20px;
   align-items: start;
 }
-.stepper {
-  margin-top: 8px;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 22px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.stepper > div {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.stepper b {
-  font-size: 10px;
-  font-weight: 500;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-}
-.stepper .active {
-  color: var(--blue);
-}
-.stepper .active b {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: var(--on-blue);
-}
 textarea.tall {
   min-height: 125px;
 }

@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Link2, Pause, Play, RefreshCw, Settings2 } from "lucide-react";
+import {
+  Copy,
+  FileText,
+  Link2,
+  Pause,
+  Play,
+  RefreshCw,
+  Settings2,
+} from "lucide-react";
+import { ResourceLandingDialog } from "../resource-landing/ResourceLandingDialog";
 import type {
   ResourceLink,
   ResourceLinkContext,
@@ -54,6 +63,7 @@ export function ResourceLinkPanel({
   const [error, setError] = useState("");
   const [needsRead, setNeedsRead] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [landingEditing, setLandingEditing] = useState(false);
   const lock = useRef(false);
   const alive = useRef(true);
   useEffect(() => {
@@ -118,7 +128,7 @@ export function ResourceLinkPanel({
       if (alive.current) setPending("");
     }
   };
-  const copy = async () => {
+  const copy = async (kind: "landing" | "redirect" = "landing") => {
     if (
       lock.current ||
       disabled ||
@@ -131,9 +141,13 @@ export function ResourceLinkPanel({
     setPending("copy");
     setError("");
     try {
-      const result = await ipc("resourceLinks.copy", { resourceId });
+      const result = await ipc("resourceLinks.copy", { resourceId, kind });
       await ipc("system.copyText", { text: result.text });
-      if (alive.current) notify("固定入口已复制。", "success");
+      if (alive.current)
+        notify(
+          kind === "redirect" ? "固定直达链接已复制。" : "落地页入口已复制。",
+          "success",
+        );
     } catch (cause) {
       if (alive.current)
         setError(cause instanceof Error ? cause.message : "复制失败，请重试。");
@@ -197,7 +211,21 @@ export function ResourceLinkPanel({
                   onClick={() => void copy()}
                 >
                   <Copy size={13} />
-                  复制入口
+                  复制落地页
+                </Button>
+                <Button
+                  size="compact"
+                  disabled={
+                    disabled ||
+                    unresolved ||
+                    link.state !== "synced" ||
+                    !link.enabled ||
+                    !link.targetUrl
+                  }
+                  onClick={() => void copy("redirect")}
+                >
+                  <Link2 size={13} />
+                  复制直达链接
                 </Button>
                 {link.syncedAt ? (
                   <time
@@ -234,6 +262,15 @@ export function ResourceLinkPanel({
               ) : null}
               {configured ? (
                 <div className="resource-link-actions">
+                  <Button
+                    quiet
+                    size="compact"
+                    disabled={!!pending}
+                    onClick={() => setLandingEditing(true)}
+                  >
+                    <FileText size={13} />
+                    落地页内容
+                  </Button>
                   {requestMissing ? (
                     <Button
                       size="compact"
@@ -284,11 +321,7 @@ export function ResourceLinkPanel({
                       <Button
                         quiet
                         size="compact"
-                        disabled={
-                          !canMaintain ||
-                          !current.currentShareUrl ||
-                          !!current.currentTargetIssue
-                        }
+                        disabled={!canMaintain || !current.currentShareUrl}
                         title={current.currentTargetIssue ?? undefined}
                         onClick={() =>
                           void mutate(
@@ -411,6 +444,12 @@ export function ResourceLinkPanel({
             )
               setEditing(false);
           }}
+        />
+      ) : null}
+      {landingEditing ? (
+        <ResourceLandingDialog
+          resourceId={resourceId}
+          onClose={() => setLandingEditing(false)}
         />
       ) : null}
     </section>

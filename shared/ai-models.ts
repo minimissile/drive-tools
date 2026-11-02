@@ -120,6 +120,7 @@ export function purposeForCall(
     "keyword_ideas",
     "resource_export_plan",
     "resource_export_match",
+    "resource_landing_review",
     "zhidao_hot_names",
   ].includes(name)
     ? "analysis"

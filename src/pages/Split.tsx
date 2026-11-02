@@ -1,17 +1,8 @@
-import { Select } from "../ui/Select";
 import { QueryError } from "../ui/QueryError";
 import { ipc } from "../api/client";
 import { useEffect, useState, useRef } from "react";
-import {
-  Button,
-  Field,
-  Header,
-  LoadingState,
-  Notice,
-  Panel,
-} from "../ui/primitives";
+import { Button, Header, LoadingState, Notice, Panel } from "../ui/primitives";
 import { ResourcePicker, ResourceRequired } from "../resources/components";
-import { formatTime } from "../lib/format";
 import {
   useAppActions,
   useAppActivity,
@@ -19,12 +10,13 @@ import {
   useAppNavigation,
   useAppSelection,
 } from "../state";
-import { RefreshCw } from "lucide-react";
+import { Copy, Database, Download, Link2, RefreshCw } from "lucide-react";
+import { updateSelection } from "../lib/selection";
 import SplitTree from "./SplitTree";
 import type { SplitItem, SplitRun } from "../../shared/types";
 export default function Split() {
   const { data } = useAppData(),
-    { resource, copy } = useAppSelection(),
+    { resource, copy, select } = useAppSelection(),
     { navigate, openSearch } = useAppNavigation(),
     { command, notify } = useAppActions(),
     { busy } = useAppActivity();
@@ -33,23 +25,11 @@ export default function Split() {
   const [readRevision, setReadRevision] = useState(0);
   const [runId, setRunId] = useState(""),
     [run, setRun] = useState<SplitRun | null>(null),
-    [history, setHistory] = useState<
-      {
-        id: string;
-        depth: number;
-        mode: string;
-        status: string;
-        createdAt: string;
-      }[]
-    >([]),
-    [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set()),
-    [rights, setRights] = useState(false),
-    [exportCodes, setExportCodes] = useState(false);
+    [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     setRunId("");
     setRun(null);
     setSelectedIds(new Set());
-    setRights(false);
     initialized.current = "";
   }, [copy?.id]);
   useEffect(() => {
@@ -59,7 +39,6 @@ export default function Split() {
     void ipc("split.list", { copyId: copy.id })
       .then((r) => {
         if (alive) {
-          setHistory(r);
           setRunId((old) =>
             old && r.some((i) => i.id === old) ? old : (r[0]?.id ?? ""),
           );
@@ -99,6 +78,11 @@ export default function Split() {
   }, [runId, data?.jobs, readRevision]);
   const current = run?.copyId === copy?.id ? run : null,
     selected = current?.items.filter((i) => selectedIds.has(i.id)) ?? [],
+    selectedRunning = selected.some((item) =>
+      ["queued", "preflight", "verifying", "sharing", "archiving"].includes(
+        item.stage ?? "",
+      ),
+    ),
     allReady =
       selected.length > 0 &&
       selected.every((i) => i.status === "ready" && i.verifiedAt);
@@ -106,7 +90,7 @@ export default function Split() {
     <>
       <Header
         title="展开目录，勾选你想单独分享的资源。"
-        description="直接查看前三层文件与文件夹，每个勾选项生成一个独立的本人链接。"
+        description="直接查看前三层文件与文件夹，支持独立建链，也可将选中项批量入库。"
       />
       <QueryError
         error={readError}
@@ -138,7 +122,6 @@ export default function Split() {
                   setRun(r);
                   setSelectedIds(new Set());
                   initialized.current = "";
-                  setRights(false);
                 }
               }}
             >
@@ -151,35 +134,9 @@ export default function Split() {
           </small>
         </Panel>
         {copy?.status !== "ready" ? (
-          <Notice warning>请先完成这份资料的本人转存与文件归属核验。</Notice>
-        ) : null}
-        {history.length ? (
-          <details className="split-history">
-            <summary>查看以往拆分记录（{history.length}次）</summary>
-            <Field label="拆分记录">
-              <Select
-                aria-label="拆分记录"
-                value={runId}
-                onValueChange={(nextValue) => {
-                  setRunId(nextValue);
-                  setSelectedIds(new Set());
-                  initialized.current = "";
-                  setRights(false);
-                }}
-                items={[
-                  ...history.map((h) => ({
-                    value: h.id,
-                    label: (
-                      <>
-                        {formatTime(h.createdAt)} · 第{h.depth}层 ·{" "}
-                        {h.mode === "all" ? "目录树" : "历史层级预览"}
-                      </>
-                    ),
-                  })),
-                ]}
-              />
-            </Field>
-          </details>
+          <Notice warning>
+            请先在资源库检查有效性，完成这份资源的文件归属核验后再拆分。
+          </Notice>
         ) : null}
         {current ? (
           <Panel
@@ -224,25 +181,34 @@ export default function Split() {
                 title={resource?.title ?? "本人资料"}
                 selectedIds={selectedIds}
                 onSelect={(item, checked) => {
-                  setRights(false);
                   setSelectedIds((old) => {
-                    const next = new Set(old);
-                    if (checked && next.size < 100) next.add(item.id);
-                    else if (!checked) next.delete(item.id);
-                    return next;
+                    return new Set(
+                      updateSelection([...old], [item.id], checked, 100),
+                    );
                   });
                 }}
                 onChange={(ids) => {
-                  setRights(false);
                   setSelectedIds(new Set(ids.slice(0, 100)));
                   if (ids.length > 100)
                     notify(
-                      `本层有${ids.length}项，已选择前100项，其余可分批勾选。`,
+                      `本次选择包含${ids.length}项，已保留前100项，其余请分批处理。`,
                       "warning",
                     );
                 }}
                 renderDetails={(item) => (
                   <>
+                    {item.archivedResourceId ? (
+                      <Button
+                        quiet
+                        size="compact"
+                        onClick={() => {
+                          select(item.archivedResourceId!);
+                          navigate("library");
+                        }}
+                      >
+                        查看已入库资源
+                      </Button>
+                    ) : null}
                     {item.shareUrl ? (
                       <p className="break-word split-own-url">
                         {item.shareUrl}
@@ -306,32 +272,46 @@ export default function Split() {
                 )}
               />
             ) : null}
-            <div className="split-confirmation">
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  aria-label="拆分分享权利确认"
-                  checked={rights}
-                  onChange={(e) => setRights(e.target.checked)}
-                />
-                我有权分享所选文件或文件夹，已核对独立链接清单。
-              </label>
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={exportCodes}
-                  onChange={(e) => setExportCodes(e.target.checked)}
-                />
-                导出清单或批量复制时附本人分享提取码
-              </label>
+            <div className="split-actions">
+              <div className="split-actions-summary" aria-live="polite">
+                <strong>已选 {selected.length} 项</strong>
+                <span>
+                  已入库{" "}
+                  {selected.filter((item) => item.archivedResourceId).length} 项
+                  · 复制与导出包含提取码
+                </span>
+              </div>
               <div className="actions">
                 <Button
                   primary
                   disabled={
                     current.status !== "ready" ||
                     !selected.length ||
+                    selected.every((item) => item.archivedResourceId) ||
+                    selectedRunning ||
+                    busy > 0
+                  }
+                  onClick={async () => {
+                    const result = await command("split.archive", {
+                      id: current.id,
+                      itemIds: selected.map((item) => item.id),
+                    });
+                    if (result)
+                      notify(
+                        `已排队入库${result.created}项，已有记录${result.reused}项。可在目录中查看逐项结果。`,
+                        "success",
+                      );
+                  }}
+                >
+                  <Database size={15} />
+                  批量入库{selected.length ? `（${selected.length}）` : ""}
+                </Button>
+                <Button
+                  disabled={
+                    current.status !== "ready" ||
+                    !selected.length ||
                     selected.length > 100 ||
-                    !rights ||
+                    selectedRunning ||
                     busy > 0
                   }
                   onClick={async () => {
@@ -347,7 +327,8 @@ export default function Split() {
                       );
                   }}
                 >
-                  生成所选{selected.length}个本人链接
+                  <Link2 size={15} />
+                  仅生成链接
                 </Button>
                 <Button
                   disabled={!allReady || busy > 0}
@@ -355,7 +336,7 @@ export default function Split() {
                     const text = await command("split.package", {
                       id: current.id,
                       itemIds: selected.map((i) => i.id),
-                      includeCodes: exportCodes,
+                      includeCodes: true,
                     });
                     if (text)
                       await command(
@@ -365,7 +346,8 @@ export default function Split() {
                       );
                   }}
                 >
-                  批量核验并复制
+                  <Copy size={15} />
+                  批量复制链接
                 </Button>
                 <Button
                   disabled={!allReady || busy > 0}
@@ -373,12 +355,13 @@ export default function Split() {
                     const path = await command("split.export", {
                       id: current.id,
                       itemIds: selected.map((i) => i.id),
-                      includeCodes: exportCodes,
+                      includeCodes: true,
                     });
                     if (path) notify(`本人链接清单已导出：${path}`, "success");
                   }}
                 >
-                  导出本人链接CSV
+                  <Download size={15} />
+                  导出CSV
                 </Button>
                 <Button
                   disabled={busy > 0}

@@ -3,6 +3,10 @@ import { id, now } from "../database";
 import { AppError } from "../errors";
 import { normalizedDirectory } from "../providers/provider";
 import { providerSchema } from "../../shared/schemas";
+import {
+  initializeAccountAlias,
+  pendingAccountAliasKey,
+} from "../account-alias";
 
 import type { HandlerServices, HandlerMap } from "./types";
 
@@ -27,7 +31,7 @@ export function createAccountHandlers(
       const input = z
           .object({
             provider: providerSchema,
-            alias: z.string().trim().min(1).max(60),
+            alias: z.string().trim().max(60).default(""),
             browser: z
               .discriminatedUnion("engine", [
                 z.object({ engine: z.literal("electron") }),
@@ -60,7 +64,12 @@ export function createAccountHandlers(
           "INSERT INTO accounts(id,provider,alias,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?)",
           accountId,
           input.provider,
-          input.alias,
+          initializeAccountAlias(
+            services.db,
+            accountId,
+            input.provider,
+            input.alias,
+          ),
           Number(isDefault),
           time,
           time,
@@ -99,6 +108,11 @@ export function createAccountHandlers(
           now(),
           input.id,
         );
+        if (input.alias !== account.alias)
+          services.db.run(
+            "DELETE FROM settings WHERE key=?",
+            pendingAccountAliasKey(input.id),
+          );
         if (!input.enabled)
           services.db.run(
             "UPDATE accounts SET is_default=0 WHERE id=?",

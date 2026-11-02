@@ -1,3 +1,4 @@
+import { IntakeHeader } from "../resources/IntakeHeader";
 import { IntakeOptionField } from "../resources/IntakeOptionField";
 import { useIntakeShare } from "../resources/useIntakeShare";
 import { IntakeShareStatus } from "../resources/IntakeShareStatus";
@@ -28,6 +29,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ImagePlus,
+  LogIn,
   Upload,
   X,
 } from "lucide-react";
@@ -38,7 +40,7 @@ import {
   useAppNavigation,
   useAppSelection,
 } from "../state";
-import { Button, Empty, Field, Header, Notice, Panel } from "../ui/primitives";
+import { Button, Empty, Field, Notice, Panel } from "../ui/primitives";
 import { accountLabel, providerName } from "../resources/labels";
 import { SourceContents, type ShareParent } from "../resources/SourceContents";
 import type { Provider, RemoteFile, ShareInspection } from "../../shared/types";
@@ -97,6 +99,7 @@ export default function Intake() {
     directory,
     isOwnResource: draftOwnResource,
   } = draft.value;
+  const hasAccounts = data!.accounts.some((account) => account.enabled);
   const intakeModeLocked = !!priorCopy && priorCopy.status !== "draft";
   const isOwnResource = intakeModeLocked ? priorOwnResource : draftOwnResource;
   const [step, setStep] = useState<"info" | "files">("info");
@@ -141,6 +144,7 @@ export default function Intake() {
       { id: "0", name: "分享根目录" },
     ]);
   const inspectionRevision = useRef(0);
+  const [requestedCheckAccount, setRequestedCheckAccount] = useState("");
   const account = data!.accounts.find((a) => a.id === accountId);
   const duplicateCopy = !priorCopy
     ? existing?.copies.find(
@@ -164,6 +168,7 @@ export default function Intake() {
         .catch(() => {});
   }, [existing?.coverId, imageDraft.loading]);
   const changeProvider = (value: Provider) => {
+    setRequestedCheckAccount("");
     setProvider(value);
     setAccountId(chooseAccount(value));
     setDirectory(
@@ -204,6 +209,39 @@ export default function Intake() {
       }
     },
   });
+  const changeAccount = (nextAccountId: string) => {
+    setRequestedCheckAccount("");
+    link.invalidate();
+    inspectionRevision.current++;
+    draft.update({
+      accountId: nextAccountId,
+      directory:
+        data!.accounts.find((item) => item.id === nextAccountId)
+          ?.defaultDirectory ?? "/盘序资源",
+    });
+    setInspection(null);
+    setInspectionLoading(false);
+    setInspectionError("");
+    setSelected([]);
+    setParents([{ id: "0", name: "分享根目录" }]);
+  };
+  useEffect(() => {
+    if (!requestedCheckAccount || requestedCheckAccount !== accountId) return;
+    setRequestedCheckAccount("");
+    void link.validate(true);
+  }, [requestedCheckAccount, accountId]);
+  const loginRequired =
+    link.validation?.status === "unavailable" &&
+    link.validation.errorCode === "AUTH_EXPIRED" &&
+    link.validation.accountId === accountId;
+  const alternativeAccount = !priorCopy
+    ? data!.accounts.find(
+        (item) =>
+          item.id === chooseAccount(provider) &&
+          item.id !== accountId &&
+          item.status === "connected",
+      )
+    : undefined;
   const inspect = async (
     parentId = "0",
     page = 1,
@@ -356,7 +394,7 @@ export default function Intake() {
         }
       }}
       footer={
-        data!.accounts.some((a) => a.enabled) ? (
+        hasAccounts ? (
           <ActionBar
             label="资源保存操作"
             status={
@@ -430,30 +468,24 @@ export default function Intake() {
         ) : null
       }
     >
-      <Header
-        title={existing ? "继续整理这份资源。" : "录入一份资源。"}
-        description={
-          currentStep === "files"
-            ? "按需读取分享内容并选择转存文件；确认选择后再保存并创建转存任务。"
-            : isOwnResource
-              ? "录入自己的资源，直接保存到资源库；封面支持上传、拖放和直接粘贴。"
-              : canTransfer
-                ? "先填写资源资料，下一步再读取并选择文件；封面支持上传、拖放和直接粘贴。"
-                : "编辑资源资料；文件、广告与分享链接在资源库中维护。"
+      <IntakeHeader
+        editing={!!existing}
+        step={currentStep}
+        mode={
+          !hasAccounts
+            ? "setup"
+            : canTransfer
+              ? "transfer"
+              : isOwnResource
+                ? "owned"
+                : "edit"
         }
+        restored={!draft.error && draft.restored && currentStep === "info"}
+        needsFileRead={canTransfer && !inspection}
       />
       {imageDraft.error ? <Notice danger>{imageDraft.error}</Notice> : null}
-      {draft.error ? (
-        <Notice danger>{draft.error}</Notice>
-      ) : draft.restored && currentStep === "info" ? (
-        <Notice>
-          已恢复本页未保存的输入。
-          {isOwnResource
-            ? "当前为自有资源模式，保存时直接入库。"
-            : "开始转存前请重新读取并选择文件。"}
-        </Notice>
-      ) : null}
-      {!data!.accounts.some((a) => a.enabled) ? (
+      {draft.error ? <Notice danger>{draft.error}</Notice> : null}
+      {!hasAccounts ? (
         <Empty
           title="先添加一个本人网盘账号"
           action={
@@ -466,41 +498,6 @@ export default function Intake() {
         </Empty>
       ) : (
         <>
-          {canTransfer ? (
-            <>
-              <small>
-                归档流程：填写资料 → 核验与转存 → 本人分享 → 本地归档。
-                {currentStep === "info"
-                  ? "当前填写资料，下一步选择文件。"
-                  : "当前选择文件，提交后创建转存任务。"}
-              </small>
-              <div className="stepper" aria-label="资源归档流程">
-                {["资源信息", "校验与转存", "本人分享", "本地归档"].map(
-                  (x, i) => (
-                    <div
-                      key={x}
-                      className={
-                        i === (currentStep === "info" ? 0 : 1) ? "active" : ""
-                      }
-                      aria-current={
-                        i === (currentStep === "info" ? 0 : 1)
-                          ? "step"
-                          : undefined
-                      }
-                    >
-                      <b>{i + 1}</b>
-                      {x}
-                    </div>
-                  ),
-                )}
-              </div>
-            </>
-          ) : isOwnResource ? (
-            <small>
-              自有资源流程：填写资料 →
-              直接入库。已有分享链接会保留，不进行转存或重新建链。
-            </small>
-          ) : null}
           <div
             ref={stepRegion}
             tabIndex={-1}
@@ -585,8 +582,66 @@ export default function Intake() {
                           error={link.error}
                           parsing={link.parsing}
                           validation={link.validation}
-                          hasValue={!!sourceText.trim()}
-                          onRetry={() => void link.validate(true)}
+                          recovery={
+                            loginRequired ||
+                            (link.validation?.status === "unavailable" &&
+                              link.validation.canOpenPage) ? (
+                              <>
+                                {loginRequired && alternativeAccount ? (
+                                  <Button
+                                    size="compact"
+                                    aria-label={`使用已登录账号${alternativeAccount.alias}检查链接`}
+                                    onClick={() => {
+                                      changeAccount(alternativeAccount.id);
+                                      setRequestedCheckAccount(
+                                        alternativeAccount.id,
+                                      );
+                                    }}
+                                  >
+                                    使用
+                                    <span
+                                      className="intake-recovery-account"
+                                      title={alternativeAccount.alias}
+                                    >
+                                      {alternativeAccount.alias}
+                                    </span>
+                                    检查
+                                  </Button>
+                                ) : null}
+                                {loginRequired ? (
+                                  <Button
+                                    quiet
+                                    size="compact"
+                                    disabled={!accountId || busy > 0}
+                                    onClick={() =>
+                                      void command("account.login", {
+                                        id: accountId,
+                                      })
+                                    }
+                                  >
+                                    <LogIn size={14} aria-hidden="true" />
+                                    登录当前账号
+                                  </Button>
+                                ) : null}
+                                {link.validation?.status === "unavailable" &&
+                                link.validation.canOpenPage ? (
+                                  <Button
+                                    quiet
+                                    size="compact"
+                                    onClick={() =>
+                                      void command("share.validationPage", {
+                                        sourceText,
+                                        code,
+                                        resourceId: existing?.id,
+                                      })
+                                    }
+                                  >
+                                    查看异常页面
+                                  </Button>
+                                ) : null}
+                              </>
+                            ) : null
+                          }
                         />
                       </div>
                     </div>
@@ -801,19 +856,7 @@ export default function Intake() {
                           }
                           value={accountId}
                           disabled={!!priorCopy}
-                          onValueChange={(nextValue) => {
-                            link.invalidate();
-                            inspectionRevision.current++;
-                            setAccountId(nextValue);
-                            setDirectory(
-                              data!.accounts.find((a) => a.id === nextValue)
-                                ?.defaultDirectory ?? "/盘序资源",
-                            );
-                            setInspection(null);
-                            setInspectionLoading(false);
-                            setInspectionError("");
-                            setSelected([]);
-                          }}
+                          onValueChange={changeAccount}
                           items={[
                             {
                               value: "",

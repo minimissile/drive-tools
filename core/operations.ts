@@ -4,6 +4,8 @@ import { parseShare } from "./links";
 import { Repository, type Row } from "./repository";
 import { SecretStore } from "./secrets";
 import { NoteExporter } from "./notes";
+import { locateResourceParent } from "./drive-resource-location";
+import type { DriveFiles } from "./drive-files";
 import {
   assertManifest,
   type DriveProvider,
@@ -28,6 +30,11 @@ const active = [
   "sharing",
   "archiving",
 ];
+interface SplitArchiveRecord {
+  requested: boolean;
+  copyId?: string;
+}
+const splitArchiveKey = (itemId: string) => `split-archive:${itemId}`;
 export class Operations {
   constructor(
     private repo: Repository,
@@ -36,6 +43,7 @@ export class Operations {
     private notes: NoteExporter,
     private verifyAccount: (id: string) => Promise<Account>,
     private changed: () => void,
+    private archiveFile: DriveFiles["archiveVerifiedFile"],
   ) {}
   private get db() {
     return this.repo.db;
@@ -111,7 +119,11 @@ export class Operations {
         "UPDATE jobs SET stage=?,error=?,checkpoint=?,updated_at=? WHERE id=?",
         stage,
         message,
-        rejected && job.kind === "split_share" ? "new" : current.checkpoint,
+        rejected &&
+          job.kind === "split_share" &&
+          current.checkpoint !== "share_verified"
+          ? "new"
+          : current.checkpoint,
         now(),
         jobId,
       );
@@ -130,7 +142,10 @@ export class Operations {
       if (job.kind === "split_share")
         this.db.run(
           "UPDATE split_items SET status=?,error=? WHERE id=?",
-          stage,
+          this.splitItem(job.targetId!).verifiedAt &&
+            current.checkpoint === "share_verified"
+            ? "ready"
+            : stage,
           message,
           job.targetId!,
         );
@@ -499,13 +514,13 @@ export class Operations {
     const copy = this.repo.getCopy(copyId);
     if (
       copy.status !== "ready" ||
-      !copy.folderId ||
+      !copy.files.length ||
       !copy.verifiedAt ||
       !copy.ownerUid
     )
       throw new AppError(
         "OWNERSHIP_UNVERIFIED",
-        "请先完成本人资料转存和文件归属核验。",
+        "请先完成这份资源的文件归属核验。",
       );
     const runId = id("split_run");
     this.db.transaction(() => {
@@ -529,6 +544,16 @@ export class Operations {
       itemId,
     );
     if (!row) throw new AppError("NOT_FOUND", "拆分项不存在。");
+    const archive = this.db.setting<SplitArchiveRecord | null>(
+      splitArchiveKey(itemId),
+      null,
+    );
+    const saved = archive?.copyId
+      ? this.db.get<{ resource_id: string }>(
+          "SELECT resource_id FROM copies WHERE id=?",
+          archive.copyId,
+        )
+      : null;
     return {
       id: row.id,
       copyId: row.copy_id,
@@ -545,6 +570,8 @@ export class Operations {
       jobId: row.job_id,
       shareVersion: row.share_version,
       stage: row.stage ?? null,
+      archivedResourceId: saved?.resource_id ?? null,
+      archiveRequested: !!archive?.requested && !saved,
     };
   }
   split(runId: string): SplitRun {
@@ -597,7 +624,6 @@ export class Operations {
       provider = this.providers[account.provider];
     if (
       copy.status !== "ready" ||
-      !copy.folderId ||
       !copy.verifiedAt ||
       !copy.files.length ||
       copy.ownerUid !== account.uid
@@ -606,14 +632,30 @@ export class Operations {
         "OWNERSHIP_UNVERIFIED",
         "资料文件尚未通过当前本人账号的归属核验。",
       );
-    const files = await provider.list(account, copy.folderId);
-    assertManifest(copy.files, files);
-    if (copy.files.some((f) => !files.some((a) => a.id === f.id)))
+    // Directly recorded own shares have no transfer folder. Locate their saved
+    // file IDs in the owner's drive without nesting the queue's account lock.
+    const directory = copy.folderId
+      ? {
+          path: copy.directory,
+          folderId: copy.folderId,
+          files: await provider.list(account, copy.folderId),
+        }
+      : await locateResourceParent(account, provider, copy);
+    const actual = directory.files;
+    const files = copy.files.map((expected) =>
+      actual.find((file) => file.id === expected.id),
+    );
+    if (files.some((file) => !file))
       throw new AppError(
         "TARGET_CHANGED",
         "资料根目录文件ID发生变化，未继续处理。",
       );
-    return { copy, account, provider, files };
+    // Never include unrelated siblings from an existing user's directory.
+    const scoped = files as RemoteFile[];
+    assertManifest(copy.files, scoped);
+    for (let index = 0; index < copy.files.length; index++)
+      assertManifest([copy.files[index]], [scoped[index]]);
+    return { copy, account, provider, files: scoped, directory };
   }
   private async inspectSplit(job: Job) {
     const run = this.split(job.targetId!);
@@ -729,7 +771,7 @@ export class Operations {
     );
     this.finish(job.id);
   }
-  startSplit(runId: string, selected: string[]) {
+  startSplit(runId: string, selected: string[], archive = false) {
     const run = this.split(runId),
       ids = [...new Set(selected)];
     if (
@@ -742,11 +784,33 @@ export class Operations {
         "INVALID_SELECTION",
         "请选择已完成预览的拆分项，最多100项。",
       );
+    if (
+      archive &&
+      run.items.some(
+        (item) =>
+          ids.includes(item.id) && item.stage && active.includes(item.stage),
+      )
+    )
+      throw new AppError(
+        "ACTIVE_JOBS",
+        "所选资源仍在建链或入库，请等待当前任务完成后再提交。",
+      );
     const result = { created: 0, reused: 0 };
     this.db.transaction(() => {
       for (const itemId of ids) {
         const item = this.splitItem(itemId);
-        if (item.status === "ready" && item.verifiedAt) {
+        if (archive && item.archivedResourceId) {
+          result.reused++;
+          continue;
+        }
+        if (archive)
+          this.db.setSetting(splitArchiveKey(itemId), { requested: true });
+        else if (
+          item.archiveRequested &&
+          (!item.stage || !active.includes(item.stage))
+        )
+          this.db.setSetting(splitArchiveKey(itemId), { requested: false });
+        if (item.status === "ready" && item.verifiedAt && !archive) {
           result.reused++;
           continue;
         }
@@ -789,6 +853,8 @@ export class Operations {
       throw new AppError("INVALID_DEPTH", "拆分项层级不正确，请重新预览。");
     const root = await this.ownedRoot(item.copyId);
     let files = root.files;
+    let parentPath = root.directory.path;
+    let parentId = root.directory.folderId;
     for (const ancestor of item.ancestors) {
       const folder = files.find((f) => f.id === ancestor.id);
       if (!folder)
@@ -797,10 +863,9 @@ export class Operations {
           "拆分项所在目录已变化，请重新预览。",
         );
       assertManifest([ancestor], [folder]);
-      files = await root.provider.list(
-        root.account,
-        this.directory(root.account.provider, folder),
-      );
+      parentPath = parentPath.replace(/\/$/, "") + "/" + folder.name;
+      parentId = this.directory(root.account.provider, folder);
+      files = await root.provider.list(root.account, parentId);
     }
     const actual = files.find((f) => f.id === item.file.id);
     if (!actual)
@@ -809,7 +874,7 @@ export class Operations {
         "拆分文件已移动或删除，请重新预览。",
       );
     assertManifest([item.file], [actual]);
-    return { ...root, file: actual };
+    return { ...root, file: actual, parentPath, parentId };
   }
   private async storeSplit(
     item: SplitItem,
@@ -824,7 +889,7 @@ export class Operations {
     if (
       share.ownerUid !== account.uid ||
       parsed.provider !== account.provider ||
-      parsed.url === resource.sourceUrl ||
+      (parsed.url === resource.sourceUrl && resource.sourceKind !== "owned") ||
       !(await provider.verifyShare(account, share.id, [item.file], share.code))
     )
       throw new AppError(
@@ -847,10 +912,23 @@ export class Operations {
   private async shareSplit(job: Job) {
     const item = this.splitItem(job.targetId!);
     this.step(job.id, "verifying");
-    const { account, provider } = await this.liveItem(item);
+    const { account, provider, file, parentPath, parentId } =
+      await this.liveItem(item);
     const checkpoint = this.repo.getJob(job.id).checkpoint;
-    let share = await provider.findOwnShare(account, [item.file]);
-    if (!share && checkpoint === "share_requested")
+    let share: OwnShare | null =
+      item.shareId &&
+      item.shareUrl &&
+      item.verifiedAt &&
+      item.ownerUid &&
+      item.ownerUid === account.uid
+        ? {
+            id: item.shareId,
+            url: item.shareUrl,
+            ownerUid: item.ownerUid,
+            code: (await this.secrets.get(`split:${item.id}`)) ?? "",
+          }
+        : await provider.findOwnShare(account, [item.file]);
+    if (!share && ["share_requested", "share_verified"].includes(checkpoint))
       throw new AppError(
         "UNCERTAIN_SHARE_RESULT",
         "上次建链结果未知，尚未找到对应本人分享；请在网盘核对后恢复，未重复建链。",
@@ -861,6 +939,28 @@ export class Operations {
       share = await provider.createShare(account, [item.file], item.file.name);
     }
     await this.storeSplit(item, account, provider, share);
+    if (this.splitItem(item.id).archiveRequested) {
+      this.step(job.id, "archiving", "share_verified");
+      const resource = this.repo.getResource(
+        this.repo.getCopy(item.copyId).resourceId,
+      );
+      const copyId = await this.archiveFile(
+        account,
+        file,
+        parentPath,
+        parentId,
+        share,
+        {
+          category: resource.category,
+          tags: resource.tags,
+          coverId: resource.coverId,
+          summary: `从「${resource.title}」拆分：${item.path}`,
+        },
+      );
+      this.db.setSetting(splitArchiveKey(item.id), { requested: true, copyId });
+      this.repo.log(job.id, "此拆分资源已入库，已有本人文件记录不会重复新增。");
+      this.changed();
+    }
     this.repo.log(
       job.id,
       "本人子链接已核验；没有移动文件、重新转存或更换原资料链接。",
@@ -881,11 +981,12 @@ export class Operations {
         "拆分链接尚未就绪，请先完成或恢复分享。",
       );
     const { account, provider } = await this.liveItem(item);
+    const resource = this.repo.getResource(
+      this.repo.getCopy(item.copyId).resourceId,
+    );
     if (
       item.ownerUid !== account.uid ||
-      item.shareUrl ===
-        this.repo.getResource(this.repo.getCopy(item.copyId).resourceId)
-          .sourceUrl
+      (item.shareUrl === resource.sourceUrl && resource.sourceKind !== "owned")
     )
       throw new AppError("OWNERSHIP_UNVERIFIED", "拆分链接归属不匹配。");
     if (!(await provider.verifyShare(account, item.shareId, [item.file]))) {

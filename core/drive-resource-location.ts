@@ -1,7 +1,7 @@
 import type { Account, RemoteFile, ResourceCopy } from "../shared/types";
 import type { DriveProvider } from "./providers/provider";
 import { normalizedDirectory } from "./providers/provider";
-import type { DriveManagement } from "./drive-management";
+import { resolveDriveDirectory } from "./drive-directory";
 import { AppError } from "./errors";
 
 function containsResource(files: RemoteFile[], expected: RemoteFile[]) {
@@ -18,7 +18,6 @@ export async function locateResourceParent(
   account: Account,
   provider: DriveProvider,
   copy: ResourceCopy,
-  management: DriveManagement,
 ) {
   if (!account.uid || !copy.ownerUid || copy.ownerUid !== account.uid)
     throw new AppError(
@@ -42,7 +41,7 @@ export async function locateResourceParent(
     paths.add(normalizedDirectory(parents[0]));
   for (const path of paths) {
     try {
-      const directory = await management.resolveDirectory(
+      const directory = await resolveDriveDirectory(
         account,
         provider,
         path,

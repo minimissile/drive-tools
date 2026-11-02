@@ -11,6 +11,7 @@ import type { ProviderShareStatsPage } from "../../shared/share-statistics";
 import type { ShareCreationOptions } from "../../shared/share-options";
 export type JsonObject = Record<string, any>;
 export interface ProviderTransport {
+  fileBytes?(accountId: string, url: string, maxBytes: number): Promise<Uint8Array>;
   ownShareCode?(accountId: string, shareId: string): Promise<string | null>;
   authHeaders?(
     accountId: string,
@@ -44,6 +45,7 @@ export interface TransferResult {
   taskId: string | null;
 }
 export interface DriveProvider {
+  readFile?(account: Account, file: RemoteFile, maxBytes: number): Promise<Uint8Array>;
   manageFile?(
     account: Account,
     input: import("../../shared/drive-files").ProviderFileMutation,

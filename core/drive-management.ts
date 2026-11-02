@@ -13,6 +13,7 @@ import type { Account, RemoteFile } from "../shared/types";
 import type { Repository } from "./repository";
 import type { DriveProvider } from "./providers/provider";
 import { normalizedDirectory } from "./providers/provider";
+import { resolveDriveDirectory } from "./drive-directory";
 import type { InsertionService } from "./insertion";
 
 interface Dependencies {
@@ -102,31 +103,7 @@ export class DriveManagement {
       .digest("hex");
   }
   async resolveDirectory(a: Account, p: DriveProvider, raw: string) {
-    const path = normalizedDirectory(raw);
-    const segments = path.split("/").filter(Boolean);
-    if (segments.length > 32)
-      throw new AppError(
-        "DIRECTORY_DEPTH",
-        "目录层级超过32层，请使用更浅的目录。",
-      );
-    let folderId = a.provider === "baidu" ? "/" : "0";
-    let currentPath = "";
-    for (const name of segments) {
-      const matches = (await p.list(a, folderId)).filter(
-        (f) => f.name === name && f.isDirectory,
-      );
-      if (matches.length !== 1)
-        throw new AppError(
-          "DIRECTORY_CHANGED",
-          "目录不存在或重名，请从上级目录重新选择。",
-        );
-      currentPath += "/" + name;
-      folderId =
-        a.provider === "baidu"
-          ? (matches[0].path ?? currentPath)
-          : matches[0].id;
-    }
-    return { path, folderId, files: await p.list(a, folderId) };
+    return resolveDriveDirectory(a, p, raw);
   }
   browse(accountId: string, raw: string): Promise<DriveDirectory> {
     return this.d.authenticated(accountId, async (a, p) => {

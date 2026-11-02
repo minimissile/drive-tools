@@ -8,7 +8,7 @@ import { migrateDistribution } from "./distribution/migration";
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 28;
+export const databaseSchemaVersion = 29;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -75,6 +75,19 @@ export class Database {
     );
     if (version > databaseSchemaVersion) throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 28) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v29-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE resource_landing_pages(resource_id TEXT PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE,data TEXT NOT NULL);
+        CREATE TABLE resource_landing_generations(request_id TEXT PRIMARY KEY,resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,status TEXT NOT NULL,created_at TEXT NOT NULL,error TEXT);
+        PRAGMA user_version=29;
+      `));
+      return;
+    }
     if (version === 27) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v28-${randomUUID()}.bak`;
@@ -86,6 +99,7 @@ export class Database {
         CREATE INDEX zhidao_answer_logs_run ON zhidao_answer_logs(run_id,id DESC);
         PRAGMA user_version=28;
       `));
+      this.migrate(false);
       return;
     }
     if (version === 26) {

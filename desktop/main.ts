@@ -1,4 +1,5 @@
 import { runtimeDataPath } from "./runtime-paths";
+import { resourceLinksTarget } from "./resource-links-network";
 import { normalizeCover } from "./cover-image";
 import { watchDevParent } from "./dev-parent";
 import { loadProviderPage } from "./provider-navigation";
@@ -47,6 +48,7 @@ import {
 } from "../shared/providers";
 import { BaiduProvider } from "../core/providers/baidu";
 import type { ProviderTransport } from "../core/providers/provider";
+import { documentDownloadAllowed } from "./resource-document-network";
 import type { Account, Result } from "../shared/types";
 import { AppError, ProviderHttpError, safeMessage } from "../core/errors";
 import { readLimited } from "../core/http";
@@ -206,6 +208,35 @@ async function providerResponse(
 }
 const captureErrors = new Map<string, Error>();
 const transport: ProviderTransport = {
+  async fileBytes(accountId, address, maxBytes) {
+    const account = service.repo.getAccount(accountId);
+    const url = new URL(address);
+    if (!documentDownloadAllowed(account.provider, address))
+      throw new AppError("DOCUMENT_HOST_BLOCKED", `网盘文件地址不属于允许的下载服务（${url.hostname}）。`);
+    try {
+      const response = await partition(accountId).fetch(url.href, {
+        credentials: "include", redirect: "error", signal: AbortSignal.timeout(90_000),
+        headers: { Referer: providerSpecs[account.provider].home },
+      });
+      if (!response.ok || !response.body) throw new Error("download");
+      if (Number(response.headers.get("content-length")) > maxBytes) throw new Error("size");
+      const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes) throw new Error("size");
+          chunks.push(value);
+        }
+      } finally { await reader.cancel().catch(() => {}); }
+      return Buffer.concat(chunks);
+    } catch {
+      // Signed URLs may contain credentials: never surface the underlying error.
+      throw new AppError("DOCUMENT_READ_FAILED", "文件读取失败或超过20MB，请检查网盘登录，或导入同名本地文件。");
+    }
+  },
   async ownShareCode(accountId, shareId) {
     const copy = service.db.get<{ id: string }>(
       "SELECT id FROM copies WHERE account_id=? AND share_id=? LIMIT 1",
@@ -441,25 +472,8 @@ const environmentSessions = createEnvironmentSessions((ref) => service.environme
 const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
 const ports: AppPorts = {
   resourceLinksFetch(url, init) {
-    const target = new URL(url);
     const method = (init.method ?? "GET").toUpperCase();
-    if (
-      target.protocol !== "https:" ||
-      target.username ||
-      target.password ||
-      target.port ||
-      target.search ||
-      target.hash ||
-      !/^\/api\/(?:connection|links\/[A-Za-z0-9_-]{8,128})$/.test(
-        target.pathname,
-      ) ||
-      !["GET", "PUT"].includes(method) ||
-      (method === "PUT" && target.pathname === "/api/connection")
-    )
-      throw new AppError(
-        "RESOURCE_LINK_REQUEST_BLOCKED",
-        "固定入口请求不在允许的服务接口范围内。",
-      );
+    const target = resourceLinksTarget(url, method);
     // An isolated in-memory session uses Chromium's system proxy without account cookies.
     return session
       .fromPartition("panxu-resource-links-network", { cache: false })
@@ -483,6 +497,17 @@ const ports: AppPorts = {
   smzdm: websiteSessions.smzdm,
   weiboPublisher: websiteSessions.weiboPublisher,
   weiboStatistics: websiteSessions.weiboStatistics,
+  async readLandingDocument(name) {
+    const result = await dialog.showOpenDialog(windows.owner(), {
+      title: `导入资源正文：${name}`, properties: ["openFile"],
+      filters: [{ name: "资源正文", extensions: ["pdf", "txt", "md"] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const path = result.filePaths[0], info = await stat(path);
+    if (!info.isFile() || info.size <= 0 || info.size > 20 * 1024 * 1024)
+      throw new AppError("DOCUMENT_TOO_LARGE", "请选择20MB以内的 PDF 或文本文件。");
+    return { name: basename(path), bytes: await readFile(path) };
+  },
   async readWeiboImages(platform = "weibo") {
     const result = await dialog.showOpenDialog(windows.owner(), {
       title: `选择${platform === "zhihu" ? "知乎" : "微博"}配图（最多 9 张）`,

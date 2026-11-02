@@ -1,10 +1,18 @@
-# 盘序资源固定入口 · Cloudflare Workers + D1
+# 盘序资源固定入口 · Cloudflare Pages + Workers + D1
 
-独立于桌面应用部署的 TypeScript 服务，没有第三方运行时依赖。Workers 提供公开领取页及临时跳转，D1 保存入口映射、版本和幂等操作回执；电脑关机不影响已部署入口。
+独立于桌面应用运行的 TypeScript 服务，使用打包后的 Zod 校验内容契约。Pages 提供公开域名，使用内部服务绑定调用现有 Worker；D1 保存入口映射、页面内容、版本和幂等操作回执。电脑关机不影响已部署入口。
+
+## SEO 内容扩展（2026-11-02）
+
+已应用 `0002_resource_pages.sql`。配置新增 `PUBLIC_ORIGIN=https://panxu.site`，Pages 适配器继续使用内部服务绑定。完整说明、生成与发布规则见[资源落地页与搜索发现](../../docs/features/resource-landing-seo.md)。访客请求只读取已发布内容，不调用 AI；AI 凭据保留在桌面端。
+
+当前 Worker 版本 `c52094e5-b49c-4603-90eb-01b95457ed6b`，启动测量22ms。首份真实落地页已发布；14项领域/模型/网络边界测试、26项隔离运行时检查、23项线上抓取检查通过。本轮截图覆盖1440×900及1366×768桌面；搜索平台的实际收录另行观察。
+
+`/api/pages/:id` 复用现有鉴权，GET 读取版本，PUT 以 `operationId`、`expectedVersion`、`expectedLinkRevision` 写入或撤下内容。接收上限128KB；需独立审阅通过、引用有效且绑定当前资源。发布回执在后续版本后仍可幂等重放，不接受同一操作号修改内容。原固定链接接口保持不变。
 
 本目录包含独立服务源码、迁移与配置示例，当前部署记录如下。管理令牌与网盘登录凭据是不同的秘密，本服务不接收网盘 Cookie、账号密码或网盘 API 令牌。
 
-## 当前部署（2026-10-30）
+## 初次部署（2026-10-30）
 
 已获用户授权，通过 Wrangler **4.156.0** 官方 OAuth 登录并使用系统钥匙串持久保存 CLI 凭据，完成 D1 创建、迁移与 Worker 发布。
 
@@ -23,7 +31,58 @@ Worker 已配置管理 secret，当前桌面源码开发版已加密保存对应
 
 此前 Cloudflare 插件的 CIMD 客户端元信息读取遇到 503，参见[官方同类问题记录](https://github.com/cloudflare/mcp/issues/329)。本轮使用用户授权后的 Wrangler 完成部署。
 
-## 首次部署
+## Pages 入口部署
+
+2026-11-02：已补充 `pages:write` 授权并完成正式部署，CLI 凭据继续保存在系统钥匙串。当前源码开发版通过“核对并迁移服务”切换到 Pages，18 条现有入口已核对并迁移，本机管理令牌未更换。
+
+| 项目 | 当前记录 |
+| --- | --- |
+| Pages 默认 origin（保留） | [panxu-resource-links.pages.dev](https://panxu-resource-links.pages.dev) |
+| Pages 项目 / 生产分支 | `panxu-resource-links` / `main` |
+| Pages 部署 ID | `e8e940fb-1803-41f1-9040-2b0827114128` |
+| Worker 后端版本 | `80e626b1-f1bd-4ce3-8e13-539eabbb5a37` |
+| 服务绑定 | `RESOURCE_LINKS` → `panxu-resource-links` |
+| D1 | 复用原数据库及迁移，无新建或清库 |
+
+正式域名的健康接口与已有资源领取页返回 200，`/go/fVOZw5ZbE_Z5` 返回 302 至原网盘分享。源码开发窗口已手动完成迁移和鉴权连接检查，界面显示“固定入口服务和管理令牌连接正常”；已手动打开 Pages 领取页。桌面与 Pages 类型检查、入口构建通过，未运行自动化测试；国内关闭代理后的可达性待用户验收。
+
+`pages/wrangler.jsonc` 是 Pages 部署配置；`pages/worker.ts` 使用高级模式接管全部路径，通过 `RESOURCE_LINKS` 服务绑定调用原 Worker。所有领取页、`/go` 跳转及管理 API 都使用 Pages 域名，浏览器不访问 `workers.dev`，适配层也不通过公网 HTTP 请求原 Worker 域名。D1 和管理令牌继续由原 Worker 管理，不复制秘密、不重建入口。
+
+先保留并部署下面的 Worker 后端，再执行以下命令。Wrangler OAuth 需要包含 `pages:write` 权限；服务绑定目标名称应与原 Worker 一致。
+
+```sh
+npm install
+npx wrangler pages project create panxu-resource-links --production-branch main --force
+npm run pages:types
+npm run pages:check
+npm run pages:deploy
+```
+
+如果项目已创建，跳过 `project create`。Wrangler 4.156.0 的 Pages 命令默认委托给 Workers，本项目明确要求 `pages.dev`，因此创建和部署都使用 `--force` 保留传统 Pages；部署脚本已包含该参数。Pages 与 Worker 是不同部署：更改业务规则时部署原 Worker，更改 Pages 适配层或绑定时执行 `pages:deploy`。不要删除服务绑定指向的 Worker，也不要把 Pages 适配层部署成同名 Worker。`pages:build` 只编译独立的 Pages 入口，不构建或打包桌面应用。
+
+部署后，在桌面“资源固定入口”中将服务根地址换成实际 `https://<项目名>.pages.dev`，点击“核对并迁移服务”。应用复用已保存令牌，先只读检查服务和所有已记录入口的短码、版本及目标，再一次性更新本地服务地址与入口地址；核对失败保留原配置，不创建或修改云端入口。迁移期间不能同时更换令牌。
+
+已有短码继续使用，已发布的旧域名不会自动改变，需要重新复制并替换对外链接。原 Worker 地址仍保留。回退时把设置改回原域名并执行同一迁移操作，无需搬迁 D1。
+
+`pages.dev` 的实际可达性需由接收者所在网络验收；部署成功不等于国内所有网络可用。
+
+## 自有域名接入
+
+根域名接入 Pages 时，域名必须在同一 Cloudflare 账号管理 DNS；注册与续费可以继续留在 Spaceship。当前接入域名为 `panxu.site`，Cloudflare 分配的名称服务器为 `fatima.ns.cloudflare.com`、`gabriel.ns.cloudflare.com`，根域 CNAME 指向 `panxu-resource-links.pages.dev`。
+
+2026-11-02 浏览器操作记录：已选择免费 DNS 计划，核对原 DNS 记录为空，撤销旧 DNSSEC 后切换名称服务器；注册局 RDAP 已确认 Cloudflare 委派，Cloudflare 控制台显示域名已激活。Pages 的 `panxu.site` 显示“活动、SSL 已启用”。区域 ID 为 `38ebfab5ed566a332c639d9738b13178`，注册和续费继续由 Spaceship 管理。
+
+Cloudflare 已启用 DNSSEC，Spaceship 已保存对应的新 DS：密钥标签 `2371`、算法 `13`、摘要类型 `2`、摘要 `1F99DFC5FB8DDB744F1DF65AFAFDC8C9707597D3F14B8D86022BBEFD03B14320`。注册局 RDAP 的 `delegationSigned` 已为 `true`，DS 与 Cloudflare 参数一致；Cloudflare 公共 DNS 对 DS 和根域 A 查询均返回 `AD: true`，校验链已通过。DS 是公开校验信息，不是管理秘密。
+
+当前桌面服务 origin 为 [https://panxu.site](https://panxu.site)。已在专用源码窗口手动执行“核对并迁移服务”，18 条入口全部迁移，短码、版本及目标保留，管理令牌未变；随后手动鉴权检查显示连接正常。新域名的健康接口及现有领取页返回 200，临时跳转返回 302 至原网盘分享，HTTPS 检查未绕过证书验证。原 Pages 与 Worker 域名继续可用，已对外发布的旧地址不会自动改写。未执行网盘写入，未运行自动化测试，国内关闭代理后的访问仍需接收者网络验收。
+
+更换名称服务器前，先撤销原 DNSSEC 的 DS 记录并等待传播，再切换至 Cloudflare 名称服务器。域名激活后，在 Pages 的“自定义域”中关联域名；仅添加 CNAME 不能代替 Pages 自定义域绑定。HTTPS 生效后才在桌面设置中“核对并迁移服务”，避免将正常配置迁移到尚不能访问的域名。
+
+Cloudflare 的 DNSSEC 签名和注册商的 DS 必须成对配置。恢复 DNSSEC 时使用该域在 Cloudflare 显示的新 DS，不使用旧 Spaceship 签名，也不把父区 DS 当成普通子区 DNS 记录添加。保留 Pages 和 Worker 原地址，避免已发布链接在域名切换时中断。
+
+官方依据：[Pages 自定义域](https://developers.cloudflare.com/pages/configuration/custom-domains/)、[Spaceship 自定义名称服务器](https://www.spaceship.com/en-GB/knowledgebase/connect-domain-custom-nameservers/)、[Cloudflare DNSSEC](https://developers.cloudflare.com/dns/dnssec/)；接入完成状态以实际浏览器与 DNS 记录为准。
+
+## 首次部署 Worker 后端
 
 以下步骤用于另行部署新实例。当前实例已完成初始化，维护时保留原 D1 与入口数据，不重复创建或清空数据库。
 
@@ -74,7 +133,7 @@ npm run dev
 ./node_modules/.bin/tsc --noEmit -p cloudflare/resource-links/tsconfig.json
 ```
 
-`.dev.vars`、实际部署配置和 `.wrangler` 均已忽略；示例不包含真实账号或数据库标识。
+`.dev.vars`、Worker 实际部署配置和 `.wrangler` 均已忽略；Pages 配置仅含项目名和服务绑定，可纳入版本控制。
 
 ## API 契约
 
@@ -193,3 +252,7 @@ interface RemoteLink {
 - [workers.dev 用途与公开访问](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)
 - [Workers 定价](https://developers.cloudflare.com/workers/platform/pricing/)、[D1 定价](https://developers.cloudflare.com/d1/platform/pricing/)、[D1 限制](https://developers.cloudflare.com/d1/platform/limits/)
 - [中国大陆与全球网络路由](https://developers.cloudflare.com/support/troubleshooting/general-troubleshooting/geographic-traffic-routing/)
+
+## 站长平台与 IndexNow
+
+正式站点的 Google/Bing 验证、站点地图与 IndexNow 部署步骤见[搜索平台接入](../../docs/features/search-engine-onboarding.md)。部署需配置独立的 `INDEXNOW_KEY` secret 并应用 `0003_indexnow.sql`；配置中的定时触发器每5分钟恢复待发送队列。Bing 首页标签使用 `BING_SITE_VERIFICATION` 公共变量。

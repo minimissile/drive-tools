@@ -1,4 +1,6 @@
 import { pageHeaders, renderPage } from "./page";
+import { flushIndexNow, indexNowKeyResponse } from "./indexnow";
+import { searchVerification } from "./search-verification";
 import {
   checkConnection,
   findById,
@@ -8,6 +10,20 @@ import {
 } from "./store";
 import { HttpError, type Env } from "./types";
 import { destination, parseWrite, validId, validSlug } from "./validation";
+import {
+  findPage,
+  publicCategories,
+  publicPageCount,
+  publicPages,
+  putPage,
+} from "./landing-store";
+import {
+  landingMarkdown,
+  publishable,
+  renderAbout,
+  renderDirectory,
+  renderLanding,
+} from "./landing-page";
 
 const identity = { service: "panxu-resource-links", version: 1 } as const;
 const maxBodyBytes = 16 * 1024;
@@ -83,7 +99,10 @@ async function authorize(
     throw new HttpError(401, "UNAUTHORIZED", "管理令牌无效。");
 }
 
-async function requestJson(request: Request): Promise<unknown> {
+async function requestJson(
+  request: Request,
+  limit = maxBodyBytes,
+): Promise<unknown> {
   if (
     !/^application\/json(?:\s*;|$)/i.test(
       request.headers.get("Content-Type") ?? "",
@@ -96,8 +115,12 @@ async function requestJson(request: Request): Promise<unknown> {
     );
   }
   const length = request.headers.get("Content-Length");
-  if (length && (!/^\d+$/.test(length) || Number(length) > maxBodyBytes))
-    throw new HttpError(413, "BODY_TOO_LARGE", "请求内容不得超过 16KB。");
+  if (length && (!/^\d+$/.test(length) || Number(length) > limit))
+    throw new HttpError(
+      413,
+      "BODY_TOO_LARGE",
+      `请求内容不得超过 ${limit / 1024}KB。`,
+    );
   const reader = request.body?.getReader();
   if (!reader) throw new HttpError(400, "INVALID_JSON", "请求内容不能为空。");
   const chunks: Uint8Array[] = [];
@@ -107,9 +130,13 @@ async function requestJson(request: Request): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > maxBodyBytes) {
+      if (total > limit) {
         await reader.cancel();
-        throw new HttpError(413, "BODY_TOO_LARGE", "请求内容不得超过 16KB。");
+        throw new HttpError(
+          413,
+          "BODY_TOO_LARGE",
+          `请求内容不得超过 ${limit / 1024}KB。`,
+        );
       }
       chunks.push(value);
     }
@@ -141,6 +168,20 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     await checkConnection(env);
     return json(identity);
   }
+  const pageId = /^\/api\/pages\/([A-Za-z0-9_-]+)$/.exec(url.pathname)?.[1];
+  if (pageId) {
+    if (!validId(pageId))
+      throw new HttpError(400, "INVALID_ID", "管理 ID 格式不正确。");
+    if (request.method === "GET") {
+      const page = await findPage(env, pageId);
+      return json(page, page ? 200 : 404);
+    }
+    if (request.method === "PUT")
+      return json(
+        await putPage(env, pageId, await requestJson(request, 128 * 1024)),
+      );
+    throw new HttpError(405, "METHOD_NOT_ALLOWED", "此接口仅支持 GET 和 PUT。");
+  }
   const id = /^\/api\/links\/([A-Za-z0-9_-]+)$/.exec(url.pathname)?.[1];
   if (!id) throw new HttpError(404, "NOT_FOUND", "管理接口不存在。");
   if (!validId(id))
@@ -161,18 +202,96 @@ async function publicPage(
   env: Env,
   url: URL,
 ): Promise<Response> {
-  if (request.method !== "GET")
+  if (request.method !== "GET" && request.method !== "HEAD")
     return html(
       { title: "无法访问此页面", message: "请通过浏览器打开资源领取链接。" },
       405,
     );
-  if (url.pathname === "/")
-    return html({
-      title: "资源领取",
-      message: "请打开分享者提供的完整领取链接，查看资源及网盘地址。",
+  const origin = canonicalOrigin(env),
+    canonical = url.origin === origin;
+  const plain = (body: string, type = "text/plain; charset=utf-8") =>
+    new Response(body, {
+      headers: { ...securityHeaders(), "Content-Type": type },
     });
-  const match = /^\/(r|go)\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
-  if (!match || !validSlug(match[2]))
+  if (url.pathname === "/robots.txt")
+    return plain(
+      `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /go/\n\nSitemap: ${origin}/sitemap.xml\n`,
+    );
+  if (url.pathname === "/llms.txt") {
+    const pages = await publicPages(env, { limit: 100 });
+    return plain(
+      `# 盘序资源\n\n> 基于资源资料与文件记录的中文说明和使用指南，部分内容使用 AI 辅助整理。使用建议不表示文件原文。\n\n## 网站\n- [资源目录](${origin}/)\n- [整理方式](${origin}/about)\n\n## 已发布资源\n${pages.map((p) => `- [${p.title.replace(/[\[\]\\\r\n]/g, "")}](${origin}/r/${p.slug})：${(JSON.parse(p.document_json!) as { article: { description: string } }).article.description}`).join("\n")}\n\n资源页的 .md 地址提供同一内容的 Markdown 表达，不另行生成内容。网盘入口以页面提供的 /go/ 地址为准。\n`,
+    );
+  }
+  if (url.pathname === "/sitemap.xml") {
+    const total = await publicPageCount(env),
+      chunks = Math.ceil(total / 1000);
+    return plain(
+      `<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemaps/site.xml</loc></sitemap>${Array.from({ length: chunks }, (_, i) => `<sitemap><loc>${origin}/sitemaps/resources-${i + 1}.xml</loc></sitemap>`).join("")}</sitemapindex>`,
+      "application/xml; charset=utf-8",
+    );
+  }
+  if (url.pathname === "/sitemaps/site.xml") {
+    const total = await publicPageCount(env);
+    return plain(
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${(total ? ["/", "/about"] : ["/about"]).map((path) => `<url><loc>${origin}${path}</loc></url>`).join("")}</urlset>`,
+      "application/xml; charset=utf-8",
+    );
+  }
+  const sitemap = /^\/sitemaps\/resources-([1-9]\d{0,5})\.xml$/.exec(
+    url.pathname,
+  );
+  if (sitemap) {
+    const pages = await publicPages(env, {
+      limit: 1000,
+      offset: (Number(sitemap[1]) - 1) * 1000,
+    });
+    if (!pages.length)
+      return new Response("Sitemap not found", {
+        status: 404,
+        headers: securityHeaders(),
+      });
+    return plain(
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${pages.map((p) => `<url><loc>${origin}/r/${p.slug}</loc><lastmod>${p.updated_at}</lastmod></url>`).join("")}</urlset>`,
+      "application/xml; charset=utf-8",
+    );
+  }
+  if (url.pathname === "/about")
+    return siteHtml(
+      (nonce) => renderAbout(nonce, origin, canonical),
+      canonical,
+    );
+  if (url.pathname === "/") {
+    const query = (url.searchParams.get("q") ?? "").trim().slice(0, 100),
+      category = (url.searchParams.get("category") ?? "").trim().slice(0, 80);
+    const page = Math.min(
+      10000,
+      Math.max(
+        1,
+        Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+      ),
+    );
+    const [pages, categories, count] = await Promise.all([
+      publicPages(env, { limit: 21, offset: (page - 1) * 20, query, category }),
+      publicCategories(env),
+      publicPageCount(env),
+    ]);
+    const indexable = canonical && !url.search && count > 0;
+    return siteHtml(
+      (nonce) =>
+        renderDirectory(
+          nonce,
+          origin,
+          indexable,
+          pages.slice(0, 20),
+          categories,
+          { query, category, page, hasNext: pages.length > 20 },
+        ),
+      indexable,
+    );
+  }
+  const match = /^\/(r|go)\/([A-Za-z0-9_-]+)(\.md)?$/.exec(url.pathname);
+  if (!match || !validSlug(match[2]) || (match[1] === "go" && match[3]))
     return html(
       { title: "资源不存在", message: "请检查领取链接是否完整。" },
       404,
@@ -208,17 +327,89 @@ async function publicPage(
       status: 302,
       headers: { ...securityHeaders(), Location: target },
     });
+  const page = await findPage(env, row.id);
+  if (page && publishable(row, page)) {
+    const doc = page.document!;
+    if (match[3])
+      return new Response(landingMarkdown(row, page, origin), {
+        headers: {
+          ...securityHeaders(),
+          "Content-Type": "text/markdown; charset=utf-8",
+          Link: `<${origin}/r/${row.slug}>; rel="canonical"`,
+        },
+      });
+    const related = (
+      await publicPages(env, { category: doc.source.category, limit: 5 })
+    )
+      .filter((p) => p.link_id !== row.id)
+      .slice(0, 4);
+    return siteHtml(
+      (nonce) => renderLanding(nonce, row, page, origin, canonical, related),
+      canonical,
+    );
+  }
+  if (match[3])
+    return html(
+      { title: "内容尚未发布", message: "此资源暂未发布完整说明。" },
+      404,
+    );
   return html({ row, available: true });
 }
 
+function canonicalOrigin(env: Env): string {
+  let url: URL;
+  try {
+    url = new URL(env.PUBLIC_ORIGIN);
+  } catch {
+    throw new HttpError(503, "PUBLIC_ORIGIN_REQUIRED", "公开域名尚未配置。");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  )
+    throw new HttpError(503, "PUBLIC_ORIGIN_REQUIRED", "公开域名配置不正确。");
+  return url.origin;
+}
+function siteHtml(render: (nonce: string) => string, indexable: boolean) {
+  const nonce = crypto.randomUUID().replace(/-/g, "");
+  return new Response(render(nonce), {
+    headers: {
+      ...securityHeaders(),
+      ...pageHeaders(nonce),
+      "X-Robots-Tag": indexable
+        ? "index, follow, max-snippet:-1, max-image-preview:large"
+        : "noindex, follow",
+    },
+  });
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(flushIndexNow(env));
+  },
+  async fetch(request: Request, env: Env, ctx): Promise<Response> {
     const url = new URL(request.url);
+    const key = indexNowKeyResponse(request, env);
+    if (key) return key;
     const isApi = url.pathname === "/api" || url.pathname.startsWith("/api/");
     try {
-      return isApi
+      const content = isApi
         ? await api(request, env, url)
         : await publicPage(request, env, url);
+      const response = searchVerification(request, content, env);
+      if (isApi && request.method === "PUT" && response.ok)
+        ctx.waitUntil(flushIndexNow(env).catch(() => {}));
+      return request.method === "HEAD"
+        ? new Response(null, {
+            status: response.status,
+            headers: response.headers,
+          })
+        : response;
     } catch (error) {
       if (isApi) {
         const issue =

@@ -9,10 +9,16 @@
     "types": "wrangler types",
     "check": "tsc --noEmit",
     "deploy": "wrangler deploy",
+    "pages:build": "node pages/build.mjs",
+    "pages:types": "wrangler types pages/pages-configuration.d.ts --config pages/wrangler.jsonc",
+    "pages:check": "tsc --noEmit -p pages/tsconfig.json",
+    "pages:deploy": "npm run pages:build && wrangler pages deploy --cwd pages --project-name panxu-resource-links --branch main --force",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
   },
+  "dependencies": { "zod": "4.6.7" },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "typescript": ">=5.9 <8",
     "wrangler": "^4.156.0"
   },

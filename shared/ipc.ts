@@ -6,6 +6,7 @@ import type { ResourceAnswerContract } from "./resource-answers";
 import type { ResourceDeletionContract } from "./resource-deletion";
 import type { ShareCreationContract } from "./share-creation";
 import type { ResourceLinksContract } from "./resource-links";
+import type { ResourceLandingContract } from "./resource-landing";
 import type { AccountDeletionContract } from "./account-deletion";
 import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
@@ -98,6 +99,7 @@ export interface IpcContract
     ResourceDeletionContract,
     ShareCreationContract,
     ResourceLinksContract,
+    ResourceLandingContract,
     AccountDeletionContract,
     IpcCommands,
     ZhidaoContract,
@@ -214,6 +216,7 @@ export const queryMethods = [
   "dev.sessions",
   "resourceLinks.settings",
   "resourceLinks.get",
+  "resourceLanding.get",
   "resourceCatalog.list",
   "resourceCatalog.get",
   "secret.preview",

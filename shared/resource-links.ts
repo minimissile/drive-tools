@@ -67,6 +67,10 @@ export interface ResourceLinksContract {
     args: undefined;
     value: { message: string };
   };
+  "resourceLinks.migrateService": {
+    args: { enabled: boolean; baseUrl: string };
+    value: ResourceLinkSettings;
+  };
   "resourceLinks.get": {
     args: { resourceId: string };
     value: ResourceLinkContext;
@@ -100,7 +104,7 @@ export interface ResourceLinksContract {
     value: ResourceLinkContext;
   };
   "resourceLinks.copy": {
-    args: { resourceId: string };
+    args: { resourceId: string; kind?: "landing" | "redirect" };
     value: { text: string };
   };
 }

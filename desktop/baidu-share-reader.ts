@@ -177,12 +177,17 @@ export function createBaiduShareReader(
       [...contexts.values()].some(
         (ctx) => !ctx.window.isDestroyed() && ctx.window.isVisible(),
       ),
-    async open() {
+    async open(source) {
       const ctx = contexts.get(workspaceKey());
       if (!ctx || ctx.window.isDestroyed())
         throw new AppError(
           "SHARE_BROWSER_CLOSED",
           "读取会话已结束，请重新读取包内名称。",
+        );
+      if (source && ctx.source !== `${source.shareKey}:${source.code}`)
+        throw new AppError(
+          "SHARE_BROWSER_CHANGED",
+          "读取页面已切换，请先重新检查当前链接，再查看异常页面。",
         );
       ctx.window.show();
       ctx.window.focus();

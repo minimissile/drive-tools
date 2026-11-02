@@ -32,7 +32,10 @@ export interface Account {
   capacity?: AccountCapacity | null;
   resourceCopies?: number;
   browserEngine?: "electron" | "bitbrowser";
-  browser?: Pick<import("./drive-browser").DriveBrowserBinding, "environmentId" | "profileId" | "profileName" | "exitIp" | "requireProxy"> | null;
+  browser?: Pick<
+    import("./drive-browser").DriveBrowserBinding,
+    "environmentId" | "profileId" | "profileName" | "exitIp" | "requireProxy"
+  > | null;
 }
 export interface RemoteFile {
   id: string;
@@ -56,6 +59,14 @@ export interface ShareInspection {
   page: number;
   parentId: string;
   nextCursor?: string;
+}
+export interface ShareValidationResult {
+  status: "valid" | "invalid" | "unavailable";
+  checkedAt: string;
+  message: string;
+  errorCode?: string;
+  accountId?: string;
+  canOpenPage?: boolean;
 }
 export interface Resource {
   sourceKind?: "share" | "owned";
@@ -186,6 +197,8 @@ export interface SplitItem {
   jobId: string | null;
   shareVersion: number;
   stage: JobStage | null;
+  archivedResourceId?: string | null;
+  archiveRequested?: boolean;
 }
 export interface SplitRun {
   id: string;

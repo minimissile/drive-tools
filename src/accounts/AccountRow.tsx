@@ -7,6 +7,7 @@ import {
   Settings2,
   Trash2,
   Fingerprint,
+  RefreshCw,
 } from "lucide-react";
 import type { Account } from "../../shared/types";
 import { ProviderIcon } from "../resources/ProviderIcon";
@@ -105,19 +106,12 @@ export function AccountRow({
           </p>
           {account.provider === "baidu" &&
           account.browserEngine === "bitbrowser" ? (
-            <Button
-              size="compact"
-              quiet
-              disabled={busy}
-              className="account-browser-action"
-              onClick={onBrowser}
-              title={account.browser?.profileName}
-            >
+            <p className="account-identity-meta account-browser-status">
               <Fingerprint size={14} aria-hidden="true" />
               <span>
                 比特后台 · {account.browser?.profileName ?? "原环境待恢复"}
               </span>
-            </Button>
+            </p>
           ) : account.provider === "baidu" ? (
             <p className="account-identity-meta">内置浏览器 · 创建后固定</p>
           ) : null}
@@ -126,71 +120,99 @@ export function AccountRow({
           ) : null}
         </div>
       </div>
-      <Capacity
-        account={account}
-        refreshing={pending === "capacity"}
-        disabled={busy || !connected}
-        onRefresh={() => onOperation("capacity")}
-      />
+      <Capacity account={account} refreshing={pending === "capacity"} />
       <div className="account-action-cell">
         <div className="account-actions">
-          {account.enabled && !current ? (
+          {account.enabled ? (
+            <div className="account-action-group">
+              {!connected ? (
+                <Button
+                  size="compact"
+                  primary
+                  data-account-action="login"
+                  disabled={busy}
+                  onClick={() => onOperation("login")}
+                >
+                  <LogIn size={14} aria-hidden="true" />
+                  {pending === "login" ? "正在打开…" : "登录"}
+                </Button>
+              ) : null}
+              <Button
+                size="compact"
+                disabled={busy}
+                onClick={() => onOperation("verify")}
+              >
+                <ShieldCheck size={14} aria-hidden="true" />
+                {pending === "verify" ? "正在核验…" : "核验登录"}
+              </Button>
+            </div>
+          ) : null}
+          <div className="account-action-group">
+            {account.enabled && !current ? (
+              <Button
+                quiet
+                size="compact"
+                disabled={busy}
+                className="account-icon-action"
+                onClick={onUse}
+                aria-label={`切换使用${account.alias}`}
+                title="用于后续新录入"
+              >
+                <ArrowRightLeft size={14} aria-hidden="true" />
+              </Button>
+            ) : null}
             <Button
               quiet
               size="compact"
+              className="account-icon-action"
+              disabled={busy || !connected}
+              onClick={() => onOperation("capacity")}
+              aria-label={pending === "capacity" ? "正在读取容量…" : "刷新容量"}
+              title={connected ? "刷新容量" : "登录并核验后可读取容量"}
+            >
+              <RefreshCw
+                size={14}
+                className={pending === "capacity" ? "spin" : undefined}
+                aria-hidden="true"
+              />
+            </Button>
+            {account.provider === "baidu" &&
+            account.browserEngine === "bitbrowser" ? (
+              <Button
+                size="compact"
+                quiet
+                className="account-icon-action"
+                disabled={busy}
+                onClick={onBrowser}
+                aria-label={`管理${account.alias}的浏览器环境`}
+                title={`浏览器环境：${account.browser?.profileName ?? "原环境待恢复"}`}
+              >
+                <Fingerprint size={14} aria-hidden="true" />
+              </Button>
+            ) : null}
+            <Button
+              size="compact"
+              quiet
               disabled={busy}
               className="account-icon-action"
-              onClick={onUse}
-              aria-label={`切换使用${account.alias}`}
-              title="用于后续新录入"
+              onClick={onManage}
+              aria-label={`管理${account.alias}`}
+              title="账号设置"
             >
-              <ArrowRightLeft size={14} aria-hidden="true" />
+              <Settings2 size={15} aria-hidden="true" />
             </Button>
-          ) : null}
-          {account.enabled && !connected ? (
             <Button
               size="compact"
-              primary
-              data-account-action="login"
+              quiet
+              className="account-icon-action account-delete-trigger"
               disabled={busy}
-              onClick={() => onOperation("login")}
+              onClick={onDelete}
+              aria-label={`删除${account.alias}`}
+              title="删除账号及本地资源"
             >
-              <LogIn size={14} aria-hidden="true" />
-              {pending === "login" ? "正在打开…" : "登录"}
+              <Trash2 size={15} aria-hidden="true" />
             </Button>
-          ) : null}
-          {account.enabled ? (
-            <Button
-              size="compact"
-              disabled={busy}
-              onClick={() => onOperation("verify")}
-            >
-              <ShieldCheck size={14} aria-hidden="true" />
-              {pending === "verify" ? "正在核验…" : "核验登录"}
-            </Button>
-          ) : null}
-          <Button
-            size="compact"
-            quiet
-            disabled={busy}
-            className="account-icon-action"
-            onClick={onManage}
-            aria-label={`管理${account.alias}`}
-            title="账号设置"
-          >
-            <Settings2 size={15} aria-hidden="true" />
-          </Button>
-          <Button
-            size="compact"
-            quiet
-            className="account-icon-action account-delete-trigger"
-            disabled={busy}
-            onClick={onDelete}
-            aria-label={`删除${account.alias}`}
-            title="删除账号及本地资源"
-          >
-            <Trash2 size={15} aria-hidden="true" />
-          </Button>
+          </div>
         </div>
       </div>
     </article>

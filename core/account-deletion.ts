@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { now } from "./database";
 import { AppError } from "./errors";
+import { pendingAccountAliasKey } from "./account-alias";
 import type { Repository } from "./repository";
 import type { ResourceDeletion } from "./resource-deletion";
 import type {
@@ -205,9 +206,10 @@ export class AccountDeletion {
             `drive-auth:${provider}:${accountId}`,
           );
           this.db.run(
-            "DELETE FROM settings WHERE key IN (?,?)",
+            "DELETE FROM settings WHERE key IN (?,?,?)",
             `account:capacity:${accountId}`,
             `intake:directories:${accountId}`,
+            pendingAccountAliasKey(accountId),
           );
           this.db.run("DELETE FROM browser_environment_accounts WHERE kind='drive' AND account_id=?", accountId);
           this.db.run("DELETE FROM settings WHERE key=?", `drive-browser:${accountId}`);

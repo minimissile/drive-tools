@@ -1,0 +1,219 @@
+.modal.landing-editor-dialog {
+  width: min(1180px, calc(100vw - 48px));
+  max-width: none;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: min(860px, calc(100dvh - 48px));
+}
+.landing-editor-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.landing-editor-top strong {
+  font-size: 16px;
+}
+.landing-editor-top p,
+.landing-editor-help {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.landing-editor-grid {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  gap: 24px;
+  padding: 16px 0;
+  min-height: 360px;
+}
+.landing-editor-aside {
+  min-width: 0;
+  padding-right: 24px;
+  border-right: 1px solid var(--line);
+}
+.landing-editor-aside > section + section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.landing-editor-aside h3,
+.landing-edit-block h3 {
+  font-size: 13px;
+}
+.landing-editor-aside details {
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.75;
+}
+.landing-editor-aside details ul {
+  padding-left: 16px;
+  overflow-wrap: anywhere;
+}
+.landing-editor-aside details li + li {
+  margin-top: 12px;
+}
+.landing-reading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.landing-quality-dimensions {
+  margin: 12px 0;
+  font-size: 12px;
+}
+.landing-quality-dimensions > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+}
+.landing-quality-dimensions dt {
+  color: var(--muted);
+}
+.landing-quality-dimensions dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.landing-editor-aside .field {
+  margin-top: 16px;
+}
+.landing-editor-aside .button.primary {
+  width: 100%;
+  margin-top: 12px;
+}
+.landing-editor-aside textarea {
+  resize: vertical;
+}
+.landing-editor-quality {
+  margin: 10px 0;
+}
+.landing-checks {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.landing-checks li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.landing-checks li svg {
+  flex: none;
+  opacity: 0.35;
+}
+.landing-checks .passed svg {
+  color: var(--green);
+  opacity: 1;
+}
+.landing-editor-warning {
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.75;
+  margin-top: 12px;
+}
+.landing-editor-main {
+  min-width: 0;
+}
+.landing-editor-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.landing-editor-tabs > span {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+.landing-editor-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.landing-editor-fields .field,
+.landing-edit-block .field {
+  margin: 0;
+}
+.landing-editor-fields textarea {
+  resize: vertical;
+}
+.landing-edit-block {
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+}
+.landing-edit-block-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.landing-edit-block-label > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.landing-edit-faq {
+  display: grid;
+  gap: 8px;
+}
+.landing-edit-faq + .landing-edit-faq {
+  margin-top: 8px;
+}
+.landing-reading-preview {
+  max-width: 70ch;
+  line-height: 1.9;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.landing-reading-preview h1 {
+  font-size: 25px;
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+.landing-reading-preview h2 {
+  font-size: 19px;
+  margin: 26px 0 10px;
+}
+.landing-reading-preview h3 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+}
+.landing-reading-preview p {
+  white-space: pre-line;
+}
+.landing-reading-preview small {
+  color: var(--muted);
+}
+.landing-preview-summary {
+  color: var(--muted);
+}
+.landing-reading-preview ul {
+  padding-left: 20px;
+  margin: 14px 0;
+}
+.landing-editor-footer {
+  width: 100%;
+  display: flex;
+  justify-content: end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.landing-editor-cloud {
+  margin-right: auto;
+  display: flex;
+  gap: 8px;
+}

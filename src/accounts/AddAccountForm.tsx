@@ -64,7 +64,7 @@ export function AddAccountForm({
       aria-describedby={hintId}
       onSubmit={async (event) => {
         event.preventDefault();
-        if (disabled || !alias.trim() || (fingerprint && !validPreview)) return;
+        if (disabled || (fingerprint && !validPreview)) return;
         setAdding(true);
         try {
           const account = await command(
@@ -114,10 +114,10 @@ export function AddAccountForm({
             }))}
           />
         </Field>
-        <Field label="账号别名">
+        <Field label="账号别名" hint="选填">
           <input
             aria-label="新增账号别名"
-            placeholder="例如：夸克资料号、百度归档号"
+            placeholder="留空则在登录核验后使用网盘用户名"
             value={alias}
             maxLength={60}
             disabled={disabled}
@@ -150,7 +150,7 @@ export function AddAccountForm({
         <Button
           type="submit"
           primary
-          disabled={!alias.trim() || disabled || (fingerprint && !validPreview)}
+          disabled={disabled || (fingerprint && !validPreview)}
         >
           <Plus size={16} aria-hidden="true" />
           {adding ? "正在添加…" : "添加账号"}

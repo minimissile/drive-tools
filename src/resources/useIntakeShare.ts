@@ -2,15 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { ipc } from "../api/client";
 import { intakeDestination } from "./intake-share";
 import { providerSpecs } from "../../shared/providers";
-import type { Account, Provider, ShareInput } from "../../shared/types";
+import type {
+  Account,
+  Provider,
+  ShareInput,
+  ShareValidationResult,
+} from "../../shared/types";
 type Parsed = ReturnType<typeof intakeDestination> & { share: ShareInput };
-type ShareValidation = {
-  status: "valid" | "invalid" | "unavailable";
-  checkedAt: string;
-  message: string;
-};
 export type IntakeShareValidation =
-  { status: "checking"; message: string } | ShareValidation;
+  { status: "checking"; message: string } | ShareValidationResult;
+const failureMessage = (
+  code: string | undefined,
+  message: string,
+  account: Account | undefined,
+) =>
+  code === "AUTH_EXPIRED" && account
+    ? `检查账号「${account.alias}」的登录会话已失效，尚未确认链接有效性。请切换已登录账号，或登录当前账号后重新检查。`
+    : message;
 type ValidationRecord = {
   keys: string[];
   value: IntakeShareValidation;
@@ -139,6 +147,7 @@ export function useIntakeShare(input: {
     const cached = lastValidation.current;
     if (
       !force &&
+      cached?.value.status === "valid" &&
       cached?.keys.includes(key) &&
       Date.now() - cached.completedAt < 60_000
     )
@@ -161,6 +170,7 @@ export function useIntakeShare(input: {
     show({ status: "checking", message: "正在检查网盘链接…" });
     const request = { keys, version: revision, promise: Promise.resolve() };
     request.promise = (async () => {
+      let checkingAccount: Account | undefined;
       try {
         const parsed = await parse();
         if (!parsed) {
@@ -179,7 +189,7 @@ export function useIntakeShare(input: {
         );
         if (!current()) return;
         show({ status: "checking", message: "正在检查网盘链接…" });
-        if (!parsed.accountId) {
+        if (!parsed.accountId && parsed.provider !== "baidu") {
           show({
             status: "unavailable",
             checkedAt: new Date().toISOString(),
@@ -187,35 +197,42 @@ export function useIntakeShare(input: {
           });
           return;
         }
-        // Read the first page through the existing provider flow; never save or transfer.
-        const result = await ipc("share.inspect", {
-          accountId: parsed.accountId,
+        checkingAccount = latest.current.accounts.find(
+          (account) => account.id === parsed.accountId,
+        );
+        const result = await ipc("share.validate", {
+          accountId: parsed.accountId || undefined,
           sourceText: parsed.share.url,
           code: parsed.share.code,
           resourceId: start.resourceId,
-          parentId: "0",
-          page: 1,
         });
         show({
-          status: "valid",
-          checkedAt: new Date().toISOString(),
-          message: result.files.length
-            ? "链接有效，可读取分享内容。"
-            : "链接有效，分享中暂无文件。",
+          ...result,
+          message: failureMessage(
+            result.errorCode,
+            result.message,
+            checkingAccount,
+          ),
         });
       } catch (cause) {
+        const errorCode =
+          cause instanceof Error &&
+          "code" in cause &&
+          typeof cause.code === "string"
+            ? cause.code
+            : undefined;
         show({
-          status:
-            cause instanceof Error &&
-            "code" in cause &&
-            cause.code === "SHARE_EXPIRED"
-              ? "invalid"
-              : "unavailable",
+          status: errorCode === "SHARE_EXPIRED" ? "invalid" : "unavailable",
+          errorCode,
+          accountId: checkingAccount?.id,
           checkedAt: new Date().toISOString(),
-          message:
+          message: failureMessage(
+            errorCode,
             cause instanceof Error
               ? cause.message
               : "暂时无法检查链接，请稍后重试。",
+            checkingAccount,
+          ),
         });
       } finally {
         if (validating.current === request) validating.current = null;

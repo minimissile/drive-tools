@@ -13,9 +13,11 @@ import { BrowserEnvironmentQueue } from "./browser-environment-queue";
 import { ResourceAnswers } from "./resource-answers";
 import { ResourceDeletion } from "./resource-deletion";
 import { AccountDeletion } from "./account-deletion";
+import { completeAccountAlias } from "./account-alias";
 import { queryMethods } from "../shared/ipc";
 import { ShareCreation } from "./share-creation";
 import { ResourceLinks } from "./resource-links";
+import { ResourceLanding } from "./resource-landing";
 import { assertResourceUnique } from "./resource-duplicates";
 import { resourceTags } from "./resource-tags";
 import { hasVerifiedShare } from "../shared/share-status";
@@ -92,6 +94,7 @@ export class AppService {
   readonly baiduDiscovery: BaiduDiscovery;
   readonly accountDeletion: AccountDeletion;
   readonly resourceLinks: ResourceLinks;
+  readonly resourceLanding: ResourceLanding;
   readonly shareCreation: ShareCreation;
   readonly resourceDeletion: ResourceDeletion;
   readonly smzdm: SmzdmArticles;
@@ -241,6 +244,7 @@ export class AppService {
       this.notes,
       (id) => this.verifyAccount(id),
       changed,
+      (...args) => this.driveFiles.archiveVerifiedFile(...args),
     );
     this.insertion = new InsertionService(
       this.db,
@@ -360,6 +364,14 @@ export class AppService {
       assertMutable: (resourceId) => this.resourceDeletion.assertMutable(resourceId),
       assertIdle: (accountId) => this.assertNoActiveJobs(accountId),
     });
+    this.resourceLanding = new ResourceLanding({
+      repo: this.repo,
+      ai: this.ai,
+      links: this.resourceLinks,
+      changed: () => this.changed(),
+      readContent: (copyId, fileId, limit) => this.driveFiles.readContent(copyId, fileId, limit),
+      readLocal: this.ports.readLandingDocument,
+    });
     this.accountDeletion = new AccountDeletion({
       repo: this.repo,
       resources: this.resourceDeletion,
@@ -387,6 +399,7 @@ export class AppService {
       baiduDiscovery: this.baiduDiscovery,
       accountDeletion: this.accountDeletion,
       resourceLinks: this.resourceLinks,
+      resourceLanding: this.resourceLanding,
       resourceCatalogs: this.resourceCatalogs,
       shareCreation: this.shareCreation,
       resourceDeletion: this.resourceDeletion,
@@ -459,6 +472,7 @@ export class AppService {
       this.queue.isBusy ||
       this.resourceDeletion.isBusy ||
       this.resourceLinks.isBusy ||
+      this.resourceLanding.isBusy ||
       this.hasRunningJobs() ||
       this.ports.collectionWebSession?.isOpen()
     )
@@ -507,6 +521,7 @@ export class AppService {
         now(),
         account.id,
       );
+      completeAccountAlias(this.db, account.id, identity.nickname);
       this.changed();
       return this.repo.getAccount(account.id);
     } catch (error) {
@@ -932,6 +947,7 @@ export class AppService {
       !!this.ports.baiduDiscovery?.isOpen() ||
       !!this.ports.baiduShareReader?.isOpen() ||
       this.resourceLinks?.isBusy ||
+      this.resourceLanding?.isBusy ||
       this.shareCreation?.isBusy ||
       this.smzdm.isBusy ||
       this.distribution.isBusy ||

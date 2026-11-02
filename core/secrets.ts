@@ -13,8 +13,10 @@ export class SecretStore {
   has(key: string) {
     return !!this.db.get("SELECT key FROM secrets WHERE key=?", key);
   }
-  async set(key: string, value: string) {
-    if (!value.trim()) {
+  async set(key: string, value: string, options?: { preserveEmpty?: boolean }) {
+    // Verified public shares have an intentionally empty code. Preserve that
+    // evidence separately from a missing secret (for example after a restore).
+    if (!value.trim() && !options?.preserveEmpty) {
       this.remove(key);
       return;
     }

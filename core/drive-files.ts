@@ -9,7 +9,7 @@ import {
   type DriveProvider,
   type OwnShare,
 } from "./providers/provider";
-import type { Account, RemoteFile } from "../shared/types";
+import type { Account, RemoteFile, Resource } from "../shared/types";
 import type { DriveShareResult } from "../shared/zhidao";
 import { DriveManagement } from "./drive-management";
 import { locateResourceParent } from "./drive-resource-location";
@@ -63,12 +63,7 @@ export class DriveFiles {
             "COPY_MISMATCH",
             "资源账号已变化，请重新打开资源。",
           );
-        const directory = await locateResourceParent(
-          account,
-          provider,
-          copy,
-          this.management,
-        );
+        const directory = await locateResourceParent(account, provider, copy);
         return { copy, directory, ownerUid: account.uid };
       },
     );
@@ -104,6 +99,17 @@ export class DriveFiles {
         account.provider === "baidu" ? normalizedDirectory(path) : path,
       ),
     );
+  }
+  async readContent(copyId: string, fileId: string, maxBytes: number) {
+    const located = await this.locateCopy(copyId);
+    const file = located.files.find((f) => f.id === fileId && !f.isDirectory);
+    if (!file) throw new AppError("FILES_CHANGED", "此文件已不在当前资源中，请重新核验资源。");
+    if (file.size != null && file.size > maxBytes)
+      throw new AppError("DOCUMENT_TOO_LARGE", "正文读取支持 20MB 以内的文件。");
+    return this.d.authenticated(located.directory.accountId, async (account, provider) => {
+      if (!provider.readFile) throw new AppError("UNSUPPORTED", "此网盘暂不支持直接读取正文，请导入同名本地 PDF 或文本文件。");
+      return provider.readFile(account, file, maxBytes);
+    });
   }
   async manage(v: {
     accountId: string;
@@ -285,7 +291,7 @@ export class DriveFiles {
                 "分享已创建但核验未完成，请稍后重新核对。",
                 true,
               );
-            const copyId = await this.archive(
+            const copyId = await this.archiveVerifiedFile(
               account,
               file,
               normalizedDirectory(path),
@@ -365,13 +371,40 @@ export class DriveFiles {
     assertResourceUnique(this.d.db, uniqueness);
     return { prior, oldResource, resourceId, uniqueness };
   }
-  private async archive(
+  /** Internal workflow entry; caller holds the account lock and has verified the share/files. */
+  async archiveVerifiedFile(
     account: Account,
     file: RemoteFile,
     parent: string,
     folderId: string,
     share: OwnShare,
+    metadata?: Pick<Resource, "category" | "tags" | "coverId" | "summary">,
   ) {
+    if (
+      !account.uid ||
+      share.ownerUid !== account.uid ||
+      parseShare(share.url).provider !== account.provider
+    )
+      throw new AppError(
+        "OWNERSHIP_UNVERIFIED",
+        "资源分享与当前本人账号不一致。",
+      );
+    // A new share for the same owned file must not create a second resource.
+    const sameFile = this.d.db
+      .all<{ id: string; files: string }>(
+        "SELECT id,files FROM copies WHERE account_id=? AND owner_uid=? AND status='ready' AND verified_at IS NOT NULL",
+        account.id,
+        account.uid,
+      )
+      .find((row) => {
+        const files = parseJson<RemoteFile[]>(row.files, []);
+        return (
+          files.length === 1 &&
+          files[0].id === file.id &&
+          files[0].isDirectory === file.isDirectory
+        );
+      });
+    if (sameFile) return sameFile.id;
     const { prior, oldResource, resourceId, uniqueness } = this.archivePlan(
       account,
       file,
@@ -398,21 +431,24 @@ export class DriveFiles {
     }
     const copyId = id("copy"),
       time = now();
-    await this.d.secrets.set(`share:${copyId}`, share.code);
+    await this.d.secrets.set(`share:${copyId}`, share.code, {
+      preserveEmpty: true,
+    });
     await this.d.secrets.set(`source:${resourceId}`, share.code);
     this.d.db.transaction(() => {
       assertResourceUnique(this.d.db, uniqueness);
       if (!oldResource)
         this.d.db.run(
-          "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,cover_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           resourceId,
           file.name,
           share.url,
           parseShare(share.url, share.code).shareKey,
           account.provider,
-          "本人网盘",
-          "[]",
-          "本人网盘已有文件",
+          metadata?.category ?? "本人网盘",
+          JSON.stringify(metadata?.tags ?? []),
+          metadata?.summary ?? "本人网盘已有文件",
+          metadata?.coverId ?? null,
           time,
           time,
         );

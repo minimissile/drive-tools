@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Button, SearchField, Status } from "../ui/primitives";
 import { stageName } from "../resources/labels";
+import { updateSelection } from "../lib/selection";
 import {
   buildSplitTree,
   selectSplitLevel,
@@ -31,7 +32,7 @@ export function SplitItemStatus({ item }: { item: SplitItem }) {
   return (
     <Status
       kind={
-        item.status === "ready"
+        item.archivedResourceId || item.status === "ready"
           ? "good"
           : ["failed", "needs_review", "waiting_login", "cancelled"].includes(
                 item.status,
@@ -40,13 +41,17 @@ export function SplitItemStatus({ item }: { item: SplitItem }) {
             : "normal"
       }
     >
-      {item.status === "ready"
-        ? "本人链接已就绪"
-        : item.status === "draft"
-          ? "待生成"
-          : item.stage
-            ? stageName(item.stage)
-            : item.status}
+      {item.archivedResourceId
+        ? "已入库"
+        : item.archiveRequested && item.stage === "archiving"
+          ? "正在入库"
+          : item.status === "ready"
+            ? "本人链接已就绪"
+            : item.status === "draft"
+              ? "待生成"
+              : item.stage
+                ? stageName(item.stage)
+                : item.status}
     </Status>
   );
 }
@@ -76,6 +81,11 @@ export default function SplitTree({
     [roots, collapsed, query],
   );
   const selected = run.items.filter((i) => selectedIds.has(i.id));
+  const selectionScope = run.items
+    .filter((item) =>
+      item.path.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+    )
+    .map((item) => item.id);
   const active = activeId
     ? run.items.find((i) => i.file.id === activeId)
     : selected[0];
@@ -173,6 +183,32 @@ export default function SplitTree({
             </div>
           </div>
           <div className="split-shortcuts">
+            <Button
+              size="compact"
+              disabled={!selectionScope.length}
+              onClick={() =>
+                onChange(
+                  updateSelection([...selectedIds], selectionScope, true),
+                )
+              }
+            >
+              {query.trim() ? "全选结果" : "全选"}
+            </Button>
+            <Button
+              size="compact"
+              disabled={!selectionScope.length}
+              onClick={() =>
+                onChange(
+                  updateSelection(
+                    updateSelection([...selectedIds], selectionScope, false),
+                    selectionScope.filter((id) => !selectedIds.has(id)),
+                    true,
+                  ),
+                )
+              }
+            >
+              反选
+            </Button>
             <span>按层快捷选</span>
             {[1, 2, 3].map((depth) => (
               <button
@@ -293,7 +329,12 @@ export default function SplitTree({
                         : "文件"}
                     </small>
                   </button>
-                  {node.item?.status === "ready" ? (
+                  {node.item?.archivedResourceId ? (
+                    <span className="split-node-ready">
+                      <Check size={14} />
+                      已入库
+                    </span>
+                  ) : node.item?.status === "ready" ? (
                     <span className="split-node-ready" title="本人链接已就绪">
                       <Check size={14} />
                       已就绪
@@ -323,7 +364,7 @@ export default function SplitTree({
         <aside className="split-selection" aria-label="拆分选择清单">
           <div className="split-selection-heading">
             <div>
-              <small>独立链接清单</small>
+              <small>已选资源</small>
               <strong>
                 <b>{selected.length}</b> / 100 项已选
               </strong>
@@ -339,7 +380,7 @@ export default function SplitTree({
           {selected.length ? (
             <>
               <p className="split-selection-caption">
-                每项对应1个链接，已就绪的本人链接会复用。
+                每项单独建链或入库，已有记录自动复用。
               </p>
               <ul className="split-selected-list">
                 {selected.map((item) => (

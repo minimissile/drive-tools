@@ -4,6 +4,7 @@ import { createResourceAnswerHandlers } from "./resource-answers";
 import { createResourceDeletionHandlers } from "./resource-deletion";
 import { createShareCreationHandlers } from "./share-creation";
 import { createResourceLinksHandlers } from "./resource-links";
+import { createResourceLandingHandlers } from "./resource-landing";
 import { createSmzdmHandlers } from "./smzdm";
 import { createDriveFilesHandlers } from "./drive-files";
 import { createDriveBrowserHandlers } from "./drive-browser";
@@ -47,6 +48,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createBaiduDiscoveryHandlers(services),
     createAccountDeletionHandlers(services),
     createResourceLinksHandlers(services),
+    createResourceLandingHandlers(services),
     createResourceCatalogHandlers(services),
     createResourceDeletionHandlers(services),
     createShareCreationHandlers(services),
