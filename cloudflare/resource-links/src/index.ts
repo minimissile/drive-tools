@@ -209,10 +209,22 @@ async function publicPage(
     );
   const origin = canonicalOrigin(env),
     canonical = url.origin === origin;
-  const plain = (body: string, type = "text/plain; charset=utf-8") =>
-    new Response(body, {
-      headers: { ...securityHeaders(), "Content-Type": type },
+  const plain = (body: string, type = "text/plain; charset=utf-8") => {
+    const headers = securityHeaders();
+    // Sitemaps and robots must stay usable by crawlers. Text alternatives and
+    // management responses retain their separate noindex policy.
+    const discovery =
+      url.pathname === "/robots.txt" ||
+      url.pathname === "/sitemap.xml" ||
+      url.pathname.startsWith("/sitemaps/");
+    if (discovery) {
+      if (canonical) delete headers["X-Robots-Tag"];
+      else headers["X-Robots-Tag"] = "noindex, follow";
+    }
+    return new Response(body, {
+      headers: { ...headers, "Content-Type": type },
     });
+  };
   if (url.pathname === "/robots.txt")
     return plain(
       `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /go/\n\nSitemap: ${origin}/sitemap.xml\n`,

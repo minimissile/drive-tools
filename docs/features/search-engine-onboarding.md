@@ -36,3 +36,12 @@ IndexNow 已采用服务端直接推送。当前页面不缓存，不能仅依�
 本轮隔离验证：`scripts/check-indexnow-worker.mjs` 检查队列触发、回执、退避、并发版本、撤下通知、默认 Workers fetch 与官方端点传输；`scripts/check-resource-landing-worker.mjs` 覆盖首页验证标签与别名隔离。测试使用独立 D1，推送服务限定为模拟；不替换进程级 fetch。
 
 官方协议：[IndexNow 文档](https://www.indexnow.org/documentation)、[Bing 接入说明](https://www.bing.com/indexnow/getstarted)、[Cloudflare Crawler Hints](https://developers.cloudflare.com/cache/advanced-configuration/crawler-hints/)。
+
+
+## 2026-11-02 站点地图抓取异常整改
+
+用户原标签页显示“无法抓取”，新读取的列表已显示成功。随后刷新原标签页，也确认状态为“成功”、已发现4个网页。
+
+排查同时发现正式域名的 robots 和 XML 站点地图错误继承了管理响应的 `X-Robots-Tag: noindex, nofollow, noarchive`。现已移除这些抓取入口上的限制，保留文本副本、管理接口与别名的既有索引边界。修复后重新提交了 `https://panxu.site/sitemap.xml`，提交成功，并核对列表状态。已发现数量不代表全部网址已收录。
+
+本轮执行源码类型检查、线上 HTTP 手动核对与 Search Console 手动操作；主站点地图、两个子站点地图及 robots 均返回200。未运行新的自动化测试、制作安装包或修改域名/DNS配置。

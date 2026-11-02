@@ -6,7 +6,7 @@
 
 ### 2026-11-02 · 开发中
 
-- 正式落地页已接入 Google Search Console 与 Bing 站长工具并提交站点地图；增加 IndexNow 服务端推送与失败重试队列，公开内容更新后自动通知搜索平台。配置与核验记录见[搜索平台接入](docs/features/search-engine-onboarding.md)。
+- 正式落地页已接入 Google Search Console 与 Bing 站长工具并提交站点地图；增加 IndexNow 服务端推送与失败重试队列，公开内容更新后自动通知搜索平台。修正站点地图与 robots 的抓取响应头，重新提交后 Search Console 列表已显示成功。配置与核验记录见[搜索平台接入](docs/features/search-engine-onboarding.md)。
 
 - 资源落地页改为先读取 PDF 或文本正文再生成，提供具体内容介绍、页码依据与适用边界；增加分项质量门槛，取消强制长文和问答，无正文依据的内容保留为草稿。支持编辑预览、发布撤回、公开目录与独立跳转链接。使用与验收说明见[资源落地页与搜索发现](docs/features/resource-landing-seo.md)。
 - 资源固定入口已绑定自有域名 [panxu.site](https://panxu.site)，HTTPS 和 DNSSEC 已启用；服务设置支持核对现有入口后迁移地址，当前工作空间的 18 条入口已迁移，沿用原有短码与分享目标。默认 Pages 地址保留，领取页、跳转及鉴权连接检查通过，国内直连待实际测试。见[固定入口说明](docs/features/resource-links.md)。
