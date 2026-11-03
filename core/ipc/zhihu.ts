@@ -2,11 +2,13 @@ import { z } from "zod";
 import type { HandlerServices } from "./types";
 import { zhihuContentInput, zhihuPolicyInput } from "../../shared/zhihu";
 import { websiteAccountIdSchema } from "../../shared/website-accounts";
+import { runtimeLogQuery } from "../../shared/runtime-logs";
 const identifier = z.object({ id: z.string().min(1).max(150) });
 const account = z.object({ accountId: websiteAccountIdSchema });
 export function createZhihuHandlers({ zhihu }: Pick<HandlerServices, "zhihu">) {
   return {
     "zhihu.snapshot": () => zhihu.snapshot(),
+    "zhihu.logs": (raw: unknown) => zhihu.logs.read(runtimeLogQuery.parse(raw)),
     "zhihu.content.save": (raw: unknown) =>
       zhihu.saveContent(zhihuContentInput.parse(raw)),
     "zhihu.content.review": (raw: unknown) => {
@@ -48,9 +50,15 @@ export function createZhihuHandlers({ zhihu }: Pick<HandlerServices, "zhihu">) {
           contentId: z.string().min(1).max(150),
           scheduledAt: z.iso.datetime({ offset: true }),
           confirmed: z.literal(true),
+          firstPost: z.boolean().default(false),
         })
         .parse(raw);
-      return zhihu.enqueue(v.accountId, v.contentId, v.scheduledAt);
+      return zhihu.enqueue(
+        v.accountId,
+        v.contentId,
+        v.scheduledAt,
+        v.firstPost,
+      );
     },
     "zhihu.scheduler": (raw: unknown) =>
       zhihu.scheduler(
@@ -60,6 +68,10 @@ export function createZhihuHandlers({ zhihu }: Pick<HandlerServices, "zhihu">) {
       ),
     "zhihu.task.cancel": (raw: unknown) =>
       zhihu.cancel(identifier.parse(raw).id),
+    "zhihu.task.retry": (raw: unknown) =>
+      zhihu.retry(
+        identifier.extend({ confirmed: z.literal(true) }).parse(raw).id,
+      ),
     "zhihu.task.resolve": (raw: unknown) => {
       const v = identifier
         .extend({

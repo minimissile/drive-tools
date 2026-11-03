@@ -41,6 +41,7 @@ const CsdnWorkflow = lazy(() => import("./csdn/Workflow"));
 const WeiboWorkflow = lazy(() => import("./weibo/Workflow"));
 const PipixWorkflow = lazy(() => import("./pipix/Workflow"));
 const ZhihuWorkflow = lazy(() => import("./zhihu/Workflow"));
+const IntelligentOperations = lazy(() => import("./operations/Workflow"));
 const SmzdmWorkflow = lazy(() => import("./smzdm/Workflow"));
 const Settings = lazy(() => import("./pages/Settings"));
 const BatchProcessing = lazy(() => import("./pages/BatchProcessing"));
@@ -57,6 +58,7 @@ function CsdnPublish() {
   return <Publish platform="csdn" />;
 }
 const surfaces = {
+  "intelligent-operations": IntelligentOperations,
   "photo-posts": PhotoPosts,
   distribution: Distribution,
   workbench: Workbench,

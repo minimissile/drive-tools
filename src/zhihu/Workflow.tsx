@@ -6,6 +6,11 @@ import { Button, Header, LoadingState, Notice, Status } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { Tabs, TabList, TabPanel } from "../ui/Tabs";
 import { zhihuSourceUrl } from "../../shared/zhihu";
+import { z } from "zod";
+import { useLocalDraft } from "../hooks/useLocalDraft";
+import { formatTime } from "../lib/format";
+import { ZhihuOverview } from "./Overview";
+import { ZhihuLogs } from "./Logs";
 import { ZhihuAccounts, type ZhihuAction } from "./Accounts";
 import { ZhihuContents } from "./Contents";
 import { ZhihuTasks } from "./Tasks";
@@ -18,8 +23,26 @@ export default function ZhihuWorkflow() {
     keepPrevious: true,
     refreshInterval: 2500,
   });
-  const [tab, setTab] = useState("accounts"),
-    [pending, setPending] = useState(false),
+  const navigation = useLocalDraft(
+    `panxu-zhihu-navigation-v1:${data?.dataPath ?? ""}`,
+    { tab: "overview" },
+    (value) =>
+      z
+        .object({
+          tab: z.enum([
+            "overview",
+            "accounts",
+            "contents",
+            "tasks",
+            "logs",
+            "guide",
+          ]),
+        })
+        .parse(value),
+  );
+  const tab = navigation.value.tab;
+  const setTab = (tab: string) => navigation.update({ tab });
+  const [pending, setPending] = useState(false),
     [error, setError] = useState("");
   const lock = useRef(false),
     alive = useRef(true);
@@ -43,7 +66,8 @@ export default function ZhihuWorkflow() {
     } catch (e) {
       if (alive.current) {
         const message = e instanceof Error ? e.message : "操作未完成，请重试。";
-        if (onError) onError(message); else setError(message);
+        if (onError) onError(message);
+        else setError(message);
       }
       return false;
     } finally {
@@ -56,22 +80,50 @@ export default function ZhihuWorkflow() {
     <div className="zhihu-workflow">
       <Header
         title="知乎多号运营"
-        description="管理创作者成长、已审核素材和错峰发布，在各自的比特环境中执行。"
+        description="账号进度、错峰发布与运行记录，在账号绑定的比特环境中执行。"
         action={
-          <div className="row"><Button onClick={() => navigate("pipix-sources")}>公共素材采集</Button><Button onClick={() => navigate("browser-environments")}>浏览器环境</Button></div>
+          <div className="row">
+            <Button size="compact" onClick={() => navigate("pipix-sources")}>
+              公共素材采集
+            </Button>
+            <Button
+              size="compact"
+              onClick={() => navigate("browser-environments")}
+            >
+              浏览器环境
+            </Button>
+          </div>
         }
       />
       <div className="zhihu-scheduler-bar">
         <div>
           <Status kind={s?.running ? "good" : "normal"}>
-            {s?.running ? "本地调度运行中" : "本地调度已停止"}
+            {!s
+              ? query.error
+                ? "调度状态未知"
+                : "正在读取调度状态…"
+              : s.running
+                ? "本地调度运行中"
+                : "本地调度已停止"}
           </Status>
           <span className="muted">
-            启动后按已保存的计划发布；应用重启后需重新启动。
+            {!s
+              ? query.error
+                ? "请重试读取运行状态"
+                : "正在连接本地运行服务"
+              : s.busy
+                ? "正在执行发布任务"
+                : s?.running
+                  ? "等待下一项计划任务"
+                  : "启用账号计划后启动调度"}
           </span>
+          {s?.lastHeartbeatAt ? (
+            <small>最近心跳 {formatTime(s.lastHeartbeatAt)}</small>
+          ) : null}
         </div>
         <Button
           primary={!s?.running}
+          size="compact"
           disabled={!s || pending}
           onClick={() =>
             void run(
@@ -89,6 +141,7 @@ export default function ZhihuWorkflow() {
           {s?.running ? "停止调度" : "启动调度"}
         </Button>
       </div>
+      {navigation.error ? <Notice warning>{navigation.error}</Notice> : null}
       <QueryError
         error={query.error}
         loading={query.loading}
@@ -107,15 +160,20 @@ export default function ZhihuWorkflow() {
           <TabList
             label="知乎运营功能"
             items={[
+              ["overview", "运行总览"],
               ["accounts", "账号与养号"],
               ["contents", `素材池 · ${s.contents.length}`],
               [
                 "tasks",
                 `发布队列 · ${s.tasks.filter((t) => t.status === "queued").length}`,
               ],
+              ["logs", "运行日志"],
               ["guide", "规则与来源"],
             ]}
           />
+          <TabPanel value="overview">
+            <ZhihuOverview snapshot={s} open={setTab} />
+          </TabPanel>
           <TabPanel value="accounts">
             <ZhihuAccounts
               accounts={s.accounts}
@@ -139,6 +197,9 @@ export default function ZhihuWorkflow() {
               busy={pending || s.busy}
               run={run}
             />
+          </TabPanel>
+          <TabPanel value="logs">
+            <ZhihuLogs accounts={s.accounts} workspace={data!.dataPath} />
           </TabPanel>
           <TabPanel value="guide">
             <div className="zhihu-guide">

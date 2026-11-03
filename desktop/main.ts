@@ -649,6 +649,7 @@ const ports: AppPorts = {
         "WORKSPACE_MISSING",
         "恢复工作空间不存在，未重启应用。",
       );
+    service.intelligentOps.scheduler(false);
     if (process.env.PANXU_DATA_DIR) process.env.PANXU_DATA_DIR = path;
     else {
       const { mkdir, writeFile, rename } = await import("node:fs/promises");
@@ -945,6 +946,7 @@ else {
           if (result.response !== 1) return false;
           assertIdle();
           installingUpdate = true;
+          service.intelligentOps.scheduler(false);
           service.queue.stop();
           await service.notes.flush();
           const backup = await snapshotBeforeUpdate(
@@ -1104,6 +1106,7 @@ else {
             )
               throw new Error("请先完成并关闭账号登录窗口。");
             devRestarting = true;
+            service.intelligentOps.scheduler(false);
             service.queue.stop();
             await service.notes.flush();
             service.db.run("PRAGMA wal_checkpoint(FULL)");
@@ -1140,6 +1143,7 @@ else {
     });
   app.on("before-quit", () => {
     quitting = true;
+    service?.intelligentOps.close();
     service?.baiduDiscovery.close();
     service?.zhidaoPages.close();
     ports.baiduShareReader?.close(true);

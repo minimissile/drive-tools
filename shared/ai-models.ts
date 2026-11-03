@@ -121,6 +121,7 @@ export function purposeForCall(
     "resource_export_plan",
     "resource_export_match",
     "resource_landing_review",
+    "intelligent_operations_advice",
     "zhidao_hot_names",
   ].includes(name)
     ? "analysis"

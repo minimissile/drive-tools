@@ -1,0 +1,360 @@
+.operations-workflow {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-workflow > .page-heading {
+  margin-bottom: 0;
+  align-items: center;
+}
+.operations-workflow .page-heading h1 {
+  font-size: 20px;
+}
+.operations-workflow .panel {
+  padding: var(--space-4);
+  margin-bottom: 0;
+}
+.operations-workflow .panel-heading {
+  margin-bottom: var(--space-3);
+}
+.operations-workflow .tabs {
+  padding-bottom: var(--space-3);
+}
+.operations-workflow .notice {
+  margin: 0;
+}
+.operations-runtime {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+}
+.operations-runtime-copy,
+.operations-toolbar,
+.operations-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.operations-runtime-copy {
+  flex: 1;
+  min-width: 0;
+}
+.operations-toolbar {
+  align-items: end;
+  margin-bottom: var(--space-3);
+}
+.operations-toolbar > .field {
+  width: 170px;
+}
+.operations-toolbar > .field:first-child {
+  width: 210px;
+}
+.operations-toolbar .operations-search {
+  width: 230px;
+}
+.operations-task-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(5, minmax(0, 1fr));
+}
+.operations-toolbar.operations-task-filters > .field,
+.operations-toolbar.operations-task-filters > .field:first-child {
+  width: auto;
+}
+.operations-quiet {
+  color: var(--muted);
+  font-size: 12px;
+}
+.operations-table-scroll {
+  overflow-x: auto;
+}
+.operations-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+.operations-table th,
+.operations-table td {
+  text-align: left;
+  padding: var(--space-2) 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.operations-table th {
+  color: var(--muted);
+  font-weight: 500;
+  background: var(--bg);
+}
+.operations-table tbody tr:hover {
+  background: var(--bg);
+}
+.operations-table small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.operations-table p {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.operations-table .operations-time {
+  width: 156px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.operations-table .operations-task-copy {
+  min-width: 220px;
+}
+.operations-table .operations-row-actions {
+  width: 145px;
+}
+.operations-task-copy > strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.operations-task-copy details {
+  margin-top: var(--space-1);
+  font-size: 12px;
+}
+.operations-task-copy summary {
+  color: var(--blue);
+  cursor: pointer;
+}
+.operations-task-copy pre,
+.operations-log-list pre {
+  font-size: 12px;
+  padding: var(--space-3);
+  background: var(--bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: var(--space-2) 0 0;
+}
+.operations-plan-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.68fr) minmax(0, 2.3fr);
+  align-items: start;
+  gap: var(--space-3);
+}
+.operations-plan-list {
+  display: grid;
+}
+.operations-plan-choice {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-2);
+  color: var(--text);
+  background: var(--surface);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  cursor: pointer;
+}
+.operations-plan-choice > span {
+  min-width: 0;
+}
+.operations-plan-choice strong,
+.operations-plan-choice small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.operations-plan-choice small {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: var(--space-1);
+}
+.operations-plan-choice[aria-pressed="true"] {
+  background: var(--blue-bg);
+}
+.operations-plan-choice:hover {
+  background: var(--bg);
+}
+.operations-plan-editor,
+.operations-form-section {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-plan-editor {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.operations-form-section + .operations-form-section {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.operations-form-section h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.operations-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.operations-fields.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.operations-fields .wide {
+  grid-column: 1 / -1;
+}
+.operations-plan-editor textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+.operations-channel {
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-channel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: center;
+}
+.operations-channel-heading p {
+  margin: 0;
+}
+.operations-account-options {
+  display: grid;
+  gap: var(--space-2);
+}
+.operations-account-option {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+.operations-account-option .operations-fields {
+  grid-template-columns: repeat(2, minmax(85px, 1fr));
+}
+.operations-account-option small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.operations-account-detail {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+.operations-account-detail > summary {
+  cursor: pointer;
+  color: var(--blue);
+}
+.operations-account-detail > .operations-fields {
+  margin-top: var(--space-2);
+}
+.operations-savebar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.operations-savebar .operations-quiet {
+  flex: 1;
+}
+.operations-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.operations-log-list > li {
+  display: grid;
+  grid-template-columns: 145px 50px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+.operations-log-list time {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.operations-log-list strong {
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.operations-log-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.operations-log-list summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 12px;
+  margin-top: var(--space-1);
+}
+.operations-log-location {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  margin: var(--space-3) 0 0;
+}
+.operations-advice {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-advice article {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.operations-advice h3 {
+  font-size: 14px;
+  margin: 0 0 var(--space-2);
+}
+.operations-advice p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.operations-review-copy {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--space-3);
+  background: var(--bg);
+}
+.operations-dialog-form {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-image-fingerprints {
+  margin: var(--space-2) 0 0;
+  padding-left: 20px;
+}
+.operations-image-fingerprints li {
+  padding-block: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.operations-image-fingerprints strong,
+.operations-image-fingerprints small {
+  display: block;
+}
+.operations-image-fingerprints small {
+  color: var(--muted);
+  font-size: 11px;
+}
+@media (max-width: 1250px) {
+  .operations-fields.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .operations-account-option {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

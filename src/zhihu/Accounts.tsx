@@ -5,6 +5,7 @@ import { Button, Empty, Field, Notice, Panel, Status } from "../ui/primitives";
 import { Select } from "../ui/Select";
 import { CheckboxField } from "../ui/CheckboxField";
 import { formatTime } from "../lib/format";
+import { ZhihuCreatorProgress } from "./CreatorProgress";
 export type ZhihuAction = (
   action: () => Promise<unknown>,
   message: string,
@@ -43,7 +44,7 @@ export function ZhihuAccounts({
       <Panel
         title="知乎账号"
         extra={
-          <Button quiet onClick={manage}>
+          <Button quiet size="compact" onClick={manage}>
             管理账号
           </Button>
         }
@@ -110,6 +111,7 @@ function AccountPlan({
   return (
     <Panel
       title={a.nickname || a.alias}
+      className="zhihu-account-plan"
       extra={
         <Status kind={a.plan.active ? "good" : "normal"}>
           {a.plan.active ? "养号已启用" : "养号已暂停"}
@@ -125,7 +127,6 @@ function AccountPlan({
               ? "未入驻"
               : "待核实"}
         </span>
-        <span>目标 Lv.{a.plan.targetLevel}</span>
         <span>
           今日 {a.today} / {a.plan.dailyLimit}
         </span>
@@ -133,19 +134,21 @@ function AccountPlan({
           本周 {a.week} / {a.plan.weeklyLimit}
         </span>
       </div>
+      <ZhihuCreatorProgress progress={p} targetLevel={a.plan.targetLevel} />
       <p className="muted">
         {a.environmentName} · 出口 {a.ip || "尚未检查"} ·{" "}
         {a.status === "connected" ? "身份已核实" : "需要检查登录"}
       </p>
       {peers > 1 ? (
-        <Notice warning={peers > 3}>
-          此出口关联 {peers} 个知乎账号。文章建议每个 IP 对应 2–3
-          个账号；所有账号仍会检查发布间隔。
-        </Notice>
+        <p className={peers > 3 ? "danger-text" : "muted"}>
+          同出口 {peers} 个知乎账号，统一按发布间隔错峰。文章建议每个 IP 对应
+          2–3 个账号。
+        </p>
       ) : null}
       <div className="row wrap">
         <Button
           disabled={busy}
+          size="compact"
           onClick={() =>
             void run(
               () => ipc("websiteAccounts.login", { id: a.id }),
@@ -157,6 +160,7 @@ function AccountPlan({
         </Button>
         <Button
           disabled={busy}
+          size="compact"
           onClick={() =>
             void run(async () => {
               const r = await ipc("websiteAccounts.check", { id: a.id });
@@ -168,16 +172,22 @@ function AccountPlan({
         </Button>
         <Button
           disabled={busy}
+          size="compact"
           onClick={() =>
             void run(
               () => ipc("zhihu.progress.check", { accountId: a.id }),
-              "创作者状态已读取",
+              "官方创作进度已读取",
             )
           }
         >
-          检查创作者等级
+          刷新创作进度
         </Button>
-        <Button quiet disabled={busy} onClick={() => setManual(!manual)}>
+        <Button
+          quiet
+          size="compact"
+          disabled={busy}
+          onClick={() => setManual(!manual)}
+        >
           手动记录等级
         </Button>
       </div>
@@ -233,80 +243,85 @@ function AccountPlan({
           </Button>
         </div>
       ) : null}
-      <div className="zhihu-fields zhihu-policy-fields">
-        <Field label="目标等级">
-          <Select
-            value={String(policy.targetLevel)}
-            items={Array.from({ length: 7 }, (_, i) => ({
-              value: String(i + 4),
-              label: `Lv.${i + 4}`,
-            }))}
-            onValueChange={(v) =>
-              setPolicy({ ...policy, targetLevel: Number(v) })
+      <div className="zhihu-policy-section">
+        <h3>发布规则</h3>
+        <div className="zhihu-fields zhihu-policy-fields">
+          <Field label="目标等级">
+            <Select
+              value={String(policy.targetLevel)}
+              items={Array.from({ length: 7 }, (_, i) => ({
+                value: String(i + 4),
+                label: `Lv.${i + 4}`,
+              }))}
+              onValueChange={(v) =>
+                setPolicy({ ...policy, targetLevel: Number(v) })
+              }
+            />
+          </Field>
+          <Field label="每日上限">
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={policy.dailyLimit}
+              onChange={(e) =>
+                setPolicy({ ...policy, dailyLimit: Number(e.target.value) })
+              }
+            />
+          </Field>
+          <Field label="每周上限">
+            <input
+              type="number"
+              min={1}
+              max={70}
+              value={policy.weeklyLimit}
+              onChange={(e) =>
+                setPolicy({ ...policy, weeklyLimit: Number(e.target.value) })
+              }
+            />
+          </Field>
+          <Field label="最小间隔（分钟）">
+            <input
+              type="number"
+              min={60}
+              max={1440}
+              value={policy.gapMinutes}
+              onChange={(e) =>
+                setPolicy({ ...policy, gapMinutes: Number(e.target.value) })
+              }
+            />
+          </Field>
+        </div>
+        <div className="row wrap">
+          <Button
+            disabled={busy}
+            size="compact"
+            onClick={() =>
+              void run(() => ipc("zhihu.plan.save", policy), "养号规则已保存")
             }
-          />
-        </Field>
-        <Field label="每日上限">
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={policy.dailyLimit}
-            onChange={(e) =>
-              setPolicy({ ...policy, dailyLimit: Number(e.target.value) })
+          >
+            保存规则
+          </Button>
+          <Button
+            primary={!a.plan.active}
+            size="compact"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () =>
+                  ipc("zhihu.plan.active", {
+                    accountId: a.id,
+                    active: !a.plan.active,
+                  }),
+                a.plan.active
+                  ? "已暂停养号计划"
+                  : "养号计划已启用，启动调度后执行",
+              )
             }
-          />
-        </Field>
-        <Field label="每周上限">
-          <input
-            type="number"
-            min={1}
-            max={70}
-            value={policy.weeklyLimit}
-            onChange={(e) =>
-              setPolicy({ ...policy, weeklyLimit: Number(e.target.value) })
-            }
-          />
-        </Field>
-        <Field label="最小间隔（分钟）">
-          <input
-            type="number"
-            min={60}
-            max={1440}
-            value={policy.gapMinutes}
-            onChange={(e) =>
-              setPolicy({ ...policy, gapMinutes: Number(e.target.value) })
-            }
-          />
-        </Field>
-      </div>
-      <div className="row wrap">
-        <Button
-          disabled={busy}
-          onClick={() =>
-            void run(() => ipc("zhihu.plan.save", policy), "养号规则已保存")
-          }
-        >
-          保存规则
-        </Button>
-        <Button
-          primary={!a.plan.active}
-          disabled={busy}
-          onClick={() =>
-            void run(
-              () =>
-                ipc("zhihu.plan.active", {
-                  accountId: a.id,
-                  active: !a.plan.active,
-                }),
-              a.plan.active
-                ? "已暂停养号计划"
-                : "养号计划已启用，启动调度后执行",
-            )
-          }
-        >
-          {a.plan.active ? "暂停养号计划" : "启用养号计划"}
-        </Button>
+          >
+            {a.plan.active ? "暂停养号计划" : "启用养号计划"}
+          </Button>
+        </div>
       </div>
       <Notice>
         {a.plan.message}。到达目标等级后停止养号；发布结果未知时需先核对。

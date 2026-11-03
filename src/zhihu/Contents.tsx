@@ -226,9 +226,20 @@ export function ZhihuContents({
         }
       >
         {draft.error ? <Notice danger>{draft.error}</Notice> : null}
-        {current?.source ? <Notice>素材来源：皮皮虾 · {current.source.author}，含 {current.source.comments.length} 条评论。
-          <Button size="compact" onClick={() => void ipc("system.external", { url: current.source!.url })}>查看原帖</Button>
-        </Notice> : null}
+        {current?.source ? (
+          <Notice>
+            素材来源：皮皮虾 · {current.source.author}，含{" "}
+            {current.source.comments.length} 条评论。
+            <Button
+              size="compact"
+              onClick={() =>
+                void ipc("system.external", { url: current.source!.url })
+              }
+            >
+              查看原帖
+            </Button>
+          </Notice>
+        ) : null}
         <div className="zhihu-fields">
           <Field label="内容形式">
             <Select
@@ -372,7 +383,13 @@ function ScheduleContent({
   run: ZhihuAction;
 }) {
   const [accountId, setAccountId] = useState(""),
-    [at, setAt] = useState("");
+    [at, setAt] = useState(""),
+    [firstPost, setFirstPost] = useState(false);
+  const firstPostEligible =
+    content.kind === "article" &&
+    content.purpose === "warming" &&
+    snapshot.accounts.find((a) => a.id === accountId)?.plan.progress
+      ?.creator === false;
   return (
     <div className="zhihu-schedule-content">
       <h3>指定账号发布</h3>
@@ -383,7 +400,10 @@ function ScheduleContent({
         <Field label="发布账号">
           <Select
             value={accountId}
-            onValueChange={setAccountId}
+            onValueChange={(id) => {
+              setAccountId(id);
+              setFirstPost(false);
+            }}
             items={[
               { value: "", label: "选择知乎账号" },
               ...snapshot.accounts.map((a) => ({
@@ -401,8 +421,15 @@ function ScheduleContent({
           />
         </Field>
       </div>
+      {firstPostEligible ? (
+        <CheckboxField
+          checked={firstPost}
+          onChange={(e) => setFirstPost(e.target.checked)}
+          label="以这篇已审核文章开通创作者中心（真实发布首篇）"
+        />
+      ) : null}
       <Button
-        disabled={busy || !accountId}
+        disabled={busy || !accountId || (firstPostEligible && !firstPost)}
         onClick={() =>
           void run(
             () =>
@@ -413,6 +440,7 @@ function ScheduleContent({
                   ? new Date(at).toISOString()
                   : new Date().toISOString(),
                 confirmed: true,
+                firstPost: firstPostEligible && firstPost,
               }),
             "发布任务已排队",
           )

@@ -12,6 +12,7 @@ import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
 import type { ZhihuContract } from "./zhihu";
+import type { IntelligentOperationsContract } from "./intelligent-operations";
 import type { BrowserEnvironmentContract } from "./browser-environments";
 import type { BitBrowserContract } from "./bitbrowser";
 import type { IpcCommands } from "./ipc-commands";
@@ -92,6 +93,7 @@ export interface IpcContract
     DriveBrowserContract,
     DistributionContract,
     ZhihuContract,
+    IntelligentOperationsContract,
     PipixContract,
     BrowserEnvironmentContract,
     BitBrowserContract,
@@ -231,6 +233,10 @@ export const queryMethods = [
   "pipix.knowledge",
   "pipix.image",
   "zhihu.snapshot",
+  "zhihu.logs",
+  "intelligentOps.snapshot",
+  "intelligentOps.tasks",
+  "intelligentOps.logs",
   "bit.profiles",
   "bit.diagnose",
   "environments.list",

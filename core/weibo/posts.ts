@@ -237,6 +237,7 @@ export class WeiboPosts {
     this.active.add(id);
     try {
       post.stage = "filling";
+      post.attemptedAt = now();
       post.message = "正在填写官方发布器并上传本地图片…";
       this.persist(post);
       const editor = await this.deps.accounts.fillWeibo(
@@ -255,7 +256,8 @@ export class WeiboPosts {
     }
     return post;
   }
-  async submit(id: string) {
+  async submit(id: string, canContinue?: () => void) {
+    canContinue?.();
     const post = this.get(id);
     if (post.stage !== "filled")
       throw new AppError("WEIBO_FILL_REQUIRED", "请先自动填写并上传。");
@@ -267,7 +269,9 @@ export class WeiboPosts {
         await this.payload(post),
         async () => {
           await this.payload(post);
+          canContinue?.();
           post.stage = "submitting";
+          post.submittedAt = now();
           post.message = "正在提交，等待微博官方回执…";
           this.persist(post);
         },

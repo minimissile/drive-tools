@@ -80,6 +80,10 @@ export const zhihuPolicyInput = z.object({
 export interface ZhihuProgress {
   creator: boolean | null;
   level: number | null;
+  /** Official current score and next-level total; absent in older/manual records. */
+  score?: number | null;
+  nextLevelScore?: number | null;
+  scoreUpdatedOn?: string | null;
   checkedAt: string;
   source: "official" | "manual";
   note: string;
@@ -94,6 +98,8 @@ export interface ZhihuPlan extends z.output<typeof zhihuPolicyInput> {
 export type ZhihuTaskStatus =
   "queued" | "running" | "submitting" | "published" | "attention" | "cancelled";
 export interface ZhihuTask {
+  /** Explicit first publication for a verified account not yet enrolled as a creator. */
+  firstPost?: boolean;
   id: string;
   accountId: string;
   uid: string;
@@ -127,6 +133,8 @@ export interface ZhihuSnapshot {
   drafts: { id: string; title: string }[];
   running: boolean;
   busy: boolean;
+  lastHeartbeatAt: string | null;
+  logFolder: string;
 }
 export interface ZhihuPayload {
   task: ZhihuTask;
@@ -139,6 +147,11 @@ export interface ZhihuBrowserPort {
     account: WebsiteAccount,
     payload: ZhihuPayload,
     beforeSubmit: () => Promise<void>,
+    onEvent?: (event: {
+      event: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }) => void,
   ): Promise<{ url: string }>;
 }
 type Contract<A, V> = { args: A; value: V };
@@ -167,11 +180,17 @@ export interface ZhihuContract {
       contentId: string;
       scheduledAt: string;
       confirmed: true;
+      firstPost?: boolean;
     },
     ZhihuTask
   >;
   "zhihu.scheduler": Contract<{ running: boolean; confirmed: true }, boolean>;
+  "zhihu.logs": Contract<
+    import("zod").input<typeof import("./runtime-logs").runtimeLogQuery>,
+    import("./runtime-logs").RuntimeLogPage
+  >;
   "zhihu.task.cancel": Contract<{ id: string }, ZhihuTask>;
+  "zhihu.task.retry": Contract<{ id: string; confirmed: true }, ZhihuTask>;
   "zhihu.task.resolve": Contract<
     {
       id: string;

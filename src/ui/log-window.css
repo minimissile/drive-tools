@@ -1,0 +1,96 @@
+.log-window {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+.log-window-columns,
+.log-window-line {
+  display: grid;
+  grid-template-columns: 150px 50px minmax(0, 1fr);
+  column-gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+.log-window-columns {
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.log-window-viewport {
+  height: clamp(220px, calc(100dvh - 590px), 520px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.log-window-viewport:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+.log-window-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.log-window-line {
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.log-window-line:last-child {
+  border-bottom: 0;
+}
+.log-window-line:hover {
+  background: var(--bg);
+}
+.log-window-line time {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.log-window-level {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 600;
+}
+.log-window-line[data-level="warning"] .log-window-level {
+  color: var(--amber);
+}
+.log-window-line[data-level="error"] .log-window-level {
+  color: var(--red);
+}
+.log-window-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.log-window-context {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-inline-end: var(--space-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+.log-window-context code {
+  font-size: 11px;
+}
+.log-window-content p {
+  display: inline;
+  margin: 0;
+}
+.log-window-content summary {
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 11px;
+  margin-top: var(--space-1);
+}
+.log-window-content pre {
+  background: var(--bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  font-size: 11px;
+}

@@ -16,6 +16,7 @@ import {
   type ZhihuSnapshot,
 } from "../../shared/zhihu";
 import { ZhihuStore } from "./store";
+import { RuntimeLog } from "../runtime-log";
 import { saveZhihuImage } from "./assets";
 import { contentImagePath, readContentImage } from "../content-assets";
 import type { SourceMaterial } from "../../shared/content-sources";
@@ -37,6 +38,9 @@ const fail = (message: string): never => {
 const ref = (id: string) => ({ kind: "website" as const, id });
 export class ZhihuOperations {
   readonly store: ZhihuStore;
+  readonly logs: RuntimeLog;
+  private lastHeartbeatAt: string | null = null;
+  private lastHeartbeat = 0;
   running = false;
   private executing = false;
   private closed = false;
@@ -46,6 +50,7 @@ export class ZhihuOperations {
   private time: () => number;
   constructor(private d: Dependencies) {
     this.store = new ZhihuStore(d.db);
+    this.logs = new RuntimeLog(d.db, d.dataPath, "zhihu");
     this.time = d.clock ?? Date.now;
     for (const task of this.tasks())
       if (["running", "submitting"].includes(task.status))
@@ -76,11 +81,54 @@ export class ZhihuOperations {
     return this.store.list("zhihu_plans");
   }
   private saveTask(task: ZhihuTask) {
+    const previous = this.tasks().find((t) => t.id === task.id);
+    if (
+      !previous ||
+      previous.status !== task.status ||
+      previous.message !== task.message
+    )
+      this.logs.record({
+        level: task.status === "attention" ? "error" : "info",
+        event: `task.${task.status}`,
+        message: task.message,
+        accountId: task.accountId,
+        taskId: task.id,
+        details: {
+          title: task.title,
+          firstPost: !!task.firstPost,
+          scheduledAt: task.scheduledAt,
+          url: task.url ?? null,
+        },
+      });
     this.store.save("zhihu_tasks", task.id, task);
     this.d.changed();
     return task;
   }
   private savePlan(plan: ZhihuPlan) {
+    const previous = this.plans().find((p) => p.accountId === plan.accountId);
+    if (
+      !previous ||
+      previous.active !== plan.active ||
+      previous.message !== plan.message ||
+      JSON.stringify(previous.progress) !== JSON.stringify(plan.progress)
+    )
+      this.logs.record({
+        level:
+          !plan.active && plan.message.startsWith("计划暂停")
+            ? "warning"
+            : "info",
+        event: "plan.updated",
+        message: plan.message,
+        accountId: plan.accountId,
+        details: {
+          active: plan.active,
+          creator: plan.progress?.creator ?? null,
+          level: plan.progress?.level ?? null,
+          score: plan.progress?.score ?? null,
+          nextLevelScore: plan.progress?.nextLevelScore ?? null,
+          scoreUpdatedOn: plan.progress?.scoreUpdatedOn ?? null,
+        },
+      });
     this.store.save("zhihu_plans", plan.accountId, plan);
     this.d.changed();
     return plan;
@@ -106,6 +154,8 @@ export class ZhihuOperations {
     return {
       running: this.running,
       busy: this.executing,
+      lastHeartbeatAt: this.lastHeartbeatAt,
+      logFolder: this.logs.folder,
       accounts: this.d.db
         .all<{ id: string }>(
           "SELECT id FROM website_accounts WHERE provider='zhihu' ORDER BY created_at",
@@ -156,8 +206,20 @@ export class ZhihuOperations {
     return content;
   }
   saveSource(material: SourceMaterial) {
-    const content = this.saveContent({ kind: "article", purpose: "warming", category: "趣味图文", title: material.title, body: material.body, questionUrl: "", aiAssisted: false });
-    const next = { ...content, images: material.images, source: material.source };
+    const content = this.saveContent({
+      kind: "article",
+      purpose: "warming",
+      category: "趣味图文",
+      title: material.title,
+      body: material.body,
+      questionUrl: "",
+      aiAssisted: false,
+    });
+    const next = {
+      ...content,
+      images: material.images,
+      source: material.source,
+    };
     this.store.save("zhihu_contents", content.id, next);
     this.d.changed();
     return next;
@@ -228,7 +290,12 @@ export class ZhihuOperations {
     if (this.executing) fail("任务正在执行，请完成后修改规则。");
     return this.savePlan({ ...plan, ...input });
   }
-  private ready(accountId: string, purpose: "warming" | "regular") {
+  private ready(
+    accountId: string,
+    purpose: "warming" | "regular",
+    firstPost = false,
+    retryTaskId?: string,
+  ) {
     const account = this.account(accountId),
       plan = this.plan(accountId);
     const env = this.d.environments.forAccount(ref(accountId));
@@ -241,8 +308,14 @@ export class ZhihuOperations {
     )
       fail("请先检查知乎登录身份。");
     const progress = plan.progress;
-    if (!progress?.creator || progress.level === null)
+    if (firstPost) {
+      if (purpose !== "warming" || progress?.creator !== false)
+        return fail(
+          "首篇开通仅适用于已核验为未入驻的账号，请先检查创作者状态。",
+        );
+    } else if (!progress?.creator || progress.level === null)
       return fail("请先入驻创作者中心，并检查或记录实际等级。");
+    if (!progress) return fail("请先检查创作者状态。");
     if (new Date(progress.checkedAt).getTime() < this.time() - 7 * 86400000)
       fail("创作者状态已超过七天，请重新检查或记录。");
     if (plan.environment)
@@ -251,13 +324,24 @@ export class ZhihuOperations {
       fail("计划的账号身份已变化，请重新记录创作者状态。");
     if (
       this.tasks().some(
-        (t) => t.accountId === accountId && t.status === "attention",
+        (t) =>
+          t.accountId === accountId &&
+          t.status === "attention" &&
+          t.id !== retryTaskId,
       )
     )
       fail("此账号有待核对的发布结果，请先登记结果。");
-    if (purpose === "warming" && progress.level >= plan.targetLevel)
+    if (
+      !firstPost &&
+      purpose === "warming" &&
+      progress.level! >= plan.targetLevel
+    )
       fail("账号已达到目标等级，养号结束。");
-    if (purpose === "regular" && progress.level < plan.targetLevel)
+    if (
+      !firstPost &&
+      purpose === "regular" &&
+      progress.level! < plan.targetLevel
+    )
       fail("账号尚未达到目标等级，请先完成养号。");
     return account;
   }
@@ -304,21 +388,52 @@ export class ZhihuOperations {
   }
   async checkProgress(accountId: string) {
     if (!this.d.ports.zhihu) fail("知乎浏览器适配不可用。");
-    return this.d.accounts.use(
+    this.logs.record({
+      level: "info",
+      event: "progress.checking",
+      message: "开始检查官方创作者状态",
       accountId,
-      "zhihu",
-      async (account) =>
-        this.recordProgress(
-          accountId,
-          await this.d.ports.zhihu!.progress(account),
-        ),
-      "检查知乎创作者状态",
-    );
+    });
+    try {
+      return await this.d.accounts.use(
+        accountId,
+        "zhihu",
+        async (account) =>
+          this.recordProgress(
+            accountId,
+            await this.d.ports.zhihu!.progress(account),
+          ),
+        "检查知乎创作者状态",
+      );
+    } catch (e) {
+      this.logs.record({
+        level: "error",
+        event: "progress.failed",
+        message: safeMessage(e),
+        accountId,
+      });
+      throw e;
+    }
   }
-  enqueue(accountId: string, contentId: string, scheduledAt: string) {
+  enqueue(
+    accountId: string,
+    contentId: string,
+    scheduledAt: string,
+    firstPost = false,
+  ) {
     const content = this.store.get("zhihu_contents", contentId);
     if (!content.reviewed) fail("请先审核当前内容版本。");
-    const account = this.ready(accountId, content.purpose);
+    if (firstPost && content.kind !== "article")
+      fail("首篇开通目前使用已审核文章。");
+    if (
+      firstPost &&
+      this.tasks().some(
+        (t) =>
+          t.accountId === accountId && t.firstPost && t.status !== "cancelled",
+      )
+    )
+      fail("此账号已有首篇开通任务，请核对结果，避免重复提交。");
+    const account = this.ready(accountId, content.purpose, firstPost);
     const questionId =
       content.kind === "answer" ? zhihuQuestionId(content.questionUrl) : null;
     if (
@@ -336,6 +451,7 @@ export class ZhihuOperations {
       );
     return this.saveTask({
       id: id("zhtask"),
+      firstPost,
       accountId,
       uid: account.uid!,
       contentId,
@@ -353,6 +469,11 @@ export class ZhihuOperations {
   }
   scheduler(running: boolean) {
     this.running = running;
+    this.logs.record({
+      level: "info",
+      event: running ? "scheduler.started" : "scheduler.stopped",
+      message: running ? "本地调度已启动" : "本地调度已停止",
+    });
     this.generation++;
     if (!running) this.abort?.abort();
     this.d.changed();
@@ -365,6 +486,31 @@ export class ZhihuOperations {
       ...task,
       status: "cancelled",
       message: "已取消，尚未执行发布",
+    });
+  }
+  retry(taskId: string) {
+    if (this.executing) fail("发布任务正在执行，请稍后重试。");
+    const task = this.store.get("zhihu_tasks", taskId);
+    if (task.status !== "attention" || task.submittedAt)
+      fail(
+        "仅从未进入提交阶段的暂停任务可继续；已提交或结果未知的任务请先核对回执。",
+      );
+    const account = this.ready(
+      task.accountId,
+      task.purpose,
+      !!task.firstPost,
+      task.id,
+    );
+    if (account.uid !== task.uid) fail("账号身份与原任务不一致。");
+    this.d.environments.assertStamp(ref(task.accountId), task.environment);
+    const content = this.store.get("zhihu_contents", task.contentId);
+    if (!content.reviewed || content.version !== task.contentVersion)
+      fail("素材已变化，请核对后重新安排。");
+    return this.saveTask({
+      ...task,
+      status: "queued",
+      scheduledAt: new Date(this.time()).toISOString(),
+      message: "已恢复未提交的原任务，继续核验后执行",
     });
   }
   resolve(
@@ -392,12 +538,37 @@ export class ZhihuOperations {
           : "本人确认未发布，可重新安排",
     });
   }
-  async tick() {
-    if (!this.running || this.closed || this.executing) return;
+  /** Execute one existing task for the shared planner without starting auto-allocation. */
+  async executeManaged(taskId: string, canContinue: () => boolean): Promise<void> {
+    if (this.running || this.executing || this.closed)
+      fail("知乎独立调度或任务仍在运行，请停止独立调度后由运营中心统一执行。");
+    if (!canContinue()) fail("运营计划已暂停或变化，未执行发布。");
+    const task = this.store.get("zhihu_tasks", taskId);
+    if (task.status !== "queued") fail("仅可执行运营中心关联的待执行原任务。");
+    await this.tick({ taskId, canContinue });
+  }
+  async tick(managed?: { taskId: string; canContinue(): boolean }) {
+    if (
+      (managed ? this.running || !managed.canContinue() : !this.running) ||
+      this.closed || this.executing
+    ) return;
     this.executing = true;
     const generation = this.generation;
+    this.lastHeartbeatAt = new Date(this.time()).toISOString();
+    if (this.time() - this.lastHeartbeat >= 60000) {
+      this.lastHeartbeat = this.time();
+      this.logs.record({
+        level: "info",
+        event: "scheduler.heartbeat",
+        message: "调度运行正常，正在检查计划与到期任务",
+        details: {
+          activePlans: this.plans().filter((p) => p.active).length,
+          queued: this.tasks().filter((t) => t.status === "queued").length,
+        },
+      });
+    }
     try {
-      for (const plan of this.plans().filter((p) => p.active)) {
+      for (const plan of managed ? [] : this.plans().filter((p) => p.active)) {
         try {
           if (
             plan.progress &&
@@ -461,6 +632,7 @@ export class ZhihuOperations {
         .filter(
           (t) =>
             t.status === "queued" &&
+            (!managed || t.id === managed.taskId) &&
             new Date(t.scheduledAt).getTime() <= this.time(),
         )
         .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))[0];
@@ -473,13 +645,19 @@ export class ZhihuOperations {
           async () => {
             const assertCurrent = () => {
               if (
-                !this.running ||
+                (managed ? this.running || !managed.canContinue() : !this.running) ||
                 this.closed ||
                 generation !== this.generation ||
                 this.store.get("zhihu_tasks", task.id).status === "cancelled"
               )
                 fail("调度已暂停，未继续提交。");
-              const a = this.ready(task.accountId, task.purpose);
+              if (managed && !this.plan(task.accountId).active)
+                fail("账号养号计划已暂停，未继续提交。");
+              const a = this.ready(
+                task.accountId,
+                task.purpose,
+                task.firstPost,
+              );
               if (a.uid !== task.uid) fail("账号身份与任务不一致。");
               this.d.environments.assertStamp(
                 ref(task.accountId),
@@ -514,7 +692,10 @@ export class ZhihuOperations {
             if (!this.d.ports.zhihu) fail("知乎浏览器适配不可用。");
             const images: { path: string; sha256: string }[] = [];
             for (const image of content.images) {
-              const asset = { ...image, storage: image.storage ?? "zhihu-assets" as const };
+              const asset = {
+                ...image,
+                storage: image.storage ?? ("zhihu-assets" as const),
+              };
               await readContentImage(this.d.dataPath, asset);
               const path = contentImagePath(this.d.dataPath, asset);
               images.push({ path, sha256: image.sha256 });
@@ -542,6 +723,13 @@ export class ZhihuOperations {
                       message: "已记录提交意图，等待平台回执",
                     });
                   },
+                  (event) =>
+                    this.logs.record({
+                      level: "info",
+                      ...event,
+                      accountId: task.accountId,
+                      taskId: task.id,
+                    }),
                 ),
             );
             const url = zhihuReceiptUrl(result.url, task.kind);
@@ -560,6 +748,22 @@ export class ZhihuOperations {
           },
           this.abort.signal,
         );
+        if (
+          task.firstPost &&
+          this.store.get("zhihu_tasks", task.id).status === "published"
+        ) {
+          try {
+            await this.checkProgress(task.accountId);
+          } catch (error) {
+            this.logs.record({
+              level: "warning",
+              event: "creator.refresh_failed",
+              message: `首篇已发布，创作者状态刷新未完成：${safeMessage(error)}`,
+              accountId: task.accountId,
+              taskId: task.id,
+            });
+          }
+        }
       } catch (error) {
         const current = this.store.get("zhihu_tasks", task.id);
         if (current.status !== "cancelled")
@@ -584,6 +788,12 @@ export class ZhihuOperations {
     }
   }
   close() {
+    if (this.running)
+      this.logs.record({
+        level: "warning",
+        event: "scheduler.shutdown",
+        message: "应用关闭或开发后台重启，调度停止；需重新启动。",
+      });
     this.running = false;
     this.closed = true;
     this.generation++;

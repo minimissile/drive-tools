@@ -16,6 +16,8 @@ import { Database, databaseSchemaVersion, id, now } from "./database";
 import { AppError } from "./errors";
 import { coverFilePattern } from "./cover-assets";
 import { sourceWeiboPostBackup } from "../shared/weibo-posts";
+import { intelligentOperationsStateKey } from "../shared/intelligent-operations";
+import { restoreIntelligentOperationsState } from "./intelligent-operations/state";
 import { studioWorkingCopy } from "../shared/studio";
 
 export async function fileHash(path: string) {
@@ -257,7 +259,15 @@ export async function stageRestore(
             throw new AppError("INVALID_BACKUP", "公共素材关联的微博草稿缺失或不完整。");
           return parsed.data;
         });
+        const rawOperations = db.setting<unknown>(intelligentOperationsStateKey, null);
+        let operationsState;
+        try {
+          operationsState = rawOperations == null ? null : restoreIntelligentOperationsState(rawOperations);
+        } catch {
+          throw new AppError("INVALID_BACKUP", "备份中的智能运营计划不完整，未启用恢复副本。");
+        }
         db.run("DELETE FROM settings");
+        if (operationsState) db.setSetting(intelligentOperationsStateKey, operationsState);
         for (const post of sourcePosts) {
           db.setSetting(`weiboPosts:v1:${post.id}`, { ...post, stage:["editing","attention"].includes(post.stage) ? "attention" : "uncertain", message:"从备份恢复，请检查账号和原发布结果，未自动填写或发布。" });
         }

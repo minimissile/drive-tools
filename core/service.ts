@@ -6,6 +6,9 @@ import { PhotoPosts } from "./photo-posts";
 import { SmzdmArticles } from "./smzdm/service";
 import { PipixSources } from "./pipix/service";
 import { ZhihuOperations } from "./zhihu/service";
+import { IntelligentOperations } from "./intelligent-operations/service";
+import { intelligentOperationsStateKey } from "../shared/intelligent-operations";
+import { restoreIntelligentOperationsState } from "./intelligent-operations/state";
 import { BitBrowserManagement } from "./bitbrowser-management";
 import { createEnvironmentStatus } from "./browser-environment-status";
 import { BrowserEnvironments } from "./browser-environments";
@@ -100,6 +103,7 @@ export class AppService {
   readonly smzdm: SmzdmArticles;
   readonly distribution: Distribution;
   readonly zhihu: ZhihuOperations;
+  readonly intelligentOps: IntelligentOperations;
   readonly pipix: PipixSources;
   readonly weiboPosts: WeiboPosts;
   readonly weiboStatistics: WeiboStatistics;
@@ -392,7 +396,14 @@ export class AppService {
       changed,
     });
     this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
+    this.intelligentOps = new IntelligentOperations({
+      db: this.db, repo: this.repo, accounts: this.websiteAccounts,
+      environments: this.environments, zhihu: this.zhihu,
+      weiboPosts: this.weiboPosts, weiboStatistics: this.weiboStatistics,
+      ai: this.ai, dataPath: this.dataPath, changed,
+    });
     this.handlers = createApplicationHandlers({
+      intelligentOps: this.intelligentOps,
       photoPosts: this.photoPosts,
       lockedAccount: (id, action) => this.mutex.run(id, action),
       driveBrowsers: this.driveBrowsers,
@@ -453,6 +464,7 @@ export class AppService {
       hasRunningJobs: () => this.hasRunningJobs(),
       backup: () => this.backup(),
       setSwitchingWorkspace: (switching) => {
+        if (switching) this.intelligentOps.scheduler(false);
         this.switchingWorkspace = switching;
       },
       invoke: (method, raw) => this.invoke(method, raw),
@@ -960,6 +972,7 @@ export class AppService {
       this.weibo.isBusy ||
       this.weiboPosts.isBusy ||
       this.zhihu.isBusy ||
+      this.intelligentOps?.isBusy ||
       this.pipix.isBusy ||
       this.csdn.isBusy ||
       this.zhidao.isBusy ||
@@ -1191,6 +1204,9 @@ export class AppService {
     copy.run("DELETE FROM secrets");
     copy.run("UPDATE accounts SET status=?,verified_at=NULL", "disconnected");
     copy.run("UPDATE website_accounts SET status='disconnected'");
+    const operationsState = copy.setting<unknown>(intelligentOperationsStateKey, null);
+    if (operationsState != null)
+      copy.setSetting(intelligentOperationsStateKey, restoreIntelligentOperationsState(operationsState));
     copy.run(
       "UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.publishingRights',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')",
     );
@@ -1249,6 +1265,7 @@ export class AppService {
     return folder;
   }
   close() {
+    this.intelligentOps.close();
     this.ports.photoPostBrowser?.close();
     this.baiduDiscovery.close();
     this.ports.baiduShareReader?.close(true);

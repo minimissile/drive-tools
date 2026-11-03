@@ -40,8 +40,13 @@ export function ZhihuTasks({
                 <small>
                   {accounts.find((a) => a.id === t.accountId)?.alias ||
                     "账号已移除"}{" "}
-                  · {t.kind === "article" ? "文章" : "回答"} · v
-                  {t.contentVersion} · 计划 {formatTime(t.scheduledAt)}
+                  ·{" "}
+                  {t.firstPost
+                    ? "开通首篇"
+                    : t.kind === "article"
+                      ? "文章"
+                      : "回答"}{" "}
+                  · v{t.contentVersion} · 计划 {formatTime(t.scheduledAt)}
                 </small>
                 <p>{t.message}</p>
                 {t.url ? (
@@ -82,15 +87,33 @@ export function ZhihuTasks({
                     取消排队
                   </Button>
                 ) : t.status === "attention" ? (
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      setResolving(t);
-                      setUrl("");
-                    }}
-                  >
-                    核对结果
-                  </Button>
+                  !t.submittedAt ? (
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        void run(
+                          () =>
+                            ipc("zhihu.task.retry", {
+                              id: t.id,
+                              confirmed: true,
+                            }),
+                          "原任务已恢复排队，请确认调度已启动",
+                        )
+                      }
+                    >
+                      继续未提交任务
+                    </Button>
+                  ) : (
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        setResolving(t);
+                        setUrl("");
+                      }}
+                    >
+                      核对结果
+                    </Button>
+                  )
                 ) : null}
               </div>
             </article>

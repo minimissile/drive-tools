@@ -30,6 +30,7 @@ import type {
   Draft,
 } from "../shared/types";
 export type Page =
+  | "intelligent-operations"
   | "photo-posts"
   | "distribution"
   | "workbench"
@@ -157,6 +158,7 @@ export function useApp(): Store {
   };
 }
 const pages: Page[] = [
+  "intelligent-operations",
   "photo-posts",
   "distribution",
   "workbench",

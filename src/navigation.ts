@@ -15,6 +15,7 @@ import {
   Share2,
   Users,
   Workflow,
+  BrainCircuit,
   type LucideIcon,
 } from "lucide-react";
 import type { Page } from "./state";
@@ -36,6 +37,7 @@ export const sidebarEntries: NavigationEntry[] = [
   { page: "library", title: "资源库", Icon: Library, group: "内容资产" },
   { page: "resource-catalog", title: "资源清单", Icon: ListChecks },
   { page: "traffic", title: "流量发现", Icon: Radar, group: "内容规划" },
+  { page: "intelligent-operations", title: "智能运营", Icon: BrainCircuit },
   { page: "search", title: "搜索运营", Icon: Workflow },
   { page: "distribution", title: "内容分发", Icon: Share2 },
   {

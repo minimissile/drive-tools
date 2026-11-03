@@ -8,7 +8,7 @@ import { migrateDistribution } from "./distribution/migration";
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 29;
+export const databaseSchemaVersion = 30;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -75,6 +75,20 @@ export class Database {
     );
     if (version > databaseSchemaVersion) throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 29) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v30-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE runtime_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,domain TEXT NOT NULL,level TEXT NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL,account_id TEXT,task_id TEXT,details TEXT NOT NULL,created_at TEXT NOT NULL);
+        CREATE INDEX runtime_logs_domain ON runtime_logs(domain,id DESC);
+        CREATE INDEX runtime_logs_account ON runtime_logs(domain,account_id,id DESC);
+        PRAGMA user_version=30;
+      `));
+      return;
+    }
     if (version === 28) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v29-${randomUUID()}.bak`;
@@ -86,6 +100,7 @@ export class Database {
         CREATE TABLE resource_landing_generations(request_id TEXT PRIMARY KEY,resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,status TEXT NOT NULL,created_at TEXT NOT NULL,error TEXT);
         PRAGMA user_version=29;
       `));
+      this.migrate(false);
       return;
     }
     if (version === 27) {

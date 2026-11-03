@@ -30,6 +30,9 @@ export type WeiboPost = {
   url: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Actual editor/submission events; older records may have no timestamp. */
+  attemptedAt?: string;
+  submittedAt?: string;
 };
 /** Only local content fields survive a workspace restore; session/environment state is stripped. */
 export const sourceWeiboPostBackup = z.object({
@@ -61,6 +64,8 @@ export const sourceWeiboPostBackup = z.object({
   url: z.string().max(2000).nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+  attemptedAt: z.iso.datetime().optional(),
+  submittedAt: z.iso.datetime().optional(),
 });
 type Contract<A, V> = { args: A; value: V };
 export interface WeiboPostsContract {

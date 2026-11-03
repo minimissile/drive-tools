@@ -7,6 +7,7 @@ import { platformSpecs } from "../shared/platforms";
 import { createHash } from "node:crypto";
 import { browserExitIp } from "./browser-exit-ip";
 import { browserProcessMode, type BrowserProcessMode } from "./browser-process-mode";
+import { existingBitBrowserEndpoint } from "./bitbrowser-existing";
 import type { BitBrowserProfile, BitProfileConfiguration } from "../shared/bitbrowser";
 
 // BitBrowser retains extraction settings on custom proxies too. Only proxyMethod=3
@@ -225,11 +226,21 @@ export class BitBrowser {
     return this.lease ? this.lease(binding, run) : run();
   }
   async withProfile<T>(profileId: string, action: (context: BrowserContext) => Promise<T>, expectedUrl?: string): Promise<T> {
-    const response = await this.call("/browser/open", {
-      id: profileId,
-      loadExtensions: true,
-    }, expectedUrl);
-    const endpoint = String(response.data?.ws ?? "");
+    let endpoint: string;
+    try {
+      const response = await this.call("/browser/open", {
+        id: profileId,
+        loadExtensions: true,
+      }, expectedUrl);
+      endpoint = String(response.data?.ws ?? "");
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== "BIT_ERROR" || !error.message.includes("打开窗口失败")) throw error;
+      // A browser may outlive the client's registry. Only reconnect to the
+      // locally attested process of this exact profile; retain all auth errors.
+      const existing = await existingBitBrowserEndpoint(profileId);
+      if (!existing) throw error;
+      endpoint = existing;
+    }
     const debug = validateLoopback(endpoint, true);
     if (!["ws:", "wss:"].includes(debug.protocol))
       throw new AppError(

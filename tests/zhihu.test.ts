@@ -8,6 +8,101 @@ import { inspectBackup, stageRestore } from "../core/backups";
 import { Database } from "../core/database";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  parseZhihuCreatorLevel,
+  matchesPublishedZhihuArticle,
+} from "../core/zhihu/browser";
+import type { ZhihuPayload } from "../shared/zhihu";
+
+test("知乎：回执补核必须匹配原草稿、已发布状态、作者、完整正文与配图数量", () => {
+  const payload = {
+    task: { uid: "owner" },
+    content: { title: "原标题", body: "第一段\n第二段" },
+    images: [],
+  } as unknown as ZhihuPayload;
+  const article = {
+    id: "123",
+    state: "published",
+    uid: "owner",
+    title: "原标题",
+    body: "第一段 第二段",
+    images: 0,
+  };
+  assert.equal(matchesPublishedZhihuArticle(article, "123", payload), true);
+  for (const patch of [
+    { id: "999" },
+    { state: "draft" },
+    { uid: "someone-else" },
+    { title: "其他标题" },
+    { body: "第一段" },
+    { images: 1 },
+  ])
+    assert.equal(
+      matchesPublishedZhihuArticle({ ...article, ...patch }, "123", payload),
+      false,
+    );
+  assert.equal(matchesPublishedZhihuArticle(null, "123", payload), false);
+});
+
+test("知乎：新版账号等级链接识别Lv4，忽略榜单等级，冲突或无效值保持未知", () => {
+  assert.equal(parseZhihuCreatorLevel(["Lv 4 \u200b"], "榜单：Lv.9 创作者"), 4);
+  assert.equal(parseZhihuCreatorLevel(["Lv.0"], "申请入驻"), 0);
+  assert.equal(parseZhihuCreatorLevel(["Lv 4", "Lv 5"], "创作等级 Lv.2"), null);
+  assert.equal(parseZhihuCreatorLevel(["Lv 11"], "创作等级 Lv.2"), null);
+  assert.equal(parseZhihuCreatorLevel(["未知"], "创作等级 Lv.2"), null);
+  assert.equal(parseZhihuCreatorLevel([], "创作等级 Lv.2"), 2);
+  assert.equal(parseZhihuCreatorLevel([], "创作分 3677，榜单 Lv 9"), null);
+});
+
+test("知乎：首篇开通显式排队，未入驻不启用普通养号，回执和等级刷新写入日志", async () => {
+  const f = await zhihuFixture();
+  try {
+    const a = await f.addAccount(),
+      c = f.content();
+    f.service.record(a.id, false, 0, "模拟未入驻创作者页面");
+    assert.throws(
+      () => f.service.enqueue(a.id, c.id, new Date(f.time).toISOString()),
+      /入驻/,
+    );
+    assert.throws(() => f.service.activate(a.id, true), /入驻/);
+    const task = f.service.enqueue(
+      a.id,
+      c.id,
+      new Date(f.time).toISOString(),
+      true,
+    );
+    assert.equal(task.firstPost, true);
+    assert.throws(
+      () =>
+        f.service.enqueue(
+          a.id,
+          f.content().id,
+          new Date(f.time).toISOString(),
+          true,
+        ),
+      /首篇/,
+    );
+    f.service.scheduler(true);
+    await f.service.tick();
+    assert.equal(f.submissions, 1);
+    assert.equal(
+      f.service.store.get("zhihu_tasks", task.id).status,
+      "published",
+    );
+    assert.equal(f.service.plan(a.id).progress?.creator, true);
+    assert.equal(f.service.plan(a.id).active, false);
+    const logs = f.service.logs.read({ accountId: a.id });
+    assert.ok(
+      logs.items.some(
+        (l) => l.event === "task.published" && l.taskId === task.id,
+      ),
+    );
+    assert.ok(logs.items.some((l) => l.event === "task.submitting"));
+    assert.ok(f.service.snapshot().lastHeartbeatAt);
+  } finally {
+    await f.close();
+  }
+});
 
 test("知乎：素材审核、编辑撤销审核、单号同问题去重和无推广养号", async () => {
   const f = await zhihuFixture();
@@ -54,6 +149,8 @@ test("知乎：素材审核、编辑撤销审核、单号同问题去重和无�
 test("知乎：多号同 IP 错峰、日上限、实际等级达标和素材耗尽停止", async () => {
   const f = await zhihuFixture();
   try {
+    // Keep the one-hour spacing inside one Shanghai day, including late-night runs.
+    f.advance(Date.parse(`${zhihuDay(f.time)}T09:00:00+08:00`) - f.time);
     const a = await f.addAccount("甲"),
       b = await f.addAccount("乙");
     f.service.configure({ accountId: a.id, dailyLimit: 1 });
@@ -117,6 +214,7 @@ test("知乎：未知结果禁止重发，核对未发布后才允许重新安�
     await f.service.tick();
     assert.equal(f.submissions, 1);
     assert.equal(f.service.store.get("zhihu_tasks", t.id).status, "attention");
+    assert.throws(() => f.service.retry(t.id), /提交阶段|已提交|核对/);
     assert.throws(
       () =>
         f.service.enqueue(a.id, f.content().id, new Date(f.time).toISOString()),
@@ -149,7 +247,11 @@ test("知乎：提交前暂停、环境身份变化和重启恢复均不自动�
     await f.service.tick();
     assert.equal(f.submissions, 0);
     assert.equal(f.service.store.get("zhihu_tasks", t.id).status, "attention");
-    f.service.resolve(t.id, "not_published");
+    const resumed = f.service.retry(t.id);
+    assert.equal(resumed.id, t.id);
+    assert.equal(resumed.status, "queued");
+    assert.equal(f.service.snapshot().tasks.length, 1);
+    f.service.cancel(t.id);
     const t2 = f.service.enqueue(a.id, c.id, new Date(f.time).toISOString());
     f.environments.invalidateIdentity({ kind: "website", id: a.id });
     f.service.scheduler(true);
