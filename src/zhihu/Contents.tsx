@@ -15,6 +15,7 @@ import { CheckboxField } from "../ui/CheckboxField";
 import { Pagination } from "../ui/Pagination";
 import type { ZhihuAction } from "./Accounts";
 import { readDraft, writeDraft } from "../storage/local-draft";
+import { ContentSourceTrace } from "../content-supply/SourceTrace";
 
 const empty: ZhihuContentInput = {
   kind: "article",
@@ -227,18 +228,7 @@ export function ZhihuContents({
       >
         {draft.error ? <Notice danger>{draft.error}</Notice> : null}
         {current?.source ? (
-          <Notice>
-            素材来源：皮皮虾 · {current.source.author}，含{" "}
-            {current.source.comments.length} 条评论。
-            <Button
-              size="compact"
-              onClick={() =>
-                void ipc("system.external", { url: current.source!.url })
-              }
-            >
-              查看原帖
-            </Button>
-          </Notice>
+          <ContentSourceTrace source={current.source} />
         ) : null}
         <div className="zhihu-fields">
           <Field label="内容形式">

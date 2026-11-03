@@ -235,7 +235,21 @@ export class PipixSources {
       JSON.stringify(source),
     );
   }
-  async collect(text: string) {
+  /** Supply jobs use archived responses first and never make paid discovery calls. */
+  async ensureCollected(sourceId: string, refresh = false) {
+    const previous = this.d.db.get<{ data: string }>("SELECT data FROM pipix_sources WHERE id=?", sourceId);
+    if (previous && !refresh) {
+      const item: PipixItem = JSON.parse(previous.data);
+      if (item.images.every((image) => image.asset)) {
+        try {
+          for (const image of item.images) await readContentImage(this.d.dataPath, image.asset!);
+          return { source: item, reused: true };
+        } catch { /* Retry missing or damaged assets through the original collector. */ }
+      }
+    }
+    return { source: await this.collect(`https://h5.pipix.com/ppx/item/${sourceId}`, true, refresh), reused: false };
+  }
+  async collect(text: string, preferArchive = false, refreshComments = false) {
     if (this.closed || this.active || this.probing)
       throw new AppError("PIPIX_BUSY", "采集正在进行，请等待当前采集完成。");
     this.active = true;
@@ -256,17 +270,37 @@ export class PipixSources {
           (image: { error?: string }) => image.error,
         );
       const local =
-        cached && !cacheFailed && Array.isArray(cached.note?.multi_image)
+        cached && (preferArchive || (!cacheFailed && Array.isArray(cached.note?.multi_image)))
           ? parsePipixData({ ppxItemDetail: { item: cached } }, sourceId, true)
           : null;
       const source =
         local &&
         local.images.every((image) => image.url) &&
-        !(local.commentCount && !local.comments.length)
+        (preferArchive || !(local.commentCount && !local.comments.length))
           ? local
           : await this.client.collect(text, signal());
+      if (preferArchive && source === local && (refreshComments || (source.commentCount && !source.comments.length))) {
+        try {
+          const page = await this.client.collect(text, signal());
+          source.comments = page.comments;
+          source.warnings.push(...page.warnings);
+          if (!page.comments.length) source.warnings.push("分享页也未返回评论；未调用付费评论接口。");
+        } catch (error) {
+          if (this.closed) throw error;
+          source.warnings.push(`分享页补充评论未完成：${safeMessage(error)} 已保留本地原帖，未调用付费评论接口。`);
+        }
+      }
       for (const image of source.images) {
         try {
+          const old: PipixItem | null = previous ? JSON.parse(previous.data) : null;
+          const asset = old?.images.find((v) => v.url === image.url)?.asset;
+          if (asset) {
+            try {
+              await readContentImage(this.d.dataPath, asset);
+              image.asset = asset;
+              continue;
+            } catch { /* Fetch only the asset that could not be reused. */ }
+          }
           const raw = await this.client.image(image.url, signal());
           const bytes = await this.d.ports.normalizeCover(raw);
           image.asset = await saveContentImage(
@@ -310,7 +344,7 @@ export class PipixSources {
         input.channel === "weibo" ? (input.accountId ?? "") : "";
       const existing = () =>
         this.exports(source.id).find(
-          (v) => v.channel === input.channel && v.accountId === accountId,
+          (v) => v.channel === input.channel && (input.channel === "zhihu" || v.accountId === accountId),
         );
       const previous = existing();
       if (previous) return { delivery: previous, existing: true };

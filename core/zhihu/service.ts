@@ -6,6 +6,8 @@ import type { BrowserEnvironmentQueue } from "../browser-environment-queue";
 import type { AppPorts } from "../ports";
 import {
   zhihuContentInput,
+  zhihuWarmingHasPromotion,
+  zhihuContentForAccount,
   zhihuPolicyInput,
   zhihuQuestionId,
   zhihuReceiptUrl,
@@ -193,6 +195,7 @@ export class ZhihuOperations {
       fail("内容正在发布，请完成后再编辑。");
     const content: ZhihuContent = {
       ...input,
+      aiAssisted: input.aiAssisted || (previous?.source?.editorial?.aiAssisted ?? false),
       id: previous?.id ?? id("zhcontent"),
       version: (previous?.version ?? 0) + 1,
       reviewed: false,
@@ -208,12 +211,12 @@ export class ZhihuOperations {
   saveSource(material: SourceMaterial) {
     const content = this.saveContent({
       kind: "article",
-      purpose: "warming",
-      category: "趣味图文",
+      purpose: material.source.editorial?.purpose ?? "warming",
+      category: material.source.editorial?.direction.slice(0, 40) || "趣味图文",
       title: material.title,
       body: material.body,
       questionUrl: "",
-      aiAssisted: false,
+      aiAssisted: material.source.editorial?.aiAssisted ?? false,
     });
     const next = {
       ...content,
@@ -229,7 +232,7 @@ export class ZhihuOperations {
     if (content.version !== version) fail("内容版本已变化，请刷新并重新审阅。");
     if (
       content.purpose === "warming" &&
-      /https?:\/\/|www\.|加[微vV]|提取码|购买|下单|推广链接/.test(content.body)
+      zhihuWarmingHasPromotion(content.body)
     )
       fail("养号素材包含链接或推广内容，请改为正常内容，或移除推广信息。");
     this.store.save("zhihu_contents", contentId, {
@@ -386,7 +389,8 @@ export class ZhihuOperations {
       source: "manual",
     });
   }
-  async checkProgress(accountId: string) {
+  async checkProgress(accountId: string, canContinue?: () => void) {
+    canContinue?.();
     if (!this.d.ports.zhihu) fail("知乎浏览器适配不可用。");
     this.logs.record({
       level: "info",
@@ -398,11 +402,12 @@ export class ZhihuOperations {
       return await this.d.accounts.use(
         accountId,
         "zhihu",
-        async (account) =>
-          this.recordProgress(
-            accountId,
-            await this.d.ports.zhihu!.progress(account),
-          ),
+        async (account) => {
+          canContinue?.();
+          const progress = await this.d.ports.zhihu!.progress(account);
+          canContinue?.();
+          return this.recordProgress(accountId, progress);
+        },
         "检查知乎创作者状态",
       );
     } catch (e) {
@@ -423,6 +428,7 @@ export class ZhihuOperations {
   ) {
     const content = this.store.get("zhihu_contents", contentId);
     if (!content.reviewed) fail("请先审核当前内容版本。");
+    if (!zhihuContentForAccount(content, accountId)) fail("此稿已指定其他账号，请选择原目标账号。");
     if (firstPost && content.kind !== "article")
       fail("首篇开通目前使用已审核文章。");
     if (
@@ -504,6 +510,7 @@ export class ZhihuOperations {
     if (account.uid !== task.uid) fail("账号身份与原任务不一致。");
     this.d.environments.assertStamp(ref(task.accountId), task.environment);
     const content = this.store.get("zhihu_contents", task.contentId);
+    if (!zhihuContentForAccount(content, task.accountId)) fail("素材指定账号与原任务不一致。");
     if (!content.reviewed || content.version !== task.contentVersion)
       fail("素材已变化，请核对后重新安排。");
     return this.saveTask({
@@ -603,7 +610,7 @@ export class ZhihuOperations {
             .list("zhihu_contents")
             .reverse()
             .find(
-              (c) => c.purpose === "warming" && c.reviewed && !used.has(c.id),
+              (c) => c.purpose === "warming" && c.reviewed && !used.has(c.id) && zhihuContentForAccount(c, plan.accountId),
             );
           if (!content) {
             this.savePlan({
@@ -664,6 +671,7 @@ export class ZhihuOperations {
                 task.environment,
               );
               const c = this.store.get("zhihu_contents", task.contentId);
+              if (!zhihuContentForAccount(c, task.accountId)) fail("素材指定账号与当前任务不一致。");
               if (!c.reviewed || c.version !== task.contentVersion)
                 fail("内容已被修改，请核对后重新排队。");
               return c;

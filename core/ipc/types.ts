@@ -37,6 +37,7 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  contentSupply: import("../content-supply/service").ContentSupply;
   intelligentOps: import("../intelligent-operations/service").IntelligentOperations;
   photoPosts: import("../photo-posts").PhotoPosts;
   driveBrowsers: import("../drive-browser-sessions").DriveBrowserSessions;

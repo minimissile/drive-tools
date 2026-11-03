@@ -101,15 +101,15 @@ export function parsePipixData(
     warnings.push(`原帖 ${rawImages.length} 张图片，本轮仅采集前 9 张。`);
   if (images.some((v) => v.animated))
     warnings.push("动态图片将保存为静态配图。");
+  const originalText = fromList ? pipixListText(item.note?.text || item.content) : text(item.note?.text || item.content, 30001);
+  if (originalText.length > 30000) warnings.push("原帖正文较长，采集预览保留前30000字符；请核对原帖，列表完整响应仍保存在本地归档。");
   return {
     id,
     url: `https://h5.pipix.com/ppx/item/${id}`,
-    text: fromList
-      ? pipixListText(item.note?.text || item.content)
-      : text(item.note?.text || item.content, 30000),
+    text: originalText.slice(0, 30000),
     author:
       (fromList
-        ? pipixListText(item.author?.name)
+        ? pipixListText(item.author?.name).slice(0, 100)
         : text(item.author?.name, 100)) || "未署名作者",
     kind: video ? "video" : images.length ? "images" : "text",
     images: video ? [] : images,

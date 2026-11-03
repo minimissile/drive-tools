@@ -10,6 +10,7 @@ import { CheckboxField } from "../ui/CheckboxField";
 import { Button, Field, Notice } from "../ui/primitives";
 import { channelNames } from "./labels";
 import type { OperationAction } from "./useOperationAction";
+import { useOperationDialog } from "./useOperationDialog";
 
 function localDate(value: string | null) {
   const d = value ? new Date(value) : new Date();
@@ -37,7 +38,7 @@ export function TaskDialog({
   const [time, setTime] = useState(localDate(t.scheduledAt));
   const [confirmed, setConfirmed] = useState(false);
   const [url, setUrl] = useState("");
-  const [error, setError] = useState("");
+  const { error, submitting, submit } = useOperationDialog(run, close);
   const material = s.materials.find((m) => m.id === t.materialId);
   const title =
     kind === "schedule"
@@ -46,7 +47,6 @@ export function TaskDialog({
         ? "审核本次微博内容"
         : "登记公众号交接";
   const apply = () => {
-    setError("");
     const action =
       kind === "schedule"
         ? () =>
@@ -67,29 +67,24 @@ export function TaskDialog({
                 ...(url.trim() ? { url: url.trim() } : {}),
                 confirmed: true,
               });
-    void run(
+    void submit(
       action,
       kind === "schedule"
         ? "任务时间已调整，执行前仍会检查规则"
         : kind === "review"
           ? "本次内容版本已审核，改动后需重新审核"
           : "人工交接结果已登记",
-      setError,
-    ).then((r) => {
-      if (r.ok) {
-        changed();
-        close();
-      }
-    });
+      changed,
+    );
   };
   return (
     <Dialog
       title={title}
       onClose={close}
-      busy={busy}
+      busy={submitting}
       footer={
         <>
-          <Button size="compact" disabled={busy} onClick={close}>
+          <Button size="compact" disabled={submitting} onClick={close}>
             返回
           </Button>
           <Button

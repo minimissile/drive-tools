@@ -11,6 +11,7 @@ import type { AccountDeletionContract } from "./account-deletion";
 import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
+import type { ContentSupplyContract } from "./content-supply";
 import type { ZhihuContract } from "./zhihu";
 import type { IntelligentOperationsContract } from "./intelligent-operations";
 import type { BrowserEnvironmentContract } from "./browser-environments";
@@ -95,6 +96,7 @@ export interface IpcContract
     ZhihuContract,
     IntelligentOperationsContract,
     PipixContract,
+    ContentSupplyContract,
     BrowserEnvironmentContract,
     BitBrowserContract,
     ResourceAnswerContract,
@@ -229,6 +231,10 @@ export const queryMethods = [
   "distribution.history",
   "distribution.batches",
   "pipix.list",
+  "contentSupply.snapshot",
+  "contentSupply.image",
+  "contentSupply.candidates",
+  "contentSupply.logs",
   "pipix.discoveryConfig",
   "pipix.knowledge",
   "pipix.image",
@@ -237,6 +243,8 @@ export const queryMethods = [
   "intelligentOps.snapshot",
   "intelligentOps.tasks",
   "intelligentOps.logs",
+  "intelligentOps.brain.snapshot",
+  "intelligentOps.brain.cycles",
   "bit.profiles",
   "bit.diagnose",
   "environments.list",

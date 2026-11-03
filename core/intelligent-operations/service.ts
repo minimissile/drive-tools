@@ -19,6 +19,8 @@ import { operationsInventory, existingOperationsState } from "./inventory";
 import { planOperations } from "./planner";
 import { queryOperationsTasks, queryOperationsLogs } from "./queries";
 import { requestOperationsAdvice } from "./advice";
+import { OperationsBrainRuntime } from "./brain-runtime";
+import type { OperationsBrainPermissions } from "../../shared/operations-brain";
 import {
   operationalDay,
   findOperationsSlot,
@@ -45,6 +47,7 @@ export class IntelligentOperations {
   private lastPlanning = 0;
   private timer: ReturnType<typeof setInterval>;
   private time: () => number;
+  private brainRuntime: OperationsBrainRuntime;
   constructor(private d: IntelligentOperationsDependencies) {
     this.time = d.clock ?? Date.now;
     this.logs = new RuntimeLog(d.db, d.dataPath, "intelligent-operations");
@@ -66,11 +69,37 @@ export class IntelligentOperations {
         ) {
           d.zhihu.cancel(original.id);
           t.status = "cancelled";
+          t.cancelOrigin = "restart";
           t.reason = "应用重启，已取消本中心尚未执行的原知乎任务；未重发";
         }
       }
     }
     this.persist(false);
+    this.brainRuntime = new OperationsBrainRuntime({
+      d: this.d,
+      state: () => this.state,
+      plan: (id) => this.plan(id),
+      running: () => this.running,
+      closed: () => this.closed,
+      now: () => this.time(),
+      persist: () => this.persist(),
+      saveTask: (task) => this.saveTask(task),
+      accountPolicy: (plan, id) => this.accountPolicy(plan, id),
+      baseReason: (plan, id, kind) => this.baseReason(plan, id, kind),
+      publicationSlot: (task, plan, startAt, reservations) =>
+        this.publicationSlot(task, plan, startAt, reservations),
+      execute: (task) => this.execute(task, this.generation),
+      stopOwned: (planId) => this.stopOwnedTasks(planId),
+      log: (event, message, planId, details, level = "info") => {
+        if (!this.closed)
+          this.logs.record({
+            level,
+            event,
+            message,
+            details: { ...details, planId },
+          });
+      },
+    });
     this.timer = setInterval(() => {
       void this.tick().catch(() => {
         this.running = false;
@@ -79,7 +108,31 @@ export class IntelligentOperations {
     this.timer.unref();
   }
   get isBusy() {
-    return this.executing || this.advising.size > 0;
+    return (
+      this.executing || this.advising.size > 0 || !!this.brainRuntime?.isBusy
+    );
+  }
+  brainSnapshot() {
+    return this.brainRuntime.snapshot();
+  }
+  brainCycles(raw: unknown = {}) {
+    return this.brainRuntime.cycles(raw);
+  }
+  brainActivate(
+    planId: string,
+    active: boolean,
+    permissions: OperationsBrainPermissions,
+    planRevision?: number,
+  ) {
+    return this.brainRuntime.activate(
+      planId,
+      active,
+      permissions,
+      planRevision,
+    );
+  }
+  brainWake(planId: string) {
+    return this.brainRuntime.wake(planId);
   }
   private stamp() {
     return new Date(this.time()).toISOString();
@@ -147,6 +200,15 @@ export class IntelligentOperations {
             : "info",
       );
     this.persist();
+    if (
+      value.status === "attention" &&
+      value.brainCycleId &&
+      this.plan(value.planId).mode === "autonomous"
+    )
+      this.brainRuntime.stop(
+        value.planId,
+        `原自主任务待核对，已停止相应自主权限：${value.reason}`,
+      );
     return value;
   }
   snapshot(): OperationsSnapshot {
@@ -233,6 +295,11 @@ export class IntelligentOperations {
       )
     )
       fail("此计划仍有执行中的任务，请先暂停并等待结果后编辑");
+    if (existing)
+      this.brainRuntime.stop(
+        existing.id,
+        "计划已修改，自主授权已撤销；异步返回不得继续业务写入",
+      );
     const p: OperationsPlan = {
       ...input,
       id: existing?.id ?? id("ioplan"),
@@ -250,6 +317,7 @@ export class IntelligentOperations {
       this.saveTask({
         ...t,
         status: "cancelled",
+        cancelOrigin: "policy",
         approvedFingerprint: null,
         reason: "计划规则已修改，旧排期保留历史；新任务需重新规划",
       });
@@ -257,8 +325,27 @@ export class IntelligentOperations {
     this.persist();
     return p;
   }
+  /** Explicit local supply handoff; preserve unrestricted inventories and never activate. */
+  linkSuppliedMaterial(planId: string, materialId: string, accountId: string) {
+    const plan = this.plan(planId),
+      inventory = operationsInventory(this.d),
+      material =
+        inventory.materials.find((m) => m.id === materialId) ??
+        fail("渠道稿已不存在，请刷新库存");
+    if (plan.active) fail("请先暂停运营计划，再加入新供稿");
+    if (
+      !plan.accounts.some(
+        (a) => a.accountId === accountId && a.channel === material.channel,
+      )
+    )
+      fail("此稿目标账号未加入该计划，请先在计划中核对账号");
+    if (!plan.materialIds.length || plan.materialIds.includes(materialId))
+      return;
+    this.save({ ...plan, materialIds: [...plan.materialIds, materialId] });
+  }
   activate(id: string, active: boolean) {
     const p = this.plan(id);
+    if (!active) this.brainRuntime.stop(id, "本人暂停运营计划，自主授权已撤销");
     if (active) {
       const enabled = p.accounts.filter(
         (a) =>
@@ -320,6 +407,7 @@ export class IntelligentOperations {
         this.saveTask({
           ...t,
           status: "cancelled",
+          cancelOrigin: "system",
           reason: "调度或计划已暂停，已取消本中心未执行的原知乎任务",
         });
       }
@@ -329,6 +417,7 @@ export class IntelligentOperations {
     if (this.closed) fail("调度已关闭");
     if (running && !this.state.plans.some((p) => p.active))
       fail("请先启用至少一个运营计划");
+    if (!running) this.brainRuntime.stopAll("本人停止统一调度，自主授权已撤销");
     this.running = running;
     this.generation++;
     if (!running) this.stopOwnedTasks();
@@ -501,6 +590,7 @@ export class IntelligentOperations {
           ...t,
           status: "cancelled",
           reason: "本人取消本中心尚未执行的原知乎任务；原任务历史保留",
+          cancelOrigin: "user",
         });
       }
     }
@@ -513,6 +603,7 @@ export class IntelligentOperations {
     return this.saveTask({
       ...t,
       status: "cancelled",
+      cancelOrigin: "user",
       reason: "本人取消尚未执行任务；重排不会复活此任务",
     });
   }
@@ -535,8 +626,21 @@ export class IntelligentOperations {
   }
   review(id: string, fingerprint: string) {
     const t = this.task(id);
-    if (!awaiting(t) || t.channel !== "weibo" || t.kind !== "publish")
-      fail("仅可审核未执行的微博发文任务");
+    const owned = this.state.brain.provenance.find(
+      (p) =>
+        p.planId === t.planId &&
+        p.materialId === t.materialId &&
+        p.accountId === t.accountId,
+    );
+    if (
+      !awaiting(t) ||
+      t.kind !== "publish" ||
+      !(
+        t.channel === "weibo" ||
+        (t.channel === "zhihu" && !!t.brainCycleId && !!owned)
+      )
+    )
+      fail("仅可审核未执行的微博或自产知乎发文任务");
     const material = operationsInventory(this.d).materials.find(
       (m) => m.id === t.materialId,
     );
@@ -547,6 +651,19 @@ export class IntelligentOperations {
       t.fingerprint !== fingerprint
     )
       fail("内容版本已变化，请重新规划并核对准确正文、图片与可见范围");
+    if (t.channel === "zhihu") {
+      const c = this.d.zhihu.store.get(
+        "zhihu_contents",
+        t.materialId!.slice(6),
+      );
+      this.d.zhihu.review(c.id, c.version);
+    }
+    if (owned) {
+      owned.reviewedFingerprint = fingerprint;
+      owned.reviewedAt = this.stamp();
+      owned.reviewReason =
+        "本人通过运营中心显式审阅并确认此准确版本；非模型自动审批";
+    }
     const p = this.plan(t.planId),
       block = this.baseReason(p, t.accountId, "publish");
     return this.saveTask({
@@ -632,6 +749,7 @@ export class IntelligentOperations {
       fail("智能运营已暂停，未继续提交");
     const p = this.plan(t.planId);
     if (p.revision !== t.planRevision) fail("计划规则已变化，原任务停止");
+    if (t.kind === "publish") this.brainRuntime.assertPublication(t);
     const block = this.baseReason(p, t.accountId, t.kind);
     if (block) fail(block);
     if (t.materialId) {
@@ -652,7 +770,12 @@ export class IntelligentOperations {
     return p;
   }
   /** Read fresh domain attempt records; exclude this exact in-flight submission. */
-  private publicationSlot(t: OperationsTask, p: OperationsPlan) {
+  private publicationSlot(
+    t: OperationsTask,
+    p: OperationsPlan,
+    startAt = this.time(),
+    includeReservations = false,
+  ) {
     const policy = this.accountPolicy(p, t.accountId),
       binding =
         p.accounts.find((a) => a.accountId === t.accountId) ??
@@ -694,8 +817,41 @@ export class IntelligentOperations {
         network: this.network(o.accountId),
       });
     }
+    if (includeReservations) {
+      const linked = new Set<string>();
+      for (const other of this.state.tasks.filter(
+        (o) =>
+          o.id !== t.id &&
+          o.kind === "publish" &&
+          !!o.scheduledAt &&
+          !o.attemptedAt &&
+          ["planned", "review", "delegated"].includes(o.status) &&
+          this.plan(o.planId).active,
+      )) {
+        if (other.linkedTaskId) linked.add(other.linkedTaskId);
+        actual.push({
+          at: other.scheduledAt!,
+          accountId: other.accountId,
+          network: this.network(other.accountId),
+        });
+      }
+      for (const other of this.d.zhihu
+        .snapshot()
+        .tasks.filter(
+          (o) =>
+            o.id !== t.linkedTaskId &&
+            o.status === "queued" &&
+            !o.attemptedAt &&
+            !linked.has(o.id),
+        ))
+        actual.push({
+          at: other.scheduledAt,
+          accountId: other.accountId,
+          network: other.networkKey ?? this.network(other.accountId),
+        });
+    }
     return findOperationsSlot(
-      this.time(),
+      Math.max(this.time(), startAt),
       policy,
       Math.min(policy.dailyLimit, binding.dailyLimit ?? 10),
       Math.max(policy.gapMinutes, binding.gapMinutes ?? 60),
@@ -844,6 +1000,7 @@ export class IntelligentOperations {
   private assertOwnedWeibo(t: OperationsTask, generation: number) {
     if (this.closed || !this.running || generation !== this.generation)
       fail("智能运营已暂停，未继续提交");
+    this.brainRuntime.assertPublication(t);
     const p = this.plan(t.planId),
       binding = p.accounts.find((a) => a.accountId === t.accountId),
       policy = p.channels.find((c) => c.channel === "weibo");
@@ -899,6 +1056,9 @@ export class IntelligentOperations {
     try {
       this.lastHeartbeatAt = this.stamp();
       if (this.time() - this.lastPlanning >= 30000) this.replan({});
+      await this.brainRuntime.tick();
+      if (this.closed || !this.running || generation !== this.generation)
+        return;
       const next = this.state.tasks
         .filter(
           (t) =>
@@ -942,6 +1102,7 @@ export class IntelligentOperations {
   close() {
     if (this.closed) return;
     this.running = false;
+    this.brainRuntime.close();
     this.generation++;
     clearInterval(this.timer);
     this.stopOwnedTasks();

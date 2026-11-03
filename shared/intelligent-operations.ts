@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { RuntimeLogPage } from "./runtime-logs";
+import {
+  operationsBrainConfig,
+  type OperationsBrainContract,
+} from "./operations-brain";
 
 export const operationsChannels = ["zhihu", "weibo", "wechat"] as const;
 export type OperationsChannel = (typeof operationsChannels)[number];
@@ -48,6 +52,8 @@ export const operationsPlanInput = z
     channels: operationsChannelPolicy.array().max(3),
     accounts: operationsAccountPolicy.array().max(100),
     materialIds: z.string().min(1).max(180).array().max(500).default([]),
+    mode: z.enum(["rules", "autonomous"]).default("rules"),
+    brain: operationsBrainConfig.default(() => operationsBrainConfig.parse({})),
   })
   .superRefine((v, ctx) => {
     if (new Set(v.channels.map((c) => c.channel)).size !== v.channels.length)
@@ -106,6 +112,8 @@ export interface OperationsTask {
   status: OperationsTaskStatus;
   scheduledAt: string | null;
   manualScheduledAt?: string | null;
+  brainCycleId?: string | null;
+  cancelOrigin?: "user" | "policy" | "restart" | "system";
   createdAt: string;
   updatedAt: string;
   materialId: string | null;
@@ -190,7 +198,7 @@ export const operationsLogQuery = z.object({
   level: z.enum(["all", "info", "warning", "error"]).default("all"),
 });
 type Contract<A, V> = { args: A; value: V };
-export interface IntelligentOperationsContract {
+export interface IntelligentOperationsContract extends OperationsBrainContract {
   "intelligentOps.snapshot": Contract<undefined, OperationsSnapshot>;
   "intelligentOps.plan.save": Contract<OperationsPlanInput, OperationsPlan>;
   "intelligentOps.plan.active": Contract<

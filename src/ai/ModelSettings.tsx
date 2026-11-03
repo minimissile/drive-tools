@@ -43,7 +43,7 @@ export default function ModelSettings({
         <div>
           <h3>不同工作，交给合适的模型</h3>
           <p className="muted">
-            在这里设置默认模型。创作、筛选和识图自动使用对应配置，图片与视频可在单次任务中临时更换。
+            在这里设置默认模型。自主运营复用分析模型及其工具调用能力，图片与视频可在单次任务中临时更换。
           </p>
         </div>
         <div className="row">
@@ -150,6 +150,23 @@ export default function ModelSettings({
                       ? "未报价"
                       : `$${Number((selected.completionPrice * 1e6).toFixed(6))}`}
                     ；按实际调用记账。
+                  </small>
+                ) : null}
+                {p === "analysis" ? (
+                  <small
+                    className={
+                      selected && "tools" in selected && selected.tools === true
+                        ? undefined
+                        : "ai-model-warning"
+                    }
+                  >
+                    {selected && "tools" in selected && selected.tools === true
+                      ? "目录已确认支持工具调用，可用于自主运营。"
+                      : selected &&
+                          "tools" in selected &&
+                          selected.tools === false
+                        ? "此模型未标注支持工具调用，自主运营需更换支持工具的模型。"
+                        : "工具调用能力尚未核实，请刷新模型目录后再启用自主运营。"}
                   </small>
                 ) : null}
                 {selected && "ratios" in selected ? (

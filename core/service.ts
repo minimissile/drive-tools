@@ -5,6 +5,7 @@ import { DriveBrowserSessions } from "./drive-browser-sessions";
 import { PhotoPosts } from "./photo-posts";
 import { SmzdmArticles } from "./smzdm/service";
 import { PipixSources } from "./pipix/service";
+import { ContentSupply } from "./content-supply/service";
 import { ZhihuOperations } from "./zhihu/service";
 import { IntelligentOperations } from "./intelligent-operations/service";
 import { intelligentOperationsStateKey } from "../shared/intelligent-operations";
@@ -105,6 +106,7 @@ export class AppService {
   readonly zhihu: ZhihuOperations;
   readonly intelligentOps: IntelligentOperations;
   readonly pipix: PipixSources;
+  readonly contentSupply: ContentSupply;
   readonly weiboPosts: WeiboPosts;
   readonly weiboStatistics: WeiboStatistics;
   readonly weibo: WeiboMarketing;
@@ -402,7 +404,17 @@ export class AppService {
       weiboPosts: this.weiboPosts, weiboStatistics: this.weiboStatistics,
       ai: this.ai, dataPath: this.dataPath, changed,
     });
+    this.contentSupply = new ContentSupply({
+      db: this.db, dataPath: this.dataPath, pipix: this.pipix, ai: this.ai, changed,
+      operations: () => this.intelligentOps.snapshot(),
+      linkMaterial: (planId, materialId, accountId) => this.intelligentOps.linkSuppliedMaterial(planId, materialId, accountId),
+      destinations: {
+        zhihu: material => this.zhihu.saveSource(material),
+        weibo: (material, accountId) => this.weiboPosts.saveSource(material, accountId),
+      },
+    });
     this.handlers = createApplicationHandlers({
+      contentSupply: this.contentSupply,
       intelligentOps: this.intelligentOps,
       photoPosts: this.photoPosts,
       lockedAccount: (id, action) => this.mutex.run(id, action),
@@ -974,6 +986,7 @@ export class AppService {
       this.zhihu.isBusy ||
       this.intelligentOps?.isBusy ||
       this.pipix.isBusy ||
+      this.contentSupply?.isBusy ||
       this.csdn.isBusy ||
       this.zhidao.isBusy ||
       this.zhidaoPages.isBusy ||
@@ -1272,6 +1285,7 @@ export class AppService {
     this.smzdm.close();
     this.distribution.close();
     this.pipix.close();
+    this.contentSupply.close();
     this.zhihu.close();
     this.weibo.close();
     this.csdn.close();

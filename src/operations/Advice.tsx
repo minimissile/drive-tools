@@ -27,7 +27,7 @@ export function OperationsAdvice({
   }, [plan?.id, plan?.revision]);
   return (
     <Panel
-      title="AI运营建议"
+      title="单次AI运营建议"
       extra={
         <Button size="compact" onClick={openSettings}>
           配置模型与预算
@@ -62,7 +62,7 @@ export function OperationsAdvice({
             </div>
           </div>
           <Notice>
-            本地排期不调用模型。此操作将把本计划必要的目标、知识依据和运营摘要交给已配置的AI服务分析；建议仅用于审阅，不会直接发文或变更审核与额度。
+            此入口仅做一次顾问分析，不启用自主运营。它会把本计划必要的目标、知识依据和运营摘要交给已配置的AI服务；自主运营的持续授权与决策轮次请在“自主运行”查看。
           </Notice>
           {!s.aiDefaults.configured ? (
             <Notice warning>请先在连接与设置中配置分析模型及API连接。</Notice>

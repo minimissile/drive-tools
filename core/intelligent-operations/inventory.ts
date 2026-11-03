@@ -5,6 +5,8 @@ import type {
   OperationsMaterial,
   OperationsTask,
 } from "../../shared/intelligent-operations";
+import { intelligentOperationsStateKey } from "../../shared/intelligent-operations";
+import { brainDraftSchema } from "./brain-state";
 
 export const operationsFingerprint = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -38,7 +40,7 @@ export function operationsInventory(d: IntelligentOperationsDependencies) {
   const materials: OperationsMaterial[] = zhihu.contents.map((c) => ({
     id: `zhihu:${c.id}`,
     channel: "zhihu",
-    accountId: null,
+    accountId: c.source?.editorial?.accountId || null,
     title: c.title,
     purpose: c.purpose,
     reviewed: c.reviewed,
@@ -70,6 +72,8 @@ export function operationsInventory(d: IntelligentOperationsDependencies) {
         text: p.text,
         images: p.images,
         visibility: p.visibility,
+        aiAssisted:
+          p.aiAssisted === true || p.source?.editorial?.aiAssisted === true,
       }),
     });
   for (const c of d.repo.drafts().filter((c) => c.platform === "wechat"))
@@ -88,6 +92,29 @@ export function operationsInventory(d: IntelligentOperationsDependencies) {
         body: c.body,
       }),
     });
+  const saved = d.db.setting<{ brain?: { drafts?: unknown } }>(
+    intelligentOperationsStateKey,
+    {},
+  );
+  const brainDrafts = brainDraftSchema
+    .array()
+    .safeParse(saved.brain?.drafts ?? []);
+  if (brainDrafts.success)
+    for (const c of brainDrafts.data)
+      materials.push({
+        id: `wechat:${c.id}`,
+        channel: "wechat",
+        accountId: c.accountId,
+        title: c.title,
+        purpose: "regular",
+        reviewed: c.reviewed,
+        preview: c.body,
+        fingerprint: operationsFingerprint({
+          id: c.id,
+          title: c.title,
+          body: c.body,
+        }),
+      });
   return { accounts, materials, zhihu };
 }
 export function existingOperationsState(
@@ -140,6 +167,8 @@ export function existingOperationsState(
         text: p.text,
         images: p.images,
         visibility: p.visibility,
+        aiAssisted:
+          p.aiAssisted === true || p.source?.editorial?.aiAssisted === true,
       }) !== t.fingerprint
     )
       return {

@@ -9,18 +9,29 @@ import {
 } from "../../shared/intelligent-operations";
 import { ipc } from "../api/client";
 import { useLocalDraft } from "../hooks/useLocalDraft";
+import { windowStorage } from "../storage/window-storage";
 import { Button, Empty, Field, Notice, Panel, Status } from "../ui/primitives";
 import { channelNames } from "./labels";
 import { ChannelEditor } from "./Policies";
 import { MaterialPicker } from "./Materials";
+import { AutonomyPolicyEditor } from "./AutonomyPolicy";
+import {
+  operationsBrainConfig,
+  operationsBrainPermissions,
+  type OperationsBrainConfig,
+} from "../../shared/operations-brain";
 import type { OperationAction } from "./useOperationAction";
+import { operationsPlanDraftSchema } from "./plan-draft";
 
 export type PlanFields = z.output<typeof operationsPlanInput>;
-const editorSchema = operationsPlanInput.safeExtend({
-  name: z.string().max(100),
-  goal: z.string().max(2000),
-});
-const fieldsFor = (p?: OperationsPlan): PlanFields => ({
+type PlanDraftFields = Omit<PlanFields, "brain"> & {
+  brain: Omit<OperationsBrainConfig, "permissions">;
+};
+function brainThresholds(config: OperationsBrainConfig) {
+  const { permissions: _permissions, ...thresholds } = config;
+  return thresholds;
+}
+const fieldsFor = (p?: OperationsPlan): PlanDraftFields => ({
   ...(p ? { id: p.id } : {}),
   name: p?.name ?? "",
   goal: p?.goal ?? "",
@@ -34,6 +45,8 @@ const fieldsFor = (p?: OperationsPlan): PlanFields => ({
       operationsChannelPolicy.parse({ channel }),
   ),
   materialIds: p?.materialIds ?? [],
+  mode: p?.mode ?? "rules",
+  brain: brainThresholds(p?.brain ?? operationsBrainConfig.parse({})),
 });
 
 export function OperationsPlans({
@@ -89,7 +102,8 @@ export function OperationsPlans({
                       .filter((c) => c.enabled)
                       .map((c) => channelNames[c.channel])
                       .join(" · ") || "尚未启用渠道"}{" "}
-                    · {p.accounts.length} 个账号
+                    · {p.accounts.length} 个账号 ·{" "}
+                    {p.mode === "autonomous" ? "AI自主" : "本地规则"}
                   </small>
                 </span>
                 <Status kind={p.active ? "good" : "normal"}>
@@ -150,12 +164,20 @@ function PlanEditor({
   run: OperationAction;
   onSaved(plan: OperationsPlan): void;
 }) {
-  const editor = useLocalDraft(
-    `panxu-operations-plan-v1:${workspace}:${plan?.id ?? "new"}`,
-    fieldsFor(plan),
-    (v) => editorSchema.parse(v),
-  );
+  const draftKey = `panxu-operations-plan-v1:${workspace}:${plan?.id ?? "new"}`;
+  const editor = useLocalDraft(draftKey, fieldsFor(plan), (v) => {
+    const parsed = operationsPlanDraftSchema.parse(v);
+    return { ...parsed, brain: brainThresholds(parsed.brain) };
+  });
   const value = editor.value;
+  // Permissions are local intent controls, never recovered from the UI draft.
+  // Saved intent still requires a new, separate runtime authorization.
+  const [permissions, setPermissions] = useState(
+    plan?.brain.permissions ?? operationsBrainPermissions.parse({}),
+  );
+  const submissionValue = { ...value, brain: { ...value.brain, permissions } };
+  const latestValue = useRef(submissionValue);
+  latestValue.current = submissionValue;
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -163,19 +185,68 @@ function PlanEditor({
       alive.current = false;
     };
   }, []);
-  const save = () =>
+  useEffect(() => {
+    try {
+      const raw = windowStorage.getItem(draftKey);
+      const previous: unknown = raw ? JSON.parse(raw) : null;
+      if (
+        previous &&
+        typeof previous === "object" &&
+        "brain" in previous &&
+        previous.brain &&
+        typeof previous.brain === "object" &&
+        "permissions" in previous.brain
+      )
+        windowStorage.setItem(draftKey, JSON.stringify(value));
+    } catch {
+      /* Unavailable UI storage is handled by the draft hook. */
+    }
+  }, [draftKey]);
+  const save = () => {
+    const submittedDraft = JSON.stringify(submissionValue);
+    let submittedStorage: string | null | undefined;
+    try {
+      submittedStorage = windowStorage.getItem(draftKey);
+    } catch {
+      /* A storage failure does not prevent saving the business plan. */
+    }
     void run(
-      () => ipc("intelligentOps.plan.save", operationsPlanInput.parse(value)),
+      () =>
+        ipc(
+          "intelligentOps.plan.save",
+          operationsPlanInput.parse(submissionValue),
+        ),
       "运营计划已保存；执行状态以已保存计划为准",
     ).then((result) => {
       if (!result.ok) return;
-      if (alive.current) {
+      // A navigation can unmount this editor before the save receipt arrives.
+      // Remove only the submitted draft, preserving a later edit at this key.
+      try {
+        if (
+          submittedStorage !== undefined &&
+          windowStorage.getItem(draftKey) === submittedStorage
+        )
+          windowStorage.removeItem(draftKey);
+      } catch {
+        /* The saved business plan remains authoritative if UI storage fails. */
+      }
+      if (
+        alive.current &&
+        JSON.stringify(latestValue.current) === submittedDraft
+      ) {
         editor.update(fieldsFor(result.value));
         editor.clear();
+        setPermissions(result.value.brain.permissions);
         onSaved(result.value);
       }
     });
-  const dirty = JSON.stringify(value) !== JSON.stringify(fieldsFor(plan));
+  };
+  const dirty =
+    JSON.stringify(value) !== JSON.stringify(fieldsFor(plan)) ||
+    JSON.stringify(permissions) !==
+      JSON.stringify(
+        plan?.brain.permissions ?? operationsBrainPermissions.parse({}),
+      );
   const saveDisabled = busy || !value.name.trim() || !value.goal.trim();
   return (
     <Panel
@@ -246,6 +317,14 @@ function PlanEditor({
             </div>
           </div>
         </section>
+        <AutonomyPolicyEditor
+          mode={value.mode}
+          value={{ ...value.brain, permissions }}
+          update={(mode, brain) => {
+            setPermissions(brain.permissions);
+            editor.update({ mode, brain: brainThresholds(brain) });
+          }}
+        />
         <section
           className="operations-form-section"
           aria-label="渠道与账号规则"

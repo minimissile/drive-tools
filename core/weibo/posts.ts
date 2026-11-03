@@ -116,6 +116,7 @@ export class WeiboPosts {
       );
     post.text = input.text;
     post.visibility = input.visibility;
+    post.aiAssisted = input.aiAssisted === true || post.aiAssisted === true || post.source?.editorial?.aiAssisted === true;
     post.stage = "editing";
     if (!input.id)
       this.deps.db.setSetting(indexKey, [
@@ -227,7 +228,7 @@ export class WeiboPosts {
       text: post.text,
       images,
       visibility: post.visibility,
-      aiAssisted: false,
+      aiAssisted: post.aiAssisted === true || post.source?.editorial?.aiAssisted === true,
     };
   }
   async fill(id: string) {

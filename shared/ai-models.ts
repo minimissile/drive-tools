@@ -23,6 +23,8 @@ export interface AiModel {
   promptPrice: number | null;
   completionPrice: number | null;
   structured: boolean;
+  /** Explicit catalog support for native function calling; absent in old cached catalogs. */
+  tools?: boolean;
   imageInput?: boolean;
   textOutput?: boolean;
   reasoningEfforts?: string[];
@@ -48,7 +50,7 @@ export const aiPurposeDetails: Record<
   },
   analysis: {
     label: "资源分析",
-    description: "资源筛选、需求解析、关键词与选题分析",
+    description: "资源筛选、需求解析、关键词与选题分析，以及自主运营决策",
     recommendation: "优先 Qwen3.8 Max 的中文理解与结构化分析能力。",
   },
   vision: {
@@ -132,7 +134,7 @@ export function modelsForPurpose(purpose: AiPurpose, catalog: AiCatalog) {
     ? catalog.media.filter((m) => m.kind === purpose)
     : catalog.text.filter(
         (m) =>
-          m.structured &&
+          (m.structured || (purpose === "analysis" && m.tools === true)) &&
           m.textOutput !== false &&
           (purpose !== "vision" || m.imageInput),
       );

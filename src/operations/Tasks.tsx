@@ -387,7 +387,7 @@ export function OperationsTasks({
             ) : undefined
           }
         >
-          保存计划并选择本地素材后，可重新规划查看排期与阻塞原因；规划不会自动启动发布。
+          规则计划可选择本地素材后重新规划；自主计划在授权后由AI决策并安排任务。保存或查看不会启动发布。
         </Empty>
       ) : null}
       <p className="operations-log-location">

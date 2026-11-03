@@ -8,6 +8,7 @@ export const weiboPostInput = z.object({
   accountId: websiteAccountIdSchema,
   text: z.string().trim().min(1, "请填写微博文案").max(2000),
   visibility: z.enum(["public", "self"]).default("self"),
+  aiAssisted: z.boolean().optional(),
 });
 export type WeiboPost = {
   environment?: import("./browser-environments").EnvironmentStamp;
@@ -16,6 +17,7 @@ export type WeiboPost = {
   uid: string;
   text: string;
   visibility: "public" | "self";
+  aiAssisted?: boolean;
   images: { name: string; sha256: string; asset?: ContentImage }[];
   source?: ContentProvenance;
   stage:
@@ -35,7 +37,7 @@ export type WeiboPost = {
   submittedAt?: string;
 };
 /** Only local content fields survive a workspace restore; session/environment state is stripped. */
-export const sourceWeiboPostBackup = z.object({
+export const weiboPostBackup = z.object({
   id: z.string().regex(/^wbpost_[\w-]+$/),
   accountId: websiteAccountIdSchema,
   uid: z.string().min(1).max(150),
@@ -43,14 +45,24 @@ export const sourceWeiboPostBackup = z.object({
   visibility: z.enum(["public", "self"]),
   images: z
     .array(
-      z.object({
-        name: z.string().max(300),
-        sha256: z.string().regex(/^[a-f0-9]{64}$/),
-        asset: contentImageSchema,
-      }),
+      z
+        .object({
+          name: z.string().max(300),
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          asset: contentImageSchema.optional(),
+        })
+        .refine(
+          (image) =>
+            !!image.asset ||
+            /^images-[A-Za-z0-9_-]+\/0[1-9]\.(?:png|jpe?g|gif)$/i.test(
+              image.name,
+            ),
+          { message: "本地微博配图引用不合法" },
+        ),
     )
     .max(9),
-  source: contentProvenanceSchema,
+  source: contentProvenanceSchema.optional(),
+  aiAssisted: z.boolean().optional(),
   stage: z.enum([
     "editing",
     "filling",
@@ -66,6 +78,17 @@ export const sourceWeiboPostBackup = z.object({
   updatedAt: z.iso.datetime(),
   attemptedAt: z.iso.datetime().optional(),
   submittedAt: z.iso.datetime().optional(),
+});
+export const sourceWeiboPostBackup = weiboPostBackup.extend({
+  source: contentProvenanceSchema,
+  images: z
+    .object({
+      name: z.string().max(300),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      asset: contentImageSchema,
+    })
+    .array()
+    .max(9),
 });
 type Contract<A, V> = { args: A; value: V };
 export interface WeiboPostsContract {

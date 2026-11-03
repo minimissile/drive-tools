@@ -97,12 +97,14 @@ export class WeiboStatistics {
     }
     return [...targets.values()].reverse();
   }
-  async refresh(accountId: string, raw: string) {
+  async refresh(accountId: string, raw: string, canContinue?: () => void) {
+    canContinue?.();
     const { account: original, url } = this.target(accountId, raw);
     return this.deps.accounts.use(
       accountId,
       "weibo",
       async (account) => {
+        canContinue?.();
         if (account.uid !== original.uid)
           throw new AppError(
             "WEIBO_ACCOUNT_MISMATCH",
@@ -117,6 +119,7 @@ export class WeiboStatistics {
         const reading = weiboStatisticsReading.parse(
           await port.read(account, url),
         );
+        canContinue?.();
         if (reading.uid !== account.uid || reading.url !== url)
           throw new AppError(
             "WEIBO_STATISTICS_IDENTITY",

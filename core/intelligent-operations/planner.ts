@@ -67,7 +67,7 @@ export function planOperations(
         network: t.networkKey ?? "",
       }));
   for (const t of context.state.tasks.filter(
-    (t) => t.channel !== "zhihu" && !!t.attemptedAt,
+    (t) => t.channel !== "zhihu" && t.kind === "publish" && !!t.attemptedAt,
   ))
     reservations.push({
       at: t.attemptedAt!,
@@ -76,7 +76,11 @@ export function planOperations(
     });
   for (const t of context.state.tasks.filter(
     (t) =>
-      terminalOperationsTask(t) &&
+      t.kind === "publish" &&
+      (terminalOperationsTask(t) ||
+        (context.plan(t.planId).active &&
+          context.plan(t.planId).mode === "autonomous" &&
+          ["planned", "review", "delegated"].includes(t.status))) &&
       t.status !== "cancelled" &&
       !!t.scheduledAt &&
       !t.attemptedAt,
@@ -89,7 +93,7 @@ export function planOperations(
   const seen = new Set<string>();
   const assignment = new Map<string, string>();
   for (const p of context.state.plans.filter(
-    (p) => !planId || p.id === planId,
+    (p) => p.mode !== "autonomous" && (!planId || p.id === planId),
   )) {
     const counts = new Map<string, number>();
     for (const m of inventory.materials.filter((m) =>
@@ -132,6 +136,8 @@ export function planOperations(
           !!t.materialId &&
           t.status !== "cancelled" &&
           (terminalOperationsTask(t) ||
+            (context.plan(t.planId).active &&
+              context.plan(t.planId).mode === "autonomous") ||
             (!!planId && t.planId !== planId && context.plan(t.planId).active)),
       )
       .map((t) => t.materialId),
@@ -198,7 +204,7 @@ export function planOperations(
     return context.saveTask(value);
   };
   for (const p of context.state.plans
-    .filter((p) => !planId || p.id === planId)
+    .filter((p) => p.mode !== "autonomous" && (!planId || p.id === planId))
     .sort((a, b) => Number(b.active) - Number(a.active)))
     for (const a of p.accounts) {
       const policy = context.accountPolicy(p, a.accountId);
@@ -447,11 +453,16 @@ export function planOperations(
         );
     }
   for (const t of context.state.tasks.filter(
-    (t) => (!planId || t.planId === planId) && awaiting(t) && !seen.has(t.id),
+    (t) =>
+      context.plan(t.planId).mode !== "autonomous" &&
+      (!planId || t.planId === planId) &&
+      awaiting(t) &&
+      !seen.has(t.id),
   ))
     context.saveTask({
       ...t,
       status: "cancelled",
+      cancelOrigin: "system",
       approvedFingerprint: null,
       reason: "内容、身份或计划条件已变化，旧排期停止；历史保留",
     });

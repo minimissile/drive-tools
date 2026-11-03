@@ -5,12 +5,45 @@ import {
   operationsTaskQuery,
   operationsLogQuery,
 } from "../../shared/intelligent-operations";
+import {
+  operationsBrainCycleQuery,
+  operationsBrainPermissions,
+} from "../../shared/operations-brain";
 const identifier = z.object({ id: z.string().min(1).max(150) });
 const confirmed = identifier.extend({ confirmed: z.literal(true) });
 export function createIntelligentOperationsHandlers({
   intelligentOps,
 }: Pick<HandlerServices, "intelligentOps">) {
   return {
+    "intelligentOps.brain.snapshot": () => intelligentOps.brainSnapshot(),
+    "intelligentOps.brain.cycles": (raw: unknown) =>
+      intelligentOps.brainCycles(operationsBrainCycleQuery.parse(raw)),
+    "intelligentOps.brain.activate": (raw: unknown) => {
+      const v = z
+        .object({
+          planId: z.string().min(1).max(150),
+          planRevision: z.number().int().positive().optional(),
+          active: z.boolean(),
+          permissions: operationsBrainPermissions,
+          confirmed: z.literal(true),
+        })
+        .parse(raw);
+      return intelligentOps.brainActivate(
+        v.planId,
+        v.active,
+        v.permissions,
+        v.planRevision,
+      );
+    },
+    "intelligentOps.brain.wake": (raw: unknown) =>
+      intelligentOps.brainWake(
+        z
+          .object({
+            planId: z.string().min(1).max(150),
+            confirmed: z.literal(true),
+          })
+          .parse(raw).planId,
+      ),
     "intelligentOps.snapshot": () => intelligentOps.snapshot(),
     "intelligentOps.plan.save": (raw: unknown) =>
       intelligentOps.save(operationsPlanInput.parse(raw)),

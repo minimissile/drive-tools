@@ -20,6 +20,8 @@ import { ideaResponse } from "../shared/ideas";
 import { ideaInstruction } from "./idea-prompt";
 import { creativeResponse, creativeCard } from "../shared/studio";
 import { redactPromptInput } from "./text-safety";
+import type { AgentTurnInput, AgentTurnResult } from "../shared/ai-agent";
+import { agentModelPrices, runAgentTurn } from "./ai-agent";
 import {
   resolveAiModels,
   purposeForCall,
@@ -70,6 +72,40 @@ export class AiService {
       this.repo.db.setting("aiModels", null),
       this.repo.db.setting("model", ""),
     )[purpose];
+  }
+  /** Native tools do not depend on structured-output support. This is a local check only. */
+  assertAgentConfigured(modelOverride?: string) {
+    if (!this.secrets.has("openrouter"))
+      throw new AppError("API_KEY_REQUIRED", "请先配置OpenRouter API Key。");
+    const model = modelOverride ?? this.modelFor("analysis");
+    const catalog = this.repo.db.setting<AiModel[]>("modelCatalog", []);
+    const selected = catalog.find((candidate) => candidate.id === model);
+    if (!model || !selected)
+      throw new AppError(
+        "MODEL_REQUIRED",
+        "请选择自主运营模型，并刷新OpenRouter模型列表确认工具能力与报价。",
+      );
+    if (selected.tools !== true || selected.textOutput === false)
+      throw new AppError(
+        "MODEL_UNSUPPORTED",
+        "所选模型未标注支持原生工具调用与文字输出，请刷新列表并更换模型。",
+      );
+    agentModelPrices(selected);
+    return { model, selected, catalog };
+  }
+  agentTurn(input: AgentTurnInput): Promise<AgentTurnResult> {
+    const { model, selected } = this.assertAgentConfigured(input.model);
+    return runAgentTurn(
+      {
+        db: this.repo.db,
+        model,
+        selected,
+        getKey: () => this.secrets.get("openrouter"),
+        requestJson: this.requestJson,
+        changed: this.changed,
+      },
+      input,
+    );
   }
   /** Local readiness check only; does not decrypt credentials or call a provider. */
   assertTextConfigured(
@@ -174,6 +210,9 @@ export class AiService {
       ).some((p: string) =>
         ["structured_outputs", "response_format"].includes(p),
       ),
+      tools:
+        Array.isArray(m.supported_parameters) &&
+        m.supported_parameters.includes("tools"),
       imageInput:
         Array.isArray(m.architecture?.input_modalities) &&
         m.architecture.input_modalities.includes("image"),

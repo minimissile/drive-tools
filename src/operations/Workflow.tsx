@@ -11,11 +11,14 @@ import { OperationsPlans } from "./Plans";
 import { OperationsTasks } from "./Tasks";
 import { OperationsLogs } from "./Logs";
 import { OperationsAdvice } from "./Advice";
+import { OperationsAutonomy } from "./Autonomy";
 import { useOperationAction } from "./useOperationAction";
 import "./operations.css";
 
 const navigationSchema = z.object({
-  tab: z.enum(["tasks", "plans", "logs", "advice"]).default("tasks"),
+  tab: z
+    .enum(["autonomy", "tasks", "plans", "logs", "advice"])
+    .default("autonomy"),
   planId: z.string().default(""),
 });
 
@@ -31,14 +34,16 @@ export default function IntelligentOperationsWorkflow() {
     navigationSchema.parse({}),
     (value) => navigationSchema.parse(value),
   );
-  const { busy, error, run } = useOperationAction(query.reload);
+  const { busy, interrupting, error, run, runInterrupt } = useOperationAction(
+    query.reload,
+  );
   const s = query.data;
   const runtime = s?.runtime;
   return (
     <div className="operations-workflow">
       <Header
         title="智能运营"
-        description="统一安排多渠道运营，逐项查看计划、依据与执行结果。"
+        description="AI在授权范围内读取状态、决策并执行，逐轮查看计划、工具与实际费用。"
         action={
           <Button size="compact" onClick={() => openSettings("ai")}>
             AI模型与预算
@@ -68,21 +73,37 @@ export default function IntelligentOperationsWorkflow() {
         <Button
           size="compact"
           primary={!runtime?.running}
-          disabled={!runtime || busy}
-          onClick={() =>
+          disabled={
+            !runtime || (runtime.running ? interrupting : busy || runtime.busy)
+          }
+          onClick={() => {
+            if (!runtime) return;
+            if (runtime.running) {
+              void runInterrupt(
+                () =>
+                  ipc("intelligentOps.scheduler", {
+                    running: false,
+                    confirmed: true,
+                  }),
+                "统一调度已停止，已提交任务仍会保留结果",
+              );
+              return;
+            }
             void run(
               () =>
                 ipc("intelligentOps.scheduler", {
-                  running: !runtime!.running,
+                  running: true,
                   confirmed: true,
                 }),
-              runtime?.running
-                ? "统一调度已停止，已提交任务仍会保留结果"
-                : "统一调度已启动，将按启用计划与审核状态执行",
-            )
-          }
+              "统一调度已启动，将按启用计划与审核状态执行",
+            );
+          }}
         >
-          {runtime?.running ? "停止调度" : "启动调度"}
+          {runtime?.running
+            ? interrupting
+              ? "正在停止…"
+              : "停止调度"
+            : "启动调度"}
         </Button>
       </div>
       {nav.error ? <Notice warning>{nav.error}</Notice> : null}
@@ -107,12 +128,25 @@ export default function IntelligentOperationsWorkflow() {
           <TabList
             label="智能运营功能"
             items={[
+              ["autonomy", "自主运行"],
               ["tasks", "任务计划"],
               ["plans", `运营计划 · ${s.plans.length}`],
               ["logs", "决策日志"],
-              ["advice", "AI运营建议"],
+              ["advice", "单次AI建议"],
             ]}
           />
+          <TabPanel value="autonomy">
+            <OperationsAutonomy
+              snapshot={s}
+              workspace={data!.dataPath}
+              busy={busy || s.runtime.busy}
+              interrupting={interrupting}
+              run={run}
+              runInterrupt={runInterrupt}
+              editPlan={(planId) => nav.update({ tab: "plans", planId })}
+              openSettings={() => openSettings("ai")}
+            />
+          </TabPanel>
           <TabPanel value="tasks">
             <OperationsTasks
               snapshot={s}

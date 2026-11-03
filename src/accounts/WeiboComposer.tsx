@@ -12,6 +12,7 @@ import { Select } from "../ui/Select";
 import type { OtherAccount } from "./useOtherAccounts";
 import type { WeiboPost } from "../../shared/weibo-posts";
 import { WeiboStatistics } from "../weibo/Statistics";
+import { ContentSourceTrace } from "../content-supply/SourceTrace";
 
 const schema = z.object({
   id: z.string(),
@@ -180,18 +181,7 @@ export function WeiboComposer({
         API。网盘推广请从“微博图文营销”关联本人资料。
       </p>
       {current?.source ? (
-        <Notice>
-          来源：皮皮虾 · {current.source.author}，包含{" "}
-          {current.source.comments.length} 条评论。
-          <Button
-            size="compact"
-            onClick={() =>
-              void ipc("system.external", { url: current.source!.url })
-            }
-          >
-            查看原帖
-          </Button>
-        </Notice>
+        <ContentSourceTrace source={current.source} />
       ) : null}
       <QueryError
         error={history.error || initialError}

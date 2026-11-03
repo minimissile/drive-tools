@@ -10,6 +10,7 @@ import { createDriveFilesHandlers } from "./drive-files";
 import { createDriveBrowserHandlers } from "./drive-browser";
 import { createDistributionHandlers } from "./distribution";
 import { createPipixHandlers } from "./pipix";
+import { createContentSupplyHandlers } from "./content-supply";
 import { createZhihuHandlers } from "./zhihu";
 import { createIntelligentOperationsHandlers } from "./intelligent-operations";
 import { createBrowserEnvironmentHandlers } from "./browser-environments";
@@ -45,6 +46,7 @@ import { createWeiboStatisticsHandlers } from "./weibo-statistics";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createContentSupplyHandlers(services),
     createIntelligentOperationsHandlers(services),
     createPhotoPostHandlers(services),
     createBaiduDiscoveryHandlers(services),

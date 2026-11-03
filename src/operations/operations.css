@@ -50,6 +50,7 @@
 }
 .operations-toolbar > .field {
   width: 170px;
+  margin-top: 0;
 }
 .operations-toolbar > .field:first-child {
   width: 210px;
@@ -198,6 +199,9 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
+}
+.operations-fields > .field {
+  margin-top: 0;
 }
 .operations-fields.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -350,9 +354,135 @@
   color: var(--muted);
   font-size: 11px;
 }
+.operations-autonomy {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-autonomy-config {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-budget-field {
+  grid-column: span 2;
+  min-width: 0;
+}
+.operations-autonomy-permissions {
+  display: grid;
+  gap: var(--space-2);
+}
+.operations-autonomy-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--line);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.operations-autonomy-summary > div {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+.operations-autonomy-summary dt {
+  color: var(--muted);
+}
+.operations-autonomy-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.operations-agent-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.operations-cycle-list {
+  display: grid;
+  gap: var(--space-3);
+}
+.operations-cycle {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-3);
+}
+.operations-cycle > summary {
+  display: grid;
+  grid-template-columns: 16px 170px auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  cursor: pointer;
+  font-size: 12px;
+}
+.operations-cycle > summary strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.operations-cycle-disclosure {
+  margin-top: 2px;
+  color: var(--muted);
+}
+.operations-cycle[open] .operations-cycle-disclosure {
+  transform: rotate(90deg);
+}
+.operations-cycle > summary time,
+.operations-cycle > summary small {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.operations-cycle-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 0;
+  font-size: 12px;
+}
+.operations-cycle-body p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.operations-cycle-steps {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+.operations-cycle-steps > li {
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+.operations-cycle-steps strong,
+.operations-cycle-steps small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.operations-cycle-steps small {
+  color: var(--muted);
+}
+.operations-cycle-steps pre,
+.operations-agent-memory {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  background: var(--bg);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.operations-agent-memory {
+  max-height: 280px;
+  overflow-y: auto;
+}
+.operations-grant-scope {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: 12px;
+}
+.operations-grant-scope li {
+  margin-block: var(--space-1);
+}
 @media (max-width: 1250px) {
   .operations-fields.four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .operations-budget-field {
+    grid-column: auto;
   }
   .operations-account-option {
     grid-template-columns: minmax(0, 1fr);

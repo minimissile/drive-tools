@@ -12,7 +12,7 @@ export function MaterialPicker({
   snapshot: s,
   update,
 }: {
-  value: PlanFields;
+  value: Pick<PlanFields, "channels" | "accounts" | "materialIds">;
   snapshot: OperationsSnapshot;
   update(ids: string[]): void;
 }) {
@@ -44,7 +44,7 @@ export function MaterialPicker({
         </Button>
       </div>
       <p className="operations-quiet">
-        仅安排这里明确选定的本地内容，留空只检查状态。微博内容还需在任务计划中核对准确版本。
+        仅认领这里选定的本地内容；留空不安排既有稿件。自主智能体需另获原创权限才可补充新稿，既有微博仍需核对准确版本。
       </p>
       <div className="operations-toolbar">
         <Field label="素材渠道">
