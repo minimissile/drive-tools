@@ -40,6 +40,28 @@ const fail = (message: string): never => {
 };
 const ref = (id: string) => ({ kind: "website" as const, id });
 export class ZhihuOperations {
+  private ruleAuthority?: {
+    owns(accountId: string): boolean;
+    approved(content: ZhihuContent, accountId: string): boolean;
+    record?(
+      taskId: string,
+      event: {
+        event: string;
+        message: string;
+        details?: Record<string, unknown>;
+      },
+    ): void;
+  };
+  connectRuleAuthority(
+    authority: NonNullable<ZhihuOperations["ruleAuthority"]>,
+  ) {
+    this.ruleAuthority = authority;
+  }
+  private approved(content: ZhihuContent, accountId: string) {
+    return (
+      content.reviewed || !!this.ruleAuthority?.approved(content, accountId)
+    );
+  }
   private interactionHistory() {
     return readParticipationState(this.d.db).activities.flatMap((activity) =>
       (activity.attempts ?? []).map((attempt) => ({
@@ -365,6 +387,8 @@ export class ZhihuOperations {
     return account;
   }
   activate(accountId: string, active: boolean) {
+    if (active && this.ruleAuthority?.owns(accountId))
+      fail("此账号由自动养号控制，请在主面板关闭后切换旧模式。");
     const plan = this.plan(accountId);
     if (active) this.ready(accountId, "warming");
     const next = this.savePlan({
@@ -443,7 +467,13 @@ export class ZhihuOperations {
     firstPost = false,
   ) {
     const content = this.store.get("zhihu_contents", contentId);
-    if (!content.reviewed) fail("请先审核当前内容版本。");
+    if (!this.approved(content, accountId))
+      fail("请先审核当前内容版本，或取得本模式准确版本的规则检查记录。");
+    if (
+      this.ruleAuthority?.owns(accountId) &&
+      !this.ruleAuthority.approved(content, accountId)
+    )
+      fail("自动养号正在管理此账号，不能混入其他发布任务。");
     if (!zhihuContentForAccount(content, accountId))
       fail("此稿已指定其他账号，请选择原目标账号。");
     if (firstPost && content.kind !== "article")
@@ -491,6 +521,11 @@ export class ZhihuOperations {
     });
   }
   scheduler(running: boolean) {
+    if (
+      running &&
+      this.snapshot().accounts.some((a) => this.ruleAuthority?.owns(a.id))
+    )
+      fail("自动养号已开启，请使用总开关管理，不能同时启动旧调度。");
     this.running = running;
     this.logs.record({
       level: "info",
@@ -575,7 +610,24 @@ export class ZhihuOperations {
     if (task.status !== "queued") fail("仅可执行运营中心关联的待执行原任务。");
     await this.tick({ taskId, canContinue });
   }
-  async tick(managed?: { taskId: string; canContinue(): boolean }) {
+  async executeRuleTask(taskId: string, canContinue: () => boolean) {
+    const task = this.store.get("zhihu_tasks", taskId),
+      content = this.store.get("zhihu_contents", task.contentId);
+    if (
+      this.running ||
+      this.executing ||
+      this.closed ||
+      !canContinue() ||
+      !this.ruleAuthority?.approved(content, task.accountId)
+    )
+      fail("规则授权、准确版本或执行状态已变化，未发布。");
+    await this.tick({ taskId, canContinue, ruleOwned: true });
+  }
+  async tick(managed?: {
+    taskId: string;
+    canContinue(): boolean;
+    ruleOwned?: boolean;
+  }) {
     if (
       (managed ? this.running || !managed.canContinue() : !this.running) ||
       this.closed ||
@@ -687,7 +739,11 @@ export class ZhihuOperations {
                 this.store.get("zhihu_tasks", task.id).status === "cancelled"
               )
                 fail("调度已暂停，未继续提交。");
-              if (managed && !this.plan(task.accountId).active)
+              if (
+                managed &&
+                !managed.ruleOwned &&
+                !this.plan(task.accountId).active
+              )
                 fail("账号养号计划已暂停，未继续提交。");
               const a = this.ready(
                 task.accountId,
@@ -702,7 +758,10 @@ export class ZhihuOperations {
               const c = this.store.get("zhihu_contents", task.contentId);
               if (!zhihuContentForAccount(c, task.accountId))
                 fail("素材指定账号与当前任务不一致。");
-              if (!c.reviewed || c.version !== task.contentVersion)
+              if (
+                !this.approved(c, task.accountId) ||
+                c.version !== task.contentVersion
+              )
                 fail("内容已被修改，请核对后重新排队。");
               return c;
             };
@@ -768,6 +827,10 @@ export class ZhihuOperations {
                       fail(
                         "提交前发现新的个人互动，同账号或同出口间隔尚未到时，未提交",
                       );
+                    this.ruleAuthority?.record?.(task.id, {
+                      event: "publish.submitting",
+                      message: "已核对身份、版本与间隔，记录提交意图",
+                    });
                     this.saveTask({
                       ...this.store.get("zhihu_tasks", task.id),
                       status: "submitting",
@@ -775,13 +838,15 @@ export class ZhihuOperations {
                       message: "已记录提交意图，等待平台回执",
                     });
                   },
-                  (event) =>
+                  (event) => {
                     this.logs.record({
                       level: "info",
                       ...event,
                       accountId: task.accountId,
                       taskId: task.id,
-                    }),
+                    });
+                    this.ruleAuthority?.record?.(task.id, event);
+                  },
                 ),
             );
             const url = zhihuReceiptUrl(result.url, task.kind);
@@ -818,11 +883,15 @@ export class ZhihuOperations {
         }
       } catch (error) {
         const current = this.store.get("zhihu_tasks", task.id);
+        const ruleStopped =
+          managed?.ruleOwned && !managed.canContinue() && !current.submittedAt;
         if (current.status !== "cancelled")
           this.saveTask({
             ...current,
-            status: "attention",
-            message: safeMessage(error),
+            status: ruleStopped ? "cancelled" : "attention",
+            message: ruleStopped
+              ? "自动养号已关闭，尚未提交，原稿保留"
+              : safeMessage(error),
           });
         const plan = this.plans().find((p) => p.accountId === task.accountId);
         if (plan)

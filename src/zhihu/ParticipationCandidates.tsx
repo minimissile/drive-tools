@@ -305,7 +305,7 @@ function CandidateDetail({
           <ParticipationContext document={c.document} open={open} busy={busy} />
         ) : (
           <Notice>
-            当前仅有搜索摘要：{c.excerpt || "页面未提供摘要"}
+            当前仅有列表摘要：{c.excerpt || "页面未提供摘要"}
             。评论、回答、点赞与关注安排前须先读取上下文。
           </Notice>
         )}

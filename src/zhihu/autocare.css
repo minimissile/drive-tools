@@ -1,0 +1,217 @@
+.autocare {
+  display: grid;
+  gap: 16px;
+}
+.autocare .panel {
+  margin-bottom: 0;
+  padding: 16px;
+}
+.autocare .panel-heading {
+  margin-bottom: 12px;
+}
+.autocare-master {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.autocare-master > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.autocare-master strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.autocare-master small,
+.autocare-settings small,
+.autocare-status-list small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.autocare-power {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.autocare-settings {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.autocare-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.autocare-accounts small {
+  display: block;
+}
+.autocare-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.autocare-flow {
+  color: var(--muted);
+  font-size: 12px;
+}
+.autocare-primary-fields {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  gap: 12px;
+  align-items: end;
+}
+.autocare-primary-fields .field + .field {
+  margin-top: 0;
+}
+.autocare-preset {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+.autocare-more {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  font-size: 12px;
+}
+.autocare-more summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.autocare-more > div,
+.autocare-more > .checkbox-field {
+  margin-top: 12px;
+}
+.autocare-budget {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-block: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.autocare-overview {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.autocare-overview strong {
+  margin-left: 8px;
+  font-weight: 500;
+}
+.autocare-status-list {
+  margin-top: 12px;
+}
+.autocare-account-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.65fr);
+  gap: 24px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.autocare-account-status > div:first-child {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+.autocare-receipts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.autocare-log-body {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+.autocare-log-tools {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.autocare-log-tools > .field {
+  flex: 1;
+  min-width: 240px;
+}
+.autocare-log-tools > .checkbox-field {
+  padding-bottom: 8px;
+}
+.autocare-log-dialog .dialog-body {
+  overflow: hidden;
+}
+.autocare-log-dialog .autocare-log-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.autocare-log-dialog .log-window {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 160px;
+}
+.autocare-log-dialog .log-window-viewport {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+.autocare-wrap {
+  overflow-wrap: anywhere;
+}
+
+.autocare-help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.autocare-participation-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.autocare-participation-table th:first-child {
+  width: 160px;
+}
+.autocare-participation-table th:nth-child(3) {
+  width: 160px;
+}
+.autocare-participation-table th:last-child {
+  width: 100px;
+}
+.autocare-participation-table td {
+  overflow-wrap: anywhere;
+}
+.autocare-participation-table td small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.autocare-interaction-detail {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+.autocare-interaction-detail h3 {
+  margin: 0;
+  font-size: 14px;
+}

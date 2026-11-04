@@ -1,3 +1,4 @@
+import { ZhihuAutocare } from "./zhihu-autocare/service";
 import { ResourceCatalogs } from "./resource-catalog";
 import { BaiduDiscovery } from "./baidu-discovery";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
@@ -105,6 +106,7 @@ export class AppService {
   readonly smzdm: SmzdmArticles;
   readonly distribution: Distribution;
   readonly zhihu: ZhihuOperations;
+  readonly zhihuAutocare: ZhihuAutocare;
   readonly zhihuParticipation: ZhihuParticipation;
   readonly intelligentOps: IntelligentOperations;
   readonly pipix: PipixSources;
@@ -405,6 +407,7 @@ export class AppService {
       zhihu: this.zhihu, dataPath, changed,
     });
     this.intelligentOps = new IntelligentOperations({
+      accountOwnedByRules: (accountId) => this.zhihuAutocare?.owns(accountId) ?? false,
       db: this.db, repo: this.repo, accounts: this.websiteAccounts,
       environments: this.environments, zhihu: this.zhihu,
       weiboPosts: this.weiboPosts, weiboStatistics: this.weiboStatistics,
@@ -420,7 +423,12 @@ export class AppService {
         weibo: (material, accountId) => this.weiboPosts.saveSource(material, accountId),
       },
     });
+    this.zhihuAutocare = new ZhihuAutocare({
+      db: this.db, dataPath, zhihu: this.zhihu, pipix: this.pipix,
+      ai: this.ai, operations: this.intelligentOps, participation: this.zhihuParticipation, changed,
+    });
     this.handlers = createApplicationHandlers({
+      zhihuAutocare: this.zhihuAutocare,
       zhihuParticipation: this.zhihuParticipation,
       contentSupply: this.contentSupply,
       intelligentOps: this.intelligentOps,
@@ -991,6 +999,7 @@ export class AppService {
       this.websiteAccounts.isBusy ||
       this.weibo.isBusy ||
       this.weiboPosts.isBusy ||
+      this.zhihuAutocare?.isBusy ||
       this.zhihu.isBusy ||
       this.zhihuParticipation?.isBusy ||
       this.intelligentOps?.isBusy ||
@@ -1287,6 +1296,7 @@ export class AppService {
     return folder;
   }
   close() {
+    this.zhihuAutocare.close();
     this.intelligentOps.close();
     this.ports.photoPostBrowser?.close();
     this.baiduDiscovery.close();

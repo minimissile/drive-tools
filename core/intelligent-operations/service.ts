@@ -468,6 +468,8 @@ export class IntelligentOperations {
           p.channels.some((c) => c.enabled && c.channel === a.channel),
       );
       if (!enabled.length) fail("请至少启用一个平台策略并选择未暂停的账号");
+      if (enabled.some(a => this.d.accountOwnedByRules?.(a.accountId)))
+        fail("所选账号由普通自动养号控制，请先关闭该模式再启用此计划。");
       for (const other of this.state.plans.filter(
         (o) => o.active && o.id !== id,
       ))

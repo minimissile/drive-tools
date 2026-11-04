@@ -202,6 +202,7 @@ export const zhihuParticipationDiscoverInput = z
     query: z.string().trim().max(200).default(""),
     kind: z.enum(["question", "author"]),
     source: z.enum(["search", "creator_recommend"]).default("search"),
+    refresh: z.boolean().default(false),
   })
   .refine(
     (v) =>
@@ -221,7 +222,7 @@ export const zhihuParticipationPlanInput =
     scheduledAt: z.iso.datetime({ offset: true }).nullable().default(null),
     planId: z
       .string()
-      .regex(/^ioplan_[\w-]+$/)
+      .regex(/^(?:ioplan|autocare)_[\w-]+$/)
       .nullable()
       .default(null),
   });

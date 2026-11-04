@@ -10,7 +10,7 @@ import {
 import type { Database } from "../database";
 import {
   zhihuInteractionAttemptSchema,
-  zhihuInteractionDecisionSchema,
+  zhihuStoredInteractionDecisionSchema,
   zhihuInteractionContinuationSchema,
   isUnsubmittedTechnicalInteractionAttempt,
 } from "../../shared/zhihu-interaction";
@@ -30,7 +30,7 @@ export const participationActivitySchema: z.ZodType<ZhihuParticipationActivity> 
     accountId: websiteAccountIdSchema,
     planId: z
       .string()
-      .regex(/^ioplan_[\w-]+$/)
+      .regex(/^(?:ioplan|autocare)_[\w-]+$/)
       .nullable(),
     candidateId: z.string().regex(/^zhcandidate_[\w-]+$/),
     candidateVersion: z.number().int().positive(),
@@ -59,7 +59,7 @@ export const participationActivitySchema: z.ZodType<ZhihuParticipationActivity> 
     automation: z
       .object({
         planRevision: z.number().int().positive(),
-        decision: zhihuInteractionDecisionSchema,
+        decision: zhihuStoredInteractionDecisionSchema,
         queuedAt: z.iso.datetime(),
         continuation: zhihuInteractionContinuationSchema.optional(),
       })

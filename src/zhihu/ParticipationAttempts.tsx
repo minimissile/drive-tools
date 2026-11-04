@@ -180,7 +180,9 @@ function AttemptDetail({
         ) : null}
         <div className="participation-decision">
           <strong>
-            AI相关性判断 · {Math.round(a.decision.relevance * 100)}%
+            {a.decision.relevance === null
+              ? "本人确认的互动依据"
+              : `AI相关性判断 · ${Math.round(a.decision.relevance * 100)}%`}
           </strong>
           <p>{a.decision.basis}</p>
           <blockquote>{a.decision.quote}</blockquote>

@@ -976,7 +976,7 @@ export class BrowserEnvironments {
   ) {
     const env = await this.runtime(environmentId);
     headless ??=
-      this.refs(environmentId).some((r) => r.kind === "drive") &&
+      this.refs(environmentId).some(r => r.kind === "drive" || (r.kind === "website" && this.accountInfo(r).platform === "zhihu")) &&
       env.engine === "bitbrowser";
     const ip =
       env.engine === "bitbrowser"

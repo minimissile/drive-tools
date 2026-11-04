@@ -30,7 +30,11 @@ export function ParticipationQueue({
         </div>
       </dl>
       <div className="participation-decision">
-        <strong>AI相关性判断 · {Math.round(decision.relevance * 100)}%</strong>
+        <strong>
+          {decision.relevance === null
+            ? "本人确认的互动依据"
+            : `AI相关性判断 · ${Math.round(decision.relevance * 100)}%`}
+        </strong>
         <p>{decision.basis}</p>
         <blockquote>{decision.quote}</blockquote>
       </div>

@@ -263,7 +263,7 @@ export class BitBrowser {
   async withDriveProfile<T>(profileId: string, allowHeadful: boolean, action: (context: BrowserContext, mode: { headless: boolean; owned: boolean }) => Promise<T>, expectedUrl?: string): Promise<T> {
     const profile = (await this.call("/browser/detail", { id: profileId }, expectedUrl)).data;
     if (!profile || profile.id !== profileId) throw new AppError("BIT_PROFILE_INVALID", "未读取到所选比特环境。");
-    if (profile.randomFingerprint === true || profile.clearCookiesBeforeLaunch === true) throw new AppError("BIT_DRIVE_PROFILE_UNSTABLE", "百度后台环境需要保留登录态与固定指纹，请在比特中关闭每次启动随机指纹及启动清理 Cookie。");
+    if (profile.randomFingerprint === true || profile.clearCookiesBeforeLaunch === true) throw new AppError("BIT_DRIVE_PROFILE_UNSTABLE", "后台环境需要保留登录态与固定指纹，请在比特中关闭每次启动随机指纹及启动清理 Cookie。");
     const response = await this.call("/browser/open", {
       id: profileId,
       args: ["--headless", "--enable-automation", "--panxu-drive-headless"],

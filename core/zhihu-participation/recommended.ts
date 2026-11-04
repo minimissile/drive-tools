@@ -12,7 +12,7 @@ export function zhihuQuestionViewCount(text: string): number | null {
   const match = text
     .replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ")
     .match(
-      /(?:^|[^\d.,])((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(亿|万)?\s*(?:次)?\s*浏览(?:量)?/,
+      /(?:^|[^\d.,+-])((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(亿|万)?\s*(?:次)?\s*浏览(?:量)?/,
     );
   if (!match) return null;
   const [whole, fraction = ""] = match[1].replaceAll(",", "").split(".");
@@ -116,6 +116,8 @@ export async function readFeaturedQuestions(
     );
   const script = `(() => { const __name = (fn) => fn; return (${featuredDom.toString()})(); })()`;
   const deadline = Date.now() + 10000;
+  let previous = "",
+    stableSince = 0;
   for (;;) {
     await guard();
     const snapshot = await page.evaluate<FeaturedSnapshot>(script);
@@ -125,6 +127,22 @@ export async function readFeaturedQuestions(
         "推荐问题页地址变化，读取已停止。",
       );
     if (snapshot.shell && snapshot.rows.length) {
+      const signature = JSON.stringify(snapshot.rows);
+      if (signature !== previous) {
+        previous = signature;
+        stableSince = Date.now();
+      }
+      // Cards hydrate separately. Wait for the current visible list to settle,
+      // rather than treating the first hydrated row as the whole loaded list.
+      if (Date.now() - stableSince < 750) {
+        if (Date.now() >= deadline)
+          throw new AppError(
+            "ZHIHU_RECOMMEND_LOADING",
+            "推荐列表仍在加载变化，未将不完整卡片当作完整结果保存。",
+          );
+        await page.waitForTimeout(250);
+        continue;
+      }
       const observedAt = new Date().toISOString();
       let known = 0;
       const hits: ZhihuResearchHit[] = [];

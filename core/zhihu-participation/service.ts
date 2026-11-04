@@ -6,6 +6,7 @@ import { RuntimeLog } from "../runtime-log";
 import type { WebsiteAccounts } from "../website-accounts";
 import type { AppPorts } from "../ports";
 import type { ZhihuOperations } from "../zhihu/service";
+import type { ZhihuContent } from "../../shared/zhihu";
 import { zhihuWarmingHasPromotion } from "../../shared/zhihu";
 import {
   zhihuParticipationDiscoverInput,
@@ -202,6 +203,7 @@ export class ZhihuParticipation {
           item.kind === input.kind,
       );
     if (
+      !input.refresh &&
       cached &&
       Date.parse(cached.observedAt) >= Date.now() - 10 * 60000 &&
       Date.parse(cached.observedAt) <= Date.now() + 60000
@@ -223,7 +225,7 @@ export class ZhihuParticipation {
       "research.discovering",
       "查询官方内容候选；不会点赞、评论或关注",
       account.id,
-      { kind: input.kind, query: input.query },
+      { kind: input.kind, query: input.query, source: input.source },
     );
     try {
       const hits = await this.d.accounts.use(
@@ -324,7 +326,12 @@ export class ZhihuParticipation {
         "research.discovered",
         `已保留${result.length}个官方候选，尚未阅读或互动`,
         account.id,
-        { count: result.length },
+        {
+          count: result.length,
+          source: input.source,
+          minimumViewsExclusive:
+            input.source === "creator_recommend" ? 10000 : null,
+        },
       );
       return result;
     } catch (error) {
@@ -621,7 +628,11 @@ export class ZhihuParticipation {
     this.d.changed();
     return activity;
   }
-  answer(raw: unknown, canContinue?: Guard) {
+  answer(
+    raw: unknown,
+    canContinue?: Guard,
+    onSaved?: (content: ZhihuContent) => void,
+  ) {
     const input = zhihuParticipationAnswerInput.parse(raw);
     this.guard(canContinue);
     const state = readParticipationState(this.d.db),
@@ -629,9 +640,7 @@ export class ZhihuParticipation {
         state.activities.find((item) => item.id === input.id) ??
         fail("参与任务不存在");
     this.account(activity.accountId);
-    const body = /AI辅助/.test(input.body)
-      ? input.body
-      : `${input.body}\n\n（本回答为AI辅助起草，发布前需审阅。）`;
+    const body = input.body;
     if (activity.contentId) {
       const content = this.d.zhihu.store.get(
         "zhihu_contents",
@@ -719,6 +728,7 @@ export class ZhihuParticipation {
       activity.version++;
       this.persist(state);
       contentId = content.id;
+      onSaved?.(content);
       this.event(
         "answer.prepared",
         "账号专用AI辅助回答草稿已保存，未审核、未发布；来源与依据保留在活动记录",

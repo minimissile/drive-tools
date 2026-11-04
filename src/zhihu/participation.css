@@ -43,6 +43,12 @@
   gap: var(--space-3);
   align-items: end;
 }
+.participation-recommendation {
+  margin-bottom: var(--space-3);
+}
+.participation-recommendation > .button {
+  flex-shrink: 0;
+}
 .participation-discovery + .participation-meta {
   margin-top: var(--space-2);
 }

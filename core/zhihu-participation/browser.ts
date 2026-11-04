@@ -500,6 +500,30 @@ export function zhihuParticipationDomSnapshot(input: {
       }
     }
   }
+  if (input.mode === "document" && input.kind !== "author") {
+    const selector =
+      input.kind === "article"
+        ? ".Post-Author .AuthorInfo a[href*='/people/'],.Post-Header .AuthorInfo a[href*='/people/']"
+        : ".Question-main .AnswerItem .AuthorInfo a[href*='/people/'],.Question-mainColumn .AnswerItem .AuthorInfo a[href*='/people/']";
+    const authors = [...document.querySelectorAll(selector)]
+      .filter(visible)
+      .filter(
+        (anchor): anchor is HTMLAnchorElement =>
+          anchor instanceof HTMLAnchorElement && !!text(anchor, 300),
+      )
+      .filter(
+        (anchor, index, all) =>
+          all.findIndex((a) => a.href === anchor.href) === index,
+      )
+      .slice(0, 5)
+      .map((anchor) => ({
+        href: anchor.href,
+        title: text(anchor, 300),
+        excerpt: "当前内容中公开列出的作者，尚未读取作者资料",
+        author: text(anchor, 300),
+      }));
+    related = [...related, ...authors].slice(0, 10);
+  }
   const hasContent = shell && (cards.length > 0 || !!heading);
   return {
     url: location.href,

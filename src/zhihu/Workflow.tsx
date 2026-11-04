@@ -1,3 +1,4 @@
+import AutocarePanel from "./AutocarePanel";
 import { useEffect, useRef, useState } from "react";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { ipc } from "../api/client";
@@ -17,6 +18,19 @@ import { ZhihuTasks } from "./Tasks";
 import { ZhihuParticipation } from "./Participation";
 import "./zhihu.css";
 export default function ZhihuWorkflow() {
+  const [advanced, setAdvanced] = useState(false);
+  return advanced ? (
+    <>
+      <Button size="compact" onClick={() => setAdvanced(false)}>
+        返回自动养号
+      </Button>
+      <LegacyZhihuWorkflow />
+    </>
+  ) : (
+    <AutocarePanel openAdvanced={() => setAdvanced(true)} />
+  );
+}
+function LegacyZhihuWorkflow() {
   const { data } = useAppData(),
     { navigate } = useAppNavigation(),
     { notify } = useAppActions();

@@ -94,6 +94,7 @@ export interface ZhihuProgress {
   score?: number | null;
   nextLevelScore?: number | null;
   scoreUpdatedOn?: string | null;
+  dimensions?: {name: string; cadence: string; description: string; score: number | null}[];
   checkedAt: string;
   source: "official" | "manual";
   note: string;

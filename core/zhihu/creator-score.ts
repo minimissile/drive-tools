@@ -52,3 +52,59 @@ export function parseZhihuCreatorScore(raw: string) {
         : null,
   };
 }
+
+export const zhihuGrowthDimensions = [
+  "创作活跃度",
+  "创作垂直度",
+  "内容优质分",
+  "创作影响力",
+  "关注者亲密度",
+  "社区成就分",
+] as const;
+/** Only explicit official dimension labels; never turn changes or averages into current scores. */
+export function parseZhihuGrowthDimensions(raw: string, total: number | null) {
+  const text = raw.replace(/[\u200b-\u200d\uFEFF]/g, "");
+  const names = zhihuGrowthDimensions.join("|");
+  const definitions = [
+    ...text.matchAll(
+      new RegExp(
+        `(${names})\\s*(日更|周更|月更)\\s*([\\s\\S]*?)(?=(?:${names})\\s*(?:日更|周更|月更)|创作分变更记录|$)`,
+        "g",
+      ),
+    ),
+  ];
+  const start = text.indexOf("创作分雷达图"),
+    end = text.indexOf("维度释义", start);
+  const chart = start >= 0 && end > start ? text.slice(start, end) : "";
+  const values = zhihuGrowthDimensions.map((name) => {
+    const matches = [
+      ...chart.matchAll(
+        new RegExp(
+          `(0|[1-9]\\d*|[1-9]\\d{0,2}(?:[,，]\\d{3})+)\\s*${name}`,
+          "g",
+        ),
+      ),
+    ];
+    return matches.length === 1
+      ? Number(matches[0][1].replace(/[,，]/g, ""))
+      : null;
+  });
+  const exact =
+    values.every((v) => v !== null && Number.isSafeInteger(v)) &&
+    total !== null &&
+    values.reduce<number>((n, v) => n + (v ?? 0), 0) === total;
+  return definitions
+    .filter((d, i, a) => a.findIndex((m) => m[1] === d[1]) === i)
+    .map((d) => ({
+      name: d[1],
+      cadence: d[2],
+      description: d[3].trim().slice(0, 1000),
+      score: exact
+        ? values[
+            zhihuGrowthDimensions.indexOf(
+              d[1] as (typeof zhihuGrowthDimensions)[number],
+            )
+          ]
+        : null,
+    }));
+}

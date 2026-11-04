@@ -84,7 +84,8 @@ export class RuntimeLog {
       clauses.push("account_id=?");
       values.push(input.accountId);
     }
-    if (input.level !== "all") {
+    if (input.level === "issues") clauses.push("level IN ('warning','error')");
+    else if (input.level !== "all") {
       clauses.push("level=?");
       values.push(input.level);
     }

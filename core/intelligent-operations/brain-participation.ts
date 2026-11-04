@@ -3,6 +3,7 @@ import { AppError } from "../errors";
 import { cleanKnowledge } from "../knowledge-response";
 import {
   zhihuParticipationKinds,
+  zhihuRecommendedMinimumViews,
   type ZhihuParticipationActivity,
 } from "../../shared/zhihu-participation";
 import type { OperationsPlan } from "../../shared/intelligent-operations";
@@ -63,7 +64,7 @@ export const participationToolDescriptions: Record<
   plan_zhihu_participation:
     "以已读取的上下文安排本计划阅读、回答、评论、点赞或关注待办，提供具体理由及针对性评论正文。本地安排不代表执行；仅有engage授权时可另用执行工具逐项判断。不得安排互关互赞、模板评论、增长或凑活跃数量任务。",
   prepare_zhihu_answer:
-    "为已有回答任务准备有依据的本地回答稿，需create和完整问题快照。用自然第一人称表达判断，如‘我更看重…’‘我的建议是…’，开头直接回答问题，少用套话、整齐模板和空泛总结，不虚构亲测、身份、资历或经历。正文不机械追加‘AI辅助回答’或自报模型；真实AI记录和平台标识保留。准确版本仍需审核，不直接发布。重复请求复用原稿。",
+    "为已有回答任务准备有依据的本地回答稿，需create、本账号推荐浏览量>10000证据和完整问题快照。用自然第一人称表达判断，如‘我更看重…’‘我的建议是…’，开头直接回答问题，少用套话、整齐模板和空泛总结，不虚构亲测、身份、资历或经历。问题图片未提供时不评价其画面细节。正文不机械追加‘AI辅助回答’或自报模型；真实AI记录和平台标识保留。准确版本仍需审核，不直接发布。重复请求复用原稿。",
   execute_zhihu_participation:
     "在engage明确授权、合法时段、额度和间隔内执行本计划一项正常个人互动。先完整阅读同账号目标；仅相关性>=0.8且给出原文精确引用与具体依据时执行。赞同限回答/文章，关注限作者，评论限回答/文章且须针对正文有实质内容。不得互赞互关、跨号相互互动、复制评论、推广、凑数量或为升级执行。无合适内容就不执行。已有状态不再次点击；提交后未知不重试，只读核对。成功仅以官方核验回执为准。每轮最多一项。",
   schedule_zhihu_interaction:
@@ -428,6 +429,20 @@ export async function executeParticipationTool(
           (a) => a.id === v.activityId && a.planId === ctx.plan.id,
         ) ?? fail("回答任务不属于此计划");
     account(ctx, a.accountId);
+    if (!a.contentId) {
+      const candidate = d
+        .snapshot()
+        .candidates.find(
+          (c) => c.id === a.candidateId && c.accountId === a.accountId,
+        );
+      if (
+        !candidate?.recommendation ||
+        candidate.recommendation.views <= zhihuRecommendedMinimumViews
+      )
+        fail(
+          "自动回答需先从本账号创作者推荐中保存浏览量大于1万的问题，再读取全文；已有原稿保留。",
+        );
+    }
     if (
       !a.contentId &&
       ctx.cycle.steps.filter(

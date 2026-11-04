@@ -39,6 +39,9 @@ type ResponseOptions = {
   timeoutMs?: number;
   outputSchema?: z.ZodType;
   retainResponse?: boolean;
+  schemaName?: string;
+  /** Recheck workflow authorization after credential lookup, before reserving or sending. */
+  beforeRequest?(): void;
   normalizeResponse?(data: unknown): unknown;
 };
 
@@ -405,7 +408,9 @@ export class AiService {
     invalidMessage?: string,
     options: ResponseOptions = {},
   ): Promise<T> {
+    options.beforeRequest?.();
     const key = await this.secrets.get("openrouter");
+    options.beforeRequest?.();
     if (!key)
       throw new AppError("API_KEY_REQUIRED", "请先配置OpenRouter API Key。");
     const purpose = purposeForCall(name, images.length > 0),
@@ -451,7 +456,7 @@ export class AiService {
         : {
             type: "json_schema",
             json_schema: {
-              name,
+              name: options.schemaName ?? name,
               strict: true,
               schema: z.toJSONSchema(options.outputSchema ?? schema, {
                 target: "draft-7",

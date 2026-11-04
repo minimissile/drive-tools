@@ -34,6 +34,8 @@ export interface ZhihuInteractionExecutionContext {
   gapMinutes: number;
   excludedUids: string[];
   guard(): void;
+  /** Set only by a direct, exact-target human confirmation command. */
+  humanConfirmed?: boolean;
 }
 export interface ParticipationInteractionHost {
   d: ZhihuParticipationDependencies;
@@ -370,7 +372,7 @@ function prepareInteraction(
   if (
     !ctx ||
     typeof ctx.guard !== "function" ||
-    !/^ioplan_[\w-]+$/.test(ctx.planId) ||
+    !/^(?:ioplan|autocare)_[\w-]+$/.test(ctx.planId) ||
     !Number.isSafeInteger(ctx.planRevision) ||
     ctx.planRevision < 1 ||
     !Number.isSafeInteger(ctx.dailyLimit) ||
@@ -381,6 +383,13 @@ function prepareInteraction(
     ctx.gapMinutes > 10080
   )
     fail("缺少有效的独立互动执行授权与本地限额");
+  if (input.decision.relevance === null && !ctx.humanConfirmed)
+    fail("本人确认记录只能由明确的单项确认入口创建，模型不能代替本人确认");
+  if (
+    ctx.planId.startsWith("autocare_") &&
+    (!ctx.humanConfirmed || input.decision.relevance !== null)
+  )
+    fail("普通运营互动仅接受准确目标的本人确认");
   const state = readParticipationState(host.d.db),
     item = activity(state, input.id),
     candidate = assertExact(host, state, item, input.version, ctx, requireDue),

@@ -3,7 +3,7 @@ import { z } from "zod";
 export const runtimeLogQuery = z.object({
   page: z.number().int().min(1).max(100000).default(1),
   accountId: z.string().max(150).default(""),
-  level: z.enum(["all", "info", "warning", "error"]).default("all"),
+  level: z.enum(["all", "info", "warning", "error", "issues"]).default("all"),
   search: z.string().trim().max(200).default(""),
   excludeHeartbeats: z.boolean().default(false),
 });

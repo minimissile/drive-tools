@@ -11,7 +11,7 @@ export const operationalDay = (at: number | string) =>
 /** Returns the earliest slot within a daytime execution window and the seven-day horizon. */
 export function findOperationsSlot(
   start: number,
-  policy: OperationsChannelPolicy,
+  policy: Pick<OperationsChannelPolicy, "windowStart" | "windowEnd">,
   dailyLimit: number,
   gapMinutes: number,
   existing: {

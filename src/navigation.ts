@@ -125,7 +125,7 @@ export const weiboOperations: WorkbenchEntry[] = [
   { page: "weibo-marketing", title: "微博图文营销", description: "选词配资料，准备图文包，回填发布与效果", Icon: Send },
 ];
 export const zhihuOperations: WorkbenchEntry[] = [
-  { page: "zhihu-operations", title: "知乎多号运营", description: "比特多号养号、素材审核、错峰发布与结果核对", Icon: Send },
+  { page: "zhihu-operations", title: "知乎自动养号", description: "规则发文、推荐问题回答、内容读取与点赞关注待办", Icon: Send },
 ];
 export const smzdmOperations: WorkbenchEntry[] = [
   {

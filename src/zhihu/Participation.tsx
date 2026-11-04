@@ -264,6 +264,7 @@ function ParticipationWorkspace({
           accountId: account.id,
           kind: "question",
           source: "creator_recommend",
+          refresh: true,
         }),
       (result) =>
         `推荐问题：浏览量大于1万的候选 ${result.length} 项，尚未准备或发布回答`,
@@ -277,7 +278,7 @@ function ParticipationWorkspace({
   return (
     <>
       <Panel>
-        <div className="row spread">
+        <div className="row spread participation-recommendation">
           <small className="participation-meta">
             优先读取此账号创作者推荐，筛选浏览量 &gt; 10,000
             的问题；热度不代替全文与回答依据。

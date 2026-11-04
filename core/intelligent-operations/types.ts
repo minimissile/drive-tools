@@ -10,6 +10,7 @@ import type { WeiboStatistics } from "../weibo/statistics";
 import type { AiService } from "../ai";
 export type OperationsChannelPolicy = z.output<typeof operationsChannelPolicy>;
 export interface IntelligentOperationsDependencies {
+  accountOwnedByRules?(accountId: string): boolean;
   db: Database;
   repo: Repository;
   accounts: WebsiteAccounts;

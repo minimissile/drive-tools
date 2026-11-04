@@ -6,8 +6,11 @@ import type {
 import type { ZhihuBrowserPort, ZhihuPayload } from "../../shared/zhihu";
 import { zhihuReceiptUrl } from "../../shared/zhihu";
 import { AppError } from "../errors";
-import { officialBrowserPage, findEnvironmentPage } from "../browser-pages";
-import { parseZhihuCreatorScore } from "./creator-score";
+import { officialBrowserPage } from "../browser-pages";
+import {
+  parseZhihuCreatorScore,
+  parseZhihuGrowthDimensions,
+} from "./creator-score";
 
 const blocked = (message: string): never => {
   throw new AppError("ZHIHU_BROWSER_BLOCKED", message);
@@ -201,17 +204,12 @@ export function zhihuBrowser(
     progress: (account) =>
       withContext(account, async (context) => {
         await assertIdentity(context, account);
-        const page = await findEnvironmentPage(
-          context,
-          `panxu:zhihu-creator:${account.id}`,
-          "https://www.zhihu.com/creator",
-        );
+        const page = await context.newPage();
         try {
           await page.goto("https://www.zhihu.com/creator", {
             waitUntil: "domcontentloaded",
             timeout: 30000,
           });
-          await page.bringToFront();
           await assertPage(page);
           // The creator shell can arrive before the account's own level link.
           await page
@@ -241,6 +239,9 @@ export function zhihuBrowser(
             text,
           );
           let scores = parseZhihuCreatorScore("");
+          let dimensions: NonNullable<
+            import("../../shared/zhihu").ZhihuProgress["dimensions"]
+          > = [];
           if (level !== null) {
             await page.goto(
               "https://www.zhihu.com/creator/account/growth-level",
@@ -267,8 +268,20 @@ export function zhihuBrowser(
                 .allInnerTexts(),
               scoreText,
             );
-            if (scoreLevel === level)
+            if (scoreLevel === level) {
               scores = parseZhihuCreatorScore(scoreText);
+              // SVG text is exposed by some official renders; canvas-only values stay unknown.
+              const chartText = await page.locator("svg").allTextContents();
+              dimensions = parseZhihuGrowthDimensions(scoreText, scores.score);
+              if (chartText.length) {
+                const rendered = parseZhihuGrowthDimensions(
+                  `创作分雷达图\n${chartText.join("\n")}\n维度释义\n${scoreText}`,
+                  scores.score,
+                );
+                if (rendered.length && rendered.every((d) => d.score !== null))
+                  dimensions = rendered;
+              }
+            }
           }
           return {
             creator:
@@ -279,6 +292,7 @@ export function zhihuBrowser(
                   : null,
             level,
             ...scores,
+            dimensions,
             source: "official",
             checkedAt: new Date().toISOString(),
             note:
@@ -289,7 +303,7 @@ export function zhihuBrowser(
                 : "页面未提供可可靠识别的等级，请查看官方页面后手动记录",
           };
         } finally {
-          /* Keep the creator page available for the user's inspection. */
+          await page.close().catch(() => {});
         }
       }),
     publish: (account, payload, beforeSubmit, onEvent) =>

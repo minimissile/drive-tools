@@ -73,6 +73,25 @@ export function ZhihuCreatorProgress({
               : "创作者状态待检查"}
         </small>
       )}
+      {p?.source === "official" && p.dimensions?.length ? (
+        <details className="zhihu-growth-dimensions">
+          <summary>创作分维度 · 官方更新口径</summary>
+          {p.dimensions.every((d) => d.score === null) ? (
+            <small>维度分值暂未读取</small>
+          ) : null}
+          <dl>
+            {p.dimensions.map((d) => (
+              <div key={d.name}>
+                <dt>
+                  {d.name} · {d.cadence}
+                </dt>
+                {d.score !== null ? <dd>{number(d.score)} 分</dd> : null}
+                <dd>{d.description}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
     </div>
   );
 }

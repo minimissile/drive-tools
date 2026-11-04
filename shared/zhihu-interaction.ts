@@ -16,8 +16,18 @@ export const zhihuInteractionDecisionSchema = z.object({
   basis: z.string().trim().min(20).max(2000),
   quote: z.string().trim().min(8).max(1000),
 });
+export const zhihuHumanInteractionDecisionSchema = z.object({
+  source: z.literal("human"),
+  relevance: z.null(),
+  basis: z.string().trim().min(20).max(2000),
+  quote: z.string().trim().min(8).max(1000),
+});
+export const zhihuStoredInteractionDecisionSchema = z.union([
+  zhihuInteractionDecisionSchema,
+  zhihuHumanInteractionDecisionSchema,
+]);
 export type ZhihuInteractionDecision = z.infer<
-  typeof zhihuInteractionDecisionSchema
+  typeof zhihuStoredInteractionDecisionSchema
 >;
 export const zhihuInteractionRequestSchema = z.object({
   kind: zhihuInteractionKindSchema,
@@ -50,11 +60,11 @@ export type ZhihuInteractionReceipt = z.infer<
 >;
 export const zhihuInteractionAttemptSchema = z.object({
   id: z.string().regex(/^zhattempt_[\w-]+$/),
-  planId: z.string().regex(/^ioplan_[\w-]+$/),
+  planId: z.string().regex(/^(?:ioplan|autocare)_[\w-]+$/),
   planRevision: z.number().int().positive(),
   activityVersion: z.number().int().positive(),
   networkKey: z.string().max(200).optional(),
-  decision: zhihuInteractionDecisionSchema,
+  decision: zhihuStoredInteractionDecisionSchema,
   request: zhihuInteractionRequestSchema,
   startedAt: z.iso.datetime(),
   submittedAt: z.iso.datetime().nullable(),
@@ -116,7 +126,7 @@ export interface ZhihuInteractionBrowserPort {
 export const zhihuInteractionExecuteInput = z.object({
   id: z.string().regex(/^zhactivity_[\w-]+$/),
   version: z.number().int().positive(),
-  decision: zhihuInteractionDecisionSchema,
+  decision: zhihuStoredInteractionDecisionSchema,
 });
 export const zhihuInteractionReconcileInput = z.object({
   id: z.string().regex(/^zhactivity_[\w-]+$/),

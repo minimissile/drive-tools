@@ -24,6 +24,7 @@ import {
   readSupplyAcquireRuns,
   restoreSupplyAcquireRun,
 } from "./content-supply/acquisition";
+import { readAutocareState, restoreAutocareState } from "./zhihu-autocare/state";
 import { pipixPolicyKey, readPipixPolicy } from "./pipix/request-budget";
 import {
   readParticipationState,
@@ -334,6 +335,7 @@ export async function stageRestore(
         const supplyAcquireRuns = readSupplyAcquireRuns(db);
         const pipixPolicy = readPipixPolicy(db);
         const participationState = readParticipationState(db);
+        const autocareState = readAutocareState(db);
         let operationsState: ReturnType<
           typeof restoreIntelligentOperationsState
         > | null = null;
@@ -385,6 +387,7 @@ export async function stageRestore(
           restoredPosts.set(postId, parsed.data);
         }
         db.run("DELETE FROM settings");
+        restoreAutocareState(db, autocareState);
         db.setSetting(pipixPolicyKey, pipixPolicy);
         db.setSetting(zhihuParticipationStateKey, {
           ...participationState,

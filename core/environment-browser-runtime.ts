@@ -22,9 +22,15 @@ export function withEnvironmentBrowser<T>(
     .list()
     .find((e) => e.id === env.id)
     ?.accounts.some((a) => a.kind === "drive");
-  if (sharesDrive && !visible)
+  const isZhihu = environments
+    .list()
+    .find((e) => e.id === env.id)
+    ?.accounts.some(
+      (a) => a.kind === ref.kind && a.id === ref.id && a.platform === "zhihu",
+    );
+  if ((sharesDrive || isZhihu) && !visible)
     return bit.withDriveProfile(env.profileId, false, action, env.connectorKey);
-  if (sharesDrive && visible)
+  if ((sharesDrive || isZhihu) && visible)
     return bit
       .stopDriveHeadless(env.profileId, env.connectorKey)
       .then(() => bit.withProfile(env.profileId, action, env.connectorKey));

@@ -13,6 +13,7 @@ import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
 import type { PipixAcquisitionContract } from "./pipix-acquisition";
 import type { ContentSupplyContract } from "./content-supply";
+import type { AutocareContract } from "./zhihu-autocare";
 import type { ZhihuContract } from "./zhihu";
 import type { ZhihuParticipationContract } from "./zhihu-participation";
 import type { IntelligentOperationsContract } from "./intelligent-operations";
@@ -96,6 +97,7 @@ export interface IpcContract
     DriveBrowserContract,
     DistributionContract,
     ZhihuContract,
+    AutocareContract,
     ZhihuParticipationContract,
     IntelligentOperationsContract,
     PipixContract,
@@ -248,6 +250,8 @@ export const queryMethods = [
   "pipix.knowledge",
   "pipix.image",
   "zhihu.snapshot",
+  "zhihu.autocare.snapshot",
+  "zhihu.autocare.logs",
   "zhihu.logs",
   "intelligentOps.snapshot",
   "intelligentOps.tasks",

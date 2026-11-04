@@ -37,6 +37,7 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  zhihuAutocare: import("../zhihu-autocare/service").ZhihuAutocare;
   contentSupply: import("../content-supply/service").ContentSupply;
   intelligentOps: import("../intelligent-operations/service").IntelligentOperations;
   photoPosts: import("../photo-posts").PhotoPosts;

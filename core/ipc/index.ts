@@ -1,3 +1,4 @@
+import { createZhihuAutocareHandlers } from "./zhihu-autocare";
 import { createPhotoPostHandlers } from "./photo-posts";
 import { createResourceCatalogHandlers } from "./resource-catalog";
 import { createResourceAnswerHandlers } from "./resource-answers";
@@ -47,6 +48,7 @@ import { createWeiboStatisticsHandlers } from "./weibo-statistics";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createZhihuAutocareHandlers(services),
     createContentSupplyHandlers(services),
     createIntelligentOperationsHandlers(services),
     createPhotoPostHandlers(services),

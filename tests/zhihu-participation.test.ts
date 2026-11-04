@@ -339,7 +339,7 @@ test("官方问题上下文→本地待审AI回答稿，绑定账号、准确版
     assert.equal(content.aiAssisted, true);
     assert.equal(content.kind, "answer");
     assert.equal(content.questionUrl, question);
-    assert.match(content.body, /AI辅助/);
+    assert.equal(content.body, input.body);
     assert.equal(result.activity.context!.text, candidate.document!.text);
     assert.equal(result.activity.basis, input.basis);
     assert.equal(result.activity.status, "prepared");
