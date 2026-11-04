@@ -50,6 +50,9 @@ export function ZhihuOverview({
           <Button quiet size="compact" onClick={() => open("contents")}>
             可用养号素材 {available} 篇
           </Button>
+          <Button quiet size="compact" onClick={() => open("participation")}>
+            日常参与与回答准备
+          </Button>
         </div>
         {s.accounts.length ? (
           <div className="zhihu-table-scroll">

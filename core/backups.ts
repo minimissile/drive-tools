@@ -20,6 +20,15 @@ import { intelligentOperationsStateKey } from "../shared/intelligent-operations"
 import { restoreIntelligentOperationsState } from "./intelligent-operations/state";
 import { studioWorkingCopy } from "../shared/studio";
 import { readSupplyDrafts, storeSupplyDraft } from "./content-supply/state";
+import {
+  readSupplyAcquireRuns,
+  restoreSupplyAcquireRun,
+} from "./content-supply/acquisition";
+import { pipixPolicyKey, readPipixPolicy } from "./pipix/request-budget";
+import {
+  readParticipationState,
+  zhihuParticipationStateKey,
+} from "./zhihu-participation/state";
 
 export async function fileHash(path: string) {
   const hash = createHash("sha256");
@@ -322,6 +331,9 @@ export async function stageRestore(
           null,
         );
         const supplyDrafts = readSupplyDrafts(db);
+        const supplyAcquireRuns = readSupplyAcquireRuns(db);
+        const pipixPolicy = readPipixPolicy(db);
+        const participationState = readParticipationState(db);
         let operationsState: ReturnType<
           typeof restoreIntelligentOperationsState
         > | null = null;
@@ -373,6 +385,12 @@ export async function stageRestore(
           restoredPosts.set(postId, parsed.data);
         }
         db.run("DELETE FROM settings");
+        db.setSetting(pipixPolicyKey, pipixPolicy);
+        db.setSetting(zhihuParticipationStateKey, {
+          ...participationState,
+          discoveryCache: [],
+        });
+        for (const run of supplyAcquireRuns) restoreSupplyAcquireRun(db, run);
         for (const draft of supplyDrafts)
           storeSupplyDraft(db, {
             ...draft,

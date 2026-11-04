@@ -6,7 +6,7 @@ import { formatMoney } from "../lib/format";
 import { Dialog } from "../ui/Dialog";
 import { CheckboxField } from "../ui/CheckboxField";
 import { Button, Notice } from "../ui/primitives";
-import { permissionCopy } from "./AutonomyPolicy";
+import { permissionCopy, reasoningEffortLabels } from "./AutonomyPolicy";
 import type { OperationAction } from "./useOperationAction";
 import { useOperationDialog } from "./useOperationDialog";
 
@@ -105,6 +105,10 @@ export function BrainAuthorization({
             分钟、{formatMoney(config.cycleBudgetMicros, "USD")}。
           </li>
           <li>
+            单次模型输出最多 {config.maxOutputTokens} token；推理强度：
+            {reasoningEffortLabels[config.reasoningEffort]}。
+          </li>
+          <li>
             本计划每日费用上限 {formatMoney(config.dailyBudgetMicros, "USD")}
             ；全局AI日预算{" "}
             {globalBudget == null
@@ -117,6 +121,14 @@ export function BrainAuthorization({
             .map((key) => (
               <li key={key}>{permissionCopy[key].label}。</li>
             ))}
+          {config.permissions.engage ? (
+            <li>
+              知乎正常相关参与：每账号每日点赞、评论与关注合计最多尝试{" "}
+              {config.interactionDailyLimit} 项（跨计划共用），实际最小间隔{" "}
+              {Math.max(60, config.interactionGapMinutes)}
+              分钟。须核对真实上下文与相关性，不做互赞互关、账号间配合或模板刷评；结果未知只读核对，不重发。
+            </li>
+          ) : null}
         </ul>
         <p className="operations-quiet">
           仅限当前计划关联账号、渠道和内容方向。保存的权限范围与本次授权分别管理；停止、修改计划、应用重启或恢复备份后不会自动恢复收费与发布授权。

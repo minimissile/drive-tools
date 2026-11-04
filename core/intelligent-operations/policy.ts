@@ -14,7 +14,12 @@ export function findOperationsSlot(
   policy: OperationsChannelPolicy,
   dailyLimit: number,
   gapMinutes: number,
-  existing: { at: string; accountId: string; network: string }[],
+  existing: {
+    at: string;
+    accountId: string;
+    network: string;
+    gapOnly?: boolean;
+  }[],
   accountId: string,
   network: string,
   horizon: number,
@@ -32,7 +37,10 @@ export function findOperationsSlot(
     if (
       at >= end ||
       existing.filter(
-        (e) => e.accountId === accountId && operationalDay(e.at) === day,
+        (e) =>
+          !e.gapOnly &&
+          e.accountId === accountId &&
+          operationalDay(e.at) === day,
       ).length >= dailyLimit
     ) {
       at = Date.parse(`${day}T00:00:00+08:00`) + 86400000;

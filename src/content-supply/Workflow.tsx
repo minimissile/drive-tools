@@ -25,6 +25,7 @@ import {
 } from "../../shared/content-supply";
 import { SupplyEditor } from "./Editor";
 import { SupplyLogs } from "./Logs";
+import { SupplyAcquisitionPanel } from "./Acquisition";
 import "./supply.css";
 
 export const supplyStageLabels: Record<SupplyStage, string> = {
@@ -239,7 +240,7 @@ export function ContentSupplyWorkflow({
               onRetry={operations.reload}
             />
             <div className="supply-toolbar">
-              <Field label="本地关键词 · 多词匹配任一项">
+              <Field label="本地与补料关键词 · 多词匹配任一项">
                 <input
                   aria-label="供稿本地关键词"
                   value={value.keyword}
@@ -276,8 +277,22 @@ export function ContentSupplyWorkflow({
               ) : null}
             </div>
             <p className="supply-muted">
-              只读取本地归档，不消耗列表请求。采集会下载缺失图片；成功项复用。新增列表请到“发现与采集”按需请求。
+              下方候选列表只读取本地；“采集并建立编辑单”不请求付费列表。自动补料会按独立授权及设置上限请求数据。
             </p>
+            <SupplyAcquisitionPanel
+              context={{
+                planId: value.planId,
+                accountId: value.accountId,
+                direction: value.direction,
+                audience: value.audience,
+              }}
+              keyword={value.keyword}
+              onOpenDraft={(draftId) => {
+                draft.update({ draftId });
+                setOpened(null);
+                onTabChange("queue");
+              }}
+            />
             <QueryError
               error={candidates.error}
               loading={candidates.loading}

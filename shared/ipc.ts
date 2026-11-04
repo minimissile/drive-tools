@@ -11,8 +11,10 @@ import type { AccountDeletionContract } from "./account-deletion";
 import type { SmzdmContract } from "./smzdm";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
+import type { PipixAcquisitionContract } from "./pipix-acquisition";
 import type { ContentSupplyContract } from "./content-supply";
 import type { ZhihuContract } from "./zhihu";
+import type { ZhihuParticipationContract } from "./zhihu-participation";
 import type { IntelligentOperationsContract } from "./intelligent-operations";
 import type { BrowserEnvironmentContract } from "./browser-environments";
 import type { BitBrowserContract } from "./bitbrowser";
@@ -94,8 +96,10 @@ export interface IpcContract
     DriveBrowserContract,
     DistributionContract,
     ZhihuContract,
+    ZhihuParticipationContract,
     IntelligentOperationsContract,
     PipixContract,
+    PipixAcquisitionContract,
     ContentSupplyContract,
     BrowserEnvironmentContract,
     BitBrowserContract,
@@ -211,6 +215,8 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "zhihu.participation.snapshot",
+  "zhihu.participation.logs",
   "photoPosts.list",
   "photoPosts.get",
   "baiduDiscovery.list",
@@ -231,6 +237,9 @@ export const queryMethods = [
   "distribution.history",
   "distribution.batches",
   "pipix.list",
+  "pipix.comments",
+  "pipix.requestPolicy",
+  "contentSupply.acquisition",
   "contentSupply.snapshot",
   "contentSupply.image",
   "contentSupply.candidates",
@@ -244,6 +253,7 @@ export const queryMethods = [
   "intelligentOps.tasks",
   "intelligentOps.logs",
   "intelligentOps.brain.snapshot",
+  "intelligentOps.quickView",
   "intelligentOps.brain.cycles",
   "bit.profiles",
   "bit.diagnose",

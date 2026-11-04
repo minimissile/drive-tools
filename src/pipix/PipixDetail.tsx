@@ -11,6 +11,8 @@ import { CheckboxField } from "../ui/CheckboxField";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { PipixExport } from "./PipixExport";
+import { PipixCommentsLibrary } from "./CommentsLibrary";
+import { usePipixCommentRules } from "./useCommentRules";
 import type { WebsiteAccountView } from "../../shared/website-accounts";
 
 const selectionSchema = z.object({
@@ -76,6 +78,7 @@ export function PipixDetail({
     },
     (raw) => selectionSchema.parse(raw),
   );
+  const rules = usePipixCommentRules();
   const [sort, setSort] = useState("page");
   const value = draft.value;
   const comments =
@@ -91,6 +94,16 @@ export function PipixDetail({
   const unavailable = selectedImages.some(
     (v) => !source.images.find((i) => i.id === v)?.asset,
   );
+  const filteredSelected = source.comments.filter(
+    (comment) =>
+      selectedComments.includes(comment.id) && rules.hits(comment).length,
+  );
+  const commentError =
+    selectedComments.length && !rules.data
+      ? "评论使用规则尚未读取，暂不能使用所选评论。"
+      : filteredSelected.length
+        ? `已选评论有${filteredSelected.length}条命中过滤词，请取消选择后创建草稿。`
+        : "";
   return (
     <Panel
       title="挑选图文与评论"
@@ -119,6 +132,7 @@ export function PipixDetail({
         </p>
       ))}
       <p className="pipix-original">{source.text || "原帖没有提供正文"}</p>
+      <PipixCommentsLibrary sourceId={source.id} disabled={busy} />
       {source.images.length ? (
         <div className="pipix-images">
           {source.images.map((image) => (
@@ -152,7 +166,7 @@ export function PipixDetail({
       ) : null}
       <div className="pipix-comment-heading">
         <h3>
-          页面评论 · {source.comments.length} 条
+          已采集评论 · {source.comments.length} 条
           {source.commentCount !== null
             ? ` / 原帖 ${source.commentCount} 条`
             : ""}
@@ -167,6 +181,11 @@ export function PipixDetail({
           onValueChange={setSort}
         />
       </div>
+      <QueryError
+        error={rules.error}
+        loading={rules.loading}
+        onRetry={rules.reload}
+      />
       {comments.length ? (
         <div className="pipix-comments">
           {comments.map((comment) => (
@@ -181,11 +200,19 @@ export function PipixDetail({
                         ? "点赞数未知"
                         : `${comment.likes} 赞`}
                       {comment.label ? ` · ${comment.label}` : ""}
+                      {rules.hits(comment).length
+                        ? ` · 已过滤：${rules.hits(comment).join("、")}`
+                        : ""}
                     </small>
                   </>
                 }
                 checked={selectedComments.includes(comment.id)}
-                disabled={busy}
+                disabled={
+                  busy ||
+                  !rules.data ||
+                  (!!rules.hits(comment).length &&
+                    !selectedComments.includes(comment.id))
+                }
                 onChange={(e) =>
                   draft.update({
                     commentIds: updateSelection(
@@ -201,7 +228,9 @@ export function PipixDetail({
           ))}
         </div>
       ) : (
-        <p className="muted">分享页没有返回文字评论，可继续导入原帖图文。</p>
+        <p className="muted">
+          本地尚无可选择的文字评论，可展开评论库查看或补采。
+        </p>
       )}
       <PipixExport
         source={source}
@@ -214,6 +243,7 @@ export function PipixDetail({
         imageIds={selectedImages}
         commentIds={selectedComments}
         unavailable={unavailable}
+        commentError={commentError}
         storageError={draft.error}
         onOpenWeibo={onOpenWeibo}
       />

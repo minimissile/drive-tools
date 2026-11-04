@@ -3,6 +3,7 @@ import type { RuntimeLogPage } from "./runtime-logs";
 import {
   operationsBrainConfig,
   type OperationsBrainContract,
+  type OperationsBrainPlanRuntime,
 } from "./operations-brain";
 
 export const operationsChannels = ["zhihu", "weibo", "wechat"] as const;
@@ -192,6 +193,35 @@ export interface OperationsTaskPage {
   page: number;
   pageSize: number;
 }
+export interface OperationsQuickPlan {
+  participationCount: number;
+  id: string;
+  name: string;
+  goal: string;
+  channels: OperationsChannel[];
+  accountCount: number;
+  active: boolean;
+  runtime: OperationsBrainPlanRuntime | null;
+  maxCyclesPerDay: number;
+  dailyBudgetMicros: number;
+  taskCount: number;
+  attentionCount: number;
+  tasks: Pick<
+    OperationsTask,
+    | "id"
+    | "title"
+    | "kind"
+    | "channel"
+    | "accountLabel"
+    | "status"
+    | "scheduledAt"
+    | "reason"
+  >[];
+}
+export interface OperationsQuickView {
+  schedulerRunning: boolean;
+  plans: OperationsQuickPlan[];
+}
 export const operationsLogQuery = z.object({
   page: z.number().int().min(1).default(1),
   planId: z.string().max(150).default(""),
@@ -199,6 +229,7 @@ export const operationsLogQuery = z.object({
 });
 type Contract<A, V> = { args: A; value: V };
 export interface IntelligentOperationsContract extends OperationsBrainContract {
+  "intelligentOps.quickView": Contract<undefined, OperationsQuickView>;
   "intelligentOps.snapshot": Contract<undefined, OperationsSnapshot>;
   "intelligentOps.plan.save": Contract<OperationsPlanInput, OperationsPlan>;
   "intelligentOps.plan.active": Contract<

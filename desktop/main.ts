@@ -1,5 +1,6 @@
 import { runtimeDataPath } from "./runtime-paths";
 import { resourceLinksTarget } from "./resource-links-network";
+import { pipixNetworkTarget } from "./pipix-network";
 import { normalizeCover } from "./cover-image";
 import { watchDevParent } from "./dev-parent";
 import { loadProviderPage } from "./provider-navigation";
@@ -471,6 +472,17 @@ function changed() {
 const environmentSessions = createEnvironmentSessions((ref) => service.environments.forAccount(ref));
 const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
 const ports: AppPorts = {
+  pipixFetch(url, init) {
+    const target = pipixNetworkTarget(url, init.method ?? "GET");
+    return session
+      .fromPartition("panxu-pipix-network", { cache: false })
+      .fetch(target.href, {
+        ...init,
+        credentials: "omit",
+        redirect: "error",
+        bypassCustomProtocolHandlers: true,
+      });
+  },
   resourceLinksFetch(url, init) {
     const method = (init.method ?? "GET").toUpperCase();
     const target = resourceLinksTarget(url, method);

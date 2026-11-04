@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { saveContentImage, readContentImage } from "../core/content-assets";
+import {
+  saveContentImage,
+  readContentImage,
+  contentImagePath,
+} from "../core/content-assets";
 import type { SourceMaterial } from "../shared/content-sources";
 import { Database } from "../core/database";
 import { PipixClient, pipixShareUrl } from "../core/pipix/client";
@@ -11,7 +15,6 @@ import { parsePipixPage } from "../core/pipix/parser";
 import { PipixSources } from "../core/pipix/service";
 import { inspectBackup, stageRestore } from "../core/backups";
 import { fixture, removeV22 } from "./helpers";
-import { weiboFixture } from "./weibo-fixture";
 import {
   pipixCommentId,
   pipixHtml,
@@ -285,6 +288,9 @@ test("重新采集下载期间的交付独立持久化，关闭会取消未完�
     const source = await service.collect(
       `https://h5.pipix.com/ppx/item/${pipixItemId}`,
     );
+    // Valid local assets are reused. Remove only this fixture's file so this
+    // branch exercises an actual replacement download and its cancellation.
+    await rm(contentImagePath(f.dir, source.images[0].asset!));
     hold = true;
     const started = new Promise<void>((resolve) => {
       entered = resolve;
@@ -295,6 +301,7 @@ test("重新采集下载期间的交付独立持久化，关闭会取消未完�
     release!();
     assert.equal((await refresh).exports[0].targetId, result.delivery.targetId);
     assert.equal((await service.export(exportInput)).existing, true);
+    await rm(contentImagePath(f.dir, source.images[0].asset!));
     const next = new Promise<void>((resolve) => {
       entered = resolve;
     });
@@ -421,9 +428,16 @@ test("v20采集数据迁移保留原知乎素材关联、旧配图及已有文�
       }),
     );
     db.db.exec(
-      removeV22 + "DROP TABLE content_source_exports; PRAGMA user_version=20;",
+      // Reconstruct v20 instead of leaving tables introduced by v23–v30.
+      "DROP TABLE runtime_logs; DROP TABLE resource_landing_generations; DROP TABLE resource_landing_pages; " +
+        "DROP TABLE zhidao_answer_logs; DROP TABLE resource_links; " +
+        "DROP TABLE distribution_runs; DROP TABLE distribution_attempts; DROP TABLE distribution_batch_items; " +
+        "DROP TABLE distribution_batches; DROP TABLE distribution_events; DROP TABLE distribution_task_sources; DROP TABLE distribution_tasks; " +
+        removeV22 +
+        "DROP TABLE content_source_exports; PRAGMA user_version=20;",
     );
     db.close();
+    db = undefined;
     db = new Database(path);
     const next = JSON.parse(
       db.get<{ data: string }>("SELECT data FROM pipix_sources")!.data,
@@ -457,16 +471,40 @@ test("v20采集数据迁移保留原知乎素材关联、旧配图及已有文�
 });
 
 test("公共配图可复用微博现有填写端口，读取同一图片文件且不调用生成或提交", async () => {
-  const f = await weiboFixture(),
+  const f = await fixture(),
     service = sourcesFor(f);
   let prepares = 0,
-    submits = 0;
+    submits = 0,
+    generated = 0;
   try {
+    const session = {
+      hasSession: true,
+      uid: "1234567890",
+      nickname: "本地模拟微博账号",
+      windowOpen: false,
+      error: null,
+    };
+    f.ports.websiteSessions = {
+      isOpen: () => false,
+      login: async () => {},
+      clear: async () => {},
+      invalidate: async () => {},
+      status: async () => session,
+      verify: async () => session,
+    };
+    const account = f.app.websiteAccounts.add("weibo", "公共配图测试账号");
+    await f.app.websiteAccounts.verify(account.id);
+    Object.assign(f.app.ai, {
+      requestJson: async () => {
+        generated++;
+        throw Error("不应调用模型");
+      },
+    });
     await service.collect(`https://h5.pipix.com/ppx/item/${pipixItemId}`);
     const result = await service.export({
       ...exportInput,
       channel: "weibo",
-      accountId: f.websiteAccount.id,
+      accountId: account.id,
     });
     f.ports.weiboPublisher = {
       prepare: async (_a, payload) => {
@@ -484,14 +522,11 @@ test("公共配图可复用微博现有填写端口，读取同一图片文件�
         throw Error("不应提交");
       },
     };
-    const filled = await f.invoke("weiboPosts.fill", {
-      id: result.delivery.targetId,
-      confirmed: true,
-    });
+    const filled = await f.app.weiboPosts.fill(result.delivery.targetId);
     assert.equal(filled.stage, "filled");
     assert.equal(prepares, 1);
     assert.equal(submits, 0);
-    assert.equal(f.generated.length, 0);
+    assert.equal(generated, 0);
   } finally {
     service.close();
     await f.cleanup();

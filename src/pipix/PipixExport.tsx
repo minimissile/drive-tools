@@ -25,6 +25,7 @@ export function PipixExport({
   imageIds,
   commentIds,
   unavailable,
+  commentError,
   storageError,
   onOpenWeibo,
 }: {
@@ -38,6 +39,7 @@ export function PipixExport({
   imageIds: string[];
   commentIds: string[];
   unavailable: boolean;
+  commentError: string;
   storageError: string;
   onOpenWeibo(account: WebsiteAccountView, postId: string): void;
 }) {
@@ -215,6 +217,7 @@ export function PipixExport({
       {unavailable ? (
         <Notice>选中的图片尚未采集成功，请重新采集或取消选择失败图片。</Notice>
       ) : null}
+      {commentError ? <Notice warning>{commentError}</Notice> : null}
       {textTooLong ? (
         <Notice warning>
           所选文案与评论超过微博 2000 字符上限，请减少评论后再创建草稿。
@@ -243,6 +246,7 @@ export function PipixExport({
             busy ||
             !title.trim() ||
             unavailable ||
+            !!commentError ||
             textTooLong ||
             (channel === "weibo" &&
               (!account || account.status !== "connected" || !!accounts.error))

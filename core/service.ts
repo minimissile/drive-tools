@@ -32,6 +32,7 @@ import { coverFilePattern, saveResourceCover } from "./cover-assets";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
 import { WebsiteAccounts } from "./website-accounts";
+import { ZhihuParticipation } from "./zhihu-participation/service";
 import { ZhidaoOperations } from "./zhidao/service";
 import { ZhidaoPageDiscovery } from "./zhidao/page-discovery/service";
 import { createApplicationHandlers } from "./ipc";
@@ -104,6 +105,7 @@ export class AppService {
   readonly smzdm: SmzdmArticles;
   readonly distribution: Distribution;
   readonly zhihu: ZhihuOperations;
+  readonly zhihuParticipation: ZhihuParticipation;
   readonly intelligentOps: IntelligentOperations;
   readonly pipix: PipixSources;
   readonly contentSupply: ContentSupply;
@@ -398,11 +400,16 @@ export class AppService {
       changed,
     });
     this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
+    this.zhihuParticipation = new ZhihuParticipation({
+      db: this.db, accounts: this.websiteAccounts, ports: browserPorts,
+      zhihu: this.zhihu, dataPath, changed,
+    });
     this.intelligentOps = new IntelligentOperations({
       db: this.db, repo: this.repo, accounts: this.websiteAccounts,
       environments: this.environments, zhihu: this.zhihu,
       weiboPosts: this.weiboPosts, weiboStatistics: this.weiboStatistics,
       ai: this.ai, dataPath: this.dataPath, changed,
+      zhihuParticipation: this.zhihuParticipation,
     });
     this.contentSupply = new ContentSupply({
       db: this.db, dataPath: this.dataPath, pipix: this.pipix, ai: this.ai, changed,
@@ -414,6 +421,7 @@ export class AppService {
       },
     });
     this.handlers = createApplicationHandlers({
+      zhihuParticipation: this.zhihuParticipation,
       contentSupply: this.contentSupply,
       intelligentOps: this.intelligentOps,
       photoPosts: this.photoPosts,
@@ -984,6 +992,7 @@ export class AppService {
       this.weibo.isBusy ||
       this.weiboPosts.isBusy ||
       this.zhihu.isBusy ||
+      this.zhihuParticipation?.isBusy ||
       this.intelligentOps?.isBusy ||
       this.pipix.isBusy ||
       this.contentSupply?.isBusy ||
@@ -1286,6 +1295,7 @@ export class AppService {
     this.distribution.close();
     this.pipix.close();
     this.contentSupply.close();
+    this.zhihuParticipation.close();
     this.zhihu.close();
     this.weibo.close();
     this.csdn.close();

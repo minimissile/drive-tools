@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { AppError } from "../errors";
 import type { PipixItem } from "../../shared/pipix";
 import { pipixListText } from "./text";
+import { parsePipixJson } from "./json";
 
 type RecordValue = Record<string, any>;
 const text = (v: unknown, max = 10000): string =>
@@ -29,7 +30,7 @@ export function parsePipixPage(html: string, expectedId?: string): PipixItem {
     if (!/\bid\s*=\s*(["'])RENDER_DATA\1/i.test(attrs)) continue;
     try {
       const raw = value.trim();
-      data = JSON.parse(raw.startsWith("{") ? raw : decodeURIComponent(raw));
+      data = parsePipixJson(raw.startsWith("{") ? raw : decodeURIComponent(raw));
     } catch {
       throw new AppError(
         "PIPIX_PARSE",

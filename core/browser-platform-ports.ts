@@ -18,6 +18,11 @@ import { weiboStatisticsReading } from "../shared/weibo-statistics";
 import { baiduKeywordPath, buildBaiduKeywordRequest } from "./baidu-keywords";
 import { buildBaiduResearchRequest } from "./baidu-research";
 import { verifyZhihu, zhihuBrowser } from "./zhihu/browser";
+import {
+  openZhihuParticipationDocument,
+  zhihuParticipationBrowser,
+} from "./zhihu-participation/browser";
+import { zhihuInteractionBrowser } from "./zhihu-participation/interaction-browser";
 import { isDocumentProvider } from "../shared/document-platforms";
 import { createZhidaoBrowserSession } from "./zhidao/browser-session";
 import { verifyBitTieba } from "./tieba/browser-session";
@@ -95,6 +100,18 @@ export function createBrowserPlatformPorts(
   ) =>
     profile(webRef(a), (context) => bitBaiduExchange(context, a, spec, file));
   return Object.assign(Object.create(native) as AppPorts, {
+    zhihuInteraction:
+      native.zhihuInteraction ??
+      zhihuInteractionBrowser((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
+    zhihuParticipation:
+      native.zhihuParticipation ??
+      zhihuParticipationBrowser((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
     zhihu:
       native.zhihu ??
       zhihuBrowser((a, action) => {
@@ -212,6 +229,12 @@ export function createBrowserPlatformPorts(
         });
       },
       openDocument: async (a, url) => {
+        if (a.provider === "zhihu" && isBit(webRef(a)))
+          return profile(
+            webRef(a),
+            (context) => openZhihuParticipationDocument(context, a, url),
+            true,
+          );
         if (isBit(webRef(a)))
           throw new AppError(
             "DOCUMENT_NATIVE_SESSION",

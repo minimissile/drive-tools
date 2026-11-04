@@ -8,6 +8,7 @@ import type {
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { formatTime } from "../lib/format";
+import { formatRuntimeLogs } from "../lib/runtime-log";
 import { DataState, Loading, LoadingState } from "../ui/DataState";
 import { Pagination } from "../ui/Pagination";
 import { QueryError } from "../ui/QueryError";
@@ -25,6 +26,10 @@ const filters = z.object({
   search: z.string().max(200).default(""),
   excludeHeartbeats: z.boolean().default(true),
 });
+const logSource = z.object({
+  source: z.enum(["publishing", "participation"]).default("publishing"),
+});
+type LogSource = z.output<typeof logSource>["source"];
 type Account = { id: string; alias: string; nickname?: string | null };
 
 export function ZhihuLogRows({
@@ -94,25 +99,68 @@ export function ZhihuLogs({
   accounts: Account[];
   workspace: string;
 }) {
+  const sourceDraft = useLocalDraft(
+    `panxu-zhihu-log-source-v1:${workspace}`,
+    logSource.parse({}),
+    (value) => logSource.parse(value),
+  );
+  const [fullscreen, setFullscreen] = useState(false);
+  return (
+    <ZhihuLogSource
+      key={sourceDraft.value.source}
+      accounts={accounts}
+      workspace={workspace}
+      source={sourceDraft.value.source}
+      sourceError={sourceDraft.error}
+      setSource={(source) => sourceDraft.update({ source })}
+      fullscreen={fullscreen}
+      setFullscreen={setFullscreen}
+    />
+  );
+}
+
+function ZhihuLogSource({
+  accounts,
+  workspace,
+  source,
+  sourceError,
+  setSource,
+  fullscreen,
+  setFullscreen,
+}: {
+  accounts: Account[];
+  workspace: string;
+  source: LogSource;
+  sourceError: string;
+  setSource(source: LogSource): void;
+  fullscreen: boolean;
+  setFullscreen(value: boolean): void;
+}) {
   const draft = useLocalDraft(
-    `panxu-zhihu-logs-v1:${workspace}`,
+    source === "publishing"
+      ? `panxu-zhihu-logs-v1:${workspace}`
+      : `panxu-zhihu-logs-v1:${workspace}:${source}`,
     filters.parse({}),
     (value) => filters.parse(value),
   );
   const { notify } = useAppActions();
-  const [fullscreen, setFullscreen] = useState(false);
   const [follow, setFollow] = useState(true);
   const [held, setHeld] = useState<{
     key: string;
     data: RuntimeLogPage;
   } | null>(null);
-  const key = JSON.stringify(draft.value);
+  const sourceLabel = source === "publishing" ? "发布" : "日常参与与互动";
+  const key = JSON.stringify([source, draft.value]);
   const paused = held?.key === key;
-  const query = useIpcQuery("zhihu.logs", draft.value, {
-    keepPrevious: true,
-    refreshInterval: paused ? 0 : 5000,
-    delay: 180,
-  });
+  const query = useIpcQuery(
+    source === "publishing" ? "zhihu.logs" : "zhihu.participation.logs",
+    draft.value,
+    {
+      keepPrevious: true,
+      refreshInterval: paused ? 0 : 5000,
+      delay: 180,
+    },
+  );
   // The shared change subscription may still receive new data while paused.
   // Freeze only presentation so text selection and historical inspection stay stable.
   const data = paused ? held!.data : query.data;
@@ -123,15 +171,9 @@ export function ZhihuLogs({
     if (!data) return;
     try {
       await navigator.clipboard.writeText(
-        [...data.items]
-          .reverse()
-          .map(
-            (e) =>
-              `[${formatTime(e.createdAt)}] [${e.level.toUpperCase()}] [${context(e)}] ${e.event} ${e.message}${e.taskId ? ` · ${e.taskId}` : ""}\n${JSON.stringify(e.details)}`,
-          )
-          .join("\n"),
+        formatRuntimeLogs(data.items, context),
       );
-      notify("当前页日志已复制", "success");
+      notify(`当前页${sourceLabel}日志已复制`, "success");
     } catch {
       notify("无法写入剪贴板，可选中日志文字手动复制", "error");
     }
@@ -172,6 +214,18 @@ export function ZhihuLogs({
   const body = (
     <div className="zhihu-log-workspace">
       <div className="zhihu-log-filters">
+        <Field label="日志来源">
+          <Select
+            value={source}
+            items={[
+              { value: "publishing", label: "发布" },
+              { value: "participation", label: "日常参与与互动" },
+            ]}
+            onValueChange={(value) =>
+              setSource(logSource.shape.source.parse(value))
+            }
+          />
+        </Field>
         <Field label="账号">
           <Select
             value={draft.value.accountId}
@@ -238,15 +292,17 @@ export function ZhihuLogs({
           </span>
         ) : null}
       </div>
-      {draft.error ? <Notice warning>{draft.error}</Notice> : null}
+      {draft.error || sourceError ? (
+        <Notice warning>{draft.error || sourceError}</Notice>
+      ) : null}
       <QueryError
         error={paused ? "" : query.error}
         loading={!paused && query.loading}
         onRetry={query.reload}
-        title="日志读取失败"
+        title={`${sourceLabel}日志读取失败`}
       />
       {!data && !query.error ? (
-        <LoadingState label="正在读取运行日志…" compact />
+        <LoadingState label={`正在读取${sourceLabel}日志…`} compact />
       ) : null}
       {data && query.loading && !paused ? (
         <Loading label="正在更新日志…" />
@@ -256,6 +312,7 @@ export function ZhihuLogs({
           {data.items.length ? (
             <LogWindow
               key={JSON.stringify([
+                source,
                 draft.value.accountId,
                 draft.value.level,
                 draft.value.search,
@@ -264,7 +321,7 @@ export function ZhihuLogs({
                 fullscreen,
               ])}
               items={data.items}
-              label="知乎运行日志输出"
+              label={`知乎${sourceLabel}日志输出`}
               context={context}
               follow={follow && draft.value.page === 1 && !paused}
               onFollowChange={setFollow}
@@ -276,7 +333,10 @@ export function ZhihuLogs({
               compact
               icon={ScrollText}
             >
-              启动调度、检查等级或执行发布后，事件会记录在这里。可切换账号或级别查看其他记录。
+              {source === "publishing"
+                ? "启动调度、检查等级或执行发布后，事件会记录在这里。"
+                : "发现内容、保存参与计划、执行互动或只读核对后，事件会记录在这里。"}
+              可切换来源、账号或级别查看其他记录。
             </DataState>
           ) : null}
           <Pagination
@@ -288,7 +348,7 @@ export function ZhihuLogs({
               setFollow(false);
               draft.update({ page });
             }}
-            label="运行日志分页"
+            label={`${sourceLabel}日志分页`}
           />
           <p className="zhihu-log-location">
             本地文件 <span>{data.folder}</span>

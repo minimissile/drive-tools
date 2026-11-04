@@ -1,10 +1,22 @@
 import { z } from "zod";
+import { useEffect } from "react";
 import { ipc } from "../api/client";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppData, useAppNavigation } from "../state";
 import { formatTime } from "../lib/format";
-import { Button, Header, LoadingState, Notice, Status } from "../ui/primitives";
+import {
+  Button,
+  Empty,
+  Field,
+  Header,
+  LoadingState,
+  Notice,
+  Panel,
+  Status,
+} from "../ui/primitives";
+import { Select } from "../ui/Select";
+import { ZhihuParticipation } from "../zhihu/Participation";
 import { QueryError } from "../ui/QueryError";
 import { Tabs, TabList, TabPanel } from "../ui/Tabs";
 import { OperationsPlans } from "./Plans";
@@ -13,11 +25,12 @@ import { OperationsLogs } from "./Logs";
 import { OperationsAdvice } from "./Advice";
 import { OperationsAutonomy } from "./Autonomy";
 import { useOperationAction } from "./useOperationAction";
+import { useOperationsFocus } from "./OperationsFocus";
 import "./operations.css";
 
 const navigationSchema = z.object({
   tab: z
-    .enum(["autonomy", "tasks", "plans", "logs", "advice"])
+    .enum(["autonomy", "tasks", "participation", "plans", "logs", "advice"])
     .default("autonomy"),
   planId: z.string().default(""),
 });
@@ -37,8 +50,17 @@ export default function IntelligentOperationsWorkflow() {
   const { busy, interrupting, error, run, runInterrupt } = useOperationAction(
     query.reload,
   );
+  const { focus, consume } = useOperationsFocus();
+  useEffect(() => {
+    if (!focus) return;
+    nav.update({ tab: focus.tab, planId: focus.planId });
+    consume(focus.token);
+  }, [focus, consume, nav.update]);
   const s = query.data;
   const runtime = s?.runtime;
+  const participationPlan = s?.plans.find(
+    (plan) => plan.id === nav.value.planId,
+  );
   return (
     <div className="operations-workflow">
       <Header
@@ -130,6 +152,7 @@ export default function IntelligentOperationsWorkflow() {
             items={[
               ["autonomy", "自主运行"],
               ["tasks", "任务计划"],
+              ["participation", "日常参与"],
               ["plans", `运营计划 · ${s.plans.length}`],
               ["logs", "决策日志"],
               ["advice", "单次AI建议"],
@@ -139,6 +162,8 @@ export default function IntelligentOperationsWorkflow() {
             <OperationsAutonomy
               snapshot={s}
               workspace={data!.dataPath}
+              selectedPlanId={nav.value.planId}
+              selectPlan={(planId) => nav.update({ planId })}
               busy={busy || s.runtime.busy}
               interrupting={interrupting}
               run={run}
@@ -166,6 +191,72 @@ export default function IntelligentOperationsWorkflow() {
               busy={busy || s.runtime.busy}
               run={run}
             />
+          </TabPanel>
+          <TabPanel value="participation">
+            <div className="participation-embedded">
+              <Panel title="计划内知乎日常参与">
+                <Field label="关联运营计划">
+                  <Select
+                    value={nav.value.planId}
+                    items={[
+                      { value: "", label: "请选择运营计划" },
+                      ...s.plans.map((plan) => ({
+                        value: plan.id,
+                        label: plan.name,
+                      })),
+                    ]}
+                    onValueChange={(planId) => nav.update({ planId })}
+                  />
+                </Field>
+              </Panel>
+              {participationPlan ? (
+                participationPlan.accounts.some(
+                  (account) => account.channel === "zhihu",
+                ) ? (
+                  <ZhihuParticipation
+                    key={participationPlan.id}
+                    accounts={s.accounts
+                      .filter((account) => account.channel === "zhihu")
+                      .map((account) => ({
+                        id: account.id,
+                        alias: account.label,
+                        environmentName: account.environmentName,
+                        status: account.connected
+                          ? "connected"
+                          : "disconnected",
+                      }))}
+                    workspace={data!.dataPath}
+                    planId={participationPlan.id}
+                    accountIds={participationPlan.accounts
+                      .filter((account) => account.channel === "zhihu")
+                      .map((account) => account.accountId)}
+                  />
+                ) : (
+                  <Panel>
+                    <Empty
+                      compact
+                      title="此计划未关联知乎账号"
+                      action={
+                        <Button
+                          size="compact"
+                          onClick={() => nav.update({ tab: "plans" })}
+                        >
+                          编辑计划账号范围
+                        </Button>
+                      }
+                    >
+                      先在计划内关联需要参与的知乎账号；不会自动扩大到其他账号。
+                    </Empty>
+                  </Panel>
+                )
+              ) : (
+                <Panel>
+                  <Empty compact title="先选择一组运营计划">
+                    此页只显示所选计划的知乎账号及参与任务。独立账号的全部候选可在知乎工作台查看。
+                  </Empty>
+                </Panel>
+              )}
+            </div>
           </TabPanel>
           <TabPanel value="logs">
             <OperationsLogs plans={s.plans} workspace={data!.dataPath} />

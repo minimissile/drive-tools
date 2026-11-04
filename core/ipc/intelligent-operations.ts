@@ -8,6 +8,8 @@ import {
 import {
   operationsBrainCycleQuery,
   operationsBrainPermissions,
+  operationsBrainReconcileRoutingInput,
+  operationsBrainContinueInteractionInput,
 } from "../../shared/operations-brain";
 const identifier = z.object({ id: z.string().min(1).max(150) });
 const confirmed = identifier.extend({ confirmed: z.literal(true) });
@@ -15,7 +17,12 @@ export function createIntelligentOperationsHandlers({
   intelligentOps,
 }: Pick<HandlerServices, "intelligentOps">) {
   return {
+    "intelligentOps.quickView": () => intelligentOps.quickView(),
     "intelligentOps.brain.snapshot": () => intelligentOps.brainSnapshot(),
+    "intelligentOps.brain.continueZhihuInteraction": (raw: unknown) =>
+      intelligentOps.brainContinueZhihuInteraction(
+        operationsBrainContinueInteractionInput.parse(raw),
+      ),
     "intelligentOps.brain.cycles": (raw: unknown) =>
       intelligentOps.brainCycles(operationsBrainCycleQuery.parse(raw)),
     "intelligentOps.brain.activate": (raw: unknown) => {
@@ -43,6 +50,10 @@ export function createIntelligentOperationsHandlers({
             confirmed: z.literal(true),
           })
           .parse(raw).planId,
+      ),
+    "intelligentOps.brain.reconcileRoutingRejection": (raw: unknown) =>
+      intelligentOps.brainReconcileRoutingRejection(
+        operationsBrainReconcileRoutingInput.parse(raw),
       ),
     "intelligentOps.snapshot": () => intelligentOps.snapshot(),
     "intelligentOps.plan.save": (raw: unknown) =>

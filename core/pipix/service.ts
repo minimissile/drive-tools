@@ -21,6 +21,18 @@ import { TikHubPipixDiscovery } from "./discovery";
 import type { SecretStore } from "../secrets";
 import { PipixKnowledge } from "./knowledge";
 import { parsePipixData } from "./parser";
+import { PipixComments } from "./comments";
+import {
+  pipixCommentsFetch,
+  pipixRequestPolicy,
+  pipixCommentExclusions,
+} from "../../shared/pipix-acquisition";
+import {
+  PipixRequestBudget,
+  pipixPolicyKey,
+  pipixUsage,
+  readPipixPolicy,
+} from "./request-budget";
 
 export class PipixSources {
   private active = false;
@@ -29,6 +41,9 @@ export class PipixSources {
   private probing = false;
   private abort = new AbortController();
   private archive: PipixKnowledge;
+  readonly comments: PipixComments;
+  private discovery: TikHubPipixDiscovery;
+  private request: typeof fetch;
   constructor(
     private d: {
       db: Database;
@@ -45,9 +60,22 @@ export class PipixSources {
       >;
     },
     private client = new PipixClient(),
-    private discovery = new TikHubPipixDiscovery(),
+    discovery?: TikHubPipixDiscovery,
   ) {
     this.archive = new PipixKnowledge(d.db);
+    this.request = (input, init) =>
+      d.ports.pipixFetch
+        ? d.ports.pipixFetch(
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.href
+                : input.url,
+            init ?? {},
+          )
+        : fetch(input, init);
+    this.discovery = discovery ?? new TikHubPipixDiscovery(this.request);
+    this.comments = new PipixComments(d.db, this.request);
   }
   get isBusy() {
     return this.active || this.probing || this.exporting > 0;
@@ -65,6 +93,132 @@ export class PipixSources {
       ),
     };
   }
+  requestPolicy() {
+    return pipixUsage(this.d.db);
+  }
+  async checkConnection() {
+    if (this.closed || this.isBusy)
+      throw new AppError("PIPIX_BUSY", "请等待当前请求完成后检查网络。");
+    this.active = true;
+    try {
+      const response = await this.request("https://api.tikhub.io/", {
+        method: "GET",
+        redirect: "error",
+        credentials: "omit",
+        signal: AbortSignal.any([
+          this.abort.signal,
+          AbortSignal.timeout(15000),
+        ]),
+      });
+      await response.body?.cancel();
+      return { status: response.status };
+    } catch {
+      throw new AppError(
+        "PIPIX_CONNECTION",
+        "数据源网络检查未完成；本次未使用Key或计费接口，请检查系统网络连接。",
+      );
+    } finally {
+      this.active = false;
+    }
+  }
+  saveRequestPolicy(raw: unknown) {
+    const policy = pipixRequestPolicy.parse(raw);
+    if (this.closed || this.isBusy)
+      throw new AppError("PIPIX_BUSY", "请等待当前请求完成后修改请求设置。");
+    this.d.db.setSetting(pipixPolicyKey, policy);
+    this.d.changed();
+    return this.requestPolicy();
+  }
+  requestBudget(runId?: string, limit?: number) {
+    return new PipixRequestBudget(this.d.db, runId, limit);
+  }
+  async fetchComments(raw: unknown, suppliedBudget?: PipixRequestBudget) {
+    const input = pipixCommentsFetch.parse(raw);
+    if (this.closed || this.active || this.probing)
+      throw new AppError("PIPIX_BUSY", "请等待当前采集或请求完成。");
+    this.active = true;
+    const budget = suppliedBudget ?? this.requestBudget(undefined, 1);
+    let requestId: string | undefined;
+    try {
+      const next = this.comments.next(input.sourceId, input.refresh);
+      if ("cached" in next) return next.cached;
+      const key = await this.d.secrets?.get("pipix:tikhub");
+      if (!key)
+        throw new AppError(
+          "PIPIX_CONFIG",
+          "请在内容数据源设置中保存TikHub Key。",
+        );
+      if (this.closed) throw new AppError("PIPIX_CLOSED", "工作空间已关闭。");
+      requestId = budget.reserve("comments", () =>
+        this.comments.begin(
+          input.sourceId,
+          next.cursor,
+          next.page,
+          next.generation,
+        ),
+      );
+      await this.comments.fetchPage(
+        input.sourceId,
+        next.cursor,
+        key,
+        AbortSignal.any([this.abort.signal, AbortSignal.timeout(45000)]),
+        (body, status) => {
+          if (this.closed)
+            throw new AppError("PIPIX_CLOSED", "工作空间已关闭。");
+          this.comments.receive(requestId!, body, status, key);
+          budget.received(requestId!, status);
+        },
+      );
+      const result = this.comments.index(requestId);
+      this.d.changed();
+      return result;
+    } catch (error) {
+      if (requestId && !this.closed) {
+        budget.uncertain(requestId);
+        this.comments.fail(requestId, error);
+        this.d.changed();
+      }
+      throw error;
+    } finally {
+      this.active = false;
+    }
+  }
+  private withComments(source: PipixItem): PipixItem {
+    const summary = this.comments.read({ sourceId: source.id }),
+      comments = this.comments.usable(source.id);
+    if (!summary.responses) return source;
+    const ranked = [...comments].sort(
+      (a, b) =>
+        Number(/神评/.test(b.label)) - Number(/神评/.test(a.label)) ||
+        (b.likes ?? -1) - (a.likes ?? -1),
+    );
+    return {
+      ...source,
+      comments: this.comments.hasIndexed(source.id)
+        ? ranked.slice(0, 50)
+        : source.comments,
+      commentArchive: {
+        total: summary.total,
+        labeled: summary.labeled,
+        hasMore: summary.hasMore,
+        fetchedAt: summary.latestAt,
+        issue: summary.issue,
+        usableTotal: summary.usableTotal,
+        excluded: summary.excluded,
+      },
+      warnings: [
+        ...new Set([
+          ...source.warnings.filter(
+            (warning) =>
+              !warning.startsWith("独立评论库已保存") &&
+              warning !== source.commentArchive?.issue,
+          ),
+          `独立评论库已保存${summary.total}条文字评论，过滤${summary.excluded}条，编辑快照最多50条；神评仅按来源标签识别。`,
+          ...(summary.issue ? [summary.issue] : []),
+        ]),
+      ],
+    };
+  }
   async saveDiscoveryKey(raw: unknown) {
     const { value } = pipixDiscoveryKeyInput.parse(raw);
     if (this.closed || this.active || this.probing)
@@ -79,17 +233,21 @@ export class PipixSources {
       this.active = false;
     }
   }
-  async discover(raw: unknown) {
+  async discover(raw: unknown, budget?: PipixRequestBudget) {
     if (this.probing)
       throw new AppError("PIPIX_BUSY", "单页容量测试正在进行，请等待完成。");
-    return this.discoverPage(raw);
+    return this.discoverPage(raw, budget);
   }
-  private async discoverPage(raw: unknown) {
+  private async discoverPage(
+    raw: unknown,
+    suppliedBudget?: PipixRequestBudget,
+  ) {
     const input = pipixDiscoverInput.parse(raw);
     if (this.closed || this.active)
       throw new AppError("PIPIX_BUSY", "采集或列表查询正在进行，请稍后重试。");
     this.active = true;
     let responseId: string | undefined;
+    const budget = suppliedBudget ?? this.requestBudget(undefined, 1);
     try {
       if (!input.force) {
         const cached = this.archive.cached(input);
@@ -103,7 +261,7 @@ export class PipixSources {
         );
       if (this.closed)
         throw new AppError("PIPIX_CLOSED", "当前工作空间已关闭。");
-      responseId = this.archive.begin(input);
+      responseId = budget.reserve("list", () => this.archive.begin(input));
       await this.discovery.discover(
         input,
         key,
@@ -112,6 +270,7 @@ export class PipixSources {
           if (this.closed)
             throw new AppError("PIPIX_CLOSED", "当前工作空间已关闭。");
           this.archive.receive(responseId!, body, status, key);
+          budget.received(responseId!, status);
         },
       );
       if (this.closed)
@@ -121,6 +280,7 @@ export class PipixSources {
       return { ...result, cached: false };
     } catch (e) {
       if (responseId && !this.closed) {
+        budget.uncertain(responseId);
         this.archive.fail(responseId, e);
         this.d.changed();
         throw new AppError(
@@ -138,6 +298,10 @@ export class PipixSources {
       throw new AppError("PIPIX_BUSY", "请等待当前采集操作完成。");
     const input = pipixDiscoverInput.parse({ mode: "search", keyword });
     this.probing = true;
+    const budget = this.requestBudget(
+      undefined,
+      Math.min(3, readPipixPolicy(this.d.db).requestsPerRun),
+    );
     const baseline = this.archive.cached(input);
     const report: PipixCapacityReport = {
       keyword: input.keyword,
@@ -156,7 +320,7 @@ export class PipixSources {
       for (const probe of probes) {
         if (this.closed) break;
         try {
-          const result = await this.discoverPage({ ...input, probe });
+          const result = await this.discoverPage({ ...input, probe }, budget);
           report.maxObserved = Math.max(
             report.maxObserved,
             result.items.length,
@@ -194,6 +358,11 @@ export class PipixSources {
   }
   knowledge(raw: unknown) {
     return this.archive.read(raw);
+  }
+  reuseList(raw: unknown) {
+    const input = pipixDiscoverInput.parse(raw),
+      cached = this.archive.cached(input);
+    return cached ? this.archive.reuse(cached) : null;
   }
   reindex() {
     if (this.closed || this.active || this.probing)
@@ -237,17 +406,32 @@ export class PipixSources {
   }
   /** Supply jobs use archived responses first and never make paid discovery calls. */
   async ensureCollected(sourceId: string, refresh = false) {
-    const previous = this.d.db.get<{ data: string }>("SELECT data FROM pipix_sources WHERE id=?", sourceId);
+    const previous = this.d.db.get<{ data: string }>(
+      "SELECT data FROM pipix_sources WHERE id=?",
+      sourceId,
+    );
     if (previous && !refresh) {
       const item: PipixItem = JSON.parse(previous.data);
       if (item.images.every((image) => image.asset)) {
         try {
-          for (const image of item.images) await readContentImage(this.d.dataPath, image.asset!);
-          return { source: item, reused: true };
-        } catch { /* Retry missing or damaged assets through the original collector. */ }
+          for (const image of item.images)
+            await readContentImage(this.d.dataPath, image.asset!);
+          const next = this.withComments(item);
+          this.save(next);
+          return { source: next, reused: true };
+        } catch {
+          /* Retry missing or damaged assets through the original collector. */
+        }
       }
     }
-    return { source: await this.collect(`https://h5.pipix.com/ppx/item/${sourceId}`, true, refresh), reused: false };
+    return {
+      source: await this.collect(
+        `https://h5.pipix.com/ppx/item/${sourceId}`,
+        true,
+        refresh,
+      ),
+      reused: false,
+    };
   }
   async collect(text: string, preferArchive = false, refreshComments = false) {
     if (this.closed || this.active || this.probing)
@@ -270,7 +454,9 @@ export class PipixSources {
           (image: { error?: string }) => image.error,
         );
       const local =
-        cached && (preferArchive || (!cacheFailed && Array.isArray(cached.note?.multi_image)))
+        cached &&
+        (preferArchive ||
+          (!cacheFailed && Array.isArray(cached.note?.multi_image)))
           ? parsePipixData({ ppxItemDetail: { item: cached } }, sourceId, true)
           : null;
       const source =
@@ -279,27 +465,39 @@ export class PipixSources {
         (preferArchive || !(local.commentCount && !local.comments.length))
           ? local
           : await this.client.collect(text, signal());
-      if (preferArchive && source === local && (refreshComments || (source.commentCount && !source.comments.length))) {
+      if (
+        preferArchive &&
+        source === local &&
+        !this.comments.hasIndexed(source.id) &&
+        (refreshComments || (source.commentCount && !source.comments.length))
+      ) {
         try {
           const page = await this.client.collect(text, signal());
           source.comments = page.comments;
           source.warnings.push(...page.warnings);
-          if (!page.comments.length) source.warnings.push("分享页也未返回评论；未调用付费评论接口。");
+          if (!page.comments.length)
+            source.warnings.push("分享页也未返回评论；未调用付费评论接口。");
         } catch (error) {
           if (this.closed) throw error;
-          source.warnings.push(`分享页补充评论未完成：${safeMessage(error)} 已保留本地原帖，未调用付费评论接口。`);
+          source.warnings.push(
+            `分享页补充评论未完成：${safeMessage(error)} 已保留本地原帖，未调用付费评论接口。`,
+          );
         }
       }
       for (const image of source.images) {
         try {
-          const old: PipixItem | null = previous ? JSON.parse(previous.data) : null;
+          const old: PipixItem | null = previous
+            ? JSON.parse(previous.data)
+            : null;
           const asset = old?.images.find((v) => v.url === image.url)?.asset;
           if (asset) {
             try {
               await readContentImage(this.d.dataPath, asset);
               image.asset = asset;
               continue;
-            } catch { /* Fetch only the asset that could not be reused. */ }
+            } catch {
+              /* Fetch only the asset that could not be reused. */
+            }
           }
           const raw = await this.client.image(image.url, signal());
           const bytes = await this.d.ports.normalizeCover(raw);
@@ -318,9 +516,10 @@ export class PipixSources {
         source.warnings.push(
           "部分图片读取失败；可重新采集，或取消选择失败图片后导入。",
         );
-      this.save(source);
+      const next = this.withComments(source);
+      this.save(next);
       this.d.changed();
-      return { ...source, exports: this.exports(source.id) };
+      return { ...next, exports: this.exports(source.id) };
     } finally {
       this.active = false;
     }
@@ -344,7 +543,9 @@ export class PipixSources {
         input.channel === "weibo" ? (input.accountId ?? "") : "";
       const existing = () =>
         this.exports(source.id).find(
-          (v) => v.channel === input.channel && (input.channel === "zhihu" || v.accountId === accountId),
+          (v) =>
+            v.channel === input.channel &&
+            (input.channel === "zhihu" || v.accountId === accountId),
         );
       const previous = existing();
       if (previous) return { delivery: previous, existing: true };
@@ -365,6 +566,16 @@ export class PipixSources {
           throw new AppError(
             "PIPIX_COMMENT",
             "选中的评论已变化，请刷新后重新选择。",
+          );
+        if (
+          pipixCommentExclusions(
+            comment,
+            readPipixPolicy(this.d.db).excludedCommentTerms,
+          ).length
+        )
+          throw new AppError(
+            "PIPIX_COMMENT_FILTERED",
+            "选中的评论含有被过滤的平台词或称呼，请取消选择；原文仍在归档中。",
           );
         return comment;
       });

@@ -173,6 +173,26 @@
   border-top: 1px solid var(--line);
   padding-top: var(--space-4);
 }
+.supply-acquisition {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  margin-block: var(--space-4);
+  border-block: 1px solid var(--line);
+}
+.supply-comment-requests {
+  display: grid;
+  gap: var(--space-3);
+  padding-block-start: var(--space-3);
+}
+.pipix-comment-library > .row,
+.pipix-comment-library > .checkbox-field,
+.pipix-comment-library > .button {
+  margin-block: var(--space-2);
+}
+.pipix-comment-library .supply-comment {
+  padding-block: var(--space-2);
+}
 .supply-delivery > .button {
   justify-self: start;
 }
@@ -187,4 +207,29 @@
 .supply-log-path,
 .supply-id {
   overflow-wrap: anywhere;
+}
+.supply-log-workspace {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.supply-log-dialog .dialog-body {
+  overflow: hidden;
+}
+.supply-log-dialog .supply-log-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.supply-log-dialog .log-window {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 160px;
+}
+.supply-log-dialog .log-window-viewport {
+  height: auto;
+  flex: 1;
+  min-height: 0;
 }

@@ -7,7 +7,7 @@ import type {
   AgentTurnResult,
 } from "../shared/ai-agent";
 import { Database, id, now } from "./database";
-import { AppError, ServiceHttpError } from "./errors";
+import { AppError, ServiceHttpError, safeMessage } from "./errors";
 import { fetchJson } from "./http";
 import { nonnegativePrice } from "./model-pricing";
 import { budgetDayStart } from "./traffic";
@@ -76,6 +76,7 @@ function toolCall(value: unknown, toolNames: Set<string>): AgentToolCall {
 function assistantMessage(
   value: unknown,
   toolNames: Set<string>,
+  maxToolCalls = 1,
 ): AgentAssistantMessage {
   if (!record(value) || value.role !== "assistant")
     invalid("模型未返回assistant消息。");
@@ -83,12 +84,21 @@ function assistantMessage(
     value.content == null ? null : text(value.content, 200_000, "模型内容");
   const result: AgentAssistantMessage = { role: "assistant", content };
   if (value.tool_calls != null) {
-    // Sequential operation is enforced even if a provider ignores parallel_tool_calls:false.
-    if (!Array.isArray(value.tool_calls) || value.tool_calls.length > 1)
-      invalid("本轮只允许一个顺序工具调用。");
+    // A provider can return several requests even when the prompt asks for one.
+    // The domain validates the whole bounded batch, then runs it sequentially.
+    if (
+      !Array.isArray(value.tool_calls) ||
+      value.tool_calls.length > maxToolCalls
+    )
+      invalid(`本轮模型响应最多接受${maxToolCalls}个顺序工具请求。`);
     result.tool_calls = value.tool_calls.map((call) =>
       toolCall(call, toolNames),
     );
+    if (
+      new Set(result.tool_calls.map((call) => call.id)).size !==
+      result.tool_calls.length
+    )
+      invalid("同一响应的工具调用ID重复，未执行任何工具。");
   }
   if (value.reasoning != null)
     result.reasoning = text(value.reasoning, 500_000, "推理上下文");
@@ -108,7 +118,11 @@ function assistantMessage(
   return result;
 }
 
-function validateConversation(messages: unknown, tools: unknown) {
+function validateConversation(
+  messages: unknown,
+  tools: unknown,
+  maxToolCalls = 1,
+) {
   if (!Array.isArray(tools) || tools.length < 1 || tools.length > 32)
     invalid("每轮必须提供1至32个工具定义。");
   const names = new Set<string>();
@@ -149,7 +163,7 @@ function validateConversation(messages: unknown, tools: unknown) {
     }
     if (outstanding.size) invalid("必须先返回所有工具调用结果再继续对话。");
     if (message.role === "assistant") {
-      const parsed = assistantMessage(message, names);
+      const parsed = assistantMessage(message, names, maxToolCalls);
       for (const call of parsed.tool_calls ?? []) {
         if (calls.has(call.id)) invalid("对话中存在重复工具调用ID。");
         calls.add(call.id);
@@ -170,13 +184,24 @@ function validateConversation(messages: unknown, tools: unknown) {
 export function agentModelPrices(selected: AiModel) {
   const prompt = nonnegativePrice(selected.promptPrice),
     completion = nonnegativePrice(selected.completionPrice),
-    request = nonnegativePrice(selected.requestPrice);
-  if (prompt == null || completion == null || request == null)
+    quotedRequest = nonnegativePrice(selected.requestPrice);
+  if (
+    prompt == null ||
+    completion == null ||
+    (selected.requestPrice != null && quotedRequest == null)
+  )
     throw new AppError(
       "MODEL_PRICE_REQUIRED",
-      "自主运营需要完整的输入、输出及每次请求报价，请刷新OpenRouter模型列表。",
+      "自主运营需要有效的输入、输出报价及可识别的固定费格式，请刷新OpenRouter模型列表。",
     );
-  return { prompt, completion, request };
+  // PublicPricing.request is optional in OpenRouter's OpenAPI schema. Missing is
+  // not a quoted zero: the routing policy refuses endpoints charging a fixed fee.
+  return {
+    prompt,
+    completion,
+    requestPriceKnown: quotedRequest != null,
+    requestPriceCeiling: quotedRequest ?? 0,
+  };
 }
 
 function actualCost(response: unknown): number | null {
@@ -186,6 +211,41 @@ function actualCost(response: unknown): number | null {
     return null;
   const micros = Math.ceil(value * 1_000_000);
   return Number.isSafeInteger(micros) ? micros : null;
+}
+
+function perMillion(price: number): number {
+  // Avoid routing a $0.1/M endpoint out with a binary-float ceiling of 0.09999999999999999.
+  return Number((price * 1_000_000).toPrecision(15));
+}
+
+function providerDiagnostic(error: unknown, key: string): string {
+  if (!(error instanceof ServiceHttpError)) return "";
+  let message = error.message;
+  // A provider may echo a credential without the usual sk-/Bearer prefix. Scrub
+  // this request's actual value before truncating or retaining diagnostic text.
+  const forms = new Set([
+    key,
+    JSON.stringify(key).slice(1, -1),
+    Buffer.from(key).toString("base64"),
+  ]);
+  try {
+    forms.add(encodeURIComponent(key));
+    forms.add(encodeURI(key));
+  } catch {
+    /* Malformed pasted Unicode must not break error accounting. */
+  }
+  for (const secret of forms)
+    if (secret) message = message.split(secret).join("[已隐藏Key]");
+  message = message.replace(
+    /\b(?:api[-_]?key|key|credential|secret|password|token)["']?\s*[:=]\s*["']?[^\s,;"'}]+/gi,
+    "凭据=[已隐藏]",
+  );
+  const safe = safeMessage(new Error(message))
+    .replace(/[\x00-\x1f\x7f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+  return safe ? ` 服务原因：${safe}` : "";
 }
 
 export interface AgentTransportDependencies {
@@ -202,9 +262,13 @@ export async function runAgentTurn(
   deps: AgentTransportDependencies,
   input: AgentTurnInput,
 ): Promise<AgentTurnResult> {
+  const maxToolCalls = input.maxToolCalls ?? 1;
+  if (!Number.isInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > 4)
+    invalid("模型工具请求批次上限需要在1至4之间。");
   const { messages, names, callIds } = validateConversation(
     input.messages,
     input.tools,
+    maxToolCalls,
   );
   const scope = input.budgetScope;
   if (
@@ -229,29 +293,49 @@ export async function runAgentTurn(
   )
     invalid("请求超时应介于1至180秒。");
   const prices = agentModelPrices(deps.selected);
+  const effort = input.reasoningEffort ?? "default";
+  if (!["auto", "default", "low", "medium", "high", "none"].includes(effort))
+    invalid("推理强度配置无法识别。");
+  const selectedEffort =
+    effort === "auto"
+      ? deps.selected.reasoningEfforts?.includes("low")
+        ? "low"
+        : null
+      : effort === "default"
+        ? null
+        : effort;
+  if (
+    selectedEffort &&
+    !deps.selected.reasoningEfforts?.includes(selectedEffort)
+  )
+    invalid(
+      "当前模型目录未声明所选推理强度，未发送请求；请刷新目录或选择自动。",
+    );
   const payload = {
     model: deps.model,
     messages,
     tools: input.tools,
     tool_choice: "auto",
-    parallel_tool_calls: false,
     max_tokens: maxTokens,
     stream: false,
+    ...(selectedEffort ? { reasoning: { effort: selectedEffort } } : {}),
     provider: {
       require_parameters: true,
       allow_fallbacks: false,
       // Catalog prices are a ceiling, not permission to route to a more expensive provider.
       max_price: {
-        prompt: prices.prompt * 1_000_000,
-        completion: prices.completion * 1_000_000,
-        request: prices.request,
+        prompt: perMillion(prices.prompt),
+        completion: perMillion(prices.completion),
+        request: prices.requestPriceCeiling,
       },
     },
   };
   const bytes = jsonSize(payload, maxPayloadBytes, "智能运营请求");
   // UTF-8 bytes are a conservative input-token upper bound, including tools and reasoning.
   const reserved = Math.ceil(
-    (bytes * prices.prompt + maxTokens * prices.completion + prices.request) *
+    (bytes * prices.prompt +
+      maxTokens * prices.completion +
+      prices.requestPriceCeiling) *
       1_000_000,
   );
   if (!Number.isSafeInteger(reserved)) invalid("模型报价无法安全估算。");
@@ -332,13 +416,16 @@ export async function runAgentTurn(
   let dispatched = false,
     billed: number | null = null,
     reconciled = false;
-  const settle = (message: string) => {
+  const settle = (message: string, status?: "failed") => {
     deps.db.run(
       "UPDATE api_calls SET status=?,confirmed_micros=?,reserved_micros=?,message=? WHERE id=?",
-      billed == null ? "uncertain" : "success",
+      status ?? (billed == null ? "uncertain" : "success"),
       billed,
       billed ?? reserved,
-      message,
+      message +
+        (prices.requestPriceKnown
+          ? ""
+          : " 目录未提供固定请求费；路由策略强制固定费上限为0，不将缺省报价记为免费。"),
       requestId,
     );
     reconciled = true;
@@ -397,13 +484,38 @@ export async function runAgentTurn(
         "INVALID_AI_RESPONSE",
         "模型响应结构无法识别，未执行工具。",
       );
-    let message: AgentAssistantMessage;
-    try {
-      message = assistantMessage(choice.message, names);
-    } catch {
+    const finishReason =
+      choice.finish_reason == null
+        ? null
+        : text(choice.finish_reason, 100, "模型结束原因");
+    if (
+      finishReason !== null &&
+      !["stop", "tool_calls"].includes(finishReason)
+    ) {
+      const usage = record(response.usage) ? response.usage : {},
+        details = record(usage.completion_tokens_details)
+          ? usage.completion_tokens_details
+          : {};
+      const count = (value: unknown) =>
+        typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+          ? value
+          : "未提供";
       throw new AppError(
         "INVALID_AI_RESPONSE",
-        "模型内容或工具调用未通过结构校验，费用已登记，未执行工具。",
+        `模型输出未完整结束（${finishReason === "length" ? "达到输出token上限" : "服务中止"}），费用已登记，未执行工具。输出tokens=${count(usage.completion_tokens)}，推理tokens=${count(details.reasoning_tokens)}。`,
+      );
+    }
+    let message: AgentAssistantMessage;
+    try {
+      message = assistantMessage(choice.message, names, maxToolCalls);
+    } catch (error) {
+      const detail =
+        error instanceof AppError && error.code === "INVALID_AGENT_REQUEST"
+          ? safeMessage(error)
+          : "结构无法识别";
+      throw new AppError(
+        "INVALID_AI_RESPONSE",
+        `模型内容或工具调用未通过结构校验：${detail}费用已登记，未执行工具。`,
       );
     }
     for (const call of message.tool_calls ?? []) {
@@ -413,10 +525,6 @@ export async function runAgentTurn(
           "模型重复使用工具调用ID，已停止周期，未执行工具。",
         );
     }
-    const finishReason =
-      choice.finish_reason == null
-        ? null
-        : text(choice.finish_reason, 100, "模型结束原因");
     if (
       (finishReason != null &&
         !["stop", "tool_calls"].includes(finishReason)) ||
@@ -436,6 +544,7 @@ export async function runAgentTurn(
     };
   } catch (error) {
     // Once dispatch has begun, even abort/network/HTTP failures may have been billed. Never retry.
+    const diagnostic = providerDiagnostic(error, key);
     if (!reconciled) {
       if (!dispatched)
         deps.db.run(
@@ -443,16 +552,29 @@ export async function runAgentTurn(
           "自主运营请求在发送前取消，未调用服务。",
           requestId,
         );
-      else
+      else if (
+        error instanceof ServiceHttpError &&
+        error.status === 404 &&
+        !(billed != null && billed > 0)
+      ) {
+        // OpenRouter commits HTTP 200 once a provider accepts inference. A real
+        // HTTP 404 is a pre-acceptance routing/request rejection, not a mid-run
+        // error.code=404 carried inside HTTP 200. Do not generalize to 5xx/timeouts.
+        billed = 0;
+        settle(
+          `自主运营HTTP 404在服务接受生成前拒绝；确认未计费，预留已释放，未执行工具且不自动重试。${diagnostic}`,
+          "failed",
+        );
+      } else
         settle(
           billed == null
-            ? "自主运营请求中断；账单未知，保留预留预算并停止周期（美元）。"
-            : "自主运营响应异常；已登记服务返回实费，未执行工具（美元）。",
+            ? `自主运营请求中断；账单未知，保留预留预算并停止周期（美元）。${diagnostic}`
+            : `自主运营响应异常；已登记服务返回实费，未执行工具（美元）。${diagnostic}`,
         );
     } else
       deps.db.run(
         "UPDATE api_calls SET message=message||? WHERE id=?",
-        " 返回内容或费用未通过检查，当前周期停止，未执行工具。",
+        ` 返回内容或费用未通过检查，当前周期停止，未执行工具。${diagnostic}`,
         requestId,
       );
     if (
@@ -462,6 +584,7 @@ export async function runAgentTurn(
       [
         "INVALID_AI_RESPONSE",
         "AI_BUDGET_EXCEEDED",
+        "AI_COST_OVERRUN",
         "INVALID_AGENT_REQUEST",
       ].includes(error.code) &&
       reconciled &&
@@ -474,7 +597,7 @@ export async function runAgentTurn(
       dispatched && billed == null
         ? "AI_COST_UNCERTAIN"
         : "AI_AGENT_REQUEST_FAILED",
-      `自主运营模型请求未完成${status}，调用记录 ${requestId}；${dispatched && billed == null ? "实际费用待核实，禁止自动重试" : "当前周期已停止"}。`,
+      `自主运营模型请求未完成${status}，调用记录 ${requestId}；${dispatched && billed == null ? "实际费用待核实，禁止自动重试" : "当前周期已停止"}。${diagnostic}`,
       dispatched && billed == null,
     );
   } finally {

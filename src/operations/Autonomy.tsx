@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { z } from "zod";
 import type { OperationsSnapshot } from "../../shared/intelligent-operations";
 import { operationsBrainConfig } from "../../shared/operations-brain";
 import { ipc } from "../api/client";
 import { useIpcQuery } from "../api/useIpcQuery";
-import { useLocalDraft } from "../hooks/useLocalDraft";
 import { formatMoney, formatTime } from "../lib/format";
 import {
   Button,
@@ -19,15 +17,16 @@ import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { BrainCycles } from "./BrainCycles";
 import { BrainAuthorization } from "./BrainAuthorization";
+import { AutonomyParticipationQueue } from "./AutonomyParticipationQueue";
 import { permissionCopy } from "./AutonomyPolicy";
 import type { OperationsBrainPermissions } from "../../shared/operations-brain";
 import type { OperationAction } from "./useOperationAction";
 
-const navigationSchema = z.object({ planId: z.string().default("") });
-
 export function OperationsAutonomy({
   snapshot: s,
   workspace,
+  selectedPlanId,
+  selectPlan,
   busy,
   interrupting,
   run,
@@ -37,6 +36,8 @@ export function OperationsAutonomy({
 }: {
   snapshot: OperationsSnapshot;
   workspace: string;
+  selectedPlanId: string;
+  selectPlan(planId: string): void;
   busy: boolean;
   interrupting: boolean;
   run: OperationAction;
@@ -44,18 +45,12 @@ export function OperationsAutonomy({
   editPlan(id: string): void;
   openSettings(): void;
 }) {
-  const navigation = useLocalDraft(
-    `panxu-operations-autonomy-v1:${workspace}`,
-    navigationSchema.parse({}),
-    (value) => navigationSchema.parse(value),
-  );
   const brain = useIpcQuery("intelligentOps.brain.snapshot", undefined, {
     keepPrevious: true,
     refreshInterval: 5000,
   });
   const [grantRevision, setGrantRevision] = useState<number | null>(null);
-  const plan =
-    s.plans.find((p) => p.id === navigation.value.planId) ?? s.plans[0];
+  const plan = s.plans.find((p) => p.id === selectedPlanId) ?? s.plans[0];
   const runtime = brain.data?.plans.find((p) => p.planId === plan?.id);
   const config = plan?.brain ?? operationsBrainConfig.parse({});
   const memory = brain.data?.memory.filter((m) => m.planId === plan?.id) ?? [];
@@ -102,7 +97,7 @@ export function OperationsAutonomy({
                   value={plan?.id ?? ""}
                   items={s.plans.map((p) => ({ value: p.id, label: p.name }))}
                   onValueChange={(planId) => {
-                    navigation.update({ planId });
+                    selectPlan(planId);
                     setGrantRevision(null);
                   }}
                 />
@@ -114,9 +109,6 @@ export function OperationsAutonomy({
                 {readiness}
               </span>
             </div>
-            {navigation.error ? (
-              <Notice warning>{navigation.error}</Notice>
-            ) : null}
             <QueryError
               error={brain.error}
               loading={brain.loading}
@@ -152,7 +144,7 @@ export function OperationsAutonomy({
                     <dd>{runtime?.running ? "正在决策或执行" : "未在执行"}</dd>
                   </div>
                   <div>
-                    <dt>下次唤醒</dt>
+                    <dt>下次模型观察</dt>
                     <dd>
                       {runtime?.nextWakeAt
                         ? formatTime(runtime.nextWakeAt)
@@ -203,6 +195,19 @@ export function OperationsAutonomy({
                         : "尚未授权"}
                     </dd>
                   </div>
+                  {config.permissions.engage ? (
+                    <div>
+                      <dt>知乎相关参与限制</dt>
+                      <dd>
+                        每账号每日最多尝试 {config.interactionDailyLimit} 项
+                        （跨计划共用）· 实际最小间隔{" "}
+                        {Math.max(60, config.interactionGapMinutes)} 分钟
+                        {runtime?.permissions.engage !== true
+                          ? " · 本次尚未授权"
+                          : ""}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
                 <p className="operations-quiet">
                   {runtime?.message ||
@@ -210,6 +215,11 @@ export function OperationsAutonomy({
                 </p>
               </>
             ) : null}
+            <AutonomyParticipationQueue
+              key={plan.id}
+              planId={plan.id}
+              accounts={s.accounts}
+            />
             {plan.mode !== "autonomous" ? (
               <Notice>
                 当前计划采用规则排期。先在计划编辑中选择“AI自主运营”，保存预算和权限范围。
@@ -254,6 +264,7 @@ export function OperationsAutonomy({
                           create: false,
                           reviewOwn: false,
                           publish: false,
+                          engage: false,
                         },
                         confirmed: true,
                       }),

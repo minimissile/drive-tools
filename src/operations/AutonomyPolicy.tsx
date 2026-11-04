@@ -7,17 +7,29 @@ import { CheckboxField } from "../ui/CheckboxField";
 import { Field } from "../ui/primitives";
 import { Select } from "../ui/Select";
 
+export const reasoningEffortLabels: Record<
+  OperationsBrainConfig["reasoningEffort"],
+  string
+> = {
+  auto: "自动（按能力优先 low）",
+  default: "模型默认",
+  low: "低",
+  medium: "中",
+  high: "高",
+  none: "关闭",
+};
+
 export const permissionCopy: Record<
   keyof OperationsBrainPermissions,
   { label: string; hint: string }
 > = {
   read: {
     label: "观察状态、规划任务与记录经验",
-    hint: "读取本计划账号、库存和已接入的实际指标；可准备本地待授权排期、记录本计划记忆。",
+    hint: "读取计划账号、库存、实际指标及相关官方内容；可发现问题与作者、准备本地待办和排期、记录经验。",
   },
   create: {
-    label: "创建AI辅助原创内容",
-    hint: "按计划方向创建原创版本，不使用未获准的外部素材。",
+    label: "创建AI辅助稿与待审回答",
+    hint: "按计划方向准备原创稿或基于问题上下文起草回答；参与回答须本人审核，不自动提交。",
   },
   reviewOwn: {
     label: "自动核验并审核本智能体创建的版本",
@@ -26,6 +38,10 @@ export const permissionCopy: Record<
   publish: {
     label: "提交已审核内容",
     hint: "仍受账号暂停、额度、执行时段、错峰、平台验证与回执规则约束。",
+  },
+  engage: {
+    label: "自主参与相关讨论（知乎点赞、评论与关注）",
+    hint: "仅围绕真实上下文正常参与；不做互赞互关、账号间配合或模板刷评。须有相关性依据，遇到验证或结果未知即停止。",
   },
 };
 
@@ -117,7 +133,36 @@ export function AutonomyPolicyEditor({
                 onChange={(dailyBudgetMicros) => patch({ dailyBudgetMicros })}
               />
             </div>
+            <Field label="单次输出上限（token）">
+              <input
+                type="number"
+                min={1000}
+                max={16000}
+                value={value.maxOutputTokens}
+                onChange={(e) =>
+                  patch({ maxOutputTokens: Number(e.target.value) })
+                }
+              />
+            </Field>
+            <Field label="推理强度">
+              <Select
+                value={value.reasoningEffort}
+                items={Object.entries(reasoningEffortLabels).map(
+                  ([value, label]) => ({ value, label }),
+                )}
+                onValueChange={(reasoningEffort) =>
+                  patch({
+                    reasoningEffort:
+                      reasoningEffort as OperationsBrainConfig["reasoningEffort"],
+                  })
+                }
+              />
+            </Field>
           </div>
+          <p className="operations-quiet">
+            自动仅在模型目录明确支持 low
+            时使用低推理强度，否则沿用模型默认。手动选择模型不支持的强度，会在发送请求前阻止并提示。
+          </p>
           <h3>本计划希望开放的权限</h3>
           <div className="operations-autonomy-permissions">
             {(
@@ -129,7 +174,7 @@ export function AutonomyPolicyEditor({
                 key={key}
                 label={permissionCopy[key].label}
                 hint={permissionCopy[key].hint}
-                checked={value.permissions[key]}
+                checked={value.permissions[key] === true}
                 disabled={key !== "read" && !value.permissions.read}
                 onChange={(e) =>
                   patch({
@@ -140,6 +185,7 @@ export function AutonomyPolicyEditor({
                             create: false,
                             reviewOwn: false,
                             publish: false,
+                            engage: false,
                           }
                         : { ...value.permissions, [key]: e.target.checked },
                   })
@@ -147,6 +193,38 @@ export function AutonomyPolicyEditor({
               />
             ))}
           </div>
+          {value.permissions.engage ? (
+            <div className="operations-fields four">
+              <Field
+                label="每账号每日互动尝试上限"
+                hint="点赞、评论与关注合计，跨计划共用"
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={value.interactionDailyLimit}
+                  onChange={(e) =>
+                    patch({ interactionDailyLimit: Number(e.target.value) })
+                  }
+                />
+              </Field>
+              <Field
+                label="互动最小间隔（分钟）"
+                hint="另受同出口至少60分钟错峰约束"
+              >
+                <input
+                  type="number"
+                  min={60}
+                  max={1440}
+                  value={value.interactionGapMinutes}
+                  onChange={(e) =>
+                    patch({ interactionGapMinutes: Number(e.target.value) })
+                  }
+                />
+              </Field>
+            </div>
+          ) : null}
           <p className="operations-quiet">
             费用同时受全局AI日预算约束；费用无法核实时停止本轮。模型连接和分析模型沿用“连接与设置”。
           </p>

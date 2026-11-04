@@ -26,6 +26,15 @@ export interface PipixItem {
   commentCount: number | null;
   warnings: string[];
   collectedAt: string;
+  commentArchive?: {
+    total: number;
+    labeled: number;
+    hasMore: boolean;
+    fetchedAt: string | null;
+    issue: string;
+    usableTotal?: number;
+    excluded?: number;
+  };
 }
 export interface PipixSource extends PipixItem {
   exports: ContentSourceExport[];

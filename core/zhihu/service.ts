@@ -23,6 +23,7 @@ import { saveZhihuImage } from "./assets";
 import { contentImagePath, readContentImage } from "../content-assets";
 import type { SourceMaterial } from "../../shared/content-sources";
 import { zhihuCounts, zhihuDue } from "./policy";
+import { readParticipationState } from "../zhihu-participation/state";
 
 type Dependencies = {
   db: Database;
@@ -39,6 +40,15 @@ const fail = (message: string): never => {
 };
 const ref = (id: string) => ({ kind: "website" as const, id });
 export class ZhihuOperations {
+  private interactionHistory() {
+    return readParticipationState(this.d.db).activities.flatMap((activity) =>
+      (activity.attempts ?? []).map((attempt) => ({
+        at: attempt.startedAt,
+        accountId: activity.accountId,
+        networkKey: attempt.networkKey || "unknown",
+      })),
+    );
+  }
   readonly store: ZhihuStore;
   readonly logs: RuntimeLog;
   private lastHeartbeatAt: string | null = null;
@@ -184,6 +194,11 @@ export class ZhihuOperations {
   saveContent(raw: unknown) {
     const input = zhihuContentInput.parse(raw),
       previous = input.id ? this.store.get("zhihu_contents", input.id) : null;
+    const owner = previous?.accountId || previous?.source?.editorial?.accountId;
+    if (owner && input.accountId && owner !== input.accountId)
+      fail("此稿已绑定原账号，不能改派其他账号。");
+    const accountId = input.accountId || owner;
+    if (accountId) this.account(accountId);
     if (
       previous &&
       this.tasks().some(
@@ -195,7 +210,11 @@ export class ZhihuOperations {
       fail("内容正在发布，请完成后再编辑。");
     const content: ZhihuContent = {
       ...input,
-      aiAssisted: input.aiAssisted || (previous?.source?.editorial?.aiAssisted ?? false),
+      ...(accountId ? { accountId } : {}),
+      aiAssisted:
+        input.aiAssisted ||
+        previous?.aiAssisted === true ||
+        (previous?.source?.editorial?.aiAssisted ?? false),
       id: previous?.id ?? id("zhcontent"),
       version: (previous?.version ?? 0) + 1,
       reviewed: false,
@@ -230,10 +249,7 @@ export class ZhihuOperations {
   review(contentId: string, version: number) {
     const content = this.store.get("zhihu_contents", contentId);
     if (content.version !== version) fail("内容版本已变化，请刷新并重新审阅。");
-    if (
-      content.purpose === "warming" &&
-      zhihuWarmingHasPromotion(content.body)
-    )
+    if (content.purpose === "warming" && zhihuWarmingHasPromotion(content.body))
       fail("养号素材包含链接或推广内容，请改为正常内容，或移除推广信息。");
     this.store.save("zhihu_contents", contentId, {
       ...content,
@@ -428,7 +444,8 @@ export class ZhihuOperations {
   ) {
     const content = this.store.get("zhihu_contents", contentId);
     if (!content.reviewed) fail("请先审核当前内容版本。");
-    if (!zhihuContentForAccount(content, accountId)) fail("此稿已指定其他账号，请选择原目标账号。");
+    if (!zhihuContentForAccount(content, accountId))
+      fail("此稿已指定其他账号，请选择原目标账号。");
     if (firstPost && content.kind !== "article")
       fail("首篇开通目前使用已审核文章。");
     if (
@@ -510,7 +527,8 @@ export class ZhihuOperations {
     if (account.uid !== task.uid) fail("账号身份与原任务不一致。");
     this.d.environments.assertStamp(ref(task.accountId), task.environment);
     const content = this.store.get("zhihu_contents", task.contentId);
-    if (!zhihuContentForAccount(content, task.accountId)) fail("素材指定账号与原任务不一致。");
+    if (!zhihuContentForAccount(content, task.accountId))
+      fail("素材指定账号与原任务不一致。");
     if (!content.reviewed || content.version !== task.contentVersion)
       fail("素材已变化，请核对后重新安排。");
     return this.saveTask({
@@ -546,7 +564,10 @@ export class ZhihuOperations {
     });
   }
   /** Execute one existing task for the shared planner without starting auto-allocation. */
-  async executeManaged(taskId: string, canContinue: () => boolean): Promise<void> {
+  async executeManaged(
+    taskId: string,
+    canContinue: () => boolean,
+  ): Promise<void> {
     if (this.running || this.executing || this.closed)
       fail("知乎独立调度或任务仍在运行，请停止独立调度后由运营中心统一执行。");
     if (!canContinue()) fail("运营计划已暂停或变化，未执行发布。");
@@ -557,8 +578,10 @@ export class ZhihuOperations {
   async tick(managed?: { taskId: string; canContinue(): boolean }) {
     if (
       (managed ? this.running || !managed.canContinue() : !this.running) ||
-      this.closed || this.executing
-    ) return;
+      this.closed ||
+      this.executing
+    )
+      return;
     this.executing = true;
     const generation = this.generation;
     this.lastHeartbeatAt = new Date(this.time()).toISOString();
@@ -610,7 +633,11 @@ export class ZhihuOperations {
             .list("zhihu_contents")
             .reverse()
             .find(
-              (c) => c.purpose === "warming" && c.reviewed && !used.has(c.id) && zhihuContentForAccount(c, plan.accountId),
+              (c) =>
+                c.purpose === "warming" &&
+                c.reviewed &&
+                !used.has(c.id) &&
+                zhihuContentForAccount(c, plan.accountId),
             );
           if (!content) {
             this.savePlan({
@@ -652,7 +679,9 @@ export class ZhihuOperations {
           async () => {
             const assertCurrent = () => {
               if (
-                (managed ? this.running || !managed.canContinue() : !this.running) ||
+                (managed
+                  ? this.running || !managed.canContinue()
+                  : !this.running) ||
                 this.closed ||
                 generation !== this.generation ||
                 this.store.get("zhihu_tasks", task.id).status === "cancelled"
@@ -671,7 +700,8 @@ export class ZhihuOperations {
                 task.environment,
               );
               const c = this.store.get("zhihu_contents", task.contentId);
-              if (!zhihuContentForAccount(c, task.accountId)) fail("素材指定账号与当前任务不一致。");
+              if (!zhihuContentForAccount(c, task.accountId))
+                fail("素材指定账号与当前任务不一致。");
               if (!c.reviewed || c.version !== task.contentVersion)
                 fail("内容已被修改，请核对后重新排队。");
               return c;
@@ -688,6 +718,7 @@ export class ZhihuOperations {
               this.plan(task.accountId),
               networkKey,
               this.time(),
+              this.interactionHistory(),
             );
             if (due.at > this.time()) {
               this.saveTask({
@@ -724,6 +755,19 @@ export class ZhihuOperations {
                   { task, content, images },
                   async () => {
                     assertCurrent();
+                    if (
+                      zhihuDue(
+                        [],
+                        task,
+                        this.plan(task.accountId),
+                        networkKey,
+                        this.time(),
+                        this.interactionHistory(),
+                      ).at > this.time()
+                    )
+                      fail(
+                        "提交前发现新的个人互动，同账号或同出口间隔尚未到时，未提交",
+                      );
                     this.saveTask({
                       ...this.store.get("zhihu_tasks", task.id),
                       status: "submitting",

@@ -37,6 +37,17 @@ const sourceSchema = z.object({
   commentCount: z.number().nullable(),
   warnings: z.string().array(),
   collectedAt: z.iso.datetime(),
+  commentArchive: z
+    .object({
+      total: z.number().int().nonnegative(),
+      labeled: z.number().int().nonnegative(),
+      hasMore: z.boolean(),
+      fetchedAt: z.iso.datetime().nullable(),
+      issue: z.string(),
+      usableTotal: z.number().int().nonnegative().optional(),
+      excluded: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });
 const draftSchema: z.ZodType<SupplyDraft> = z.object({
   id: z.string(),

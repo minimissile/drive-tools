@@ -12,6 +12,7 @@ import { createDistributionHandlers } from "./distribution";
 import { createPipixHandlers } from "./pipix";
 import { createContentSupplyHandlers } from "./content-supply";
 import { createZhihuHandlers } from "./zhihu";
+import { createZhihuParticipationHandlers } from "./zhihu-participation";
 import { createIntelligentOperationsHandlers } from "./intelligent-operations";
 import { createBrowserEnvironmentHandlers } from "./browser-environments";
 import { createBitBrowserHandlers } from "./bitbrowser";
@@ -61,6 +62,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createDriveBrowserHandlers(services),
     createDistributionHandlers(services),
     createZhihuHandlers(services),
+    createZhihuParticipationHandlers(services),
     createPipixHandlers(services),
     createBrowserEnvironmentHandlers(services),
     createBitBrowserHandlers(services),

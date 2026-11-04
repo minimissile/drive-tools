@@ -1,10 +1,13 @@
 import { z } from "zod";
+import { zhihuInteractionContinueInput } from "./zhihu-interaction";
+import type { ZhihuParticipationActivity } from "./zhihu-participation";
 
 export const operationsBrainPermissions = z.object({
   read: z.boolean().default(false),
   create: z.boolean().default(false),
   reviewOwn: z.boolean().default(false),
   publish: z.boolean().default(false),
+  engage: z.boolean().optional(),
 });
 export type OperationsBrainPermissions = z.output<
   typeof operationsBrainPermissions
@@ -27,12 +30,18 @@ export const operationsBrainConfig = z
       .max(1_000_000_000)
       .default(1_000_000),
     maxCycleMinutes: z.number().int().min(1).max(20).default(5),
+    maxOutputTokens: z.number().int().min(1000).max(16000).default(4000),
+    reasoningEffort: z
+      .enum(["auto", "default", "low", "medium", "high", "none"])
+      .default("auto"),
     permissions: operationsBrainPermissions.default(() => ({
       read: false,
       create: false,
       reviewOwn: false,
       publish: false,
     })),
+    interactionDailyLimit: z.number().int().min(1).max(10).default(3),
+    interactionGapMinutes: z.number().int().min(60).max(1440).default(60),
   })
   .refine((v) => v.cycleBudgetMicros <= v.dailyBudgetMicros, {
     message: "每轮预算不能高于每日预算",
@@ -120,8 +129,26 @@ export interface OperationsBrainCyclePage {
   page: number;
   pageSize: number;
 }
+/** Manual reconciliation of a durably recorded pre-provider HTTP 404, never a retry. */
+export const operationsBrainReconcileRoutingInput = z.object({
+  planId: z.string().regex(/^ioplan_[\w-]+$/),
+  cycleId: z.string().regex(/^iocycle_[\w-]+$/),
+  callId: z.string().regex(/^ai_[\w-]+$/),
+  evidence: z.string().trim().min(20).max(2000),
+  confirmed: z.literal(true),
+});
+export const operationsBrainContinueInteractionInput =
+  zhihuInteractionContinueInput.omit({ scheduledAt: true }).extend({
+    planId: z.string().regex(/^ioplan_[\w-]+$/),
+    planRevision: z.number().int().positive(),
+    earliestAt: z.iso.datetime({ offset: true }),
+  });
 type Contract<A, V> = { args: A; value: V };
 export interface OperationsBrainContract {
+  "intelligentOps.brain.continueZhihuInteraction": Contract<
+    z.input<typeof operationsBrainContinueInteractionInput>,
+    ZhihuParticipationActivity
+  >;
   "intelligentOps.brain.snapshot": Contract<undefined, OperationsBrainSnapshot>;
   "intelligentOps.brain.cycles": Contract<
     z.input<typeof operationsBrainCycleQuery>,
@@ -139,6 +166,10 @@ export interface OperationsBrainContract {
   >;
   "intelligentOps.brain.wake": Contract<
     { planId: string; confirmed: true },
+    OperationsBrainSnapshot
+  >;
+  "intelligentOps.brain.reconcileRoutingRejection": Contract<
+    z.input<typeof operationsBrainReconcileRoutingInput>,
     OperationsBrainSnapshot
   >;
 }

@@ -40,7 +40,7 @@ export function operationsInventory(d: IntelligentOperationsDependencies) {
   const materials: OperationsMaterial[] = zhihu.contents.map((c) => ({
     id: `zhihu:${c.id}`,
     channel: "zhihu",
-    accountId: c.source?.editorial?.accountId || null,
+    accountId: c.accountId || c.source?.editorial?.accountId || null,
     title: c.title,
     purpose: c.purpose,
     reviewed: c.reviewed,
@@ -51,6 +51,7 @@ export function operationsInventory(d: IntelligentOperationsDependencies) {
       title: c.title,
       body: c.body,
       images: c.images,
+      accountId: c.accountId,
     }),
   }));
   for (const p of d.weiboPosts.list())

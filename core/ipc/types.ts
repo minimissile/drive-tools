@@ -52,6 +52,7 @@ export interface HandlerServices {
   distribution: import("../distribution").Distribution;
   pipix: import("../pipix/service").PipixSources;
   zhihu: import("../zhihu/service").ZhihuOperations;
+  zhihuParticipation: import("../zhihu-participation/service").ZhihuParticipation;
   environments: import("../browser-environments").BrowserEnvironments;
   environmentQueue: import("../browser-environment-queue").BrowserEnvironmentQueue;
   resourceAnswers: import("../resource-answers").ResourceAnswers;

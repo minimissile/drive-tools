@@ -10,6 +10,7 @@ import {
   type OperationsTaskPage,
   type OperationsSnapshot,
   type OperationsAdvice,
+  type OperationsQuickView,
 } from "../../shared/intelligent-operations";
 import {
   restoreIntelligentOperationsState,
@@ -115,6 +116,115 @@ export class IntelligentOperations {
   brainSnapshot() {
     return this.brainRuntime.snapshot();
   }
+  brainContinueZhihuInteraction(raw: unknown) {
+    return this.brainRuntime.continueZhihuInteraction(raw);
+  }
+  /** Local projection for the global quick panel; no inventory or execution work. */
+  quickView(): OperationsQuickView {
+    const participation =
+      this.d.zhihuParticipation?.snapshot().activities ?? [];
+    const runtime = new Map(
+      this.brainRuntime.snapshot().plans.map((plan) => [plan.planId, plan]),
+    );
+    const autonomous = this.state.plans.filter(
+        (plan) => plan.mode === "autonomous",
+      ),
+      ids = new Set(autonomous.map((plan) => plan.id));
+    const pendingByPlan = new Map<string, OperationsTask[]>();
+    for (const task of this.state.tasks) {
+      if (
+        !ids.has(task.planId) ||
+        ["completed", "cancelled"].includes(task.status)
+      )
+        continue;
+      const list = pendingByPlan.get(task.planId);
+      if (list) list.push(task);
+      else pendingByPlan.set(task.planId, [task]);
+    }
+    const plans = autonomous
+      .map((plan) => {
+        const pending = pendingByPlan.get(plan.id) ?? [];
+        const tasks = pending
+          .slice()
+          .sort((a, b) => {
+            const aRunning = ["running", "delegated"].includes(a.status);
+            const bRunning = ["running", "delegated"].includes(b.status);
+            return (
+              Number(bRunning) - Number(aRunning) ||
+              Number(a.scheduledAt === null) - Number(b.scheduledAt === null) ||
+              (a.scheduledAt ?? "").localeCompare(b.scheduledAt ?? "") ||
+              a.id.localeCompare(b.id)
+            );
+          })
+          .slice(0, 3)
+          .map(
+            ({
+              id,
+              title,
+              kind,
+              channel,
+              accountLabel,
+              status,
+              scheduledAt,
+              reason,
+            }) => ({
+              id,
+              title,
+              kind,
+              channel,
+              accountLabel,
+              status,
+              scheduledAt,
+              reason,
+            }),
+          );
+        return {
+          id: plan.id,
+          name: plan.name,
+          goal: plan.goal,
+          channels: plan.channels
+            .filter((channel) => channel.enabled)
+            .map((channel) => channel.channel),
+          accountCount: plan.accounts.length,
+          active: plan.active,
+          runtime: runtime.get(plan.id) ?? null,
+          participationCount: participation.filter(
+            (a) =>
+              a.planId === plan.id &&
+              !["done", "skipped", "succeeded", "failed"].includes(a.status) &&
+              plan.accounts.some(
+                (p) => p.accountId === a.accountId && p.channel === "zhihu",
+              ),
+          ).length,
+          maxCyclesPerDay: plan.brain.maxCyclesPerDay,
+          dailyBudgetMicros: plan.brain.dailyBudgetMicros,
+          taskCount: pending.length,
+          attentionCount: pending.filter((task) =>
+            ["attention", "review", "handoff"].includes(task.status),
+          ).length,
+          tasks,
+        };
+      })
+      .sort((a, b) => {
+        const aRunning =
+          a.runtime?.running ||
+          a.tasks.some((task) =>
+            ["running", "delegated"].includes(task.status),
+          );
+        const bRunning =
+          b.runtime?.running ||
+          b.tasks.some((task) =>
+            ["running", "delegated"].includes(task.status),
+          );
+        return (
+          Number(bRunning) - Number(aRunning) ||
+          Number(b.active) - Number(a.active) ||
+          a.name.localeCompare(b.name, "zh-CN") ||
+          a.id.localeCompare(b.id)
+        );
+      });
+    return { schedulerRunning: this.running, plans };
+  }
   brainCycles(raw: unknown = {}) {
     return this.brainRuntime.cycles(raw);
   }
@@ -133,6 +243,10 @@ export class IntelligentOperations {
   }
   brainWake(planId: string) {
     return this.brainRuntime.wake(planId);
+  }
+  brainReconcileRoutingRejection(raw: unknown) {
+    if (this.isBusy) fail("请等待当前运营任务退出，再核对费用记录");
+    return this.brainRuntime.reconcileRoutingRejection(raw);
   }
   private stamp() {
     return new Date(this.time()).toISOString();
@@ -325,7 +439,7 @@ export class IntelligentOperations {
     this.persist();
     return p;
   }
-  /** Explicit local supply handoff; preserve unrestricted inventories and never activate. */
+  /** Explicit local supply handoff; select this exact material and never activate. */
   linkSuppliedMaterial(planId: string, materialId: string, accountId: string) {
     const plan = this.plan(planId),
       inventory = operationsInventory(this.d),
@@ -339,8 +453,9 @@ export class IntelligentOperations {
       )
     )
       fail("此稿目标账号未加入该计划，请先在计划中核对账号");
-    if (!plan.materialIds.length || plan.materialIds.includes(materialId))
-      return;
+    if (material.accountId && material.accountId !== accountId)
+      fail("此稿绑定了其他账号，不能关联到当前目标账号");
+    if (plan.materialIds.includes(materialId)) return;
     this.save({ ...plan, materialIds: [...plan.materialIds, materialId] });
   }
   activate(id: string, active: boolean) {
@@ -780,7 +895,26 @@ export class IntelligentOperations {
       binding =
         p.accounts.find((a) => a.accountId === t.accountId) ??
         fail("账号不再属于此计划");
-    const actual: { at: string; accountId: string; network: string }[] = [];
+    const actual: {
+      at: string;
+      accountId: string;
+      network: string;
+      gapOnly?: boolean;
+    }[] = [];
+    for (const activity of this.d.zhihuParticipation?.snapshot().activities ??
+      []) {
+      for (const attempt of activity.attempts ?? []) {
+        actual.push({
+          at: attempt.startedAt,
+          accountId: activity.accountId,
+          network:
+            !attempt.networkKey || attempt.networkKey === "unknown"
+              ? ""
+              : attempt.networkKey,
+          gapOnly: true,
+        });
+      }
+    }
     for (const source of this.d.zhihu
       .snapshot()
       .tasks.filter((o) => !!o.attemptedAt && o.id !== t.linkedTaskId))

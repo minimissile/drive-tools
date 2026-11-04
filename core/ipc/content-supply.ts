@@ -8,11 +8,32 @@ import {
 } from "../../shared/content-supply";
 import { runtimeLogQuery } from "../../shared/runtime-logs";
 import type { HandlerMap, HandlerServices } from "./types";
+import { supplyAcquireInput } from "../../shared/pipix-acquisition";
 
 export function createContentSupplyHandlers({
   contentSupply,
 }: Pick<HandlerServices, "contentSupply">) {
   return {
+    "contentSupply.acquisition": () => contentSupply.acquisition.snapshot(),
+    "contentSupply.acquire": (raw) =>
+      contentSupply.acquisition.start(supplyAcquireInput.parse(raw)),
+    "contentSupply.acquirePause": () => contentSupply.acquisition.pause(),
+    "contentSupply.acquireResume": (raw) =>
+      contentSupply.acquisition.resume(
+        z
+          .object({ id: z.string().max(150), confirmed: z.literal(true) })
+          .parse(raw).id,
+      ),
+    "contentSupply.attachComments": (raw) => {
+      const v = z
+        .object({
+          id: z.string().max(150),
+          version: z.number().int().positive(),
+          commentIds: z.string().max(100).array().min(1).max(50),
+        })
+        .parse(raw);
+      return contentSupply.attachComments(v.id, v.version, v.commentIds);
+    },
     "contentSupply.image": (raw) => {
       const v = z
         .object({

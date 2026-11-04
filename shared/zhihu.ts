@@ -44,10 +44,12 @@ export function zhihuReceiptUrl(value: string, kind?: "article" | "answer") {
   }
   return null;
 }
-export const zhihuWarmingHasPromotion = (body: string) => /https?:\/\/|www\.|加[微vV]|提取码|购买|下单|推广链接/.test(body);
+export const zhihuWarmingHasPromotion = (body: string) =>
+  /https?:\/\/|www\.|加[微vV]|提取码|购买|下单|推广链接/.test(body);
 export const zhihuContentInput = z
   .object({
     id: z.string().optional(),
+    accountId: websiteAccountIdSchema.optional(),
     kind: z.enum(["article", "answer"]),
     purpose: z.enum(["warming", "regular"]),
     category: z.string().trim().max(40).default("文案句子"),
@@ -71,7 +73,13 @@ export interface ZhihuContent extends z.output<typeof zhihuContentInput> {
   createdAt: string;
   updatedAt: string;
 }
-export const zhihuContentForAccount = (content: Pick<ZhihuContent, "source">, accountId: string) => !content.source?.editorial?.accountId || content.source.editorial.accountId === accountId;
+export const zhihuContentForAccount = (
+  content: Pick<ZhihuContent, "source" | "accountId">,
+  accountId: string,
+) => {
+  const owner = content.accountId || content.source?.editorial?.accountId;
+  return !owner || owner === accountId;
+};
 export const zhihuPolicyInput = z.object({
   accountId: websiteAccountIdSchema,
   targetLevel: z.number().int().min(4).max(10).default(5),

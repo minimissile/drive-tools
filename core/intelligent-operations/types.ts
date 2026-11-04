@@ -15,6 +15,7 @@ export interface IntelligentOperationsDependencies {
   accounts: WebsiteAccounts;
   environments: BrowserEnvironments;
   zhihu: ZhihuOperations;
+  zhihuParticipation?: import("../zhihu-participation/service").ZhihuParticipation;
   weiboPosts: WeiboPosts;
   weiboStatistics: WeiboStatistics;
   ai: AiService;

@@ -1,7 +1,11 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
-  readLandingDocument?(name: string): Promise<{ name: string; bytes: Uint8Array } | null>;
+  /** Isolated TikHub network transport. Never reuses an account's browser cookies. */
+  pipixFetch?(url: string, init: RequestInit): Promise<Response>;
+  readLandingDocument?(
+    name: string,
+  ): Promise<{ name: string; bytes: Uint8Array } | null>;
   photoPostBrowser?: {
     open(
       platform: import("../shared/photo-posts").PhotoPlatform,
@@ -58,6 +62,8 @@ export interface AppPorts {
     ): Promise<boolean>;
   };
   zhihu?: import("../shared/zhihu").ZhihuBrowserPort;
+  zhihuParticipation?: import("../shared/zhihu-participation").ZhihuParticipationBrowserPort;
+  zhihuInteraction?: import("../shared/zhihu-interaction").ZhihuInteractionBrowserPort;
   browserEnvironments?: {
     prepare(
       environment: import("../shared/browser-environments").BrowserEnvironmentRuntime,

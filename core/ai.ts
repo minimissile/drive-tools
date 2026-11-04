@@ -556,6 +556,22 @@ export class AiService {
           }),
           new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         );
+      const finishReason = response.choices?.[0]?.finish_reason;
+      // A constrained decoder can return closed, schema-valid JSON despite an
+      // incomplete generation. Syntax and field lengths do not prove completion.
+      // Missing legacy metadata stays unknown; never invent a truncation diagnosis.
+      if (finishReason != null && finishReason !== "stop") {
+        const reason =
+          finishReason === "length"
+            ? "模型达到输出上限，内容可能不完整"
+            : finishReason === "content_filter"
+              ? "服务过滤并终止了生成"
+              : "模型返回了非正常文字结束状态";
+        throw new AppError(
+          "INVALID_AI_RESPONSE",
+          `${reason}；即使JSON可解析也不保存为完整内容，本次费用已记录。`,
+        );
+      }
       const issues = this.repo.db.setting<Record<string, string>>(
         "ai:modelIssues",
         {},

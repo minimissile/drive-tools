@@ -277,7 +277,7 @@ export function PipixSources({
                         <strong>{v.text.slice(0, 70) || "无正文帖子"}</strong>
                         <small>
                           {v.author} · {v.images.length} 图 ·{" "}
-                          {v.comments.length} 条页面评论
+                          {v.comments.length} 条已采集评论
                         </small>
                       </span>
                       {v.exports.length ? (

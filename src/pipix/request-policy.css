@@ -1,0 +1,13 @@
+.pipix-request-policy {
+  display: grid;
+  gap: var(--space-3);
+}
+.pipix-request-policy .fields {
+  gap: var(--space-3);
+}
+.pipix-request-policy > p {
+  margin: 0;
+}
+.pipix-request-policy > .button {
+  justify-self: start;
+}

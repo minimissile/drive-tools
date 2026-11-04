@@ -8,12 +8,24 @@ import type {
   OperationsTask,
 } from "../../shared/intelligent-operations";
 import { operationsInventory, operationsFingerprint } from "./inventory";
+import {
+  isRecommendedAnswer,
+  randomRecommendedAnswerSlot,
+} from "./answer-scheduling";
 import type { OperationsBrainToolContext } from "./brain-types";
+import {
+  participationToolArgs,
+  participationToolDescriptions,
+  executeParticipationTool,
+  observeParticipation,
+  preparedParticipationAnswers,
+} from "./brain-participation";
 
 const fail = (message: string): never => {
   throw new AppError("OPERATIONS_BRAIN_TOOL_BLOCKED", message);
 };
 const args = {
+  ...participationToolArgs,
   observe: z.object({}),
   inspect_material: z.object({ materialId: z.string().max(180) }),
   read_progress: z.object({ accountId: z.string().max(150) }),
@@ -47,6 +59,7 @@ const args = {
 };
 type ToolName = keyof typeof args;
 const descriptions: Record<ToolName, string> = {
+  ...participationToolDescriptions,
   observe:
     "读取当前计划范围内账号、渠道规则、选中库存、本人任务、近期结果和有限记忆。不是全库读取。",
   inspect_material: "读取本计划允许使用的指定素材的完整正文、审核状态及版本。",
@@ -67,14 +80,28 @@ const descriptions: Record<ToolName, string> = {
   finish:
     "结束本轮，概述已发生的动作、阻塞与下一步；不要虚构发布、升级、涨粉或效果。",
 };
+/** Validate every request in a provider batch before any business write occurs. */
+export function validateOperationsBrainToolArguments(
+  name: string,
+  raw: unknown,
+): unknown {
+  if (!Object.hasOwn(args, name)) fail("不支持的业务工具");
+  return args[name as ToolName].parse(raw);
+}
 export function operationsBrainTools(
   permissions: OperationsBrainToolContext["permissions"],
 ): AgentToolDefinition[] {
   const names = (Object.keys(args) as ToolName[]).filter(
     (name) =>
       !(name === "create_original" && !permissions.create) &&
+      !(name === "prepare_zhihu_answer" && !permissions.create) &&
       !(name === "review_own" && !permissions.reviewOwn) &&
-      !(name === "execute_task" && !permissions.publish),
+      !(name === "execute_task" && !permissions.publish) &&
+      !(
+        ["execute_zhihu_participation", "schedule_zhihu_interaction"].includes(
+          name,
+        ) && !permissions.engage
+      ),
   );
   return names.map((name) => ({
     type: "function",
@@ -106,8 +133,16 @@ function materials(ctx: OperationsBrainToolContext) {
       .brain.provenance.filter((p) => p.planId === ctx.plan.id)
       .map((p) => p.materialId),
   );
+  const answers = new Set(
+    preparedParticipationAnswers(ctx.host.d, ctx.plan).map(
+      (a) => `zhihu:${a.contentId}`,
+    ),
+  );
   return operationsInventory(ctx.host.d).materials.filter(
-    (m) => ctx.plan.materialIds.includes(m.id) || owned.has(m.id),
+    (m) =>
+      ctx.plan.materialIds.includes(m.id) ||
+      owned.has(m.id) ||
+      answers.has(m.id),
   );
 }
 function material(
@@ -198,6 +233,7 @@ export function observeOperationsBrain(ctx: OperationsBrainToolContext) {
         finishedAt: c.finishedAt,
       })),
     permissions: ctx.permissions,
+    participation: observeParticipation(ctx),
   });
 }
 export async function executeOperationsBrainTool(
@@ -208,6 +244,8 @@ export async function executeOperationsBrainTool(
   ctx.guard("read");
   if (!Object.hasOwn(args, name))
     fail("不支持的业务工具，不提供任意网页、shell或IPC操作");
+  if (Object.hasOwn(participationToolArgs, name))
+    return executeParticipationTool(ctx, name, raw);
   if (name === "observe") {
     args.observe.parse(raw);
     return { result: observeOperationsBrain(ctx) };
@@ -563,6 +601,10 @@ export async function executeOperationsBrainTool(
         true,
       );
       t.scheduledAt = slot;
+      if (slot && !existing?.scheduledAt && isRecommendedAnswer(ctx, t)) {
+        t.scheduledAt = randomRecommendedAnswerSlot(ctx, t, slot);
+        t.manualScheduledAt = t.scheduledAt;
+      }
       if (!slot) {
         t.status = "blocked";
         t.reason = "未来7天暂无额度、间隔和时段均允许的执行时间";

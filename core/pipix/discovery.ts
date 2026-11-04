@@ -1,5 +1,6 @@
 import { AppError } from "../errors";
 import { readLimited } from "../http";
+import { parsePipixJson } from "./json";
 import { pipixListText } from "./text";
 import {
   pipixDiscoverInput,
@@ -183,7 +184,7 @@ export class TikHubPipixDiscovery {
     }
     let value: unknown;
     try {
-      value = JSON.parse(body);
+      value = parsePipixJson(body);
     } catch {
       throw new AppError(
         "PIPIX_LIST_JSON",

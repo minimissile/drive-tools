@@ -29,8 +29,11 @@ const brainDraft = z.object({
   maxCyclesPerDay: z.number(),
   maxStepsPerCycle: z.number(),
   maxCycleMinutes: z.number(),
+  maxOutputTokens: z.number().default(4000),
   cycleBudgetMicros: z.number(),
   dailyBudgetMicros: z.number(),
+  interactionDailyLimit: z.number(),
+  interactionGapMinutes: z.number(),
 });
 export const operationsPlanDraftSchema = z.object({
   ...operationsPlanInput.shape,

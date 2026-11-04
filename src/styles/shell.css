@@ -43,7 +43,6 @@
   gap: 3px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
   min-height: 0;
   flex: 1;
   align-content: start;
@@ -181,7 +180,8 @@
   background: var(--green);
 }
 .main-content {
-  padding: var(--page-padding) var(--page-padding) var(--space-8);
+  padding: var(--page-padding) var(--page-padding)
+    calc(var(--space-8) + var(--floating-control-clearance, 0px));
   overflow: auto;
   min-height: 0;
   flex: 1;

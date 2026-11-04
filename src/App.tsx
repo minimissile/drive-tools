@@ -17,6 +17,8 @@ import { sidebarEntries, sidebarPage } from "./navigation";
 import { ActiveTaskSwitcher } from "./tasks/ActiveTaskSwitcher";
 import { WorkbenchNavigation } from "./workbench/WorkbenchNavigation";
 import { SessionWindows } from "./dev/SessionWindows";
+import { OperationsFocusProvider } from "./operations/OperationsFocus";
+import { OperationsQuickAccess } from "./operations/QuickAccess";
 const Workbench = lazy(() => import("./pages/Workbench"));
 const PhotoPosts = lazy(() => import("./pages/PhotoPosts"));
 const BaiduDiscovery = lazy(() => import("./pages/BaiduDiscovery"));
@@ -129,107 +131,110 @@ export default function App() {
       />
     );
   return (
-    <div className="app-shell">
-      <a
-        className="skip-link"
-        href="#main-content"
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById("main-content")?.focus();
-        }}
-      >
-        跳到主要内容
-      </a>
-      <aside className="sidebar">
-        <div className="brand">
-          <img
-            className="brand-mark"
-            src={brandMark}
-            width="36"
-            height="36"
-            alt=""
-          />
-          <div>
-            <strong>盘序</strong>
-            <small>PANXU STUDIO</small>
-          </div>
-        </div>
-        <nav id="main-navigation" aria-label="主导航">
-          {sidebarEntries.map(({ page: id, title, Icon, group }) => (
-            <div key={id}>
-              {group ? <div className="nav-group">{group}</div> : null}
-              <button
-                aria-label={title}
-                aria-current={sidebarPage(page) === id ? "page" : undefined}
-                onClick={() => {
-                  if (id === "search") openSearch();
-                  else navigate(id);
-                }}
-              >
-                <Icon size={17} aria-hidden="true" />
-                <span className="nav-label">{title}</span>
-                {id === "workbench" && pendingJobs > 0 ? (
-                  <span className="nav-count" title="待处理转存任务">
-                    {pendingJobs}
-                  </span>
-                ) : null}
-              </button>
-            </div>
-          ))}
-        </nav>
-        <footer className="sidebar-footer">
-          <span className="sidebar-version">
-            盘序 {data?.appVersion ?? "…"}
-          </span>
-          {import.meta.env.DEV ? (
-            <button
-              className="dev-mode"
-              title="当前工作区源码 · 前端热更新 · 后端空闲时自动重启。点击打开开发者工具。"
-              onClick={() => void ipc("dev.tools")}
-            >
-              <Code2 size={13} aria-hidden="true" />
-              开发调试
-            </button>
-          ) : null}
-        </footer>
-      </aside>
-      <div className="app-body">
-        <div className="topbar">
-          <div>
-            <WorkbenchNavigation />
-          </div>
-          <div className="topbar-task-actions">
-            <SessionWindows />
-            <ActiveTaskSwitcher />
-            <BusyStatus />
-          </div>
-        </div>
-        <main
-          key={page}
-          id="main-content"
-          tabIndex={-1}
-          className="main-content"
-          data-page={page}
+    <OperationsFocusProvider key={data.dataPath}>
+      <div className="app-shell app-shell--quick-access">
+        <a
+          className="skip-link"
+          href="#main-content"
+          onClick={(event) => {
+            event.preventDefault();
+            document.getElementById("main-content")?.focus();
+          }}
         >
-          <UpdateBanner />
-          <ToastMessage />
-          <QueryError
-            error={status.error}
-            loading={status.loading}
-            onRetry={retry}
-          />
-          <Suspense fallback={<LoadingState label="正在打开页面…" fill />}>
-            <Surface
-              key={
-                page === "intake"
-                  ? `${editResourceId ?? "new"}:${editCopyId ?? "new"}`
-                  : page
-              }
+          跳到主要内容
+        </a>
+        <aside className="sidebar">
+          <div className="brand">
+            <img
+              className="brand-mark"
+              src={brandMark}
+              width="36"
+              height="36"
+              alt=""
             />
-          </Suspense>
-        </main>
+            <div>
+              <strong>盘序</strong>
+              <small>PANXU STUDIO</small>
+            </div>
+          </div>
+          <nav id="main-navigation" aria-label="主导航">
+            {sidebarEntries.map(({ page: id, title, Icon, group }) => (
+              <div key={id}>
+                {group ? <div className="nav-group">{group}</div> : null}
+                <button
+                  aria-label={title}
+                  aria-current={sidebarPage(page) === id ? "page" : undefined}
+                  onClick={() => {
+                    if (id === "search") openSearch();
+                    else navigate(id);
+                  }}
+                >
+                  <Icon size={17} aria-hidden="true" />
+                  <span className="nav-label">{title}</span>
+                  {id === "workbench" && pendingJobs > 0 ? (
+                    <span className="nav-count" title="待处理转存任务">
+                      {pendingJobs}
+                    </span>
+                  ) : null}
+                </button>
+              </div>
+            ))}
+          </nav>
+          <footer className="sidebar-footer">
+            <span className="sidebar-version">
+              盘序 {data?.appVersion ?? "…"}
+            </span>
+            {import.meta.env.DEV ? (
+              <button
+                className="dev-mode"
+                title="当前工作区源码 · 前端热更新 · 后端空闲时自动重启。点击打开开发者工具。"
+                onClick={() => void ipc("dev.tools")}
+              >
+                <Code2 size={13} aria-hidden="true" />
+                开发调试
+              </button>
+            ) : null}
+          </footer>
+        </aside>
+        <div className="app-body">
+          <div className="topbar">
+            <div>
+              <WorkbenchNavigation />
+            </div>
+            <div className="topbar-task-actions">
+              <SessionWindows />
+              <ActiveTaskSwitcher />
+              <BusyStatus />
+            </div>
+          </div>
+          <main
+            key={page}
+            id="main-content"
+            tabIndex={-1}
+            className="main-content"
+            data-page={page}
+          >
+            <UpdateBanner />
+            <ToastMessage />
+            <QueryError
+              error={status.error}
+              loading={status.loading}
+              onRetry={retry}
+            />
+            <Suspense fallback={<LoadingState label="正在打开页面…" fill />}>
+              <Surface
+                key={
+                  page === "intake"
+                    ? `${editResourceId ?? "new"}:${editCopyId ?? "new"}`
+                    : page
+                }
+              />
+            </Suspense>
+          </main>
+        </div>
+        <OperationsQuickAccess />
       </div>
-    </div>
+    </OperationsFocusProvider>
   );
 }
 

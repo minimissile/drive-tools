@@ -14,6 +14,7 @@ import { ZhihuLogs } from "./Logs";
 import { ZhihuAccounts, type ZhihuAction } from "./Accounts";
 import { ZhihuContents } from "./Contents";
 import { ZhihuTasks } from "./Tasks";
+import { ZhihuParticipation } from "./Participation";
 import "./zhihu.css";
 export default function ZhihuWorkflow() {
   const { data } = useAppData(),
@@ -34,6 +35,7 @@ export default function ZhihuWorkflow() {
             "accounts",
             "contents",
             "tasks",
+            "participation",
             "logs",
             "guide",
           ]),
@@ -80,7 +82,7 @@ export default function ZhihuWorkflow() {
     <div className="zhihu-workflow">
       <Header
         title="知乎多号运营"
-        description="账号进度、错峰发布与运行记录，在账号绑定的比特环境中执行。"
+        description="账号进度、日常参与与发布记录，在账号绑定的比特环境中处理。"
         action={
           <div className="row">
             <Button size="compact" onClick={() => navigate("pipix-sources")}>
@@ -162,6 +164,7 @@ export default function ZhihuWorkflow() {
             items={[
               ["overview", "运行总览"],
               ["accounts", "账号与养号"],
+              ["participation", "日常参与"],
               ["contents", `素材池 · ${s.contents.length}`],
               [
                 "tasks",
@@ -180,6 +183,13 @@ export default function ZhihuWorkflow() {
               busy={pending || s.busy}
               run={run}
               manage={() => navigate("website-accounts")}
+            />
+          </TabPanel>
+          <TabPanel value="participation">
+            <ZhihuParticipation
+              accounts={s.accounts}
+              workspace={data!.dataPath}
+              onOpenContents={() => setTab("contents")}
             />
           </TabPanel>
           <TabPanel value="contents">

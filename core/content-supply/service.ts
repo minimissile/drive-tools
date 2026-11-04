@@ -26,6 +26,8 @@ import {
   type SupplyCandidate,
 } from "../../shared/content-supply";
 import { readSupplyDraft, readSupplyDrafts, storeSupplyDraft } from "./state";
+import { SupplyAcquisition } from "./acquisition";
+import { pipixCommentExclusions } from "../../shared/pipix-acquisition";
 
 const fail = (message: string): never => {
   throw new AppError("CONTENT_SUPPLY_BLOCKED", message);
@@ -34,6 +36,8 @@ const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class ContentSupply {
   readonly logs: RuntimeLog;
+  readonly acquisition: SupplyAcquisition;
+  private currentCollection: Promise<void> | null = null;
   private collecting = false;
   private working = new Set<string>();
   private stopping = false;
@@ -60,11 +64,42 @@ export class ContentSupply {
         draft.reason = "上次采集已中断；本地结果保留，选择继续后复用成功项";
         this.put(draft, false);
       }
+    this.acquisition = new SupplyAcquisition({
+      db: d.db,
+      pipix: d.pipix,
+      logs: this.logs,
+      changed: d.changed,
+      operations: d.operations,
+      contentBusy: () => this.collecting || this.working.size > 0,
+      ingest: async (sourceIds, context) => {
+        const result = this.prepare({ sourceIds, ...context });
+        await this.currentCollection;
+        const drafts = result.ids.map((key) => this.get(key));
+        for (const draft of drafts.filter(
+          (item) => item.stage === "editing" && !item.editorial.checks,
+        )) {
+          const s = draft.source!;
+          draft.editorial.checks = `来源：${s.url}\n本地${s.images.filter((image) => image.asset).length}/${s.images.length}张图片，快照${s.comments.length}条评论${s.commentArchive ? `，评论库共${s.commentArchive.total}条、来源标注神评${s.commentArchive.labeled}条` : ""}。\n待核对：与账号方向的关系、事实与版本、原文/图片/评论的使用依据；补充作者自己的具体判断。`;
+          draft.version++;
+          this.put(draft);
+        }
+        return {
+          ids: result.ids,
+          ready: drafts.filter((item) => item.stage === "editing").length,
+          blocked: drafts.filter((item) => item.stage !== "editing").length,
+        };
+      },
+    });
   }
   get isBusy() {
-    return this.collecting || this.working.size > 0;
+    return (
+      this.collecting ||
+      this.working.size > 0 ||
+      (this.acquisition?.isBusy ?? false)
+    );
   }
   close() {
+    this.acquisition.close();
     this.closed = true;
     this.stopping = true;
   }
@@ -185,6 +220,9 @@ export class ContentSupply {
   }
   start(raw: unknown) {
     this.assertIdle();
+    return this.prepare(raw);
+  }
+  private prepare(raw: unknown) {
     const input = supplyStartInput.parse(raw),
       sourceIds = [...new Set(input.sourceIds)],
       drafts = this.all();
@@ -259,7 +297,7 @@ export class ContentSupply {
     if (!ids.length) return;
     this.collecting = true;
     this.stopping = false;
-    void this.drain(ids)
+    this.currentCollection = this.drain(ids)
       .catch((error) =>
         this.event(
           "supply.queue_failed",
@@ -293,7 +331,13 @@ export class ContentSupply {
           !!draft.source,
         );
         if (this.closed) return;
-        draft.source = source;
+        const terms = this.d.pipix.requestPolicy().policy.excludedCommentTerms;
+        draft.source = {
+          ...source,
+          comments: source.comments.filter(
+            (comment) => !pipixCommentExclusions(comment, terms).length,
+          ),
+        };
         draft.stage = "editing";
         draft.version++;
         draft.reason =
@@ -310,7 +354,9 @@ export class ContentSupply {
           {
             images: source.images.filter((v) => v.asset).length,
             missingImages: source.images.filter((v) => !v.asset).length,
-            comments: source.comments.length,
+            comments: draft.source.comments.length,
+            excludedComments:
+              source.comments.length - draft.source.comments.length,
             commentCount: source.commentCount,
             warnings: source.warnings,
           },
@@ -382,6 +428,15 @@ export class ContentSupply {
   }
   private validateSelections(draft: SupplyDraft) {
     const source = draft.source ?? fail("请先完成原素材采集。");
+    const terms = this.d.pipix.requestPolicy().policy.excludedCommentTerms;
+    if (
+      source.comments.some(
+        (comment) =>
+          draft.editorial.commentIds.includes(comment.id) &&
+          pipixCommentExclusions(comment, terms).length,
+      )
+    )
+      fail("选中的评论命中过滤词，请取消选用；不会改写原话。");
     if (
       draft.editorial.imageIds.some(
         (key) => !source.images.some((v) => v.id === key && v.asset),
@@ -395,6 +450,47 @@ export class ContentSupply {
     )
       fail("所选评论不存在，请重新选择。");
   }
+  attachComments(key: string, version: number, commentIds: string[]) {
+    const draft = this.editable(key, version),
+      source = draft.source ?? fail("请先完成原素材采集。"),
+      library = this.d.pipix.comments.usable(source.id),
+      unique = [...new Set(commentIds)];
+    const selected = unique.map(
+      (commentId) =>
+        library.find((comment) => comment.id === commentId) ??
+        fail("选中的评论已不在当前评论库，请刷新后重选。"),
+    );
+    const preserve = source.comments.filter((comment) =>
+        draft.editorial.commentIds.includes(comment.id),
+      ),
+      merged = [...preserve, ...selected, ...source.comments].filter(
+        (comment, index, all) =>
+          all.findIndex((item) => item.id === comment.id) === index,
+      );
+    if (
+      new Set([...preserve, ...selected].map((comment) => comment.id)).size > 50
+    )
+      fail("当前已采用评论与新增评论超过50条，请先减少已采用项。");
+    const summary = this.d.pipix.comments.read({ sourceId: source.id });
+    source.comments = merged.slice(0, 50);
+    source.commentArchive = {
+      total: summary.total,
+      labeled: summary.labeled,
+      hasMore: summary.hasMore,
+      fetchedAt: summary.latestAt,
+      issue: summary.issue,
+      usableTotal: summary.usableTotal,
+      excluded: summary.excluded,
+    };
+    draft.version++;
+    this.put(draft);
+    this.event(
+      "editorial.comments_attached",
+      `已将${selected.length}条本地评论加入选材快照，尚未自动采用或交付`,
+      draft,
+    );
+    return draft;
+  }
   async generate(raw: unknown) {
     const input = supplyActionInput
         .extend({ confirmed: z.literal(true) })
@@ -403,6 +499,7 @@ export class ContentSupply {
       e = draft.editorial;
     if (!e.direction || !e.angle || e.contribution.length < 10)
       fail("先保存内容方向、核心问题和至少10字的作者新增判断，再生成初稿。");
+    this.validateSelections(draft);
     if (e.checks.length > 3999)
       fail(
         "待核事实超过3999字符，请整理后再生成，避免生成后的核对项超出保存上限。",

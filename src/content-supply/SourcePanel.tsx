@@ -6,6 +6,8 @@ import { QueryError } from "../ui/QueryError";
 import { formatTime } from "../lib/format";
 import type { PipixItem } from "../../shared/pipix";
 import type { SupplyEditorial } from "../../shared/content-supply";
+import { PipixCommentsLibrary } from "../pipix/CommentsLibrary";
+import { usePipixCommentRules } from "../pipix/useCommentRules";
 function SupplyImage({
   draftId,
   imageId,
@@ -48,6 +50,7 @@ export function SupplySourcePanel({
   refreshDisabled,
   onRefresh,
   selection,
+  onAttachComments,
 }: {
   source: PipixItem;
   editorial: SupplyEditorial;
@@ -57,7 +60,9 @@ export function SupplySourcePanel({
   refreshDisabled: boolean;
   onRefresh(): void;
   selection(key: "imageIds" | "commentIds", id: string, checked: boolean): void;
+  onAttachComments?(ids: string[]): Promise<void>;
 }) {
+  const rules = usePipixCommentRules();
   return (
     <Panel
       title="来源与选材"
@@ -134,6 +139,11 @@ export function SupplySourcePanel({
         </div>
       ) : null}
       <h3 className="supply-subheading">原帖评论</h3>
+      <QueryError
+        error={rules.error}
+        loading={rules.loading}
+        onRetry={rules.reload}
+      />
       {source.comments.length ? (
         <div className="supply-comments">
           {source.comments.map((comment) => (
@@ -150,11 +160,19 @@ export function SupplySourcePanel({
                       {comment.label
                         ? ` · 原标签：${comment.label}`
                         : " · 未标注神评"}
+                      {rules.hits(comment).length
+                        ? ` · 已过滤：${rules.hits(comment).join("、")}`
+                        : ""}
                     </small>
                   </>
                 }
                 checked={e.commentIds.includes(comment.id)}
-                disabled={disabled}
+                disabled={
+                  disabled ||
+                  !rules.data ||
+                  (!!rules.hits(comment).length &&
+                    !e.commentIds.includes(comment.id))
+                }
                 onChange={(event) =>
                   selection("commentIds", comment.id, event.target.checked)
                 }
@@ -172,6 +190,11 @@ export function SupplySourcePanel({
         <br />
         编辑单 {draftId}
       </small>
+      <PipixCommentsLibrary
+        sourceId={source.id}
+        disabled={disabled}
+        onAttach={onAttachComments}
+      />
     </Panel>
   );
 }

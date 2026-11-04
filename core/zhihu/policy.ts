@@ -29,6 +29,7 @@ export function zhihuDue(
   plan: ZhihuPlan,
   networkKey: string,
   time: number,
+  interactions: { at: string; accountId: string; networkKey: string }[] = [],
 ) {
   const counts = zhihuCounts(tasks, task.accountId, time);
   if (counts.today >= plan.dailyLimit || counts.week >= plan.weeklyLimit) {
@@ -48,6 +49,18 @@ export function zhihuDue(
       next = Math.max(
         next,
         new Date(other.attemptedAt).getTime() + plan.gapMinutes * 60000,
+      );
+  }
+  for (const other of interactions) {
+    if (
+      other.accountId === task.accountId ||
+      other.networkKey === networkKey ||
+      networkKey === "unknown" ||
+      other.networkKey === "unknown"
+    )
+      next = Math.max(
+        next,
+        Date.parse(other.at) + Math.max(60, plan.gapMinutes) * 60000,
       );
   }
   return {

@@ -126,7 +126,12 @@ export function SupplyEditor({
     key: "imageIds" | "commentIds",
     id: string,
     checked: boolean,
-  ) =>
+  ) => {
+    setRights((old) =>
+      key === "commentIds"
+        ? { ...old, commentBasis: "unknown", commentEvidence: "" }
+        : { ...old, imageBasis: "unknown", imageEvidence: "" },
+    );
     update({
       [key]: updateSelection(
         e[key],
@@ -135,6 +140,7 @@ export function SupplyEditor({
         key === "imageIds" ? 9 : 50,
       ),
     });
+  };
   return (
     <div className="supply-editor-layout">
       <SupplySourcePanel
@@ -145,6 +151,21 @@ export function SupplyEditor({
         showRefresh={!immutable && !held}
         refreshDisabled={disabled || changed}
         selection={selection}
+        onAttachComments={
+          immutable || held || changed || stale
+            ? undefined
+            : (ids) =>
+                run(
+                  "读取评论",
+                  () =>
+                    ipc("contentSupply.attachComments", {
+                      id: draft.id,
+                      version: draft.version,
+                      commentIds: ids,
+                    }),
+                  "本地评论已加入选材快照，尚未自动采用",
+                )
+        }
         onRefresh={() =>
           void run(
             "补全中",

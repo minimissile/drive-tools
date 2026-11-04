@@ -41,6 +41,9 @@ export interface AgentTurnInput {
   messages: AgentMessage[];
   tools: AgentToolDefinition[];
   maxOutputTokens?: number;
+  /** The caller must validate a whole batch and execute it sequentially. Default remains one. */
+  maxToolCalls?: 1 | 2 | 3 | 4;
+  reasoningEffort?: "auto" | "default" | "low" | "medium" | "high" | "none";
   /** Remaining caller budget, checked in addition to ledger-backed scope limits. */
   maxCostMicros: number;
   budgetScope: AgentBudgetScope;

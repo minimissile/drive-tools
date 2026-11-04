@@ -13,6 +13,7 @@ import type { AppPorts } from "./ports";
 import { AppError } from "./errors";
 import type { WeiboEditorPayload } from "../shared/weibo-publishing";
 import { weiboReceiptUrl } from "../shared/weibo-marketing";
+import { canonicalZhihuParticipationUrl } from "../shared/zhihu-participation";
 import type { BrowserEnvironments } from "./browser-environments";
 import {
   documentPlatformUrl,
@@ -451,7 +452,9 @@ export class WebsiteAccounts {
   }
   async openDocument(accountId: string, value: string) {
     const account = this.get(accountId);
-    const url = documentPlatformUrl(account.provider, value);
+    const url = account.provider === "zhihu"
+      ? canonicalZhihuParticipationUrl(value)
+      : documentPlatformUrl(account.provider, value);
     if (!url)
       throw new AppError(
         "DOCUMENT_URL_BLOCKED",

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { id, now, type Database } from "../database";
 import { AppError, safeMessage } from "../errors";
 import { cleanKnowledge } from "../knowledge-response";
+import { parsePipixJson } from "./json";
 import {
   pipixDiscoverInput,
   pipixKnowledgeInput,
@@ -153,7 +154,7 @@ export class PipixKnowledge {
         "PIPIX_RESPONSE_SAVED",
         "该记录没有可重新解析的成功响应。",
       );
-    const raw: unknown = JSON.parse(row.response),
+    const raw: unknown = parsePipixJson(row.response),
       parsed = parsePipixDiscovery(raw, request);
     const originals = new Map(
       pipixDiscoveryEntries(raw).items.map((item) => [

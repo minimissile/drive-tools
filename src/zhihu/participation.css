@@ -1,0 +1,284 @@
+.zhihu-participation,
+.participation-embedded,
+.participation-detail,
+.participation-form-section,
+.participation-context,
+.participation-attempt-body,
+.participation-attempts {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.zhihu-participation .panel {
+  padding: var(--space-4);
+  margin-bottom: 0;
+}
+.zhihu-participation .panel-heading {
+  margin-bottom: var(--space-3);
+}
+.zhihu-participation .tabs {
+  padding-bottom: var(--space-3);
+}
+.zhihu-participation .notice {
+  margin: 0;
+}
+.participation-account-bar {
+  display: grid;
+  grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: end;
+}
+.participation-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.participation-account-bar .participation-meta {
+  margin-top: var(--space-1);
+}
+.participation-discovery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+.participation-discovery + .participation-meta {
+  margin-top: var(--space-2);
+}
+.participation-columns {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.65fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+.participation-list-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.participation-list {
+  display: grid;
+}
+.participation-choice {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.participation-choice[aria-pressed="true"] {
+  background: var(--blue-bg);
+}
+.participation-choice:hover {
+  background: var(--bg);
+}
+.participation-choice > span {
+  min-width: 0;
+}
+.participation-choice strong {
+  display: block;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.participation-choice small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.participation-choice p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: var(--space-1) 0;
+  overflow-wrap: anywhere;
+}
+.participation-task-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.participation-task-state small {
+  margin-top: 0;
+}
+.participation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.participation-source {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.participation-context-text {
+  max-height: 360px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  background: var(--bg);
+  padding: var(--space-3);
+  border-radius: var(--control-radius);
+}
+.participation-context summary,
+.participation-details summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 12px;
+}
+.participation-related {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+.participation-related li {
+  padding-block: var(--space-1);
+}
+.participation-related small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.participation-text-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.participation-form-section {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.participation-form-section h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.participation-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.participation-fields .wide {
+  grid-column: 1 / -1;
+}
+.participation-fields textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+.participation-fields textarea.participation-answer-body {
+  min-height: 200px;
+}
+.participation-log-location {
+  font-size: 11px;
+}
+.participation-resolution {
+  padding: var(--space-3);
+  background: var(--bg);
+  border-radius: var(--control-radius);
+  font-size: 12px;
+}
+.participation-resolution p {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.participation-execution-heading,
+.participation-attempt-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.participation-execution-heading {
+  justify-content: space-between;
+}
+.participation-attempt {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-3);
+  min-width: 0;
+}
+.participation-attempt > summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.participation-attempt-heading {
+  display: inline-flex;
+}
+.participation-attempt-body {
+  padding-top: var(--space-3);
+}
+.participation-evidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: 12px;
+}
+.participation-evidence .wide {
+  grid-column: 1 / -1;
+}
+.participation-evidence dt {
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+.participation-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.participation-decision,
+.participation-execution-result {
+  margin: 0;
+  font-size: 12px;
+}
+.participation-decision p,
+.participation-decision blockquote,
+.participation-execution-result span {
+  display: block;
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.participation-decision blockquote {
+  color: var(--muted);
+  padding: var(--space-2);
+  background: var(--bg);
+  border-radius: var(--control-radius);
+}
+.participation-form-section > .notice .participation-actions {
+  margin-top: var(--space-2);
+}
+.participation-dialog {
+  display: grid;
+  gap: var(--space-3);
+}
+.participation-dialog p {
+  margin: 0;
+}
+.participation-account-choice {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
