@@ -30,7 +30,6 @@
   overflow-y: auto;
   min-height: 100px;
   padding: 4px 20px 18px;
-  scrollbar-gutter: stable;
 }
 .generation-drop {
   position: relative;

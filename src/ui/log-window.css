@@ -22,7 +22,6 @@
   height: clamp(220px, calc(100dvh - 590px), 520px);
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 .log-window-viewport:focus-visible {
   outline: 2px solid var(--blue);

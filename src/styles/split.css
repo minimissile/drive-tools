@@ -112,7 +112,6 @@
   overflow: auto;
   padding: 9px 0;
   min-height: 160px;
-  scrollbar-gutter: stable;
 }
 .split-tree-row {
   position: relative;
