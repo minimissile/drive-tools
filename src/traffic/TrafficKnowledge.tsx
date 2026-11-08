@@ -1,535 +1,472 @@
-import { Select } from "../ui/Select";
-import { updateSelection } from "../lib/selection";
-import { keywordMetrics, keywordMetricNames as metricName } from "./knowledge";
-import { useIpcQuery } from "../api/useIpcQuery";
-import { QueryError } from "../ui/QueryError";
-import { Tabs, TabList, TabPanel } from "../ui/Tabs";
-import { useEffect, useState } from "react";
-import { Archive, ArrowRight, Download, RefreshCw, Search } from "lucide-react";
+import { useState } from "react";
+import {
+  ArrowRight,
+  BookmarkPlus,
+  Copy,
+  Download,
+  RefreshCw,
+} from "lucide-react";
+import type { KnowledgeFilter } from "../../shared/traffic-knowledge";
+import { useAppActions, useAppActivity } from "../state";
 import {
   Button,
   Empty,
   Field,
-  Loading,
   LoadingState,
   Notice,
   Panel,
 } from "../ui/primitives";
+import { QueryError } from "../ui/QueryError";
+import { Select } from "../ui/Select";
+import { Pagination } from "../ui/Pagination";
 import { formatTime } from "../lib/format";
-import { useAppActions, useAppActivity } from "../state";
-import { endpointSpecs } from "../../shared/platforms";
-import type { Endpoint } from "../../shared/types";
-import type {
-  KnowledgeDetail,
-  KnowledgeFilter,
-} from "../../shared/traffic-knowledge";
-const phaseName: Record<string, string> = {
-  query: "查询",
-  submit: "提交分析",
-  poll: "获取分析结果",
-  legacy: "历史恢复",
-};
+import {
+  knowledgePlatforms,
+  knowledgePlatformName,
+  knowledgeSources,
+  primaryKeywordMetric,
+} from "./knowledge";
+import { libraryEntryKey, useTrafficLibrary } from "./useTrafficLibrary";
+import { TrafficKnowledgeDetails } from "./TrafficKnowledgeDetails";
+import { TrafficQueryArchive } from "./TrafficQueryArchive";
 
-const statusName: Record<string, string> = {
-  requested: "请求中 / 尚未确认",
-  received: "响应已归档",
-  pending: "分析中",
-  success: "成功",
-  uncertain: "结果或费用待核",
-  recovered: "旧记录恢复",
-};
 export default function TrafficKnowledge({
   onAppend,
+  onOpenPools,
 }: {
   onAppend(words: string[]): void;
+  onOpenPools(): void;
 }) {
-  const { command, notify } = useAppActions(),
-    { busy } = useAppActivity();
-  const [input, setInput] = useState(""),
-    [filter, setFilter] = useState<KnowledgeFilter>({
-      search: "",
-      endpoint: "",
-      platform: "",
-      page: 1,
-      view: "items",
-    }),
-    [detail, setDetail] = useState<KnowledgeDetail | null>(null),
-    [selected, setSelected] = useState<string[]>([]),
-    [poolName, setPoolName] = useState("");
+  const model = useTrafficLibrary();
   const {
     data: result,
     loading,
     error,
     reload,
-  } = useIpcQuery("traffic.knowledge.list", filter, { keepPrevious: true });
-  useEffect(() => {
-    setSelected([]);
-    setDetail(null);
-  }, [filter]);
-  const inspect = async (id: string) => {
-    const r = await command("traffic.knowledge.detail", {
-      id,
-    });
-    if (r) setDetail(r);
-  };
-  const chosen = result?.items.filter((i) => selected.includes(i.id)) ?? [];
-  const update = (patch: Partial<KnowledgeFilter>) =>
-    setFilter((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
+    filter,
+    updateFilter,
+    selected,
+    select,
+  } = model;
+  const { command, notify } = useAppActions();
+  const { busy } = useAppActivity();
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const items = result?.items ?? [];
+  const selectedKeys = new Set(selected.map(libraryEntryKey));
+  const allPage =
+    items.length > 0 &&
+    items.every((item) => selectedKeys.has(libraryEntryKey(item)));
+  const words = [
+    ...new Map(
+      selected.map((item) => [
+        item.word.normalize("NFKC").trim().toLowerCase(),
+        item.word,
+      ]),
+    ).values(),
+  ];
+  const copiedText = words.join("\n");
+  const poolAllowed =
+    selected.length > 0 && selected.every((item) => item.kind === "word");
+  const platforms =
+    filter.platform &&
+    !knowledgePlatforms.some((item) => item.value === filter.platform)
+      ? [
+          ...knowledgePlatforms,
+          { value: filter.platform, label: filter.platform },
+        ]
+      : knowledgePlatforms;
   return (
-    <Tabs
-      className="traffic-knowledge"
-      value={filter.view}
-      onChange={(view) => update({ view })}
-    >
-      <Notice>
-        百度关键词中月均搜索量大于10的新词自动收录；同来源、同词展示最新指标并保留历史，已收录词降至10及以下仍更新数据。5118响应继续长期归档。刷新本地不会请求外部接口。
-      </Notice>
-      {result ? (
-        <div className="stat-strip usage-strip">
-          <div>
-            归档查询<strong>{result.summary.queries}</strong>
-            <small>
-              其中 {result.summary.responses} 条有响应，{result.summary.legacy}{" "}
-              条为旧记录恢复
-            </small>
-          </div>
-          <div>
-            累计独立词语<strong>{result.summary.words}</strong>
-            <small>另有 {result.summary.hotspots} 个独立热点</small>
-          </div>
-          <div>
-            历史观察记录<strong>{result.summary.observations}</strong>
-            <small>同一词不同时点的指标分别保留</small>
-          </div>
-        </div>
-      ) : null}
+    <div className="traffic-knowledge">
       <Panel
-        title="本地流量知识库"
+        title="关键词库"
         extra={
-          <Button
-            onClick={() => {
-              setSelected([]);
-              setDetail(null);
-              reload();
-            }}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loading label="正在刷新…" />
-            ) : (
-              <>
-                <RefreshCw size={15} />
-                刷新本地
-              </>
-            )}
-          </Button>
+          <div className="row compact">
+            <small>
+              {result ? `${result.total.toLocaleString()}项` : "正在读取…"}
+            </small>
+            <Button quiet size="compact" disabled={loading} onClick={reload}>
+              <RefreshCw size={14} className={loading ? "spin" : undefined} />
+              刷新
+            </Button>
+          </div>
         }
       >
         <form
           className="knowledge-filters"
-          onSubmit={(e) => {
-            e.preventDefault();
-            update({ search: input });
+          onSubmit={(event) => {
+            event.preventDefault();
+            updateFilter({ search: model.input.trim() });
           }}
         >
-          <Field label="搜索归档词语或种子词">
+          <Field label="搜索关键词">
             <input
-              aria-label="搜索本地知识库"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="例如：Obsidian、怎么使用"
+              aria-label="搜索词库"
+              maxLength={200}
+              placeholder="输入想找的词…"
+              value={model.input}
+              onChange={(event) => model.setInput(event.target.value)}
             />
           </Field>
-          <Field label="接口来源">
+          <Field label="来源">
             <Select
-              aria-label="知识库接口来源"
+              aria-label="词库来源"
               value={filter.endpoint}
-              onValueChange={(nextValue) =>
-                update({
-                  endpoint: nextValue as KnowledgeFilter["endpoint"],
+              items={knowledgeSources}
+              onValueChange={(endpoint) =>
+                updateFilter({
+                  endpoint: endpoint as KnowledgeFilter["endpoint"],
                 })
               }
-              items={[
-                { value: "", label: "全部接口" },
-                ...Object.entries(endpointSpecs).map(([key, s]) => ({
-                  value: key,
-                  label: s.name,
-                })),
-                { value: "baidu-keywords", label: "百度营销 · 关键词规划师" },
-              ]}
             />
           </Field>
-          <Field label="平台代码（可选）">
-            <input
+          <Field label="平台">
+            <Select
+              aria-label="词库平台"
               value={filter.platform}
-              aria-label="知识库平台"
-              placeholder="例如 baidu / douyin"
-              onChange={(e) => update({ platform: e.target.value })}
+              items={platforms}
+              onValueChange={(platform) => updateFilter({ platform })}
             />
           </Field>
-          <Button type="submit" primary disabled={loading}>
-            <Search size={15} />
-            搜索本地
-          </Button>
-        </form>
-        <div className="knowledge-toolbar">
-          <TabList
-            label="知识库视图"
-            items={[
-              ["items", "词语与热点"],
-              ["queries", "查询档案"],
-            ]}
-          />
-          <Button
-            disabled={busy > 0}
-            onClick={async () => {
-              const p = await command("traffic.knowledge.export", filter);
-              if (p) notify(`知识库已导出：${p}`, "success");
-            }}
-          >
-            <Download size={15} />
-            导出筛选后的全部观察 CSV
-          </Button>
-        </div>
-        <small>
-          同来源、同词及平台合并为一条最新记录；首次收录与最近采集分别展示，导出保留历史观察。更新随下一次手动检索成功后入库，不自动消耗接口配额。
-        </small>
-        <TabPanel value={filter.view}>
-          <QueryError
-            error={error}
-            loading={loading}
-            onRetry={reload}
-            title="本地知识库暂未读取成功"
-          />
-          {loading && !result?.total ? (
-            <LoadingState label="正在读取本地知识库…" />
-          ) : result && result.total ? (
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    {(filter.view === "items"
-                      ? [
-                          "选择",
-                          "词语 / 热点",
-                          "来源 / 平台",
-                          "首次收录 / 最近采集",
-                          "历史观察",
-                          "指标 / 来源档案",
-                        ]
-                      : [
-                          "时间",
-                          "接口 / 阶段",
-                          "种子词 / 平台",
-                          "状态",
-                          "词条数",
-                          "档案",
-                        ]
-                    ).map((t) => (
-                      <th key={t}>{t}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filter.view === "items"
-                    ? result.items.map((i) => (
-                        <tr key={i.id}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              aria-label={`选择知识库词 ${i.word}`}
-                              checked={selected.includes(i.id)}
-                              onChange={(e) =>
-                                setSelected((prev) =>
-                                  updateSelection(
-                                    prev,
-                                    [i.id],
-                                    e.target.checked,
-                                  ),
-                                )
-                              }
-                            />
-                          </td>
-                          <td>
-                            <strong>{i.word}</strong>
-                            <br />
-                            <small>
-                              {i.kind === "hotspot" ? "热点线索" : "关键词"}
-                            </small>
-                          </td>
-                          <td>
-                            {i.source}
-                            <br />
-                            <small>{i.platform ?? "未限定平台"}</small>
-                          </td>
-                          <td>
-                            <small>
-                              首次：
-                              {i.firstObservedAt
-                                ? formatTime(i.firstObservedAt)
-                                : "未知"}
-                            </small>
-                            <br />
-                            最近：
-                            {i.observedAt
-                              ? formatTime(i.observedAt)
-                              : "采集时间未知"}
-                            <br />
-                            <small>
-                              源更新：{i.sourceUpdatedAt ?? "未提供"}
-                            </small>
-                          </td>
-                          <td>
-                            {i.observations}
-                            <br />
-                            <Button
-                              onClick={() => {
-                                setInput(i.word);
-                                update({ search: i.word, view: "queries" });
-                              }}
-                            >
-                              查看历史
-                            </Button>
-                          </td>
-                          <td>
-                            <div className="knowledge-metrics">
-                              {Object.entries(i.metrics)
-                                .slice(0, 5)
-                                .map(([k, v]) => (
-                                  <small key={k}>
-                                    {metricName[k] ?? k}：{String(v)}
-                                  </small>
-                                ))}
-                              {!Object.keys(i.metrics).length ? (
-                                <small>未提供指标</small>
-                              ) : null}
-                            </div>
-                            <Button onClick={() => void inspect(i.queryId)}>
-                              <Archive size={14} />
-                              查看来源档案
-                            </Button>
-                          </td>
-                        </tr>
-                      ))
-                    : result.queries.map((q) => (
-                        <tr key={q.id}>
-                          <td>
-                            {q.receivedAt
-                              ? formatTime(q.receivedAt)
-                              : q.startedAt
-                                ? formatTime(q.startedAt)
-                                : "时间未知"}
-                          </td>
-                          <td>
-                            {(q.endpoint === "baidu-keywords"
-                              ? "百度营销 · 关键词规划师"
-                              : endpointSpecs[q.endpoint as Endpoint]?.name) ??
-                              q.endpoint}
-                            <br />
-                            <small>{phaseName[q.phase] ?? q.phase}</small>
-                          </td>
-                          <td>
-                            {q.seeds.join("、") || "未记录 / 未限定"}
-                            <br />
-                            <small>{q.platform}</small>
-                          </td>
-                          <td>
-                            {statusName[q.status] ?? q.status}
-                            {q.legacy ? <small>历史恢复</small> : null}
-                          </td>
-                          <td>{q.count}</td>
-                          <td>
-                            <Button onClick={() => void inspect(q.id)}>
-                              {q.endpoint === "baidu-keywords"
-                                ? "查看收录档案"
-                                : "查看完整响应"}
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                </tbody>
-              </table>
-            </div>
-          ) : error ? null : (
-            <Empty title="暂无匹配的知识库资料">
-              新查询会自动归档，已有本地缓存和分析结果会在升级时恢复。
-            </Empty>
-          )}
-          <div className="knowledge-toolbar">
-            <small>
-              {loading
-                ? "本地历史记录"
-                : result
-                  ? `共 ${result.total} 项 · 第 ${filter.page} 页`
-                  : "分页信息暂不可用"}
-            </small>
-            <div className="inline-actions">
-              <Button
-                disabled={loading || filter.page === 1}
-                onClick={() => update({ page: filter.page - 1 })}
-              >
-                上一页
-              </Button>
-              <Button
-                disabled={
-                  loading ||
-                  !result ||
-                  filter.page * result.pageSize >= result.total
-                }
-                onClick={() => update({ page: filter.page + 1 })}
-              >
-                下一页
-              </Button>
-            </div>
-          </div>
-          {chosen.length ? (
-            <div className="knowledge-selection">
-              <strong>已选 {chosen.length} 项</strong>
-              <Button onClick={() => onAppend(chosen.map((i) => i.word))}>
-                <ArrowRight size={15} />
-                带入找词 / AI联想
-              </Button>
-              <input
-                aria-label="知识库新词池名称"
-                placeholder="流量池名称"
-                value={poolName}
-                onChange={(e) => setPoolName(e.target.value)}
-              />
-              <Button
-                disabled={busy > 0 || chosen.some((i) => i.kind !== "word")}
-                onClick={async () => {
-                  const r = await command(
-                    "pool.save",
-                    {
-                      name: poolName.trim() || "历史发现词池",
-                      resourceId: null,
-                      keywords: chosen.map((i) => ({
-                        id: i.id,
-                        word: i.word,
-                        platform: i.platform,
-                        source: i.source,
-                        metrics: keywordMetrics(i.metrics),
-                        sourceUpdatedAt: i.sourceUpdatedAt,
-                        fetchedAt: i.observedAt ?? "",
-                      })),
-                    },
-                    "已从知识库建立词池",
-                  );
-                  if (r) {
-                    setSelected([]);
-                    setPoolName("");
-                  }
-                }}
-              >
-                保存为流量池
-              </Button>
-            </div>
-          ) : null}
-        </TabPanel>
-      </Panel>
-      {detail ? (
-        <Panel
-          title="查询来源档案"
-          extra={<Button onClick={() => setDetail(null)}>关闭档案</Button>}
-        >
-          <p>
-            {(detail.query.endpoint === "baidu-keywords"
-              ? "百度营销 · 关键词规划师"
-              : endpointSpecs[detail.query.endpoint as Endpoint]?.name) ??
-              "历史接口未知"}{" "}
-            · {statusName[detail.query.status] ?? detail.query.status} ·{" "}
-            {detail.query.count} 条观察
-          </p>
-          <small>
-            {detail.query.message}{" "}
-            {detail.query.endpoint === "baidu-keywords"
-              ? "以下为本次符合收录规则的词条及更新数据，不包含登录凭据。"
-              : detail.query.legacy
-                ? "以下为当时仍保留的历史内容，可能不是完整原始响应。"
-                : "凭据字段已隐藏；接口新增字段仍保留在完整响应中。"}
-          </small>
-          <Field label="查询参数与种子词">
-            <pre className="knowledge-json">
-              {JSON.stringify(
-                {
-                  parameters: detail.query.request,
-                  seeds: detail.query.seeds,
-                  httpStatus: detail.query.httpStatus,
-                  receivedAt: detail.query.receivedAt,
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </Field>
-          <Field label="完整归档响应">
-            <textarea
-              aria-label="完整归档响应"
-              className="knowledge-response"
-              readOnly
-              value={
-                detail.response ??
-                "本次未取得完整响应。请核对网络或远端任务；应用不会自动重试。"
+          <Field label="排序">
+            <Select
+              aria-label="词库排序"
+              value={filter.sort}
+              items={[
+                { value: "recent", label: "最近采集优先" },
+                { value: "monthly", label: "月搜索量从高到低" },
+                { value: "word", label: "按关键词排序" },
+              ]}
+              onValueChange={(sort) =>
+                updateFilter({ sort: sort as KnowledgeFilter["sort"] })
               }
             />
           </Field>
-          <Button
-            onClick={async () => {
-              const p = await command("traffic.knowledge.exportQuery", {
-                id: detail.query.id,
-              });
-              if (p) notify(`查询档案已导出：${p}`, "success");
-            }}
-          >
-            <Download size={15} />
-            导出此查询 JSON
+          <Button primary type="submit" disabled={loading}>
+            搜索
           </Button>
-        </Panel>
-      ) : null}
-      {result ? (
-        <Panel title="本地样本规律">
-          <Notice>
-            这是你在本工具中查询和积累的样本，不是平台真实用户搜索日志。下列意图按字面规则粗分，可重叠，不能据此推断全网需求或因果趋势。
-          </Notice>
-          <div className="knowledge-patterns">
-            {result.patterns.map((p) => (
-              <div key={p.name}>
-                <small>{p.name}</small>
-                <strong>{p.count}</strong>
-                <span>个独立词语含相关表达</span>
-              </div>
-            ))}
-          </div>
-          <h4>常用查询主题</h4>
-          {result.seeds.length ? (
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>种子词</th>
-                    <th>有响应的查询 / 提交次数</th>
-                    <th>关联观察数</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.seeds.map((s) => (
-                    <tr key={s.word}>
-                      <td>{s.word}</td>
-                      <td>{s.queries}</td>
-                      <td>{s.results}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <small>还没有可统计的新查询主题。旧恢复记录不纳入查询频次。</small>
-          )}
+        </form>
+        <div className="knowledge-filter-options">
+          <Select
+            aria-label="搜索量依据"
+            value={filter.volume}
+            items={[
+              { value: "", label: "全部搜索量" },
+              { value: "measured", label: "有实测月搜索量" },
+              { value: "default", label: "默认月搜索量" },
+              { value: "unknown", label: "未提供月搜索量" },
+            ]}
+            onValueChange={(volume) =>
+              updateFilter({ volume: volume as KnowledgeFilter["volume"] })
+            }
+          />
+          <Select
+            aria-label="词条类型"
+            value={filter.kind}
+            items={[
+              { value: "", label: "全部类型" },
+              { value: "word", label: "关键词" },
+              { value: "longtail", label: "长尾流量池" },
+              { value: "hotspot", label: "热点" },
+            ]}
+            onValueChange={(kind) =>
+              updateFilter({ kind: kind as KnowledgeFilter["kind"] })
+            }
+          />
           <small>
-            多种子搜索量任务的每个种子关联整批结果；观察数用于追溯资料，不代表该词的搜索次数。
+            {filter.kind === "longtail"
+              ? "归集百度批量扩词与5118长尾词；默认搜索量不代表实测。"
+              : "同词的不同来源分别保留；默认搜索量不代表实测。"}
           </small>
-        </Panel>
+          {filter.search ||
+          filter.endpoint ||
+          filter.platform ||
+          filter.volume ||
+          filter.kind ? (
+            <Button
+              quiet
+              size="compact"
+              onClick={() => {
+                model.setInput("");
+                updateFilter({
+                  search: "",
+                  endpoint: "",
+                  platform: "",
+                  volume: "",
+                  kind: "",
+                });
+              }}
+            >
+              清除筛选
+            </Button>
+          ) : null}
+        </div>
+        {model.draftError ? <Notice warning>{model.draftError}</Notice> : null}
+        <QueryError
+          title="所选词条暂未核对"
+          error={model.selectionError}
+          loading={model.selectionLoading}
+          onRetry={model.retrySelection}
+        />
+        {model.missingSelectionCount ? (
+          <Notice warning>
+            {model.missingSelectionCount}
+            项所选词的采集记录已不可用，文本与原指标快照仍保留，可复制或保存。
+          </Notice>
+        ) : null}
+        <div className="knowledge-selection" aria-label="词库批量操作">
+          <div className="knowledge-selection-summary">
+            <strong>
+              {selected.length
+                ? `已选 ${selected.length} 项`
+                : "勾选词条后批量复用"}
+            </strong>
+            {selected.length ? (
+              <>
+                <small>跨页保留 · {words.length}个词</small>
+                <Button quiet size="compact" onClick={model.clear}>
+                  清空选择
+                </Button>
+              </>
+            ) : (
+              <small>支持跨页选择，最多1000项</small>
+            )}
+          </div>
+          <div className="row compact">
+            <Button
+              size="compact"
+              disabled={!words.length || copiedText.length > 100000 || busy > 0}
+              title="最多复制10万字；超出时请分批选择"
+              onClick={async () => {
+                const copied = await command("system.copyText", {
+                  text: copiedText,
+                });
+                if (copied)
+                  notify(`已复制${words.length}个去重词。`, "success");
+              }}
+            >
+              <Copy size={14} />
+              复制词
+            </Button>
+            <Button
+              size="compact"
+              disabled={
+                !words.length ||
+                words.length > 50 ||
+                words.some((word) => word.length > 100)
+              }
+              title="最多50个词，每词最多100字；只带入查询框，不自动请求接口"
+              onClick={() => onAppend(words)}
+            >
+              <ArrowRight size={14} />
+              带入找词
+            </Button>
+          </div>
+          {selected.length ? (
+            <div className="knowledge-pool-actions">
+              <input
+                aria-label="词库新词池名称"
+                placeholder="词池名称（可选）"
+                maxLength={100}
+                value={model.poolName}
+                onChange={(event) => model.setPoolName(event.target.value)}
+              />
+              <Button
+                primary
+                size="compact"
+                disabled={!poolAllowed || busy > 0}
+                onClick={async () => {
+                  if (await model.savePool()) setSaved(true);
+                }}
+              >
+                <BookmarkPlus size={14} />
+                保存为词池
+              </Button>
+              {!poolAllowed ? (
+                <small>热点可复制或带入找词；词池仅收录关键词。</small>
+              ) : null}
+              {words.length > 50 ? (
+                <small>
+                  当前超过50词，带入找词请分批；仍可复制或保存词池。
+                </small>
+              ) : null}
+            </div>
+          ) : null}
+          {saved ? (
+            <Button quiet size="compact" onClick={onOpenPools}>
+              查看已保存词池 <ArrowRight size={14} />
+            </Button>
+          ) : null}
+        </div>
+        <QueryError
+          title="词库暂未读取成功"
+          error={error}
+          loading={loading}
+          onRetry={reload}
+        />
+        {loading && !result ? (
+          <LoadingState label="正在读取词库…" />
+        ) : result && items.length ? (
+          <div className="table-scroll">
+            <table
+              className="knowledge-entries"
+              aria-label="词库列表"
+              aria-busy={loading}
+            >
+              <thead>
+                <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      aria-label="全选本页词条"
+                      checked={allPage}
+                      disabled={loading}
+                      ref={(node) => {
+                        if (node)
+                          node.indeterminate =
+                            !allPage &&
+                            items.some((item) =>
+                              selectedKeys.has(libraryEntryKey(item)),
+                            );
+                      }}
+                      onChange={(event) => select(items, event.target.checked)}
+                    />
+                  </th>
+                  <th>关键词</th>
+                  <th>来源 / 平台</th>
+                  <th>核心指标</th>
+                  <th>最近采集</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => {
+                  const key = libraryEntryKey(item),
+                    metric = primaryKeywordMetric(item.metrics);
+                  return (
+                    <tr
+                      key={key}
+                      data-selected={selectedKeys.has(key) || undefined}
+                    >
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`选择词条 ${item.word}`}
+                          checked={selectedKeys.has(key)}
+                          disabled={loading}
+                          onChange={(event) =>
+                            select([item], event.target.checked)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <strong>{item.word}</strong>
+                        {item.kind === "hotspot" ? <small>热点</small> : null}
+                      </td>
+                      <td>
+                        {item.source}
+                        <small>{knowledgePlatformName(item.platform)}</small>
+                      </td>
+                      <td>
+                        <span>{metric.value}</span>
+                        <small>
+                          {metric.label}
+                          {metric.note ? ` · ${metric.note}` : ""}
+                        </small>
+                      </td>
+                      <td>
+                        {item.observedAt
+                          ? formatTime(item.observedAt)
+                          : "时间未记录"}
+                        <small>{item.observations}次采集</small>
+                      </td>
+                      <td>
+                        <Button
+                          quiet
+                          size="compact"
+                          disabled={loading}
+                          aria-label={`查看词条 ${item.word}`}
+                          onClick={() => model.setDetail(item)}
+                        >
+                          详情
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : !error && !loading ? (
+          <Empty
+            title={
+              filter.search ||
+              filter.endpoint ||
+              filter.platform ||
+              filter.volume ||
+              filter.kind
+                ? "没有符合筛选的词条"
+                : "还没有收录词条"
+            }
+          >
+            {filter.search ||
+            filter.endpoint ||
+            filter.platform ||
+            filter.volume ||
+            filter.kind
+              ? "调整搜索或筛选条件，已收录的词仍保留在词库中。"
+              : "通过百度扩词或找词工具采集，结果会自动积累到这里。"}
+          </Empty>
+        ) : null}
+        {result ? (
+          <Pagination
+            label="词库分页"
+            page={filter.page}
+            pageSize={result.pageSize}
+            total={result.total}
+            disabled={loading}
+            onPageChange={model.changePage}
+          />
+        ) : null}
+      </Panel>
+      <details
+        className="knowledge-archive"
+        onToggle={(event) => setArchiveOpen(event.currentTarget.open)}
+      >
+        <summary>查询档案与入库说明</summary>
+        {archiveOpen ? (
+          <>
+            <p>
+              百度新词月搜索量至少10时收录；批量扩词默认10，非实测。同来源保留每次观察，已收录词后续低于10仍更新。词池是你整理的选词快照，不会随新采集改变。
+            </p>
+            <div className="knowledge-toolbar">
+              <small>
+                档案与导出沿用当前筛选，包含历史观察，数量可能多于最新词条。
+              </small>
+              <Button
+                disabled={busy > 0}
+                onClick={async () => {
+                  const path = await command(
+                    "traffic.knowledge.export",
+                    filter,
+                  );
+                  if (path) notify(`历史观察已导出：${path}`, "success");
+                }}
+              >
+                <Download size={14} />
+                导出历史 CSV
+              </Button>
+            </div>
+            <TrafficQueryArchive filter={filter} />
+          </>
+        ) : null}
+      </details>
+      {model.detail ? (
+        <TrafficKnowledgeDetails
+          item={model.detail}
+          onClose={() => model.setDetail(null)}
+        />
       ) : null}
-    </Tabs>
+    </div>
   );
 }

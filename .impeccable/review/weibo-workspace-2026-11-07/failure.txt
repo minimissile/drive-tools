@@ -1,0 +1,73 @@
+locator.click: Timeout 10000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('option', { name: '模拟·清单选题 · 词池：模拟·本地选题 · 手工录入', exact: true })[22m
+
+    at invoke (/Users/nuke/Desktop/drive-tools/scripts/dev-test-session.mjs:227:34)
+    at Proxy.<anonymous> (/Users/nuke/Desktop/drive-tools/scripts/dev-test-session.mjs:238:22)
+    at async run (/Users/nuke/Desktop/drive-tools/scripts/qa-weibo-workspace.mjs:252:5)
+    at async withDevTestSession (/Users/nuke/Desktop/drive-tools/scripts/dev-test-session.mjs:82:19)
+    at async <anonymous> (/Users/nuke/Desktop/drive-tools/scripts/run-dev-test-session.mjs:21:18)
+跳到主要内容
+盘序
+PANXU STUDIO
+工作台
+内容资产
+资源库
+资源清单
+内容规划
+流量词库
+智能运营
+搜索运营
+内容分发
+运营复盘
+分享统计
+工作空间
+账号管理
+资源图文营销
+指纹浏览器
+连接与设置
+盘序 0.0.5
+开发调试
+返回
+我的工作空间
+工作台
+微博内容
+微博来源一致性复验
+自动化测试中
+weibo-workspace-20261107
+暂无进行中任务
+本地工作台
+后端有更新待应用
+继续使用当前后端；应用时会重新打开所有会话窗口。
+应用更新并重启
+微博内容
+
+选题、草稿、发布与复盘集中管理，按账号保持原有表达和资源分享排版。
+
+公共素材
+账号管理
+返回内容列表
+选题与文案会按窗口暂存，稍后可继续。
+内容设置
+目标微博账号可先保存选题，交付发布前再选账号。
+稍后选择账号
+内容类型
+资源分享
+关联本人资料（可选）带网盘链接时使用已核验资料，并保留发布权限检查。
+计划时间用于待办排序，到时仍需你审阅并确认发布。
+适合人群（可选）
+当前账号文风
+新建内容
+选题 / 内容名称 *
+来源：手工选题，可从本地词库建议中选择；微博搜索热度未接入。
+微博文案0 / 2000 字符；可以留空，先保存选题。
+已核实内容依据保存选题时可留空。AI创作或关联资料交付时需至少10字；不猜年份、画质或文件大小。
+保存选题
+按账号文风生成
+继续审阅与发布
+
+生成按现有模型和预算计费，仅点击时执行；此处不会上传或发布。配图在发布编辑器中选择。
+
+模拟·清单选题 · 词池：模拟·本地选题 · 手工录入
+模拟·清单选题
+[]

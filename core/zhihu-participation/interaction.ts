@@ -4,6 +4,11 @@ import { AppError, safeMessage } from "../errors";
 import { cleanKnowledge } from "../knowledge-response";
 import { zhihuWarmingHasPromotion } from "../../shared/zhihu";
 import {
+  autocareRandomLikeScope,
+  autocareRandomCommentScope,
+  autocareRandomFollowScope,
+} from "../../shared/zhihu-autocare";
+import {
   zhihuInteractionExecuteInput,
   zhihuInteractionReconcileInput,
   zhihuInteractionQueueInput,
@@ -36,6 +41,63 @@ export interface ZhihuInteractionExecutionContext {
   guard(): void;
   /** Set only by a direct, exact-target human confirmation command. */
   humanConfirmed?: boolean;
+  /** Set only by an enabled autocare interaction rule, never by an AI tool. */
+  rulesAuthorized?: boolean;
+  /** Immutable batch bounds, supplied only by the autocare rule service. */
+  autocareRun?: { startedAt: string; deadlineAt: string };
+}
+/** Internal service authorization. No renderer IPC accepts this context. */
+export interface ZhihuInteractionRuleAuthorization {
+  planId:
+    | typeof autocareRandomLikeScope
+    | typeof autocareRandomCommentScope
+    | typeof autocareRandomFollowScope;
+  rulesAuthorized: true;
+  autocareRun: { startedAt: string; deadlineAt: string };
+}
+type InteractionQuotaContext = Pick<
+  ZhihuInteractionExecutionContext,
+  "dailyLimit" | "gapMinutes"
+> &
+  Partial<
+    Pick<
+      ZhihuInteractionExecutionContext,
+      "planId" | "rulesAuthorized" | "autocareRun"
+    >
+  >;
+
+function isAutocareRuleQuota(ctx: InteractionQuotaContext) {
+  return (
+    ctx.rulesAuthorized === true &&
+    [
+      autocareRandomLikeScope,
+      autocareRandomCommentScope,
+      autocareRandomFollowScope,
+    ].includes(ctx.planId ?? "")
+  );
+}
+
+function interactionRuleWindow(ctx: InteractionQuotaContext) {
+  if (!isAutocareRuleQuota(ctx)) return null;
+  const start = Date.parse(ctx.autocareRun?.startedAt ?? ""),
+    end = Date.parse(ctx.autocareRun?.deadlineAt ?? "");
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    end <= start ||
+    end - start > 2 * 3600000
+  )
+    fail("自动养号规则缺少有效的两小时批次授权");
+  if (Date.now() < start || Date.now() >= end)
+    fail("自动养号批次尚未开始或已经截止，未继续互动");
+  return { start, end };
+}
+
+function interactionGapMinutes(ctx: InteractionQuotaContext) {
+  // Write callers first pass prepareInteraction's exact source/scope/kind checks.
+  // A small gap alone, or a human/AI plan, never grants the autocare floor.
+  const rule = isAutocareRuleQuota(ctx);
+  return Math.max(rule ? 5 : 60, ctx.gapMinutes);
 }
 export interface ParticipationInteractionHost {
   d: ZhihuParticipationDependencies;
@@ -154,8 +216,8 @@ export function recoverParticipationInteractions(
 function assertQuota(
   host: ParticipationInteractionHost,
   state: ZhihuParticipationState,
-  item: ZhihuParticipationActivity,
-  ctx: ZhihuInteractionExecutionContext,
+  item: Pick<ZhihuParticipationActivity, "accountId">,
+  ctx: InteractionQuotaContext,
   networkKey: string,
   ownAttemptId?: string,
 ) {
@@ -164,6 +226,7 @@ function assertQuota(
       .filter((attempt) => attempt.id !== ownAttemptId)
       .map((attempt) => ({ other, attempt })),
   );
+  const run = interactionRuleWindow(ctx);
   if (
     entries.some(
       ({ other, attempt }) =>
@@ -173,6 +236,16 @@ function assertQuota(
   )
     fail("此账号有进行中或结果待核对的互动尝试，禁止继续真实互动");
   if (
+    run &&
+    entries.filter(({ other, attempt }) => {
+      const at = Date.parse(attempt.submittedAt ?? attempt.startedAt);
+      return (
+        other.accountId === item.accountId && at >= run.start && at < run.end
+      );
+    }).length >= ctx.dailyLimit
+  )
+    fail("已达此账号本批次跨计划共享的互动上限，未因跨午夜重置额度");
+  if (
     entries.filter(
       ({ other, attempt }) =>
         other.accountId === item.accountId &&
@@ -180,7 +253,7 @@ function assertQuota(
     ).length >= ctx.dailyLimit
   )
     fail("已达此账号跨计划共享的互动日额度，请等待下一运营日");
-  const gap = Math.max(60, ctx.gapMinutes) * 60000,
+  const gap = interactionGapMinutes(ctx) * 60000,
     stamp = Date.now();
   if (
     entries.some(
@@ -209,6 +282,28 @@ function assertQuota(
       )
   )
     fail("此账号或同出口近期已有知乎发布，互动需继续等待错峰间隔");
+}
+/** Read-only preflight before candidate research. Execution rechecks the same quota. */
+export function assertParticipationInteractionAvailable(
+  host: ParticipationInteractionHost,
+  accountId: string,
+  limits: Pick<ZhihuInteractionExecutionContext, "dailyLimit" | "gapMinutes">,
+  authorization?: ZhihuInteractionRuleAuthorization,
+) {
+  const account = host.account(accountId);
+  assertQuota(
+    host,
+    readParticipationState(host.d.db),
+    { accountId: account.id },
+    {
+      dailyLimit: limits.dailyLimit,
+      gapMinutes: limits.gapMinutes,
+      planId: authorization?.planId,
+      rulesAuthorized: authorization?.rulesAuthorized,
+      autocareRun: authorization?.autocareRun,
+    },
+    network(host, account),
+  );
 }
 function assertExact(
   host: ParticipationInteractionHost,
@@ -383,17 +478,47 @@ function prepareInteraction(
     ctx.gapMinutes > 10080
   )
     fail("缺少有效的独立互动执行授权与本地限额");
-  if (input.decision.relevance === null && !ctx.humanConfirmed)
+  const humanDecision =
+      "source" in input.decision && input.decision.source === "human",
+    rule =
+      input.decision.relevance === null && input.decision.source === "rule"
+        ? input.decision.rule
+        : null,
+    ruleScope =
+      rule === "autocare_random_like"
+        ? autocareRandomLikeScope
+        : rule === "autocare_random_comment"
+          ? autocareRandomCommentScope
+          : rule === "autocare_random_follow"
+            ? autocareRandomFollowScope
+            : null,
+    autocare = ctx.planId.startsWith("autocare_");
+  if (humanDecision && !ctx.humanConfirmed)
     fail("本人确认记录只能由明确的单项确认入口创建，模型不能代替本人确认");
+  if (ruleScope && (ctx.planId !== ruleScope || ctx.rulesAuthorized !== true))
+    fail("规则互动仅接受普通自动养号的准确规则授权，AI工具不能执行规则决定");
   if (
-    ctx.planId.startsWith("autocare_") &&
-    (!ctx.humanConfirmed || input.decision.relevance !== null)
+    [
+      autocareRandomLikeScope,
+      autocareRandomCommentScope,
+      autocareRandomFollowScope,
+    ].includes(ctx.planId) &&
+    !ruleScope
   )
-    fail("普通运营互动仅接受准确目标的本人确认");
+    fail("随机互动记录只能使用对应的已授权规则");
+  if (autocare && !humanDecision && !ruleScope)
+    fail("普通运营互动仅接受本人确认或已授权的互动规则");
+  if (ruleScope) interactionRuleWindow(ctx);
   const state = readParticipationState(host.d.db),
     item = activity(state, input.id),
     candidate = assertExact(host, state, item, input.version, ctx, requireDue),
     account = host.account(item.accountId);
+  if (
+    (rule === "autocare_random_like" && item.kind !== "like") ||
+    (rule === "autocare_random_comment" && item.kind !== "comment") ||
+    (rule === "autocare_random_follow" && item.kind !== "follow")
+  )
+    fail("随机互动规则与任务类型不匹配，不授权其他类型操作");
   const continued =
     continuation ??
     (requireDue && item.status === "queued"
@@ -580,7 +705,11 @@ export function continueParticipationInteraction(
     continuation,
   );
   const at = Date.parse(input.scheduledAt),
-    gap = Math.max(60, ctx.gapMinutes) * 60000;
+    gapMinutes = interactionGapMinutes(ctx),
+    gap = gapMinutes * 60000;
+  const run = interactionRuleWindow(ctx);
+  if (run && at >= run.end)
+    fail("原互动任务的续排时间不能超出当前两小时批次截止");
   if (
     at < Date.now() ||
     at > Date.now() + 7 * 86400000 ||
@@ -590,7 +719,9 @@ export function continueParticipationInteraction(
       (attempt) => at - Date.parse(attempt.startedAt) < gap,
     )
   )
-    fail("原任务只能安排未来合法时段，旧真实尝试仍须满足至少60分钟间隔");
+    fail(
+      `原任务只能安排未来合法时段，旧真实尝试仍须满足至少${gapMinutes}分钟间隔`,
+    );
   item.automation = {
     planRevision: ctx.planRevision,
     decision: previous.decision,
@@ -631,6 +762,8 @@ export function queueParticipationInteraction(
   const input = zhihuInteractionQueueInput.parse(raw),
     { state, item } = prepareInteraction(host, input, ctx, false),
     at = Date.parse(input.scheduledAt);
+  const run = interactionRuleWindow(ctx);
+  if (run && at >= run.end) fail("规则互动排期不能超出当前两小时批次截止");
   if (at < Date.now() - 1000 || at > Date.now() + 7 * 86400000)
     fail("互动排期需要在当前至未来7天内，未保存无效排期");
   const previous = item.automation;

@@ -46,7 +46,7 @@ export function OtherAccountConnection({
   onConfigure(): void;
 }) {
   const document = isDocumentProvider(provider);
-  const nativeOnly = provider === "smzdm" || document;
+  const nativeOnly = provider === "smzdm" || provider === "wechat" || document;
   return (
     <section
       className="account-connect website-account-connect"
@@ -102,11 +102,13 @@ export function OtherAccountConnection({
       </div>
       {nativeOnly ? (
         <p className="website-account-connect-hint">
-          {document
-            ? "使用独立内置浏览器保存登录；文档的公开访问权限需在官方平台设置。"
-            : hasSmzdm
-              ? "什么值得买仅支持一个账号，请在下方账号中登录或检查身份。"
-              : "什么值得买使用独立内置浏览器保存登录状态。"}
+          {provider === "wechat"
+            ? "使用微信扫码登录公众号后台，完成后检查身份。无需配置 AppID 或密钥。"
+            : document
+              ? "使用独立内置浏览器保存登录；文档的公开访问权限需在官方平台设置。"
+              : hasSmzdm
+                ? "什么值得买仅支持一个账号，请在下方账号中登录或检查身份。"
+                : "什么值得买使用独立内置浏览器保存登录状态。"}
         </p>
       ) : (
         <AccountBrowserChoice

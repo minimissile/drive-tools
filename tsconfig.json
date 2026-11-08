@@ -17,6 +17,7 @@
     "desktop",
     "core",
     "shared",
+    "video-templates",
     "tests",
     "scripts/*.ts",
     "vite.config.ts"

@@ -1,3 +1,4 @@
+import { AiIcon } from "../ui/AiIcon";
 import { Select } from "../ui/Select";
 import { updateSelection } from "../lib/selection";
 import { ipc } from "../api/client";
@@ -9,7 +10,6 @@ import {
   ChevronUp,
   Lightbulb,
   LoaderCircle,
-  Sparkles,
 } from "lucide-react";
 import {
   useAppActions,
@@ -291,7 +291,7 @@ export default function KeywordIdeas({
                 {generating ? (
                   <LoaderCircle size={15} className="spin" />
                 ) : (
-                  <Sparkles size={15} />
+                  <AiIcon size={15} />
                 )}
                 {generating ? "正在构思内容机会…" : "生成候选词"}
               </Button>

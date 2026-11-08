@@ -1,6 +1,7 @@
+import { AiIcon } from "../ui/AiIcon";
 import { Select } from "../ui/Select";
 import type { TrafficModel } from "./useTrafficDiscovery";
-import { RefreshCw, Search, Sparkles } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import {
   useAppActions,
   useAppActivity,
@@ -114,7 +115,7 @@ export function TrafficQuery({ model }: { model: TrafficModel }) {
               }
               onClick={() => void extract()}
             >
-              <Sparkles size={14} />
+              <AiIcon size={14} />
               AI提取种子词
             </Button>
           ) : null
@@ -247,7 +248,14 @@ export function TrafficQuery({ model }: { model: TrafficModel }) {
       {busy > 0 ? (
         <LoadingState label="正在查询，请勿重复提交…" compact />
       ) : null}
-      {queryFeedback ? <Notice warning>{queryFeedback}</Notice> : null}
+      {queryFeedback ? (
+        <Notice warning>
+          {queryFeedback}
+          <Button quiet onClick={() => openSettings("costs")}>
+            查看调用与费用
+          </Button>
+        </Notice>
+      ) : null}
       {tab === "words" &&
       method === "suggest" &&
       data!.suggestionQueries.length ? (

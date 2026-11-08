@@ -3,6 +3,7 @@ import { focusSection } from "../ui/SectionNav";
 const items = [
   ["settings-ai", "AI与预算"],
   ["settings-traffic", "5118接口"],
+  ["settings-costs", "调用与费用"],
   ["settings-sources", "内容数据源"],
   ["settings-resource-links", "固定入口"],
   ["settings-notes", "知识库"],

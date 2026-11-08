@@ -2,6 +2,7 @@ import { z } from "zod";
 import { environmentIdSchema } from "../../shared/browser-environments";
 import { id, now } from "../database";
 import { AppError } from "../errors";
+import { externalLinkInput } from "../external-links";
 import { parseShare } from "../links";
 import {
   collectionDriveTypes,
@@ -103,6 +104,8 @@ export function createZhidaoHandlers(
       return s.zhidao.store.detail(v.id, v.page, v.driveType);
     },
     "zhidao.start": (input) => s.zhidao.start(runStartInput.parse(input)),
+    "zhidao.answer.startMany": (input) => s.zhidao.startAnswers(input),
+    "zhidao.answer.sessions": () => s.zhidao.answerSessions(),
     "zhidao.answer.logs": (input) => {
       const v = z.object({ id: identifier, page: paging }).parse(input);
       return s.zhidao.store.answerLogs(v.id, v.page);
@@ -372,11 +375,8 @@ export function createZhidaoHandlers(
       return { copyIds, batchId: batch.id };
     },
     "zhidao.open": async (input) => {
-      const { url } = z.object({ url: z.url().max(3000) }).parse(input);
-      const u = new URL(url);
-      if (u.protocol !== "https:" || u.username || u.password || u.port)
-        throw new AppError("INVALID_URL", "只能打开有效 HTTPS 来源链接。");
-      await s.ports.openExternal(u.href);
+      const { url } = externalLinkInput.parse(input);
+      await s.ports.openExternal(url);
       return true;
     },
     "drive.files": (input) => {

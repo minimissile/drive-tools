@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { discoveryInputSchema } from "../../shared/baidu-discovery";
 import type { HandlerServices, HandlerMap } from "./types";
-import { insertQuestionDrafts } from "../zhidao/question-drafts";
 import { AppError } from "../errors";
 import { zhidaoContentPolicy } from "../zhidao/content-policy";
 import { parseShare } from "../links";
@@ -14,12 +13,11 @@ const selectedWords = z.array(z.string().min(1).max(100)).min(1).max(10000);
 export function createBaiduDiscoveryHandlers({
   baiduDiscovery: service,
   ports,
-  zhidao,
-  changed,
+  baiduDiscoveryQuestions,
   ai,
 }: Pick<
   HandlerServices,
-  "baiduDiscovery" | "ports" | "zhidao" | "changed" | "ai"
+  "baiduDiscovery" | "ports" | "baiduDiscoveryQuestions" | "ai"
 >) {
   return {
     "baiduDiscovery.list": () => service.list(),
@@ -56,6 +54,10 @@ export function createBaiduDiscoveryHandlers({
       const v = runId.extend({ key: z.string().min(1).max(200) }).parse(raw);
       return service.removeWord(v.id, v.key);
     },
+    "baiduDiscovery.questionImport": (raw) =>
+      baiduDiscoveryQuestions.progress(runId.parse(raw).id),
+    "baiduDiscovery.pauseQuestionImport": (raw) =>
+      baiduDiscoveryQuestions.pause(runId.parse(raw).id),
     "baiduDiscovery.insertZhidao": (raw) => {
       const v = runId
         .extend({
@@ -64,7 +66,7 @@ export function createBaiduDiscoveryHandlers({
             .min(1)
             .max(10000)
             .optional(),
-          links: z.string().trim().min(1).max(30000),
+          copyIds: z.array(z.string().min(1).max(100)).min(1).max(100),
           materials: z
             .array(z.string().trim().min(1).max(2000))
             .min(1)
@@ -86,10 +88,9 @@ export function createBaiduDiscoveryHandlers({
           "BAIDU_DISCOVERY_STALE",
           "部分所选词已被删除，请刷新结果后重新选择。",
         );
-      const result = insertQuestionDrafts(zhidao.store, {
+      return baiduDiscoveryQuestions.insert({
         id: run.id,
-        name: "百度批量扩词",
-        links: v.links,
+        copyIds: v.copyIds,
         materials: v.materials,
         questions: words.map((word) => ({
           key: word.key,
@@ -97,8 +98,6 @@ export function createBaiduDiscoveryHandlers({
           sourceUrl: word.origins[0]?.url || "",
         })),
       });
-      if (result.added) changed();
-      return result;
     },
     "baiduDiscovery.generateMaterials": (raw) => {
       const v = runId

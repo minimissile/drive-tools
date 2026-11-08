@@ -48,11 +48,22 @@ const reads = new Set<string>([
   "system.backupPreview",
 ]);
 export const shouldRefreshSnapshot = (method: string) =>
+  !method.startsWith("video.") &&
+  !method.startsWith("music.") &&
+  !method.startsWith("bilibili.") &&
   !method.startsWith("photoPosts.") &&
+  !method.startsWith("tieba.autocare.") &&
+  !method.startsWith("tieba.participation.") &&
+  !method.startsWith("tieba.automation.") &&
+  !method.startsWith("tieba.topics.") &&
+  !method.startsWith("tieba.insights.") &&
+  !method.startsWith("tieba.publishing.") &&
+  !method.startsWith("tieba.postStats.") &&
   !reads.has(method) &&
   !method.startsWith("resourceCatalog.") &&
   !method.startsWith("distribution.") &&
   !method.startsWith("smzdm.") &&
+  !method.startsWith("wechat.") &&
   !method.startsWith("baiduKeywords.") &&
   !method.startsWith("baiduResearch.") &&
   !method.startsWith("zhidaoPages.") &&

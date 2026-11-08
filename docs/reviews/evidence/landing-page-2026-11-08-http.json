@@ -1,0 +1,690 @@
+{
+  "checkedDate": "2026-11-08",
+  "timeZone": "Asia/Shanghai",
+  "method": "GET only; no JavaScript, no /events, no external redirect follow; public HTTP is not indexing/traffic/citation evidence",
+  "responses": [
+    {
+      "name": "home",
+      "url": "https://panxu.site/",
+      "fetchedAtUtc": "2026-11-08T04:58:46.336661+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 21482,
+      "title": [
+        "学习资料与实用文档索引 · 盘序资源"
+      ],
+      "h1": [
+        "找到资源，也看懂怎么用。"
+      ],
+      "canonical": [
+        "https://panxu.site/"
+      ],
+      "description": "盘序资源整理学习资料、实用文档与模板，提供文件信息、内容要点和使用建议。先了解资料与整理依据，再前往网盘查看文件。",
+      "metaRobots": "index,follow,max-snippet:-1,max-image-preview:large",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": true,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:49 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "index, follow, max-snippet:-1, max-image-preview:large",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a5720133fb2a665c-AMS"
+      },
+      "jsonLdTypes": [
+        "CollectionPage",
+        "Organization",
+        "WebSite"
+      ],
+      "publishedItemCount": null,
+      "dateModified": null,
+      "bodySha256": "32b5a5c64b2390cde0bee9d491537b146feecfd4df3250b8627bd9a66f9126b7"
+    },
+    {
+      "name": "catalogs",
+      "url": "https://panxu.site/catalogs",
+      "fetchedAtUtc": "2026-11-08T04:58:46.336846+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 18482,
+      "title": [
+        "资源清单 · 盘序资源"
+      ],
+      "h1": [
+        "资源清单"
+      ],
+      "canonical": [
+        "https://panxu.site/catalogs"
+      ],
+      "description": "按主题与分类浏览盘序资源清单，查看资源说明、详细介绍与网盘分享。",
+      "metaRobots": "index,follow,max-snippet:-1,max-image-preview:large",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:47 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "index, follow, max-snippet:-1, max-image-preview:large",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572012bbd311c9a-AMS"
+      },
+      "jsonLdTypes": [
+        "CollectionPage",
+        "Organization"
+      ],
+      "publishedItemCount": 1,
+      "dateModified": null,
+      "bodySha256": "6ad9431773c7ede80bec9e3dc213069c984c1b9426711c142161d47e12f43803"
+    },
+    {
+      "name": "catalog",
+      "url": "https://panxu.site/c/dbedf7b723e3468e",
+      "fetchedAtUtc": "2026-11-08T04:58:46.337766+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 39785,
+      "title": [
+        "求职与个人成长资源清单 · 盘序资源"
+      ],
+      "h1": [
+        "求职与个人成长资源清单"
+      ],
+      "canonical": [
+        "https://panxu.site/c/dbedf7b723e3468e"
+      ],
+      "description": "浏览“求职与个人成长资源清单”资源清单，共20份资料。按分类和关键词查找，查看资源说明后前往网盘获取。",
+      "metaRobots": "index,follow,max-snippet:-1,max-image-preview:large",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:47 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "index, follow, max-snippet:-1, max-image-preview:large",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572012b8d810c13-AMS"
+      },
+      "jsonLdTypes": [
+        "BreadcrumbList",
+        "CollectionPage",
+        "Organization"
+      ],
+      "publishedItemCount": 20,
+      "dateModified": "2026-11-08T04:22:48.302Z",
+      "bodySha256": "824356828ebd76ff4a724524d8860195543ac87a06dc41592a69aac2e1813470"
+    },
+    {
+      "name": "resource",
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5",
+      "fetchedAtUtc": "2026-11-08T04:58:46.338245+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 25077,
+      "title": [
+        "人情世故指南PDF下载：不会拒绝、怕得罪人时怎么说？ · 盘序资源"
+      ],
+      "h1": [
+        "人情世故指南PDF下载：不会拒绝、怕得罪人时怎么说？"
+      ],
+      "canonical": [
+        "https://panxu.site/r/fVOZw5ZbE_Z5"
+      ],
+      "description": "《人情世故指南》PDF涵盖职场沟通、人际关系与拒绝话术，提供帮忙被加码、同事临时加活等场景的表达示例。附章节页码与内容预览，提供104页资料的夸克网盘获取入口。",
+      "metaRobots": "index,follow,max-snippet:-1,max-image-preview:large",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": true,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:48 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "index, follow, max-snippet:-1, max-image-preview:large",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572012b6a496639-AMS"
+      },
+      "jsonLdTypes": [
+        "BreadcrumbList",
+        "CreativeWork",
+        "Organization",
+        "WebPage"
+      ],
+      "resourceSummaryCharacters": 136,
+      "bodySha256": "c625e7d69450d0d58135fbc866f5fe44c33658eaac3ef9a6e0b1a09a32fcd599"
+    },
+    {
+      "name": "go",
+      "url": "https://panxu.site/go/fVOZw5ZbE_Z5",
+      "fetchedAtUtc": "2026-11-08T04:58:47.727771+00:00",
+      "status": "302",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 0,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:49 GMT",
+        "x-robots-tag": "noindex, nofollow, noarchive",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a5720139b87e553a-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redirectHost": "pan.quark.cn"
+    },
+    {
+      "name": "robots",
+      "url": "https://panxu.site/robots.txt",
+      "fetchedAtUtc": "2026-11-08T04:58:48.323015+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 95,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:49 GMT",
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "BYPASS",
+        "cf-ray": "a5720137deb166e0-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "54f18878e874d39c537531f5221bf533c1dd16f9e7278dfb0ca4684005b5e838"
+    },
+    {
+      "name": "sitemap",
+      "url": "https://panxu.site/sitemap.xml",
+      "fetchedAtUtc": "2026-11-08T04:58:48.588074+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 330,
+      "sitemapLocations": [
+        "https://panxu.site/sitemaps/site.xml",
+        "https://panxu.site/sitemaps/resources-1.xml",
+        "https://panxu.site/sitemaps/catalogs-1.xml"
+      ],
+      "lastmods": [],
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:50 GMT",
+        "content-type": "application/xml; charset=utf-8",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572013e19e8a002-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "01267cfc0a81ffa9745e6da8fa49ddc405acab30ab4a792b28b4fabb13fde0df"
+    },
+    {
+      "name": "llms",
+      "url": "https://panxu.site/llms.txt",
+      "fetchedAtUtc": "2026-11-08T04:58:49.166467+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 904,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:50 GMT",
+        "content-type": "text/plain; charset=utf-8",
+        "x-robots-tag": "noindex, nofollow, noarchive",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572013cfb1c97c7-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "5c1f5e2a89df2fa2051b15dd5a19541c8e0a8070df180bc52e858a99e818b101"
+    },
+    {
+      "name": "markdown",
+      "url": "https://panxu.site/r/fVOZw5ZbE_Z5.md",
+      "fetchedAtUtc": "2026-11-08T04:58:49.247690+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 4699,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:50 GMT",
+        "content-type": "text/markdown; charset=utf-8",
+        "x-robots-tag": "noindex, nofollow, noarchive",
+        "cache-control": "private, no-store, max-age=0",
+        "link": "<https://panxu.site/r/fVOZw5ZbE_Z5>; rel=\"canonical\"",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572013d9f6e775a-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "2bcf4ed954a052906de4203bb67f6da576040cf1064d6ac75d94702000c14a6b"
+    },
+    {
+      "name": "about",
+      "url": "https://panxu.site/about",
+      "fetchedAtUtc": "2026-11-08T04:58:49.681029+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 12666,
+      "title": [
+        "关于盘序与资料整理方式 · 盘序资源"
+      ],
+      "h1": [
+        "关于盘序资源"
+      ],
+      "canonical": [
+        "https://panxu.site/about"
+      ],
+      "description": "盘序资源如何整理与核对资料：文件信息与正文依据、AI辅助整理的范围、使用建议和原文的区别，以及网盘获取与更新方式。",
+      "metaRobots": "index,follow,max-snippet:-1,max-image-preview:large",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:51 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "index, follow, max-snippet:-1, max-image-preview:large",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57201463bb7fba1-AMS"
+      },
+      "jsonLdTypes": [
+        "AboutPage",
+        "Organization"
+      ],
+      "bodySha256": "fe7f8f8422e4e6dedcea3fa639cbee4e66f09f398e42a6856e04fba022c8abe2"
+    },
+    {
+      "name": "privacy",
+      "url": "https://panxu.site/privacy",
+      "fetchedAtUtc": "2026-11-08T04:58:50.354859+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 12144,
+      "title": [
+        "隐私与访问统计说明 · 盘序资源"
+      ],
+      "h1": [
+        "隐私与访问统计说明"
+      ],
+      "canonical": [
+        "https://panxu.site/privacy"
+      ],
+      "description": "了解盘序资源的匿名访问统计、统计范围与隐私选择。",
+      "metaRobots": "noindex,follow",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:52 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "noindex, follow",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a572014a69b7c5b0-AMS"
+      },
+      "jsonLdTypes": [
+        "Organization"
+      ],
+      "bodySha256": "0965b19dbb2fbb9aca20d7b8cf18a9f38b6bbb73088b4a0ec1640490dca3a0d6"
+    },
+    {
+      "name": "health",
+      "url": "https://panxu.site/api/health",
+      "fetchedAtUtc": "2026-11-08T04:58:50.993959+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 46,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:51 GMT",
+        "content-type": "application/json; charset=utf-8",
+        "x-robots-tag": "noindex, nofollow, noarchive",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57201488b2eb132-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "e4877e96198d03325e39933301b0cdfb03e166e0cbc8d66693d31e40ae3f55c4"
+    },
+    {
+      "name": "pages_alias",
+      "url": "https://panxu-resource-links.pages.dev/r/fVOZw5ZbE_Z5",
+      "fetchedAtUtc": "2026-11-08T04:58:51.322622+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 23511,
+      "title": [
+        "人情世故指南PDF下载：不会拒绝、怕得罪人时怎么说？ · 盘序资源"
+      ],
+      "h1": [
+        "人情世故指南PDF下载：不会拒绝、怕得罪人时怎么说？"
+      ],
+      "canonical": [
+        "https://panxu.site/r/fVOZw5ZbE_Z5"
+      ],
+      "description": "《人情世故指南》PDF涵盖职场沟通、人际关系与拒绝话术，提供帮忙被加码、同事临时加活等场景的表达示例。附章节页码与内容预览，提供104页资料的夸克网盘获取入口。",
+      "metaRobots": "noindex,follow",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:58:52 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "x-robots-tag": "noindex, follow",
+        "cf-ray": "a572014b8824470f-LAX"
+      },
+      "jsonLdTypes": [
+        "BreadcrumbList",
+        "CreativeWork",
+        "Organization",
+        "WebPage"
+      ],
+      "resourceSummaryCharacters": 136,
+      "bodySha256": "e6d2298a10a665b7f844d27692a4580b833214c89cbc64162cd8fa6bb41f157a"
+    },
+    {
+      "name": "worker_alias",
+      "url": "https://panxu-resource-links.mininuke567.workers.dev/r/fVOZw5ZbE_Z5",
+      "fetchedAtUtc": "2026-11-08T04:58:52.063865+00:00",
+      "status": "000",
+      "curlExitCode": 35,
+      "error": "curl: (35) Recv failure: Connection reset by peer",
+      "headers": {},
+      "jsonLdTypes": []
+    },
+    {
+      "name": "sitemap_site",
+      "url": "https://panxu.site/sitemaps/site.xml",
+      "fetchedAtUtc": "2026-11-08T04:59:42.466855+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 243,
+      "sitemapLocations": [
+        "https://panxu.site/",
+        "https://panxu.site/about",
+        "https://panxu.site/catalogs"
+      ],
+      "lastmods": [],
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:59:43 GMT",
+        "content-type": "application/xml; charset=utf-8",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a5720289bc83e568-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "cedf3dfbbf83c1e20e1fc8e8cb94823a9aba7a068cd4cf3894969c2b85e33180"
+    },
+    {
+      "name": "sitemap_resources",
+      "url": "https://panxu.site/sitemaps/resources-1.xml",
+      "fetchedAtUtc": "2026-11-08T04:59:42.467066+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 205,
+      "sitemapLocations": [
+        "https://panxu.site/r/fVOZw5ZbE_Z5"
+      ],
+      "lastmods": [
+        "2026-11-02T03:57:00.615Z"
+      ],
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:59:43 GMT",
+        "content-type": "application/xml; charset=utf-8",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a5720289fa603857-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "6e2d6af1a0438129927503b96a05243c3897a81556a6f051daad3573cecd72f6"
+    },
+    {
+      "name": "sitemap_catalogs",
+      "url": "https://panxu.site/sitemaps/catalogs-1.xml",
+      "fetchedAtUtc": "2026-11-08T04:59:42.467916+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 209,
+      "sitemapLocations": [
+        "https://panxu.site/c/dbedf7b723e3468e"
+      ],
+      "lastmods": [
+        "2026-11-08T04:22:48.302Z"
+      ],
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:59:44 GMT",
+        "content-type": "application/xml; charset=utf-8",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57202901eebfeb1-AMS"
+      },
+      "jsonLdTypes": [],
+      "bodySha256": "93b719f43d7e27dbdd9653c041eaa6f7863513ebafeafd1d5d4970a0e9b0242f"
+    },
+    {
+      "name": "home_filter",
+      "url": "https://panxu.site/?category=%E5%AD%A6%E4%B9%A0%E8%B5%84%E6%96%99",
+      "fetchedAtUtc": "2026-11-08T04:59:43.514223+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 19531,
+      "title": [
+        "学习资料与实用文档索引 · 盘序资源"
+      ],
+      "h1": [
+        "找到资源，也看懂怎么用。"
+      ],
+      "canonical": [
+        "https://panxu.site/"
+      ],
+      "description": "盘序资源整理学习资料、实用文档与模板，提供文件信息、内容要点和使用建议。先了解资料与整理依据，再前往网盘查看文件。",
+      "metaRobots": "noindex,follow",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:59:44 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "noindex, follow",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57202903fd3be9d-AMS"
+      },
+      "jsonLdTypes": [
+        "CollectionPage",
+        "Organization",
+        "WebSite"
+      ],
+      "publishedItemCount": null,
+      "dateModified": null,
+      "bodySha256": "8ccc8123c1767826b786d97eeb67bedac086979a1db57617f920347b2534cfda"
+    },
+    {
+      "name": "catalog_filter",
+      "url": "https://panxu.site/c/dbedf7b723e3468e?category=%E5%85%B6%E4%BB%96",
+      "fetchedAtUtc": "2026-11-08T04:59:44.246369+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 36270,
+      "title": [
+        "求职与个人成长资源清单 · 盘序资源"
+      ],
+      "h1": [
+        "求职与个人成长资源清单"
+      ],
+      "canonical": [
+        "https://panxu.site/c/dbedf7b723e3468e"
+      ],
+      "description": "浏览“求职与个人成长资源清单”资源清单，共20份资料。按分类和关键词查找，查看资源说明后前往网盘获取。",
+      "metaRobots": "noindex,follow",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:59:45 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "noindex, follow",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57202970b5f4547-AMS"
+      },
+      "jsonLdTypes": [
+        "BreadcrumbList",
+        "CollectionPage",
+        "Organization"
+      ],
+      "publishedItemCount": 16,
+      "dateModified": "2026-11-08T04:22:48.302Z",
+      "bodySha256": "274a2872d46425a5aaa80474f6a3b3075f6c786df3629c69eed1ad76e99f3ce2"
+    },
+    {
+      "name": "catalogs_filter",
+      "url": "https://panxu.site/catalogs?q=%E6%B1%82%E8%81%8C",
+      "fetchedAtUtc": "2026-11-08T04:59:44.485602+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 18445,
+      "title": [
+        "资源清单 · 盘序资源"
+      ],
+      "h1": [
+        "资源清单"
+      ],
+      "canonical": [
+        "https://panxu.site/catalogs"
+      ],
+      "description": "按主题与分类浏览盘序资源清单，查看资源说明、详细介绍与网盘分享。",
+      "metaRobots": "noindex,follow",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": false,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 04:59:45 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "noindex, follow",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57202984fa51c8d-AMS"
+      },
+      "jsonLdTypes": [
+        "CollectionPage",
+        "Organization"
+      ],
+      "publishedItemCount": 1,
+      "dateModified": null,
+      "bodySha256": "b21acea1a78d4de69be0f55845d10e5d03f22e9c0fea3569b8e8854968b21002"
+    },
+    {
+      "name": "legacy",
+      "url": "https://panxu.site/r/XsP0Nyq9w6fw",
+      "fetchedAtUtc": "2026-11-08T05:20:58.190530+00:00",
+      "status": "200",
+      "curlExitCode": 0,
+      "error": "",
+      "bytes": 26029,
+      "title": [
+        "社招数据分析师简历模板：项目量化与技能呈现改写建议 · 盘序资源"
+      ],
+      "h1": [
+        "社招数据分析师简历模板：项目量化与技能呈现改写建议"
+      ],
+      "canonical": [
+        "https://panxu.site/r/XsP0Nyq9w6fw"
+      ],
+      "description": "落地页围绕社招数据分析师简历给出项目量化、技能分层与投递前检查等改写建议，同时说明该docx文件的获取方式与已知信息边界。",
+      "metaRobots": "index,follow,max-snippet:-1,max-image-preview:large",
+      "ogSiteName": "盘序资源",
+      "icons": [
+        "/favicon.png",
+        "/favicon.ico",
+        "/apple-touch-icon.png"
+      ],
+      "eventsInSource": true,
+      "headers": {
+        "date": "Sun, 08 Nov 2026 05:20:59 GMT",
+        "content-type": "text/html; charset=utf-8",
+        "x-robots-tag": "index, follow, max-snippet:-1, max-image-preview:large",
+        "cache-control": "private, no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "cf-cache-status": "DYNAMIC",
+        "cf-ray": "a57221b0ab456d94-AMS"
+      },
+      "jsonLdTypes": [
+        "BreadcrumbList",
+        "CreativeWork",
+        "Organization",
+        "WebPage"
+      ],
+      "bodySha256": "7f05d946f41944b57bd751a0b1ec1fc6fdb989a701690f01c4206a4a65649025"
+    }
+  ]
+}

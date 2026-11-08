@@ -10,9 +10,12 @@ import { AppError } from "../core/errors";
 import { readLimited, readLimitedBytes } from "../core/http";
 import { createWeiboSessions } from "./weibo-session";
 import { createZhihuIdentitySession } from "./zhihu-session";
+import { createBilibiliIdentitySession } from "./bilibili-session";
+import { createBilibiliContent } from "./bilibili-content";
 import { createWebsiteIdentitySession } from "./website-identity-session";
 import { tiebaIdentityScript } from "../core/tieba/identity";
 import { createSmzdmSession } from "./smzdm-session";
+import { createWechatSession } from "./wechat-session";
 import { createDocumentSessions } from "./document-session";
 import { isDocumentProvider } from "../shared/document-platforms";
 import { browserSessionFetch } from "./browser-session-fetch";
@@ -463,6 +466,8 @@ export function createWebsiteSessions(
   };
   const weiboSessions = createWeiboSessions(workspace, environmentProfile);
   const zhihuIdentity = createZhihuIdentitySession(context);
+  const bilibiliIdentity = createBilibiliIdentitySession(context);
+  const bilibiliContent = createBilibiliContent(context, bilibiliIdentity.verify);
   const tiebaIdentity = createWebsiteIdentitySession(context, {
     provider: "tieba",
     label: "贴吧",
@@ -472,6 +477,16 @@ export function createWebsiteSessions(
     script: tiebaIdentityScript(),
   });
   const smzdm = createSmzdmSession(context);
+  const articleReader = smzdm.port.readArticle;
+  let articleReading = false;
+  smzdm.port.readArticle = async (url) => {
+    if (articleReading)
+      throw new AppError("WECHAT_ARTICLE_BUSY", "另一篇公众号文章正在读取，请等待完成后重试。");
+    articleReading = true;
+    try { return await articleReader(url); }
+    finally { articleReading = false; }
+  };
+  const wechat = createWechatSession(context, workspace, smzdm.port.readArticle);
   const documents = createDocumentSessions(context, (account) =>
     baiduSessions.login(account),
   );
@@ -479,11 +494,15 @@ export function createWebsiteSessions(
     account.provider === "weibo" ? weiboSessions : baiduSessions;
   const sessions: NonNullable<AppPorts["websiteSessions"]> = {
     isOpen: () =>
-      baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen(),
+      baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen() || bilibiliContent.isOpen(),
     login: (account) => adapter(account).login(account),
     status: (account) =>
       isDocumentProvider(account.provider)
         ? Promise.resolve(documents.status(account))
+        : account.provider === "wechat"
+          ? Promise.resolve(wechat.status(account))
+        : account.provider === "bilibili"
+          ? Promise.resolve(bilibiliIdentity.status(account))
         : account.provider === "smzdm"
           ? Promise.resolve(smzdm.status(account))
           : account.provider === "tieba"
@@ -495,6 +514,10 @@ export function createWebsiteSessions(
     invalidate: async (account) =>
       isDocumentProvider(account.provider)
         ? documents.invalidate(account)
+        : account.provider === "wechat"
+          ? wechat.invalidate(account)
+        : account.provider === "bilibili"
+          ? bilibiliIdentity.invalidate(account)
         : account.provider === "smzdm"
           ? smzdm.invalidate(account)
           : account.provider === "tieba"
@@ -505,6 +528,10 @@ export function createWebsiteSessions(
     verify: (account) =>
       isDocumentProvider(account.provider)
         ? documents.verify(account)
+        : account.provider === "wechat"
+          ? wechat.verify(account)
+        : account.provider === "bilibili"
+          ? bilibiliIdentity.verify(account)
         : account.provider === "smzdm"
           ? smzdm.verify(account)
           : account.provider === "tieba"
@@ -538,5 +565,8 @@ export function createWebsiteSessions(
     weiboPublisher: weiboSessions.publisher,
     weiboStatistics: weiboSessions.statistics,
     smzdm: smzdm.port,
+    wechat: wechat.port,
+    bilibili: bilibiliContent.port,
+    readWechatPreviewImage: wechat.readPreviewImage,
   };
 }

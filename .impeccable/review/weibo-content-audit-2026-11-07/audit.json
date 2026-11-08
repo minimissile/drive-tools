@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-07",
+  "scope": "read-only current frontend product audit",
+  "screenshots": [
+    [
+      "01-marketing-entry",
+      "1. 微博图文营销入口",
+      "布局清楚，但创建前必须提供已核验本人资料与至少10字依据。适合资源推荐，不能在此先积累不带资源的选题。"
+    ],
+    [
+      "03-account-entry",
+      "2. 账号管理",
+      "账号、环境、登录状态展示清楚，但从微博页进入后仍展示全部平台；内容操作依赖账号行。"
+    ],
+    [
+      "04-account-actions",
+      "3. 更多操作",
+      "发布微博、微博图文、数据统计和发布能力并列在更多菜单，常用内容操作不容易发现。"
+    ],
+    [
+      "05-statistics-entry",
+      "4. 单条统计",
+      "已有采集时间、真实0和缺失区分。当前界面展示2026-10-26历史快照，本轮没有点击读取最新数据。缺少跨帖比较、账号汇总和内容归因视图。"
+    ],
+    [
+      "06-direct-composer",
+      "5. 直接发布编辑器",
+      "弹窗支持文案、本地图片、可见范围和本地草稿。日常发帖路径简单，但与营销页分开；默认“仅自己可见（适合流程验证）”仍带调试语气。"
+    ],
+    [
+      "07-history-selector",
+      "6. 草稿与回执选择",
+      "草稿和已提交内容合放下拉框；当前仅一条回执，因此不能据此证明长列表失效，但规模扩大后缺少搜索、筛选和内容状态看板的风险很明确。"
+    ]
+  ],
+  "findings": [
+    [
+      "P1",
+      "内容入口分裂",
+      "步骤1、3、5、6；营销任务与直接发布分别读取weibo.history和weiboPosts.list。",
+      "把微博日常操作汇总到一个内容工作区，账号管理保留登录、环境、权限。内容工作区提供新建内容、草稿、待发布、已发布和待处理。"
+    ],
+    [
+      "P1",
+      "资料绑定过早，选题与内容类型偏窄",
+      "步骤1；Setup.tsx要求copyId与evidence；营销输入仅围绕资料推荐。已有公共素材供给能交付到直接发布草稿，不等于营销入口已覆盖这些类型。",
+      "允许先保存选题/草稿，后关联资料；提供教程技巧、问题解答、资源推荐、经验分享等内容类型。发布包含资料入口时再验证归属与权限。"
+    ],
+    [
+      "P1",
+      "发布流程暴露过多内部步骤",
+      "后半流程仅源码检查：Workflow.tsx先生成图文方案再生成实际图；Delivery.tsx导出图文包后上传；marketing.prepare必选本地目录。",
+      "将封面、附件和发布准备由应用统一管理，导出图文包作为可选操作；保留内容审阅、身份核对、可见范围和显式最终发布确认。"
+    ],
+    [
+      "P1",
+      "多账号的内容组织还不充分",
+      "源码：任务在Delivery阶段才选账号；marketing.create以相同关键词+资料返回原任务，去重条件不含目标账号。当前只有一条微博账号，未做多号实际发布。",
+      "以一份选题为基础，显式派生不同账号的内容版本和独立发布项；展示账号定位、文风、状态和排期，继续复用原浏览器环境，不在此重复配置代理。"
+    ],
+    [
+      "P2",
+      "效果数据没有形成运营决策",
+      "步骤4；Statistics.tsx提供单条指标与历史表。",
+      "先做已发布列表、采集时间、可比指标排序和同一内容的历史变化；可用时关联自有落地页访问或网盘结果，并分别标明数据来源。不能把落地页访问冒充微博官方链接点击。"
+    ],
+    [
+      "P2",
+      "选题辅助缺少明确的微博用途判断",
+      "步骤1；当前从本地词库取候选，界面诚实说明微博热度未接入。",
+      "补充目标人群、真实问题、开头切入点、已有资料匹配理由、是否重复发过；先帮助判断写什么，再考虑热榜数据。"
+    ]
+  ],
+  "windowsClosed": [
+    "fd2101db-0c34-4f01-81bf-bd914c90dd4a",
+    "60b23c23-2a46-46e2-bf47-c7b16db637a4"
+  ],
+  "focused": "main",
+  "limitations": [
+    "backend update pending; not applied",
+    "no real generation/upload/publish",
+    "no new remote statistics read",
+    "marketing later stages source review only",
+    "no full keyboard or contrast verification"
+  ],
+  "firstCaptureComposerNote": "Initial immediate menu count was inconclusive; second independent capture explicitly waited for the menu and successfully opened composer."
+}

@@ -3,6 +3,7 @@ import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AppService, type AppPorts } from "../core/service";
+import { databaseSchemaVersion } from "../core/database";
 import type { Account, RemoteFile, ShareInput } from "../shared/types";
 import type { DriveProvider, OwnShare } from "../core/providers/provider";
 import type { SecretCodec } from "../core/secrets";
@@ -13,8 +14,42 @@ export const file: RemoteFile = {
   isDirectory: false,
   size: 120,
 };
-export const currentSchemaVersion = 22;
-export const removeV22 = "DROP TABLE content_knowledge_hits; DROP TABLE content_knowledge_items; DROP TABLE content_source_responses;";
+export const currentSchemaVersion = databaseSchemaVersion;
+// Legacy fixtures start from today's schema before reconstructing their old
+// version. Remove later tables too, so a fixture cannot retain future schema.
+const removeV34 = `
+  DROP TRIGGER IF EXISTS traffic_queries_revision_insert;
+  DROP TRIGGER IF EXISTS traffic_queries_revision_update;
+  DROP TRIGGER IF EXISTS traffic_queries_revision_delete;
+  CREATE TABLE traffic_items_fixture_legacy(
+    id TEXT PRIMARY KEY,query_id TEXT NOT NULL REFERENCES traffic_queries(id),
+    kind TEXT NOT NULL,word TEXT NOT NULL,normalized_word TEXT NOT NULL,platform TEXT,
+    source TEXT NOT NULL,metrics TEXT NOT NULL,data TEXT NOT NULL,observed_at TEXT,source_updated_at TEXT);
+  INSERT INTO traffic_items_fixture_legacy
+    SELECT id,query_id,kind,word,normalized_word,platform,source,metrics,data,observed_at,source_updated_at
+    FROM traffic_items;
+  DROP VIEW traffic_items;
+  DROP TABLE traffic_observations;
+  DROP TABLE traffic_entries;
+  DROP TABLE traffic_knowledge_state;
+  ALTER TABLE traffic_items_fixture_legacy RENAME TO traffic_items;
+  CREATE INDEX traffic_items_word ON traffic_items(normalized_word,platform,observed_at DESC);
+  CREATE INDEX traffic_items_query ON traffic_items(query_id);
+  DROP INDEX traffic_queries_endpoint;
+  ALTER TABLE traffic_queries DROP COLUMN item_count;
+  ALTER TABLE traffic_queries DROP COLUMN legacy_items;
+`;
+export const removeV23 = removeV34 + [
+  "tieba_visibility_checks", "tieba_forum_metrics", "tieba_topic_generations",
+  "tieba_topic_rules", "tieba_topic_drafts", "tieba_automation_tasks",
+  "tieba_reply_generations", "tieba_reply_drafts", "tieba_thread_candidates",
+  "tieba_autocare_tasks", "tieba_autocare_targets", "runtime_logs",
+  "resource_landing_generations", "resource_landing_pages", "zhidao_answer_logs",
+  "resource_links", "distribution_attempts", "distribution_batch_items",
+  "distribution_batches", "distribution_events", "distribution_task_sources",
+  "distribution_runs", "distribution_tasks",
+].map((name) => `DROP TABLE IF EXISTS ${name};`).join("");
+export const removeV22 = removeV23 + "DROP TABLE content_knowledge_hits; DROP TABLE content_knowledge_items; DROP TABLE content_source_responses;";
 export const removeV21 = removeV22 + "DROP TABLE content_source_exports;";
 export const removeV20 = removeV21 + "DROP TABLE pipix_sources;";
 export const removeV19 = removeV20 + "DROP TABLE zhihu_contents; DROP TABLE zhihu_tasks; DROP TABLE zhihu_plans;";

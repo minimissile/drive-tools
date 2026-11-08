@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
-  distributionStatus,
   distributionStatusLabels,
   type DistributionPlatformId,
   type DistributionStatus,
@@ -11,7 +10,6 @@ import { useIpcQuery } from "../api/useIpcQuery";
 import {
   Button,
   Empty,
-  Loading,
   LoadingState,
   Panel,
   SearchField,
@@ -21,6 +19,8 @@ import { Pagination } from "../ui/Pagination";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { formatTime } from "../lib/format";
+import { providerSpecs } from "../../shared/providers";
+import type { Provider } from "../../shared/types";
 import { ResolveDialog } from "./ResolveDialog";
 import type { DistributionModel } from "./useDistribution";
 
@@ -48,16 +48,16 @@ export function TaskBoard({
   const data = tasks.data?.platformId === platformId ? tasks.data : null;
   return (
     <Panel
-      title="逐条分发记录"
+      title="分发记录"
       extra={
         <Button
           quiet
           size="compact"
-          disabled={model.busy || tasks.loading}
+          disabled={model.busy || (tasks.loading && !data)}
           onClick={model.refresh}
         >
           <RefreshCw size={14} />
-          刷新本地记录
+          刷新
         </Button>
       }
     >
@@ -65,14 +65,26 @@ export function TaskBoard({
         <SearchField
           value={query}
           onChange={onQuery}
-          placeholder="搜索标题、资源 ID 或分享记录 ID…"
+          placeholder="搜索资源名称…"
         />
         <Select
           aria-label="筛选分发阶段"
           value={status}
           items={[
-            { value: "all", label: "全部阶段" },
-            ...distributionStatus.options.map((value) => ({
+            { value: "all", label: "全部记录" },
+            ...Array.from(
+              new Set<DistributionStatus>([
+                "ready",
+                "uncertain",
+                "failed",
+                "rejected",
+                "submitted",
+                "reviewing",
+                "published",
+                "skipped",
+                ...(status === "all" ? [] : [status]),
+              ]),
+            ).map((value) => ({
               value,
               label: distributionStatusLabels[value],
             })),
@@ -92,9 +104,6 @@ export function TaskBoard({
         <LoadingState label="正在读取分发记录…" layout="list" />
       ) : data ? (
         <>
-          {tasks.loading && data.items.length ? (
-            <Loading label="正在更新本地进度…" />
-          ) : null}
           {data.items.length ? (
             <div className="distribution-records">
               {data.items.map((task) => (
@@ -110,12 +119,12 @@ export function TaskBoard({
               title={
                 query || status !== "all"
                   ? "没有符合条件的分发记录"
-                  : "尚未准备这个平台的全库链接"
+                  : "还没有分发记录"
               }
             >
               {query || status !== "all"
                 ? "调整关键词或阶段后再查看。"
-                : "点击上方“准备全库链接”，自动读取全部已就绪的本人分享。"}
+                : "点击上方“准备链接”，读取资源库中已保存的本人分享。"}
             </Empty>
           ) : null}
           <Pagination
@@ -172,46 +181,25 @@ function TaskRow({
         <div>
           <h3>{task.title}</h3>
           <p>
-            {task.provider} · {task.shareUrl}
+            {providerSpecs[task.provider as Provider]?.name ?? task.provider} ·{" "}
+            {formatTime(task.updatedAt)}
           </p>
         </div>
         <Status kind={tone}>{distributionStatusLabels[task.status]}</Status>
       </div>
-      <p className="distribution-record-message">{task.message}</p>
-      <div className="distribution-record-meta">
-        <span title={task.resourceId}>资源 ID：{task.resourceId}</span>
-        <span title={task.shareRecordId}>分享 ID：{task.shareRecordId}</span>
-      </div>
+      {["failed", "rejected", "blocked"].includes(task.status) ? (
+        <p className="distribution-record-message">{task.message}</p>
+      ) : null}
       <div className="row spread">
         <details
           className="distribution-history"
           onToggle={(event) => setExpanded(event.currentTarget.open)}
         >
-          <summary>记录与历史</summary>
+          <summary>查看详情</summary>
           {expanded ? (
             <>
-              <dl>
-                <div>
-                  <dt>资源 ID</dt>
-                  <dd>{task.resourceId}</dd>
-                </div>
-                <div>
-                  <dt>分享记录 ID</dt>
-                  <dd>{task.shareRecordId}</dd>
-                </div>
-                <div>
-                  <dt>分发记录 ID</dt>
-                  <dd>{task.id}</dd>
-                </div>
-                <div>
-                  <dt>当前批次</dt>
-                  <dd>{task.batchId || "尚未进入提交批次"}</dd>
-                </div>
-                <div>
-                  <dt>最后更新</dt>
-                  <dd>{formatTime(task.updatedAt)}</dd>
-                </div>
-              </dl>
+              <p className="distribution-share-url">{task.shareUrl}</p>
+              <p>{task.message}</p>
               <QueryError
                 error={history.error}
                 loading={history.loading}
@@ -229,7 +217,12 @@ function TaskRow({
                         </strong>
                         <time>{formatTime(event.at)}</time>
                         <p>{event.note}</p>
-                        {event.receipt ? <p>回执：{event.receipt}</p> : null}
+                        {event.receipt ? (
+                          <details>
+                            <summary>平台回执</summary>
+                            <p>{event.receipt}</p>
+                          </details>
+                        ) : null}
                         {event.url ? <p>{event.url}</p> : null}
                       </li>
                     ))}
@@ -257,7 +250,7 @@ function TaskRow({
           "skipped",
         ].includes(task.status) ? (
           <Button quiet size="compact" onClick={onResolve}>
-            核对官网结果
+            核对结果
           </Button>
         ) : null}
       </div>
@@ -276,7 +269,7 @@ export function BatchHistory({
     { keepPrevious: true, refreshInterval: 2000 },
   );
   return (
-    <Panel title="提交批次">
+    <Panel title="提交历史">
       <QueryError
         error={query.error}
         loading={query.loading}
@@ -313,11 +306,14 @@ export function BatchHistory({
                               : batch.status)}
                     </Status>
                   </div>
-                  <small>
-                    {batch.id} · {formatTime(batch.createdAt)}
-                  </small>
+                  <small>{formatTime(batch.createdAt)}</small>
                   <p>{batch.message}</p>
-                  {batch.receipt ? <p>回执：{batch.receipt}</p> : null}
+                  {batch.receipt ? (
+                    <details className="distribution-history">
+                      <summary>查看平台回执</summary>
+                      <p>{batch.receipt}</p>
+                    </details>
+                  ) : null}
                 </article>
               ))}
             </div>

@@ -7,7 +7,7 @@ import type {
   WebsiteSessionState,
 } from "../shared/website-accounts";
 import type { EnvironmentAccountRef } from "../shared/browser-environments";
-import { AppError } from "./errors";
+import { AppError, safeMessage } from "./errors";
 import type { WeiboPublisher } from "./weibo/browser-publisher";
 import { verifyBitWeibo, useBitWeiboPublisher } from "./weibo/bit-session";
 import { findEnvironmentPage as pageFor } from "./browser-pages";
@@ -26,6 +26,12 @@ import { zhihuInteractionBrowser } from "./zhihu-participation/interaction-brows
 import { isDocumentProvider } from "../shared/document-platforms";
 import { createZhidaoBrowserSession } from "./zhidao/browser-session";
 import { verifyBitTieba } from "./tieba/browser-session";
+import { verifyBitBilibili } from "./bilibili/account-browser";
+import { tiebaAutocareBrowser } from "./tieba/autocare-browser";
+import { tiebaParticipationBrowser } from "./tieba/participation-browser";
+import { tiebaTopicPublisher } from "./tieba/topic-browser";
+import { tiebaInsightsBrowser } from "./tieba/insights-browser";
+import { tiebaPostStatsBrowser } from "./tieba/post-stats-browser";
 import { withEnvironmentBrowser } from "./environment-browser-runtime";
 
 const webRef = (a: WebsiteAccount): EnvironmentAccountRef => ({
@@ -54,20 +60,21 @@ export function createBrowserPlatformPorts(
   };
   const isBit = (ref: EnvironmentAccountRef) =>
     environments.forAccount(ref).engine === "bitbrowser";
-  const verify = async (a: WebsiteAccount) =>
+  const observeIdentity = async (a: WebsiteAccount) =>
     profile(webRef(a), async (context) => {
       if (isDocumentProvider(a.provider))
         throw new AppError(
           "DOCUMENT_NATIVE_SESSION",
           "文档平台当前使用内置浏览器，请在账号管理关联内置环境。",
         );
-      if (a.provider === "smzdm")
+      if (a.provider === "smzdm" || a.provider === "wechat")
         throw new AppError(
           "SMZDM_NATIVE_SESSION",
-          "什么值得买文章发布目前使用内置浏览器，请在账号管理关联内置环境。",
+          "什么值得买与微信公众号目前使用内置浏览器，请在账号管理关联内置环境。",
         );
       let state: WebsiteSessionState;
       if (a.provider === "tieba") state = await verifyBitTieba(context);
+      else if (a.provider === "bilibili") state = await verifyBitBilibili(context);
       else if (a.provider === "zhihu") state = await verifyZhihu(context);
       else if (a.provider === "weibo") state = await verifyBitWeibo(context);
       else {
@@ -88,6 +95,20 @@ export function createBrowserPlatformPorts(
       cache.set(a.id, state);
       return state;
     });
+  const verify = async (a: WebsiteAccount) => {
+    try {
+      return await observeIdentity(a);
+    } catch (error) {
+      cache.set(a.id, {
+        unverified: true,
+        hasSession: false,
+        uid: null,
+        windowOpen: false,
+        error: safeMessage(error),
+      });
+      throw error;
+    }
+  };
   const withPublisher = <T>(
     a: WebsiteAccount,
     action: (publisher: WeiboPublisher) => Promise<T>,
@@ -100,6 +121,36 @@ export function createBrowserPlatformPorts(
   ) =>
     profile(webRef(a), (context) => bitBaiduExchange(context, a, spec, file));
   return Object.assign(Object.create(native) as AppPorts, {
+    tiebaTopics:
+      native.tiebaTopics ??
+      tiebaTopicPublisher((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
+    tiebaInsights:
+      native.tiebaInsights ??
+      tiebaInsightsBrowser((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
+    tiebaPostStats:
+      native.tiebaPostStats ??
+      tiebaPostStatsBrowser((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
+    tiebaParticipation:
+      native.tiebaParticipation ??
+      tiebaParticipationBrowser((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
+    tieba:
+      native.tieba ??
+      tiebaAutocareBrowser((account, action) => {
+        if (!isBit(webRef(account))) return missing();
+        return profile(webRef(account), action);
+      }),
     zhihuInteraction:
       native.zhihuInteraction ??
       zhihuInteractionBrowser((account, action) => {
@@ -153,10 +204,10 @@ export function createBrowserPlatformPorts(
             "DOCUMENT_NATIVE_SESSION",
             "文档平台账号请使用内置浏览器环境。",
           );
-        if (a.provider === "smzdm")
+        if (a.provider === "smzdm" || a.provider === "wechat")
           throw new AppError(
             "SMZDM_NATIVE_SESSION",
-            "什么值得买账号请使用内置浏览器环境。",
+            "什么值得买与微信公众号账号请使用内置浏览器环境。",
           );
         await profile(
           webRef(a),
@@ -170,6 +221,8 @@ export function createBrowserPlatformPorts(
                   ? "https://www.zhihu.com/"
                   : a.provider === "weibo"
                     ? "https://weibo.com/"
+                    : a.provider === "bilibili"
+                      ? "https://passport.bilibili.com/login"
                     : "https://qingge.baidu.com/login",
             );
             await page.bringToFront();
@@ -182,6 +235,7 @@ export function createBrowserPlatformPorts(
         !isBit(webRef(a))
           ? (native.websiteSessions ?? missing()).status(a)
           : (cache.get(a.id) ?? {
+              unverified: true,
               hasSession: false,
               uid: null,
               windowOpen: false,

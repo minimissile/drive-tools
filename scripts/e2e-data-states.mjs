@@ -302,28 +302,28 @@ try {
   await page.getByRole("heading", { name: "从一个关键词开始" }).waitFor();
   checks.push("搜索运营慢读取使用区域占位，失败不显示引导空态且可重试");
   await mode("traffic.knowledge.list", "hold");
-  await nav("流量发现").click();
-  await page.getByRole("tab", { name: "本地知识库", exact: true }).click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "关键词库", exact: true }).click();
   await pending("traffic.knowledge.list");
   await page
-    .getByRole("heading", { name: "正在读取本地知识库…", exact: true })
+    .getByRole("heading", { name: "正在读取词库…", exact: true })
     .waitFor();
   await release("traffic.knowledge.list");
-  await page.getByRole("heading", { name: "暂无匹配的知识库资料" }).waitFor();
+  await page.getByRole("heading", { name: "还没有收录词条" }).waitFor();
   await mode("traffic.knowledge.list", "fail");
-  await page.getByRole("button", { name: "刷新本地", exact: true }).click();
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
   await page
     .getByRole("alert")
     .filter({ hasText: "traffic.knowledge.list" })
     .waitFor();
   assert.equal(
-    await page.getByRole("heading", { name: "暂无匹配的知识库资料" }).count(),
+    await page.getByRole("heading", { name: "还没有收录词条" }).count(),
     0,
   );
   await shot("knowledge-error-1320");
   await mode("traffic.knowledge.list", "");
   await page.getByRole("button", { name: "重试读取", exact: true }).click();
-  await page.getByRole("heading", { name: "暂无匹配的知识库资料" }).waitFor();
+  await page.getByRole("heading", { name: "还没有收录词条" }).waitFor();
   checks.push("知识库复用读取生命周期，失败不再冒充空库，支持本地重试");
   await page.evaluate(() =>
     sessionStorage.setItem(

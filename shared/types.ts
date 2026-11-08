@@ -238,6 +238,15 @@ export interface Pool {
   keywords: Keyword[];
   createdAt: string;
 }
+/** A navigation/list item. Complete frozen keyword snapshots are read on demand. */
+export interface PoolSummary {
+  id: string;
+  name: string;
+  resourceId: string | null;
+  keywordCount: number;
+  preview: Pick<Keyword, "id" | "word">[];
+  createdAt: string;
+}
 export interface ApiPlan {
   endpoint: Endpoint;
   configured: boolean;
@@ -346,7 +355,7 @@ export interface AppSnapshot {
   resourceTotals: ResourceTotals;
   shareChecks: ShareCheck[];
   jobs: Job[];
-  pools: Pool[];
+  pools: PoolSummary[];
   drafts: Draft[];
   bindings: BrowserBinding[];
   publications: Publication[];

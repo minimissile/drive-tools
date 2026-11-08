@@ -22,9 +22,22 @@ export const zhihuHumanInteractionDecisionSchema = z.object({
   basis: z.string().trim().min(20).max(2000),
   quote: z.string().trim().min(8).max(1000),
 });
+/** A program rule records its actual source; it never represents human or AI judgement. */
+export const zhihuRuleInteractionDecisionSchema = z.object({
+  source: z.literal("rule"),
+  rule: z.enum([
+    "autocare_random_like",
+    "autocare_random_comment",
+    "autocare_random_follow",
+  ]),
+  relevance: z.null(),
+  basis: z.string().trim().min(20).max(2000),
+  quote: z.string().trim().min(8).max(1000),
+});
 export const zhihuStoredInteractionDecisionSchema = z.union([
   zhihuInteractionDecisionSchema,
   zhihuHumanInteractionDecisionSchema,
+  zhihuRuleInteractionDecisionSchema,
 ]);
 export type ZhihuInteractionDecision = z.infer<
   typeof zhihuStoredInteractionDecisionSchema

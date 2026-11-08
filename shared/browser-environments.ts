@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const maxEnvironmentsPerExitIp = 3;
+
 export const environmentIdSchema = z.string().regex(/^env_[\w-]{1,100}$/);
 export const environmentAccountSchema = z.object({
   kind: z.enum(["website", "zhidao", "binding", "drive"]),

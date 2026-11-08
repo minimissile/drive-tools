@@ -1,0 +1,23 @@
+{
+  "windowId": "c09248a8-d3bd-4631-afc5-2a081e62560f",
+  "updates": {
+    "revision": 243,
+    "runningRevision": 243,
+    "pending": false,
+    "compiling": false,
+    "buildError": "",
+    "applyError": "",
+    "applying": false
+  },
+  "minimumLoadedWeiboRevision": 242,
+  "realAccountFound": true,
+  "styleMatchesObservedResourcePreset": true,
+  "localRows": 1,
+  "localStatisticsTargets": 1,
+  "readOnly": true,
+  "networkStatisticsRead": false,
+  "generated": false,
+  "modifiedBusinessData": false,
+  "uploaded": false,
+  "published": false
+}

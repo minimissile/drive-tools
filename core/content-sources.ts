@@ -17,20 +17,26 @@ export class ContentSources {
     private search: Pick<SearchOperations, "assertTarget">,
   ) {}
   words(raw: unknown): ContentKeyword[] {
-    const { query } = z
-      .object({ query: z.string().trim().max(100) })
+    const { query, source } = z
+      .object({
+        query: z.string().trim().max(100),
+        source: z.enum(["all", "history", "pool"]).default("all"),
+      })
       .parse(raw);
     const term = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
-    const rows = this.repo.db.all<{
-      id: string;
-      word: string;
-      source: string;
-      observed_at: string | null;
-      metrics: string;
-    }>(
-      "SELECT i.id,i.word,i.source,i.observed_at,i.metrics FROM traffic_items i WHERE i.kind='word' AND i.word LIKE ? ESCAPE '\\' ORDER BY coalesce(i.observed_at,'') DESC,i.rowid DESC LIMIT 60",
-      term,
-    );
+    const rows =
+      source === "pool"
+        ? []
+        : this.repo.db.all<{
+            id: string;
+            word: string;
+            source: string;
+            observed_at: string | null;
+            metrics: string;
+          }>(
+            "SELECT i.id,i.word,e.source,i.observed_at,i.metrics FROM traffic_entries e JOIN traffic_observations i ON i.seq=e.latest_observation_seq WHERE e.kind='word' AND e.word LIKE ? ESCAPE '\\' ORDER BY e.last_observed_at DESC,e.seq DESC LIMIT 60",
+            term,
+          );
     const result: ContentKeyword[] = rows.map((r) => ({
       id: `knowledge:${r.id}`,
       word: r.word,
@@ -38,18 +44,19 @@ export class ContentSources {
       observedAt: r.observed_at,
       metrics: parseJson(r.metrics, {}),
     }));
-    for (const pool of this.repo.pools())
-      for (const word of pool.keywords) {
-        if (!word.word.toLowerCase().includes(query.toLowerCase())) continue;
-        result.push({
-          id: `pool:${pool.id}:${word.id}`,
-          word: word.word,
-          source: `词池：${pool.name} · ${word.source}`,
-          observedAt: word.fetchedAt ?? pool.createdAt,
-          metrics: word.metrics,
-        });
-        if (result.length >= 100) break;
-      }
+    if (source !== "history")
+      pools: for (const pool of this.repo.pools())
+        for (const word of pool.keywords) {
+          if (!word.word.toLowerCase().includes(query.toLowerCase())) continue;
+          result.push({
+            id: `pool:${pool.id}:${word.id}`,
+            word: word.word,
+            source: `词池：${pool.name} · ${word.source}`,
+            observedAt: word.fetchedAt ?? pool.createdAt,
+            metrics: word.metrics,
+          });
+          if (result.length >= 100) break pools;
+        }
     return [
       ...new Map(
         result.map((word) => [

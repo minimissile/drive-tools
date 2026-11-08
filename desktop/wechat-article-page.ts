@@ -1,7 +1,7 @@
 /** Runs only inside the public WeChat article window. All returned material is untrusted data. */
 export function readWechatArticle() {
   const root = document.querySelector("#js_content");
-  if (!root || !root.textContent?.trim())
+  if (!root)
     throw new Error(
       "未读取到公众号正文，请检查文章是否已删除、需要登录或安全验证。",
     );
@@ -33,6 +33,7 @@ export function readWechatArticle() {
         return "";
       }
     }
+    const imagesBefore = imageCount;
     const content = Array.from(node.childNodes).map(walk).join("");
     if (!content.trim()) return "";
     if (tag === "a") {
@@ -51,6 +52,10 @@ export function readWechatArticle() {
           u.port
         )
           return content;
+        // Markdown links cannot contain another Markdown image as a label.
+        // Keep the image intact and retain its click target as copyable text.
+        if (imageCount > imagesBefore)
+          return `${content.trim()}\n\n${u.href}\n\n`;
         return `[${content.trim().replace(/[\[\]]/g, "")}](${u.href})`;
       } catch {
         return content;
@@ -73,6 +78,10 @@ export function readWechatArticle() {
     .join("")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  if (!body)
+    throw new Error(
+      "未读取到公众号正文，请检查文章是否已删除、需要登录或安全验证。",
+    );
   return {
     url: location.href,
     title: (

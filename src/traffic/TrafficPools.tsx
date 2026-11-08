@@ -1,4 +1,6 @@
 import { ArrowRight } from "lucide-react";
+import { useEffect, useRef } from "react";
+import type { Pool } from "../../shared/types";
 import {
   useAppActions,
   useAppActivity,
@@ -7,12 +9,14 @@ import {
   useAppSelection,
 } from "../state";
 import { Button, Field, Panel } from "../ui/primitives";
+import { TrafficPoolCard } from "./TrafficPoolCard";
+import { poolSummary } from "./pools";
 
 import type { TrafficModel } from "./useTrafficDiscovery";
 export function TrafficPools({ model }: { model: TrafficModel }) {
   const { data } = useAppData();
   const { resource, select } = useAppSelection();
-  const { command } = useAppActions();
+  const { command, notify } = useAppActions();
   const { navigate, openSearch } = useAppNavigation();
   const { busy } = useAppActivity();
   const {
@@ -23,9 +27,48 @@ export function TrafficPools({ model }: { model: TrafficModel }) {
     manualBound,
     setManualBound,
   } = model;
+  const fingerprint = JSON.stringify([
+    manualName,
+    manualWords,
+    manualBound,
+    resource?.id,
+  ]);
+  const latestFingerprint = useRef(fingerprint);
+  latestFingerprint.current = fingerprint;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const copy = (pool: Pool, expected: string) => {
+    if (latestFingerprint.current !== expected) {
+      notify(
+        "词池已读取，但整理内容已有修改；再次点击复制编辑可替换当前内容。",
+        "warning",
+      );
+      return;
+    }
+    setManualName(`${pool.name.slice(0, 90)} 副本`);
+    setManualWords(pool.keywords.map((word) => word.word).join("\n"));
+    setManualBound(!!pool.resourceId);
+    if (pool.resourceId) select(pool.resourceId);
+    const form = document.querySelector<HTMLDetailsElement>(
+      ".knowledge-manual-pool",
+    );
+    if (form) {
+      form.open = true;
+      form.scrollIntoView({ block: "start" });
+      form
+        .querySelector<HTMLInputElement>("input")
+        ?.focus({ preventScroll: true });
+    }
+  };
   return (
     <>
-      <Panel title="手工整理词池">
+      <details className="knowledge-manual-pool">
+        <summary>手工整理词池</summary>
         <Field label="手工词池名称">
           <input
             aria-label="手工词池名称"
@@ -55,6 +98,7 @@ export function TrafficPools({ model }: { model: TrafficModel }) {
         <Button
           disabled={!manualName.trim() || !manualWords.trim() || busy > 0}
           onClick={async () => {
+            const submitted = latestFingerprint.current;
             const saved = await command(
               "pool.manual",
               {
@@ -64,7 +108,11 @@ export function TrafficPools({ model }: { model: TrafficModel }) {
               },
               "手工词池已保存在本地，未调用付费接口。",
             );
-            if (saved) {
+            if (
+              saved &&
+              mounted.current &&
+              latestFingerprint.current === submitted
+            ) {
               setManualName("");
               setManualWords("");
             }
@@ -75,7 +123,7 @@ export function TrafficPools({ model }: { model: TrafficModel }) {
         <small>
           手工词不附流量指数；复制已有词池进行整理时会另存副本，原稿引用保持有效。
         </small>
-      </Panel>
+      </details>
       <Panel
         title="我的词池"
         extra={
@@ -91,36 +139,20 @@ export function TrafficPools({ model }: { model: TrafficModel }) {
         {data!.pools.length ? (
           <div className="pool-list">
             {data!.pools.map((p) => (
-              <div key={p.id}>
-                <strong>{p.name}</strong>
-                <small>
-                  {p.keywords.length}个词 ·{" "}
-                  {p.resourceId
-                    ? data!.resources.find((r) => r.id === p.resourceId)?.title
-                    : "尚未关联资源"}
-                </small>
-                <div className="row compact">
-                  {p.keywords.slice(0, 5).map((k) => (
-                    <span className="tag" key={k.id}>
-                      {k.word}
-                    </span>
-                  ))}
-                </div>
-                <Button quiet onClick={() => openSearch({ poolId: p.id })}>
-                  创建搜索选题
-                </Button>
-                <Button
-                  quiet
-                  onClick={() => {
-                    setManualName(`${p.name.slice(0, 90)} 副本`);
-                    setManualWords(p.keywords.map((k) => k.word).join("\n"));
-                    setManualBound(!!p.resourceId);
-                    if (p.resourceId) select(p.resourceId);
-                  }}
-                >
-                  复制编辑
-                </Button>
-              </div>
+              <TrafficPoolCard
+                key={p.id}
+                pool={poolSummary(p)}
+                resourceTitle={
+                  p.resourceId
+                    ? (data!.resources.find(
+                        (resource) => resource.id === p.resourceId,
+                      )?.title ?? "关联资源未在当前列表")
+                    : "尚未关联资源"
+                }
+                draftFingerprint={fingerprint}
+                onCopy={copy}
+                onSearch={() => openSearch({ poolId: p.id })}
+              />
             ))}
           </div>
         ) : (

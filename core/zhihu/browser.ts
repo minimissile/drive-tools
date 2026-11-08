@@ -4,7 +4,7 @@ import type {
   WebsiteSessionState,
 } from "../../shared/website-accounts";
 import type { ZhihuBrowserPort, ZhihuPayload } from "../../shared/zhihu";
-import { zhihuReceiptUrl } from "../../shared/zhihu";
+import { zhihuQuestionId, zhihuReceiptUrl } from "../../shared/zhihu";
 import { AppError } from "../errors";
 import { officialBrowserPage } from "../browser-pages";
 import {
@@ -86,7 +86,12 @@ async function assertIdentity(
   account: WebsiteAccount,
 ) {
   const state = await verifyZhihu(context);
-  if (!state.hasSession || state.uid !== account.uid)
+  if (!state.hasSession)
+    throw new AppError(
+      "ZHIHU_LOGIN_REQUIRED",
+      "比特窗口中的知乎登录已失效，请完成原账号登录后重新检查。",
+    );
+  if (state.uid !== account.uid)
     blocked("比特窗口中的知乎身份与任务不一致，请检查登录。");
 }
 async function assertPage(page: Page) {
@@ -98,6 +103,139 @@ async function assertPage(page: Page) {
     )
   )
     blocked("知乎显示验证或发布限制，请在官方窗口处理后核对任务。");
+}
+
+const answerEditorSelector =
+  '.DraftEditor-root [contenteditable="true"], .ProseMirror[contenteditable="true"], .public-DraftEditor-content[contenteditable="true"]';
+const answerEntryUnavailable = (message: string): never => {
+  throw new AppError("ZHIHU_ANSWER_ENTRY_UNAVAILABLE", message);
+};
+
+/** Resolve the current question's explicit action; absence is never proof of an existing answer. */
+async function openZhihuAnswerEditor(
+  page: Page,
+  questionId: string | null,
+  resumed: boolean,
+  onEvent: Parameters<ZhihuBrowserPort["publish"]>[3],
+) {
+  const ownAnswerLabel = /^(查看我的回答|编辑我的回答)$/;
+  const deadline = Date.now() + 15000;
+  let visibleEntries = 0;
+  let enabledEntry = false;
+  while (Date.now() < deadline) {
+    if (!questionId || zhihuQuestionId(page.url()) !== questionId)
+      answerEntryUnavailable(
+        "回答页面已离开原问题，未打开编辑器、未提交回答。",
+      );
+    const login = page
+      .locator(".SignFlow,.SignContainer-content,form[action*='sign_in']")
+      .filter({ visible: true });
+    if (await login.count()) {
+      await assertPage(page);
+      throw new AppError(
+        "ZHIHU_LOGIN_REQUIRED",
+        "知乎问题页要求重新登录，请在官方窗口完成后核对任务。",
+      );
+    }
+    const headers = page.locator(".QuestionHeader").filter({ visible: true });
+    const header = (await headers.count()) === 1 ? headers : undefined;
+    // Only the page's explicit "my answer" action is evidence. Do not infer
+    // authorship from arbitrary answers, an absent action, or a page redirect.
+    let existingUrl: string | null | undefined;
+    const ownLinks = page
+      .getByRole("link", { name: ownAnswerLabel })
+      .filter({ visible: true });
+    for (
+      let i = 0, count = Math.min(await ownLinks.count(), 20);
+      i < count;
+      i++
+    ) {
+      const href = await ownLinks.nth(i).getAttribute("href");
+      if (!href) continue;
+      try {
+        const url = new URL(href, page.url());
+        const answer = url.pathname.match(
+          /^\/question\/(\d+)\/answer\/(\d+)(?:\/edit)?\/?$/,
+        );
+        if (
+          answer?.[1] === questionId &&
+          url.protocol === "https:" &&
+          url.hostname === "www.zhihu.com" &&
+          !url.port &&
+          !url.username &&
+          !url.password
+        ) {
+          existingUrl = `https://www.zhihu.com/question/${questionId}/answer/${answer[2]}`;
+          break;
+        }
+      } catch {
+        // A malformed link cannot establish an existing answer.
+      }
+    }
+    if (
+      existingUrl === undefined &&
+      header &&
+      (await header
+        .getByRole("button", { name: ownAnswerLabel })
+        .filter({ visible: true })
+        .count())
+    )
+      existingUrl = null;
+    if (existingUrl !== undefined) {
+      onEvent?.({
+        event: "answer.already-present",
+        message: "原问题页明确显示“我的回答”，未打开或重新提交回答",
+        details: { questionId, url: existingUrl },
+      });
+      throw new AppError(
+        "ZHIHU_ANSWER_ALREADY_PRESENT",
+        `原问题页已显示“我的回答”，本任务未提交；请核对已有回答${existingUrl ? `：${existingUrl}` : "。"}`,
+      );
+    }
+    // A never-submitted retry can already have its own answer editor open.
+    // The caller still checks its exact body and refuses unrelated draft text.
+    if (
+      resumed &&
+      (await page
+        .locator(answerEditorSelector)
+        .filter({ visible: true })
+        .count()) === 1 &&
+      (await page
+        .getByRole("button", { name: /^发布回答$/ })
+        .filter({ visible: true })
+        .count()) === 1
+    ) {
+      await assertPage(page);
+      return;
+    }
+    const write = (header ?? page)
+      .getByRole("button", { name: /^写回答$/ })
+      .filter({ visible: true });
+    visibleEntries = await write.count();
+    enabledEntry = visibleEntries === 1 && (await write.isEnabled());
+    if (enabledEntry) {
+      await assertPage(page);
+      try {
+        await write.click({ timeout: 10000 });
+      } catch {
+        answerEntryUnavailable(
+          "写回答入口已变化或不可操作，未提交回答，请核对原问题页。",
+        );
+      }
+      return;
+    }
+    // DOMContentLoaded precedes the account-specific question actions. Keep a
+    // bounded read-only wait; never select the first of several visible actions.
+    await page.waitForTimeout(250);
+  }
+  await assertPage(page);
+  answerEntryUnavailable(
+    visibleEntries > 1
+      ? "原问题页存在多个可见的写回答入口，无法唯一核对，未提交回答。"
+      : visibleEntries === 1 && !enabledEntry
+        ? "原问题页的写回答入口当前不可用，未提交回答。"
+        : "等待原问题页加载后仍未找到可用的写回答入口，未提交回答；不能据此判断是否已有回答。",
+  );
 }
 
 async function declareAi(
@@ -347,10 +485,12 @@ export function zhihuBrowser(
           });
           await assertPage(page);
           if (content.kind === "answer") {
-            const write = page.getByRole("button", { name: /^写回答$/ });
-            if ((await write.count()) !== 1)
-              blocked("未找到唯一的写回答入口，可能已回答或页面结构变化。");
-            await write.click();
+            await openZhihuAnswerEditor(
+              page,
+              task.questionId,
+              !!resumed,
+              onEvent,
+            );
           } else {
             const title = page.locator(
               'textarea[placeholder*="标题"], input[placeholder*="标题"]',
@@ -365,12 +505,32 @@ export function zhihuBrowser(
               blocked("知乎恢复了已有草稿，请保留原内容并人工处理。");
             await title.fill(content.title);
           }
-          const editor = page.locator(
-            '.DraftEditor-root [contenteditable="true"], .ProseMirror[contenteditable="true"], .public-DraftEditor-content[contenteditable="true"]',
-          );
-          await editor.waitFor({ state: "visible", timeout: 15000 });
-          if ((await editor.count()) !== 1)
+          const editor = page.locator(answerEditorSelector);
+          try {
+            await editor.waitFor({ state: "visible", timeout: 15000 });
+          } catch (error) {
+            if (content.kind === "answer") {
+              await assertPage(page);
+              answerEntryUnavailable(
+                "点击写回答后未能打开唯一可见的正文编辑器，未填写或提交回答。",
+              );
+            }
+            throw error;
+          }
+          if ((await editor.count()) !== 1) {
+            if (content.kind === "answer")
+              answerEntryUnavailable(
+                "回答正文编辑器不唯一，未填写或提交回答，请核对原问题页。",
+              );
             blocked("未找到唯一的知乎正文编辑器，页面可能已变化。");
+          }
+          if (
+            content.kind === "answer" &&
+            zhihuQuestionId(page.url()) !== task.questionId
+          )
+            answerEntryUnavailable(
+              "回答编辑器已离开原问题，未填写或提交回答。",
+            );
           const previousBody = (await editor.innerText()).trim();
           if (
             (previousBody || (await editor.locator("img").count())) &&
@@ -422,6 +582,11 @@ export function zhihuBrowser(
             });
           const assertContent = async () => {
             await assertPage(page);
+            if (
+              content.kind === "answer" &&
+              zhihuQuestionId(page.url()) !== task.questionId
+            )
+              answerEntryUnavailable("回答编辑器已离开原问题，未提交回答。");
             if (
               (await editor.innerText()).replace(/\s+/g, " ").trim() !==
               content.body.replace(/\s+/g, " ").trim()

@@ -153,11 +153,15 @@ try {
   await nav("批量录入").click();
   assert.match(await csv.inputValue(), /CSV暂存/);
   checks.push("CSV输入切页保留，预检与提交保持显式");
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "我的词池", exact: true }).click();
+  await page.locator(".knowledge-manual-pool > summary").click();
   await page.getByLabel("手工词池名称").fill("未保存词池");
   await page.getByLabel("手工词池关键词").fill("暂存关键词");
   await nav("资源库").click();
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "我的词池", exact: true }).click();
+  await page.locator(".knowledge-manual-pool > summary").click();
   assert.equal(
     await page.getByLabel("手工词池名称").inputValue(),
     "未保存词池",
@@ -192,7 +196,8 @@ try {
   await page.screenshot({ path: join(evidence, "tasks-attention.png") });
   checks.push("异常任务默认直达，状态数量准确，完成记录按需展开");
   // Server-side resource search through the common Base UI combobox.
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "5118找词", exact: true }).click();
   await page.getByRole("button", { name: "展开当前资源", exact: true }).click();
   await page.getByLabel("当前资源", { exact: true }).fill("界面审核资料 50");
   await page
@@ -235,7 +240,7 @@ try {
     "资料拆分",
     "转存任务",
     "搜索运营",
-    "流量发现",
+    "流量词库",
     "分享统计",
     "内容工作室",
     "发布准备",

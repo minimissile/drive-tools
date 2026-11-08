@@ -233,7 +233,8 @@ try {
     /控件验收资料 5/,
   );
   await chooseOption(category, "all");
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "5118找词", exact: true }).click();
   const source = page.getByRole("combobox", { name: "关联资源", exact: true });
   // SearchSelect has a server-backed query, unlike fixed select lists.
   const resourceInput = (await source.count())
@@ -377,7 +378,7 @@ try {
     "资料拆分",
     "转存任务",
     "搜索运营",
-    "流量发现",
+    "流量词库",
     "内容工作室",
     "发布准备",
     "分享统计",

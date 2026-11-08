@@ -4,8 +4,10 @@ import { RuntimeLog } from "../runtime-log";
 import type { ZhihuParticipation } from "../zhihu-participation/service";
 import {
   enabledAutocareJob,
+  hasAutocareRandomInteractions,
   hasAutocareResearch,
   readNextAutocareContext,
+  runNextAutocareRandomInteraction,
   prepareAutocareAnswer,
   type AutocareParticipationHost,
 } from "./participation";
@@ -14,13 +16,19 @@ import type { PipixRequestBudget } from "../pipix/request-budget";
 import type { PipixSources } from "../pipix/service";
 import type { AiService } from "../ai";
 import type { IntelligentOperations } from "../intelligent-operations/service";
-import type { ZhihuContent } from "../../shared/zhihu";
+import {
+  zhihuTaskNeedsReconciliation,
+  type ZhihuContent,
+} from "../../shared/zhihu";
 import type { ContentSourceExport } from "../../shared/content-sources";
 import type { PipixCandidate } from "../../shared/pipix";
 import {
   autocareConfigSchema,
   autocareInteractionInput,
   autocareParticipationScope,
+  autocareRandomLikeScope,
+  autocareRandomCommentScope,
+  autocareRandomFollowScope,
   autocareStateSchema,
   type AutocareState,
   type AutocareJob,
@@ -30,10 +38,26 @@ import {
   autocareStateKey,
   fingerprint,
   contentFingerprint,
+  autocareGenerationCount,
 } from "./state";
 import { nextAutocareCycle } from "./agenda";
+import {
+  autocareRunDuration,
+  autocareRunGapMinutes,
+  autocareRunWindow,
+  withinAutocareRun,
+} from "./run-window";
 import { autocareSlot } from "./scheduling";
+import { autocareDayPlan } from "./daily-plan";
+import { autocareBlockers } from "./blockers";
 import { generateAutocareArticle, checkAutocareArticle } from "./generation";
+import {
+  assertAutocareAccountTargets,
+  autocareAccountDomain,
+  autocareContentMatchesAccountDomain,
+  autocareDomainQuery,
+  matchesAutocareDomain,
+} from "./domain";
 import { zhihuDay, zhihuCounts } from "../zhihu/policy";
 import { readParticipationState } from "../zhihu-participation/state";
 import { readSupplyDrafts } from "../content-supply/state";
@@ -42,6 +66,9 @@ function fail(message: string): never {
 }
 const normalize = (s: string) =>
   s.replace(/\s/g, "").replace(/参考来源：[\s\S]*$/, "");
+const usesAi = (config: AutocareState["config"]) =>
+  config.publish || config.answerRecommended || config.randomComments;
+type AutocareCycleKind = AutocareState["cycles"][string]["kind"];
 export class ZhihuAutocare {
   readonly logs: RuntimeLog;
   private state: AutocareState;
@@ -63,6 +90,18 @@ export class ZhihuAutocare {
     },
   ) {
     this.state = readAutocareState(d.db);
+    if (this.state.batchPolicyVersion < 1) {
+      // One-time application of the user's explicitly requested quantities.
+      Object.assign(this.state.config, {
+        dailyLimit: 3,
+        answersPerDay: 2,
+        researchPerDay: 4,
+        interactionDailyLimit: 4,
+        gapMinutes: autocareRunGapMinutes,
+      });
+      this.state.batchPolicyVersion = 1;
+      this.state.revision++;
+    }
     this.logs = new RuntimeLog(d.db, d.dataPath, "zhihu-autocare");
     for (const j of this.state.jobs)
       if (["collecting", "generating"].includes(j.status)) {
@@ -74,12 +113,33 @@ export class ZhihuAutocare {
         r.status = "failed";
         r.message = "读取因应用重启中断，不计为本人阅读回执";
       }
-    this.replanMissed();
-    if (this.state.enabled) this.planCycles(false);
+    for (const job of this.state.commentJobs)
+      if (["generating", "ready"].includes(job.status)) {
+        job.status = "attention";
+        job.message = "评论准备因重启中断，生成正文与费用记录保留，不自动重放";
+        job.updatedAt = now();
+      }
+    if (this.state.enabled) {
+      this.beginRun("系统启动");
+      this.replanMissed();
+      this.planCycles(true);
+    }
     this.persist();
     d.zhihu.connectRuleAuthority({
       owns: (accountId) => this.owns(accountId),
       approved: (c, accountId) => this.approved(c, accountId),
+      allowReachedTarget: (c, accountId) =>
+        !!autocareAccountDomain(this.state.config, accountId) &&
+        this.approved(c, accountId),
+      executionPolicy: (accountId) =>
+        this.owns(accountId) && withinAutocareRun(this.state)
+          ? {
+              dailyLimit: this.state.config.dailyLimit,
+              weeklyLimit: this.state.config.weeklyLimit,
+              gapMinutes: autocareRunGapMinutes,
+              deadlineAt: this.state.run!.deadlineAt,
+            }
+          : null,
       record: (taskId, event) => {
         const job = this.state.jobs.find((j) => j.taskId === taskId);
         if (job)
@@ -113,7 +173,9 @@ export class ZhihuAutocare {
   private approved(c: ZhihuContent, accountId: string) {
     return (
       this.owns(accountId) &&
+      withinAutocareRun(this.state) &&
       c.accountId === accountId &&
+      autocareContentMatchesAccountDomain(this.state.config, accountId, c) &&
       this.d.zhihu
         .snapshot()
         .accounts.some(
@@ -170,10 +232,30 @@ export class ZhihuAutocare {
       },
     });
   }
+  private configurationIssues() {
+    const issues: string[] = [];
+    if (this.competing().length || this.d.zhihu.running)
+      issues.push("其他运营模式仍在管理所选账号，请关闭冲突模式");
+    if (usesAi(this.state.config)) {
+      if (this.state.model !== this.d.ai.modelFor("copy"))
+        issues.push("内容模型已变化，请保存设置后重新开启以应用模型");
+      if (this.unknownCosts())
+        issues.push("存在生成费用待核实记录，请先核对原费用");
+    }
+    return issues;
+  }
   snapshot() {
     const usage = this.d.pipix.requestPolicy();
-    const accounts = this.d.zhihu.snapshot().accounts;
+    const zhihu = this.d.zhihu.snapshot();
+    const participation = this.d.participation.snapshot();
+    const accounts = zhihu.accounts;
     const remaining = this.state.config.accountIds.filter((id) => {
+      if (hasAutocareResearch(this.state)) return true;
+      if (
+        (this.state.config.publish || this.state.config.answerRecommended) &&
+        autocareAccountDomain(this.state.config, id)
+      )
+        return true;
       const progress = accounts.find((a) => a.id === id)?.plan.progress;
       return (
         !progress?.creator ||
@@ -182,23 +264,32 @@ export class ZhihuAutocare {
         progress.level < this.state.config.targetLevel
       );
     });
+    const blockers = autocareBlockers(
+      this.state,
+      zhihu,
+      participation,
+      this.configurationIssues(),
+    );
     return {
       ...structuredClone(this.state),
+      todayPlan: autocareDayPlan(this.state, zhihu, participation),
+      blockers,
       busy: this.working,
       accounts,
       participation: {
-        candidates: this.d.participation
-          .snapshot()
-          .candidates.filter((c) =>
-            this.state.config.accountIds.includes(c.accountId),
-          ),
-        activities: this.d.participation
-          .snapshot()
-          .activities.filter(
-            (a) =>
-              a.planId === autocareParticipationScope &&
-              this.state.config.accountIds.includes(a.accountId),
-          ),
+        candidates: participation.candidates.filter((c) =>
+          this.state.config.accountIds.includes(c.accountId),
+        ),
+        activities: participation.activities.filter(
+          (a) =>
+            [
+              autocareParticipationScope,
+              autocareRandomLikeScope,
+              autocareRandomCommentScope,
+              autocareRandomFollowScope,
+            ].includes(a.planId ?? "") &&
+            this.state.config.accountIds.includes(a.accountId),
+        ),
       },
       modelName: this.d.ai.modelFor("copy"),
       generationCount: this.generationCount(),
@@ -208,7 +299,9 @@ export class ZhihuAutocare {
       needsAttention:
         this.state.enabled &&
         remaining.length > 0 &&
-        remaining.every((id) => this.state.blockedAccountIds.includes(id)),
+        remaining.every((id) =>
+          blockers.some((item) => item.accountId === id && item.blocking),
+        ),
       globalAiBudgetMicros: this.d.db.setting<number | null>(
         "dailyAiBudgetMicros",
         null,
@@ -216,22 +309,19 @@ export class ZhihuAutocare {
     };
   }
   private generationCount() {
-    return this.state.jobs.filter(
-      (j) => j.generatedAt && zhihuDay(j.generatedAt) === zhihuDay(Date.now()),
-    ).length;
+    return autocareGenerationCount(this.state);
   }
   private guard(revision: number) {
     if (this.closed || !this.state.enabled || revision !== this.state.revision)
       fail("自动养号已关闭或设置变化，停止后续操作");
+    if (!withinAutocareRun(this.state))
+      fail("本轮两小时养号已结束，停止新的读取、生成和提交");
     if (
-      (this.state.config.publish || this.state.config.answerRecommended) &&
+      usesAi(this.state.config) &&
       this.state.model !== this.d.ai.modelFor("copy")
     )
       fail("内容模型已变化，停止新的生成请求，请重新开启");
-    if (
-      (this.state.config.publish || this.state.config.answerRecommended) &&
-      this.unknownCosts()
-    )
+    if (usesAi(this.state.config) && this.unknownCosts())
       fail("存在生成费用待核实记录，未继续调用模型");
   }
   private message(accountId: string, message: string, blocked = false) {
@@ -281,14 +371,14 @@ export class ZhihuAutocare {
     }
     if (this.working) fail("正在收尾，请稍后开启");
     const cfg = this.state.config;
+    assertAutocareAccountTargets(cfg);
     if (
       !cfg.accountIds.length ||
       !(cfg.publish || cfg.answerRecommended || hasAutocareResearch(this.state))
     )
       fail("请选择账号和至少一项操作");
-    if (cfg.publish || cfg.answerRecommended)
-      this.d.ai.assertTextConfigured("copy");
-    if ((cfg.publish || cfg.answerRecommended) && this.unknownCosts())
+    if (usesAi(cfg)) this.d.ai.assertTextConfigured("copy");
+    if (usesAi(cfg) && this.unknownCosts())
       fail("存在生成费用待核实记录，请先核对后开启");
     const snapshot = this.d.zhihu.snapshot();
     if (snapshot.busy || this.d.operations.isBusy)
@@ -352,11 +442,11 @@ export class ZhihuAutocare {
     this.state.blockedAccountIds = [];
     this.state.accountMessages = {};
     this.state.revision++;
-    this.state.message = "计划已保存，等待随机任务时间（无头运行）";
+    this.beginRun("开启自动养号");
     this.planCycles(true);
     this.event(
       "run.started",
-      "自动养号已开启：固定规则、AI生成、随机排期；未启用AI自主运营",
+      "自动养号已开启，所选操作在启动后的两小时内安排，无需逐项确认",
       undefined,
       "info",
       { config: cfg, model: this.state.model },
@@ -367,16 +457,32 @@ export class ZhihuAutocare {
   save(raw: unknown, revision: number) {
     if (revision !== this.state.revision) fail("设置已变化，请刷新后保存");
     if (this.working) fail("当前操作进行中，完成后再保存设置");
-    const cfg = autocareConfigSchema.parse(raw);
+    const cfg = {
+      ...autocareConfigSchema.parse(raw),
+      gapMinutes: autocareRunGapMinutes,
+    };
+    assertAutocareAccountTargets(cfg);
     if (
       this.state.enabled &&
       JSON.stringify(cfg.accountIds) !==
         JSON.stringify(this.state.config.accountIds)
     )
       fail("更换账号前请先关闭总开关");
+    if (this.state.enabled && usesAi(cfg)) {
+      this.d.ai.assertTextConfigured("copy");
+      if (this.unknownCosts())
+        fail("存在生成费用待核实记录，请先核对后启用AI生成操作");
+    }
     this.cancelFuture();
+    for (const accountId of cfg.accountIds)
+      if (
+        autocareAccountDomain(cfg, accountId) !==
+        autocareAccountDomain(this.state.config, accountId)
+      )
+        delete this.state.interactionDiscovery[accountId];
     this.state.config = cfg;
     this.state.revision++;
+    this.sync();
     this.state.accountMessages = {};
     this.state.blockedAccountIds = [];
     this.state.nextCheckAt = null;
@@ -400,8 +506,277 @@ export class ZhihuAutocare {
           });
         }
     }
-    if (this.state.enabled) this.planCycles(true);
+    if (this.state.enabled && withinAutocareRun(this.state))
+      this.planCycles(true);
     this.event("config.saved", "设置已保存，未提交任务按新设置重新安排");
+    this.persist();
+    return this.snapshot();
+  }
+  private beginRun(reason: string) {
+    this.cancelFuture();
+    const started = Date.now();
+    this.state.config.gapMinutes = autocareRunGapMinutes;
+    // Reserve the existing generator's attempt count for the selected work;
+    // provider/global monetary limits still report their own failures.
+    const cfg = this.state.config;
+    const requestedGenerations =
+      cfg.accountIds.length *
+      ((cfg.publish || cfg.answerRecommended ? cfg.dailyLimit : 0) +
+        (cfg.randomComments ? cfg.interactionDailyLimit : 0));
+    cfg.generationsPerDay = Math.max(
+      cfg.generationsPerDay,
+      Math.min(30, requestedGenerations),
+    );
+    this.state.run = {
+      id: id("carerun"),
+      startedAt: new Date(started).toISOString(),
+      deadlineAt: new Date(started + autocareRunDuration).toISOString(),
+      status: "running",
+    };
+    this.state.cycles = {};
+    for (const accountId of this.state.config.accountIds)
+      delete this.state.nextResearchAt[accountId];
+    this.state.nextCheckAt = null;
+    this.state.message =
+      "本轮将在启动后的两小时内安排，已保存当日数量和原执行记录";
+    this.event("batch.started", this.state.message, undefined, "info", {
+      reason,
+      ...this.state.run,
+    });
+  }
+  private finishRun(status: "completed" | "expired") {
+    if (!this.state.run || this.state.run.status !== "running") return;
+    this.state.run.status = status;
+    this.cancelFuture();
+    this.state.cycles = {};
+    this.state.nextCheckAt = null;
+    this.state.message =
+      status === "completed"
+        ? "本轮数量已处理完毕，执行结果见计划与日志；等待下次系统启动或重新开启"
+        : "本轮两小时已结束；未完成任务保留原因，不在截止后补做";
+    this.event(`batch.${status}`, this.state.message);
+    this.persist();
+  }
+  private runQuotasReached() {
+    const cfg = this.state.config,
+      window = autocareRunWindow(this.state);
+    if (!window) return false;
+    const zhihu = this.d.zhihu.snapshot(),
+      participation = this.d.participation.snapshot();
+    return (
+      cfg.accountIds.length > 0 &&
+      cfg.accountIds.every((accountId) => {
+        const counted = (at: string) =>
+          Date.parse(at) >= window.start && Date.parse(at) < window.end;
+        const own = zhihu.tasks.filter(
+          (task) =>
+            task.accountId === accountId &&
+            task.attemptedAt &&
+            counted(task.attemptedAt),
+        );
+        const day = zhihuCounts(zhihu.tasks, accountId, Date.now());
+        const answers = Math.max(
+          own.filter((task) => task.kind === "answer").length,
+          zhihu.tasks.filter(
+            (task) =>
+              task.accountId === accountId &&
+              task.kind === "answer" &&
+              task.attemptedAt &&
+              zhihuDay(task.attemptedAt) === zhihuDay(Date.now()),
+          ).length,
+        );
+        const publicationDone =
+          !(cfg.publish || cfg.answerRecommended) ||
+          own.length >= cfg.dailyLimit ||
+          day.today >= cfg.dailyLimit ||
+          day.week >= cfg.weeklyLimit ||
+          (!cfg.publish && answers >= cfg.answersPerDay);
+        const interactions = participation.activities
+          .filter((activity) => activity.accountId === accountId)
+          .flatMap((activity) => activity.attempts ?? []);
+        const interactionDone =
+          !hasAutocareRandomInteractions(this.state) ||
+          Math.max(
+            interactions.filter((attempt) =>
+              counted(attempt.submittedAt ?? attempt.startedAt),
+            ).length,
+            interactions.filter(
+              (attempt) =>
+                zhihuDay(attempt.submittedAt ?? attempt.startedAt) ===
+                zhihuDay(Date.now()),
+            ).length,
+          ) >= cfg.interactionDailyLimit;
+        const researchDone =
+          !cfg.readRecommended ||
+          Math.max(
+            this.state.research.filter(
+              (read) => read.accountId === accountId && counted(read.at),
+            ).length,
+            this.state.research.filter(
+              (read) =>
+                read.accountId === accountId &&
+                zhihuDay(read.at) === zhihuDay(Date.now()),
+            ).length,
+          ) >= cfg.researchPerDay;
+        const unresolved =
+          zhihu.tasks.some(
+            (task) =>
+              task.accountId === accountId &&
+              (["running", "submitting"].includes(task.status) ||
+                zhihuTaskNeedsReconciliation(task)),
+          ) ||
+          participation.activities.some(
+            (activity) =>
+              activity.accountId === accountId &&
+              activity.attempts?.some((attempt) =>
+                ["running", "unknown"].includes(attempt.status),
+              ),
+          );
+        return (
+          publicationDone && interactionDone && researchDone && !unresolved
+        );
+      })
+    );
+  }
+  private restoreVerifiedAccountStops() {
+    const snapshot = this.d.zhihu.snapshot();
+    const participation = this.d.participation.snapshot();
+    for (const accountId of this.state.config.accountIds) {
+      const account = snapshot.accounts.find((entry) => entry.id === accountId);
+      if (
+        !account ||
+        account.status !== "connected" ||
+        account.uid !== this.state.identities[accountId]
+      )
+        continue;
+      const detail = this.state.researchStopDetails[accountId];
+      let authenticationRestored = false;
+      if (
+        detail?.kind === "authentication" &&
+        detail.uid === account.uid &&
+        account.checkedAt &&
+        Date.parse(account.checkedAt) > Date.parse(detail.at)
+      ) {
+        delete this.state.researchStops[accountId];
+        delete this.state.researchStopDetails[accountId];
+        authenticationRestored = true;
+        this.event(
+          "account.login_restored",
+          "已确认原账号重新登录，读取暂停已解除",
+          undefined,
+          "info",
+          { accountId },
+        );
+      }
+      const hard = autocareBlockers(
+        this.state,
+        snapshot,
+        participation,
+        this.configurationIssues(),
+      ).some((item) => item.accountId === accountId && item.blocking);
+      const oldMessage = this.state.accountMessages[accountId] || "";
+      if (
+        !hard &&
+        this.state.blockedAccountIds.includes(accountId) &&
+        (authenticationRestored ||
+          /账号身份变化或未登录|账号仍未连接|发布或准备结果需要处理|存在待核对.*结果|原随机互动结果已核实/.test(
+            oldMessage,
+          ))
+      )
+        this.message(
+          accountId,
+          "原账号已连接，可恢复的阻断已解除；未提交失败仅保留本项记录，其他任务继续",
+        );
+    }
+  }
+  /** Re-evaluate local blockers only. Never submits, cancels, or replays work. */
+  recheck(revision: number) {
+    if (this.closed) fail("工作空间已关闭，无法复查");
+    if (!this.state.enabled) fail("自动养号已关闭，请先开启后复查");
+    if (this.working) fail("已有任务执行中，完成后再复查");
+    if (revision !== this.state.revision) fail("设置已更新，请刷新后复查");
+    this.sync();
+    this.restoreVerifiedAccountStops();
+    const snapshot = this.d.zhihu.snapshot();
+    const participation = this.d.participation.snapshot();
+    const common: string[] = [];
+    if (this.competing().length || this.d.zhihu.running)
+      common.push("其他运营模式仍在管理所选账号，请先关闭冲突模式");
+    if (usesAi(this.state.config)) {
+      try {
+        this.d.ai.assertTextConfigured("copy");
+      } catch (error) {
+        common.push(safeMessage(error));
+      }
+      if (this.state.model !== this.d.ai.modelFor("copy"))
+        common.push("内容模型已变化，需要关闭并重新开启以应用新模型");
+      if (this.unknownCosts())
+        common.push("仍有生成费用待核实记录，请先核对原费用");
+    }
+    for (const accountId of this.state.config.accountIds) {
+      const reasons = [...common];
+      const account = snapshot.accounts.find((entry) => entry.id === accountId);
+      if (
+        !account ||
+        account.status !== "connected" ||
+        account.uid !== this.state.identities[accountId]
+      )
+        reasons.push("账号仍未连接或身份已变化，请核对后关闭并重新开启");
+      if (this.state.researchStops[accountId])
+        reasons.push(
+          `原读取或互动暂停仍保留：${this.state.researchStops[accountId]}；本地复查不能证明官方限制已解除`,
+        );
+      if (
+        snapshot.tasks.some(
+          (task) =>
+            task.accountId === accountId && zhihuTaskNeedsReconciliation(task),
+        ) ||
+        this.state.jobs.some(
+          (job) => job.accountId === accountId && job.status === "attention",
+        )
+      )
+        reasons.push(
+          ...autocareBlockers(this.state, snapshot, participation)
+            .filter(
+              (item) =>
+                item.accountId === accountId &&
+                item.blocking &&
+                ["publication", "generation"].includes(item.kind),
+            )
+            .map((item) => item.message),
+        );
+      if (
+        participation.activities.some(
+          (activity) =>
+            activity.accountId === accountId &&
+            activity.attempts?.some(
+              (attempt) =>
+                attempt.status === "unknown" || attempt.status === "running",
+            ),
+        )
+      )
+        reasons.push("仍有进行中或结果待核对的互动，不能自动重放");
+      this.message(
+        accountId,
+        reasons.length
+          ? reasons.join("；")
+          : "本地阻断已解除，保留原任务并等待下一安排；提交前仍会核对官方状态",
+        reasons.length > 0,
+      );
+    }
+    // Future cycles keep their identity and time. Only missing/expired cycles
+    // are planned again; queued publications and submission records are untouched.
+    if (withinAutocareRun(this.state)) this.planCycles(false);
+    this.state.nextCheckAt = null;
+    this.state.message = this.state.config.accountIds.some((accountId) =>
+      this.state.blockedAccountIds.includes(accountId),
+    )
+      ? "本地复查完成，仍有账号需要处理，原任务已保留"
+      : "本地复查通过，等待原任务安排";
+    this.event("run.rechecked", this.state.message, undefined, "info", {
+      accountIds: this.state.config.accountIds,
+      blockedAccountIds: this.state.blockedAccountIds,
+    });
     this.persist();
     return this.snapshot();
   }
@@ -434,7 +809,7 @@ export class ZhihuAutocare {
       if (accountId && j.accountId !== accountId) continue;
       if (j.status === "queued" && j.taskId) {
         const t = this.d.zhihu.snapshot().tasks.find((t) => t.id === j.taskId);
-        if (t?.status === "queued" && !t.attemptedAt) {
+        if (t?.status === "queued" && !t.attemptedAt && !t.submittedAt) {
           this.d.zhihu.cancel(t.id);
           j.taskId = undefined;
           j.scheduledAt = undefined;
@@ -458,6 +833,19 @@ export class ZhihuAutocare {
             j.status = "cancelled";
             j.message = "稿件已修改或移除，停止本模式自动发布，保留手动处理";
             this.event("content.changed", j.message, j, "warning");
+          } else if (
+            this.state.config.accountIds.includes(j.accountId) &&
+            !autocareContentMatchesAccountDomain(
+              this.state.config,
+              j.accountId,
+              content,
+            )
+          ) {
+            changed = true;
+            j.status = "cancelled";
+            j.message = "原稿不符合当前领域，保留供手动处理";
+            j.updatedAt = now();
+            this.event("content.domain_changed", j.message, j, "warning");
           }
         }
         if (j.status === "attention" && !this.unknownCosts()) {
@@ -478,18 +866,34 @@ export class ZhihuAutocare {
         j.message = "官方已确认发布";
         j.updatedAt = now();
         this.event("publish.verified", j.message, j, "info", { url: t.url });
-      } else if (t.status === "attention" && j.status !== "attention") {
+      } else if (
+        t.status === "attention" &&
+        j.status !== (zhihuTaskNeedsReconciliation(t) ? "attention" : "skipped")
+      ) {
         changed = true;
-        j.status = "attention";
-        j.message = t.message;
-        this.event("publish.attention", t.message, j, "warning");
+        j.status = zhihuTaskNeedsReconciliation(t) ? "attention" : "skipped";
+        j.message = zhihuTaskNeedsReconciliation(t)
+          ? t.message
+          : `本项未提交，保留失败记录并继续其他任务：${t.message}`;
+        j.updatedAt = now();
+        this.event(
+          zhihuTaskNeedsReconciliation(t)
+            ? "publish.attention"
+            : "publish.not_submitted",
+          j.message,
+          j,
+          "warning",
+        );
       } else if (
         t.status === "cancelled" &&
         ["queued", "attention"].includes(j.status)
       ) {
         changed = true;
         j.status =
-          t.message === "自动养号已关闭，尚未提交，原稿保留" && !t.submittedAt
+          (t.message === "自动养号已关闭，尚未提交，原稿保留" ||
+            t.message.startsWith("本轮截止前无可用发布时段")) &&
+          !t.attemptedAt &&
+          !t.submittedAt
             ? "ready"
             : "cancelled";
         j.message = t.message;
@@ -516,12 +920,50 @@ export class ZhihuAutocare {
       "SELECT id FROM api_calls WHERE endpoint='openrouter' AND phase LIKE 'zhihu_autocare:%' AND status IN ('reserved','uncertain') LIMIT 1",
     );
   }
+  private cycleKinds(): AutocareCycleKind[] {
+    const cfg = this.state.config;
+    const prepare = cfg.publish || cfg.answerRecommended;
+    if (!hasAutocareRandomInteractions(this.state))
+      return [prepare ? "prepare" : "research"];
+    if (prepare) return ["prepare", "interaction"];
+    return cfg.readRecommended ? ["interaction", "research"] : ["interaction"];
+  }
+  private nextCycleKind(previous: AutocareCycleKind) {
+    const kinds = this.cycleKinds();
+    const index = kinds.indexOf(previous);
+    return kinds[(index + 1) % kinds.length];
+  }
+  private cycleTargets(kind: AutocareCycleKind) {
+    const cfg = this.state.config;
+    if (kind === "interaction")
+      return [
+        ...(cfg.randomLikes || cfg.likeCandidates ? ["自动点赞"] : []),
+        ...(cfg.randomComments ? ["自动评论"] : []),
+        ...(cfg.followCandidates ? ["自动关注作者"] : []),
+      ];
+    if (kind === "prepare")
+      return [
+        ...(cfg.publish ? ["自动发文准备"] : []),
+        ...(cfg.answerRecommended ? ["推荐问题回答准备"] : []),
+      ];
+    return [...(cfg.readRecommended ? ["读取推荐内容"] : [])];
+  }
   private planCycle(
     accountId: string,
     snapshot = this.d.zhihu.snapshot(),
     after = Date.now(),
+    kind: AutocareCycleKind = this.cycleKinds()[0],
   ) {
-    const at = nextAutocareCycle(this.state, snapshot, accountId, after);
+    const queuedInteractions = this.d.participation
+      .snapshot()
+      .activities.filter(
+        (a) => a.status === "queued" && a.automation && a.scheduledAt,
+      )
+      .map((a) => ({ at: a.scheduledAt!, accountId: a.accountId }));
+    const at = nextAutocareCycle(this.state, snapshot, accountId, after, [
+      ...this.interactions(),
+      ...queuedInteractions,
+    ]);
     if (!at) {
       delete this.state.cycles[accountId];
       return;
@@ -531,19 +973,13 @@ export class ZhihuAutocare {
       at,
       uid: this.state.identities[accountId],
       revision: this.state.revision,
-      targets:
-        this.state.config.publish || this.state.config.answerRecommended
-          ? ["创作活跃度", "内容优质分"]
-          : ["内容选题准备"],
-      kind:
-        this.state.config.publish || this.state.config.answerRecommended
-          ? ("prepare" as const)
-          : ("research" as const),
+      targets: this.cycleTargets(kind),
+      kind,
     };
     this.state.cycles[accountId] = cycle;
     this.event(
       "cycle.planned",
-      "已安排账号任务，到时才启用无头环境",
+      `已安排${cycle.targets.join("、") || "账号任务"}，到时才启用无头环境`,
       undefined,
       "info",
       { accountId, ...cycle },
@@ -552,23 +988,40 @@ export class ZhihuAutocare {
   private planCycles(reset: boolean) {
     if (reset) this.state.cycles = {};
     const snapshot = this.d.zhihu.snapshot();
+    const kinds = this.cycleKinds();
     for (const accountId of this.state.config.accountIds) {
       const cycle = this.state.cycles[accountId];
       if (
         !cycle ||
+        !kinds.includes(cycle.kind) ||
         cycle.revision !== this.state.revision ||
         cycle.uid !== this.state.identities[accountId] ||
         Date.parse(cycle.at) < Date.now()
       )
-        this.planCycle(accountId, snapshot);
+        this.planCycle(
+          accountId,
+          snapshot,
+          Date.now(),
+          cycle && kinds.includes(cycle.kind) ? cycle.kind : kinds[0],
+        );
     }
     this.state.nextCheckAt = null;
   }
   async tick() {
     if (this.closed || this.working) return;
     const synced = this.sync();
+    this.restoreVerifiedAccountStops();
     if (!this.state.enabled) {
       if (synced) this.persist();
+      return;
+    }
+    if (!withinAutocareRun(this.state)) {
+      this.finishRun("expired");
+      if (synced) this.persist();
+      return;
+    }
+    if (this.runQuotasReached()) {
+      this.finishRun("completed");
       return;
     }
     if (
@@ -583,39 +1036,82 @@ export class ZhihuAutocare {
       this.replanMissed();
       this.planCycles(false);
     }
-    const day = zhihuDay(Date.now());
-    if (
-      Date.now() <
-        Date.parse(`${day}T${this.state.config.windowStart}:00+08:00`) ||
-      Date.now() >= Date.parse(`${day}T${this.state.config.windowEnd}:00+08:00`)
-    ) {
-      this.replanMissed();
-      this.planCycles(false);
-    }
     const local = this.d.zhihu.snapshot();
+    const unresolvedInteractionAccounts = new Set(
+      this.d.participation
+        .snapshot()
+        .activities.filter((activity) =>
+          activity.attempts?.some(
+            (attempt) =>
+              attempt.status === "unknown" || attempt.status === "running",
+          ),
+        )
+        .map((activity) => activity.accountId),
+    );
+    const stamp = Date.now();
     for (const accountId of this.state.config.accountIds)
       if (!this.state.cycles[accountId]) this.planCycle(accountId, local);
     const due = this.state.config.accountIds
       .flatMap((accountId) => {
         const cycle = this.state.cycles[accountId];
-        const publish = this.state.jobs
+        const own = this.state.jobs.filter((j) => j.accountId === accountId);
+        const publish = own
           .filter(
-            (j) =>
-              j.accountId === accountId &&
-              j.status === "queued" &&
-              enabledAutocareJob(this.state, j),
+            (j) => j.status === "queued" && enabledAutocareJob(this.state, j),
           )
           .map((j) => local.tasks.find((t) => t.id === j.taskId))
           .filter((t) => t?.status === "queued")
           .sort((a, b) => a!.scheduledAt.localeCompare(b!.scheduledAt))[0];
-        const at = [cycle?.at, publish?.scheduledAt]
+        const publishingNow =
+          !!publish && Date.parse(publish.scheduledAt) <= stamp;
+        const earliest = [cycle?.at, publish?.scheduledAt]
           .filter((v): v is string => !!v)
           .sort()[0];
+        const at = publishingNow ? publish!.scheduledAt : earliest;
+        const isPublish = publishingNow || publish?.scheduledAt === at;
+        const account = local.accounts.find((a) => a.id === accountId);
+        const requiresPublicationCheck =
+          isPublish ||
+          cycle?.kind === "interaction" ||
+          this.state.config.publish ||
+          this.state.config.answerRecommended;
+        const locallyBlocked =
+          !account ||
+          account.uid !== this.state.identities[accountId] ||
+          account.status !== "connected" ||
+          unresolvedInteractionAccounts.has(accountId) ||
+          !!this.state.researchStops[accountId] ||
+          (requiresPublicationCheck &&
+            (own.some((j) => j.status === "attention") ||
+              local.tasks.some(
+                (task) =>
+                  task.accountId === accountId &&
+                  zhihuTaskNeedsReconciliation(task),
+              )));
         return at
-          ? [{ accountId, at, cycle, publish: publish?.scheduledAt === at }]
+          ? [
+              {
+                accountId,
+                at,
+                cycle,
+                publish: isPublish,
+                publishTaskId: publish?.id,
+                locallyBlocked,
+              },
+            ]
           : [];
       })
-      .sort((a, b) => a.at.localeCompare(b.at))[0];
+      .sort((a, b) => {
+        // A blocked overdue publication must not monopolize other accounts.
+        // Still report an overdue blocked item before waiting for future work.
+        const rank = (item: typeof a) =>
+          Date.parse(item.at) > stamp ? 2 : item.locallyBlocked ? 1 : 0;
+        const availability = rank(a) - rank(b);
+        if (availability) return availability;
+        const publishPriority =
+          rank(a) === 0 ? Number(b.publish) - Number(a.publish) : 0;
+        return publishPriority || a.at.localeCompare(b.at);
+      })[0];
     if (!due || Date.parse(due.at) > Date.now()) {
       this.state.lastHeartbeatAt = now();
       this.state.nextCheckAt = new Date(
@@ -629,42 +1125,64 @@ export class ZhihuAutocare {
       this.persist();
       return;
     }
+    // A known unresolved blocker is observed locally until recheck. Do not fill
+    // the activity log with the same failed cycle or monopolize runnable peers.
+    if (
+      due.locallyBlocked &&
+      this.state.blockedAccountIds.includes(due.accountId)
+    ) {
+      this.state.lastHeartbeatAt = now();
+      this.state.nextCheckAt = new Date(Date.now() + 60000).toISOString();
+      this.state.message = "已保留需处理任务，等待问题处理或下一正常账号安排";
+      this.persist();
+      return;
+    }
     // Consume the planned slot before remote work. An interrupted cycle is not replayed.
-    if (due.cycle && Date.parse(due.cycle.at) <= Date.now())
+    if (
+      !due.publish &&
+      due.cycle &&
+      due.cycle.kind !== "interaction" &&
+      Date.parse(due.cycle.at) <= Date.now()
+    )
       this.planCycle(
         due.accountId,
         local,
-        Date.now() + Math.max(60, this.state.config.gapMinutes) * 60000,
+        Date.now() + 15000,
+        this.nextCycleKind(due.cycle.kind),
       );
     this.event(
       "cycle.started",
-      due.publish ? "已到发布排期，准备无头执行" : "已到任务排期，准备无头执行",
+      due.publish
+        ? "已到发布排期，准备无头执行"
+        : due.cycle?.kind === "interaction"
+          ? "已到随机互动排期，准备无头执行"
+          : "已到任务排期，准备无头执行",
       undefined,
       "info",
       {
         accountId: due.accountId,
         plannedAt: due.at,
-        cycleId: due.cycle?.id,
+        cycleId: due.publish ? undefined : due.cycle?.id,
+        cycleKind: due.publish ? "publish" : due.cycle?.kind,
+        taskId: due.publish ? due.publishTaskId : undefined,
         browserMode: "headless",
-        targets: due.cycle?.targets,
+        targets: due.publish ? ["文章或回答发布"] : due.cycle?.targets,
       },
     );
     this.working = true;
     const revision = this.state.revision;
     this.state.lastHeartbeatAt = now();
     this.state.nextCheckAt = new Date(Date.now() + 60000).toISOString();
+    this.persist();
     try {
       if (this.competing().length || this.d.zhihu.running)
         fail("其他运营模式已占用账号，请关闭冲突模式后继续");
       if (
-        (this.state.config.publish || this.state.config.answerRecommended) &&
+        usesAi(this.state.config) &&
         this.state.model !== this.d.ai.modelFor("copy")
       )
         fail("内容生成模型已改变，请关闭后重新开启以应用新模型");
-      if (
-        (this.state.config.publish || this.state.config.answerRecommended) &&
-        this.unknownCosts()
-      )
+      if (usesAi(this.state.config) && this.unknownCosts())
         fail("存在生成费用待核实记录，未继续调用模型");
       const cfg = this.state.config,
         s = this.d.zhihu.snapshot();
@@ -694,6 +1212,65 @@ export class ZhihuAutocare {
             continue;
           }
           const own = this.state.jobs.filter((j) => j.accountId === accountId);
+          const publicationNeedsAttention =
+            own.some((j) => j.status === "attention") ||
+            s.tasks.some(
+              (t) =>
+                t.accountId === accountId && zhihuTaskNeedsReconciliation(t),
+            );
+          if (!due.publish && due.cycle?.kind === "interaction") {
+            if (publicationNeedsAttention) {
+              this.message(
+                accountId,
+                "存在待核对发布结果，随机互动暂停，请先处理原任务",
+                true,
+              );
+              continue;
+            }
+            this.state.message = "正在处理随机互动任务";
+            let consumed = false;
+            const consume = () => {
+              this.guard(revision);
+              if (consumed) return;
+              this.planCycle(
+                accountId,
+                this.d.zhihu.snapshot(),
+                Date.now() + 15000,
+                this.nextCycleKind(due.cycle!.kind),
+              );
+              consumed = true;
+              this.persist();
+            };
+            const result = await runNextAutocareRandomInteraction(
+              this.researchHost(revision),
+              accountId,
+              consume,
+            );
+            this.guard(revision);
+            if (result.status === "waiting") {
+              this.state.cycles[accountId] = {
+                ...due.cycle,
+                at: result.nextAt,
+              };
+              const message = `${result.message}；下次检查 ${new Date(result.nextAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}`;
+              this.message(accountId, message);
+              this.state.message = "随机互动已保留，等待下一可用时段";
+              this.event("cycle.deferred", message, undefined, "info", {
+                accountId,
+                cycleId: due.cycle.id,
+                cycleKind: due.cycle.kind,
+                previousAt: due.cycle.at,
+                scheduledAt: result.nextAt,
+              });
+            } else if (result.status === "blocked") {
+              this.state.message = "随机互动需要处理，原任务已保留";
+              this.message(accountId, result.message, true);
+            } else {
+              consume();
+              this.state.message = "按规则运行，等待下一项任务";
+            }
+            return;
+          }
           if (!cfg.publish && !cfg.answerRecommended) {
             if (
               await readNextAutocareContext(
@@ -704,16 +1281,11 @@ export class ZhihuAutocare {
               return;
             this.message(
               accountId,
-              "内容研究按时段与读取上限执行；点赞关注待本人确认",
+              "内容读取按本轮截止与数量执行；所选互动自动核对后执行",
             );
             continue;
           }
-          if (
-            own.some((j) => j.status === "attention") ||
-            s.tasks.some(
-              (t) => t.accountId === accountId && t.status === "attention",
-            )
-          ) {
+          if (publicationNeedsAttention) {
             this.message(
               accountId,
               "存在待核对结果，请先打开任务详情处理",
@@ -737,7 +1309,10 @@ export class ZhihuAutocare {
             this.message(accountId, "请先完成创作者入驻并核实等级", true);
             continue;
           }
-          if (current.level >= cfg.targetLevel) {
+          if (
+            current.level >= cfg.targetLevel &&
+            !autocareAccountDomain(cfg, accountId)
+          ) {
             this.cancelFuture(accountId);
             reached++;
             this.message(accountId, "目标等级已达到，自动发文和回答停止");
@@ -751,13 +1326,48 @@ export class ZhihuAutocare {
             continue;
           }
           const waiting = own.find(
-            (j) => j.status === "queued" && enabledAutocareJob(this.state, j),
+            (j) =>
+              j.status === "queued" &&
+              enabledAutocareJob(this.state, j) &&
+              (!due.publish || j.taskId === due.publishTaskId),
           );
           if (waiting) {
             const t = this.d.zhihu
               .snapshot()
               .tasks.find((t) => t.id === waiting.taskId);
             if (!t) fail("原发布任务不存在，未创建替代任务");
+            const queuedContent = s.contents.find(
+              (content) => content.id === waiting.contentId,
+            );
+            if (
+              !autocareContentMatchesAccountDomain(
+                cfg,
+                accountId,
+                queuedContent,
+              )
+            ) {
+              if (!t.attemptedAt && !t.submittedAt && t.status === "queued") {
+                this.d.zhihu.cancel(t.id);
+                waiting.status = "cancelled";
+                waiting.updatedAt = now();
+                waiting.message = "原稿不符合当前领域，保留供手动处理";
+                this.event(
+                  "content.domain_changed",
+                  waiting.message,
+                  waiting,
+                  "warning",
+                );
+                this.message(accountId, waiting.message);
+                this.persist();
+              } else {
+                this.message(
+                  accountId,
+                  "原任务已有尝试或提交记录且未匹配当前领域，请核对原任务；未取消或重放",
+                  true,
+                );
+              }
+              continue;
+            }
             if (
               waiting.kind === "answer" &&
               !t.attemptedAt &&
@@ -773,22 +1383,13 @@ export class ZhihuAutocare {
               waiting.taskId = undefined;
               waiting.scheduledAt = undefined;
               waiting.status = "ready";
-              this.message(accountId, "已到今日回答上限，原稿保留到下一运营日");
+              this.message(accountId, "已用满回答数量，原稿保留，本轮不再提交");
               this.persist();
               continue;
             }
-            const day = zhihuDay(Date.now()),
-              start = Date.parse(`${day}T${cfg.windowStart}:00+08:00`),
-              end = Date.parse(`${day}T${cfg.windowEnd}:00+08:00`);
-            if (Date.now() >= end || Date.now() < start) {
-              this.message(accountId, "等待运营时段，错过的任务将重新分散安排");
-              if (!t.attemptedAt) {
-                this.d.zhihu.cancel(t.id);
-                waiting.taskId = undefined;
-                waiting.status = "ready";
-                waiting.scheduledAt = undefined;
-              }
-              continue;
+            if (!withinAutocareRun(this.state)) {
+              this.finishRun("expired");
+              return;
             }
             if (Date.parse(t.scheduledAt) > Date.now()) {
               if (
@@ -812,7 +1413,8 @@ export class ZhihuAutocare {
               () =>
                 !this.closed &&
                 this.state.enabled &&
-                this.state.revision === revision,
+                this.state.revision === revision &&
+                withinAutocareRun(this.state),
             );
             this.sync();
             this.state.message = this.state.enabled
@@ -847,25 +1449,51 @@ export class ZhihuAutocare {
             }
             return;
           }
-          const answerAttempts = s.tasks.filter(
-            (t) =>
-              t.accountId === accountId &&
-              t.kind === "answer" &&
-              t.attemptedAt &&
-              zhihuDay(t.attemptedAt) === zhihuDay(Date.now()),
-          ).length;
+          const runWindow = autocareRunWindow(this.state)!;
+          const inRun = (value: string) =>
+            Date.parse(value) >= runWindow.start &&
+            Date.parse(value) < runWindow.end;
+          const answerAttempts = Math.max(
+            s.tasks.filter(
+              (t) =>
+                t.accountId === accountId &&
+                t.kind === "answer" &&
+                t.attemptedAt &&
+                inRun(t.attemptedAt),
+            ).length,
+            s.tasks.filter(
+              (t) =>
+                t.accountId === accountId &&
+                t.kind === "answer" &&
+                t.attemptedAt &&
+                zhihuDay(t.attemptedAt) === zhihuDay(Date.now()),
+            ).length,
+          );
           let job: AutocareJob | null | undefined = own.find(
             (j) =>
               j.status === "ready" &&
               enabledAutocareJob(this.state, j) &&
+              autocareContentMatchesAccountDomain(
+                cfg,
+                accountId,
+                s.contents.find((content) => content.id === j.contentId),
+              ) &&
               (j.kind !== "answer" || answerAttempts < cfg.answersPerDay),
           );
           if (!job) {
             const counts = zhihuCounts(s.tasks, accountId, Date.now());
+            counts.today = Math.max(
+              counts.today,
+              s.tasks.filter(
+                (t) =>
+                  t.accountId === accountId &&
+                  t.attemptedAt &&
+                  inRun(t.attemptedAt),
+              ).length,
+            );
             if (
-              counts.today >=
-                Math.min(cfg.dailyLimit, account.plan.dailyLimit) ||
-              counts.week >= Math.min(cfg.weeklyLimit, account.plan.weeklyLimit)
+              counts.today >= cfg.dailyLimit ||
+              counts.week >= cfg.weeklyLimit
             ) {
               if (
                 await readNextAutocareContext(
@@ -874,7 +1502,7 @@ export class ZhihuAutocare {
                 )
               )
                 return;
-              this.message(accountId, "已到日/周发布额度，等待下一可用日期");
+              this.message(accountId, "已用满发布数量，本轮不再新建发布任务");
               continue;
             }
             if (this.generationCount() >= cfg.generationsPerDay) {
@@ -896,7 +1524,10 @@ export class ZhihuAutocare {
               this.interactions(),
             );
             if (!slot) {
-              this.message(accountId, "未来7天暂无合法时段");
+              this.message(
+                accountId,
+                "本轮截止前没有可用发布时段，原任务保留且不会跨日排期",
+              );
               continue;
             }
             if (cfg.answerRecommended && answerAttempts < cfg.answersPerDay)
@@ -975,7 +1606,29 @@ export class ZhihuAutocare {
           this.persist();
           return;
         } catch (error) {
-          this.message(accountId, safeMessage(error), true);
+          const blockers = autocareBlockers(
+            this.state,
+            this.d.zhihu.snapshot(),
+            this.d.participation.snapshot(),
+            this.configurationIssues(),
+          );
+          const hard = blockers.some(
+            (item) => item.accountId === accountId && item.blocking,
+          );
+          this.message(
+            accountId,
+            hard
+              ? safeMessage(error)
+              : `本项暂未完成，其他任务继续：${safeMessage(error)}`,
+            hard,
+          );
+          this.event(
+            hard ? "cycle.blocked" : "cycle.step_failed",
+            safeMessage(error),
+            undefined,
+            "warning",
+            { accountId, blocking: hard },
+          );
         }
       }
       if (
@@ -988,6 +1641,7 @@ export class ZhihuAutocare {
           .accounts.filter((a) => cfg.accountIds.includes(a.id))
           .every(
             (a) =>
+              !autocareAccountDomain(cfg, a.id) &&
               a.plan.progress?.creator &&
               a.plan.progress.level !== null &&
               a.plan.progress.level >= cfg.targetLevel,
@@ -1017,7 +1671,13 @@ export class ZhihuAutocare {
         this.state.accountMessages[due.accountId] || this.state.message,
         undefined,
         "info",
-        { accountId: due.accountId, plannedAt: due.at, cycleId: due.cycle?.id },
+        {
+          accountId: due.accountId,
+          plannedAt: due.at,
+          cycleId: due.publish ? undefined : due.cycle?.id,
+          cycleKind: due.publish ? "publish" : due.cycle?.kind,
+          taskId: due.publish ? due.publishTaskId : undefined,
+        },
       );
       this.working = false;
       this.requestBudget = undefined;
@@ -1036,6 +1696,8 @@ export class ZhihuAutocare {
       guard: () => this.guard(revision),
       closed: () => this.closed,
       persist: () => this.persist(),
+      status: (accountId, message, blocked) =>
+        this.message(accountId, message, blocked),
       log: (event, message, accountId, level = "info", job) => {
         const key = `${accountId}:${event}`;
         if (!job && this.researchMessages.get(key) === message) return;
@@ -1079,7 +1741,7 @@ export class ZhihuAutocare {
         this.d.zhihu
           .snapshot()
           .tasks.some(
-            (t) => t.accountId === accountId && t.status === "attention",
+            (t) => t.accountId === accountId && zhihuTaskNeedsReconciliation(t),
           )
       )
         fail("此账号有待核对发布结果，请先处理原任务");
@@ -1236,12 +1898,39 @@ export class ZhihuAutocare {
     const activity = this.d.participation
       .snapshot()
       .activities.find(
-        (a) => a.id === input.id && a.planId === autocareParticipationScope,
+        (a) =>
+          a.id === input.id &&
+          [
+            autocareParticipationScope,
+            autocareRandomLikeScope,
+            autocareRandomCommentScope,
+            autocareRandomFollowScope,
+          ].includes(a.planId ?? ""),
       );
     if (!activity) fail("此记录不属于普通运营的互动待办");
     this.working = true;
     try {
       const result = await this.d.participation.reconcileInteraction(input);
+      const detail = this.state.researchStopDetails[activity.accountId];
+      const noUnknown = !result.attempts?.some(
+        (attempt) =>
+          attempt.status === "unknown" || attempt.status === "running",
+      );
+      if (
+        detail?.kind === "interaction" &&
+        detail.activityId === activity.id &&
+        detail.uid === this.state.identities[activity.accountId] &&
+        noUnknown
+      ) {
+        delete this.state.researchStops[activity.accountId];
+        delete this.state.researchStopDetails[activity.accountId];
+        this.message(
+          activity.accountId,
+          "原互动结果已核实，其他任务按本轮剩余时间继续",
+        );
+        this.restoreVerifiedAccountStops();
+        if (withinAutocareRun(this.state)) this.planCycles(false);
+      }
       this.event(
         "interaction.reconciled",
         result.attempts?.at(-1)?.receipt?.summary ||
@@ -1259,7 +1948,7 @@ export class ZhihuAutocare {
   private interactions() {
     return readParticipationState(this.d.db).activities.flatMap((a) =>
       (a.attempts ?? []).map((t) => ({
-        at: t.startedAt,
+        at: t.submittedAt ?? t.startedAt,
         accountId: a.accountId,
         networkKey: t.networkKey || "unknown",
       })),
@@ -1269,6 +1958,7 @@ export class ZhihuAutocare {
     accountId: string,
     revision: number,
   ): Promise<AutocareJob | null> {
+    const domain = autocareAccountDomain(this.state.config, accountId);
     const excluded = new Set([
       ...this.state.jobs.map((j) => j.sourceId),
       ...this.d.zhihu
@@ -1298,6 +1988,7 @@ export class ZhihuAutocare {
             (c) =>
               !excluded.has(c.id) &&
               c.text.trim().length >= 40 &&
+              matchesAutocareDomain(c.text, domain) &&
               !/https?:\/\/|提取码|购买|私信|加群|扫码|返利/.test(c.text),
           );
         if (candidate) return candidate;
@@ -1308,7 +1999,10 @@ export class ZhihuAutocare {
     this.requestBudget = requestBudget;
     let candidate = choose();
     if (!candidate) {
-      const local = this.d.pipix.knowledge({ mode: "home" });
+      const discovery = domain
+        ? { mode: "search" as const, keyword: autocareDomainQuery(domain) }
+        : { mode: "home" as const };
+      const local = this.d.pipix.knowledge(discovery);
       if (local.next?.retry) fail("上次皮皮虾推荐请求待核对，不自动重发");
       if (local.unparsed)
         fail("本地采集响应尚未完成索引，请在公共素材中重建索引，未重复请求");
@@ -1318,16 +2012,23 @@ export class ZhihuAutocare {
         local.latestAt &&
         zhihuDay(local.latestAt) === zhihuDay(Date.now())
       ) {
-        this.message(accountId, "今日推荐列表已用尽，等待明日补料");
+        this.message(
+          accountId,
+          domain
+            ? `今日领域关键词“${domain}”的列表已用尽，等待明日补料`
+            : "今日推荐列表已用尽，等待明日补料",
+        );
         return null;
       }
       const p = this.d.pipix.requestPolicy();
       if (!p.policy.listPagesPerRun || !p.remainingToday)
-        fail("无可用库存，采集预算或列表页上限为0；请在内容数据源设置调整");
+        fail(
+          `${domain ? `没有匹配领域关键词“${domain}”的库存` : "无可用库存"}，采集预算或列表页上限为0；请在内容数据源设置调整`,
+        );
       this.guard(revision);
       const page = await this.d.pipix.discover(
         {
-          mode: "home",
+          ...discovery,
           cursor: local.next?.cursor ?? "0",
           page: local.next?.page ?? 0,
           force: local.hasQuery && !local.next,
@@ -1337,12 +2038,17 @@ export class ZhihuAutocare {
       const usage = this.d.pipix.requestPolicy();
       this.event(
         "source.list",
-        `推荐列表已入库${page.cached ? "，复用缓存" : ""}；今日采集剩余${usage.remainingToday}/${usage.policy.dailyRequests}次`,
+        `${domain ? `领域关键词“${domain}”的搜索列表` : "推荐列表"}已入库${page.cached ? "，复用缓存" : ""}；今日采集剩余${usage.remainingToday}/${usage.policy.dailyRequests}次`,
       );
       this.guard(revision);
       candidate = choose();
       if (!candidate) {
-        this.message(accountId, "当前推荐页暂无可用图文，等待后续补料");
+        this.message(
+          accountId,
+          domain
+            ? `当前没有匹配领域关键词“${domain}”的可用图文，等待后续补料；不改写无关素材`
+            : "当前推荐页暂无可用图文，等待后续补料",
+        );
         return null;
       }
     }
@@ -1371,6 +2077,8 @@ export class ZhihuAutocare {
         candidate.id,
       );
       this.guard(revision);
+      if (!matchesAutocareDomain(source.text, domain))
+        fail(`完整原帖未匹配领域关键词“${domain}”，未调用AI生成`);
       job.sourceHash = fingerprint({
         text: source.text,
         images: source.images.map((i) => i.asset?.sha256),
@@ -1420,10 +2128,11 @@ export class ZhihuAutocare {
         source,
         comments,
         () => this.guard(revision),
+        domain,
       );
       // Always keep a received paid result, even if the switch was turned off in flight.
       if (this.closed) return null;
-      const checks = checkAutocareArticle(result, source, comments);
+      const checks = checkAutocareArticle(result, source, comments, domain);
       if (
         this.d.zhihu
           .snapshot()
@@ -1464,7 +2173,7 @@ export class ZhihuAutocare {
             editorial: {
               id: job.id,
               version: 1,
-              direction: "不限领域",
+              direction: domain || "不限领域",
               accountId,
               contribution: result.evidence.join("\n"),
               aiAssisted: true,

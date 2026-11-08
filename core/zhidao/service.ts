@@ -39,6 +39,8 @@ import {
   collectionDriveType,
 } from "../../shared/resource-collection";
 import { answerInstruction } from "./answer-prompt";
+import { AnswerReservations } from "./answer-history";
+import { autoAnswersStart, zhidaoAccountLabel } from "../../shared/zhidao";
 import { publicationFingerprint } from "./publishing";
 import {
   zhidaoContentIssue,
@@ -60,9 +62,11 @@ export class ZhidaoOperations {
   >();
   private closed = false;
   private accountPending = new Set<string>();
+  private answerReservations = new AnswerReservations();
   private fetcher: SourceFetch;
   private pace: number;
   private verifyCopy?: (copyId: string) => Promise<void>;
+  private pauseQuestionImport?: (sourceId: string) => void;
   constructor(
     private repo: Repository,
     private secrets: SecretStore,
@@ -74,6 +78,7 @@ export class ZhidaoOperations {
       fetcher?: SourceFetch;
       pace?: number;
       verifyCopy?: (copyId: string) => Promise<void>;
+      pauseQuestionImport?: (sourceId: string) => void;
       environments?: BrowserEnvironments;
       schedule?<T>(
         refs: import("../../shared/browser-environments").EnvironmentAccountRef[],
@@ -86,6 +91,7 @@ export class ZhidaoOperations {
     this.fetcher = options.fetcher ?? sourceFetch;
     this.pace = options.pace ?? 2500;
     this.verifyCopy = options.verifyCopy;
+    this.pauseQuestionImport = options.pauseQuestionImport;
     this.environments = options.environments;
     this.schedule = options.schedule;
     this.store = new OperationsStore(repo.db, (account) => {
@@ -371,14 +377,18 @@ export class ZhidaoOperations {
     kind: OperationKind,
     config: Record<string, unknown>,
   ) {
-    if (this.active.size >= 3)
+    const automatic = kind === "answer" && config.mode === "auto";
+    if (!automatic && [...this.active.keys()].filter((id) => {
+      const run = this.store.run(id);
+      return run.kind !== "answer" || run.config.mode !== "auto";
+    }).length >= 3)
       throw new AppError(
         "TOO_MANY_RUNS",
         "已有三个运营任务正在运行，请稍后开始。",
       );
     for (const [runId] of this.active) {
       const r = this.store.run(runId);
-      if (r.kind === kind)
+      if (r.kind === kind && !(kind === "answer" && (automatic || r.config.mode === "auto")))
         throw new AppError(
           "KIND_BUSY",
           `${operationLabels[kind]}已有任务在运行，请先停止或等待完成。`,
@@ -395,7 +405,7 @@ export class ZhidaoOperations {
       this.assertAccountIdle(String(accountId));
     }
   }
-  async start(raw: RunStartInput) {
+  private prepareStart(raw: RunStartInput) {
     const v = runStartInput.parse(raw);
     const config = { ...v.input };
     if (v.kind === "collect" && !v.input.zhidao)
@@ -448,17 +458,49 @@ export class ZhidaoOperations {
           ? `${v.input.keywords[0]}${v.input.keywords.length > 1 ? ` 等${v.input.keywords.length}词` : ""} · 资源采集`
           : v.kind === "answer"
             ? v.input.mode === "auto"
-              ? "自动回答"
+              ? `自动回答 · ${zhidaoAccountLabel(this.store.account(v.input.accountId))}`
               : v.input.question.slice(0, 35)
             : v.kind === "publish"
               ? v.input.taskName
               : "资源问答模板";
-    const run = this.store.create(v.kind, title, config, total);
+    return { kind: v.kind, title, config, total };
+  }
+  async start(raw: RunStartInput) {
+    const prepared = this.prepareStart(raw);
+    const run = this.store.create(prepared.kind, prepared.title, prepared.config, prepared.total);
     this.launch(run);
     return this.store.run(run.id);
   }
+  startAnswers(raw: unknown) {
+    const input = autoAnswersStart.parse(raw);
+    const identities = input.accountIds.map((id) => this.store.account(id).uid).filter(Boolean);
+    if (new Set(identities).size !== identities.length)
+      throw new AppError("DUPLICATE_ACCOUNT", "所选账号包含同一个百度身份，请只选择一次。");
+    const { accountIds, authorized, ...options } = input;
+    const prepared = accountIds.map((accountId) => this.prepareStart({
+      kind: "answer", authorized,
+      input: { ...options, mode: "auto", question: "", accountId },
+    }));
+    const runs = this.repo.db.transaction(() => prepared.map((p) =>
+      this.store.create(p.kind, p.title, p.config, p.total)));
+    runs.forEach((run) => this.launch(run));
+    return runs.map((run) => this.store.run(run.id));
+  }
+  answerSessions() {
+    return this.repo.db.all<{ id: string }>(`SELECT id FROM (
+      SELECT id,created_at,ROW_NUMBER() OVER (
+        PARTITION BY json_extract(config,'$.accountId')
+        ORDER BY CASE WHEN status='running' THEN 0 ELSE 1 END,created_at DESC,rowid DESC
+      ) AS rank FROM operation_runs
+      WHERE kind='answer' AND json_extract(config,'$.mode')='auto'
+    ) WHERE rank=1 ORDER BY created_at DESC LIMIT 200`).map((row) => this.store.run(row.id));
+  }
   pause(runId: string) {
     const run = this.store.run(runId);
+    if (run.config.sourceKind === "discovery-independent" && typeof run.config.sourceId === "string") {
+      this.pauseQuestionImport?.(run.config.sourceId);
+      return this.store.run(runId);
+    }
     const active = this.active.get(runId);
     if (active) {
       active.controller.abort(new Error("用户停止"));
@@ -473,6 +515,8 @@ export class ZhidaoOperations {
   }
   resume(runId: string) {
     const run = this.store.run(runId);
+    if (run.config.sourceKind === "discovery-independent")
+      throw new AppError("QUESTION_IMPORT_RESUME", "请返回百度批量扩词，打开配资料窗口继续建链；不会调用模板生成或AI。");
     if (this.active.has(runId))
       throw new AppError("RUN_BUSY", "任务仍在运行或停止中。");
     if (run.status === "completed")
@@ -655,6 +699,7 @@ export class ZhidaoOperations {
         );
       })
       .finally(() => {
+        this.answerReservations.release(run.id);
         this.active.delete(run.id);
         if (!this.closed) this.changed();
       });
@@ -683,6 +728,8 @@ export class ZhidaoOperations {
       get closed() {
         return owner.closed;
       },
+      claimAnswerQuestion: (owner, qid, question) => this.answerReservations.claim(owner, qid, question),
+      releaseAnswerQuestion: (owner) => this.answerReservations.release(owner),
       verifyCopy: this.verifyCopy,
       progress: (run, message, done) => this.progress(run, message, done),
       settings: () => this.settings(),
@@ -736,7 +783,9 @@ export class ZhidaoOperations {
       }
       return this.execute(run, signal);
     };
-    return this.schedule && ids.length
+    // Long-lived answering loops use each environment's own lease. Holding a global
+    // queue slot for their whole lifetime would serialize unrelated accounts.
+    return this.schedule && ids.length && !(run.kind === "answer" && run.config.mode === "auto")
       ? this.schedule(
           ids.map((id) => ({ kind: "zhidao", id })),
           "百度知道运营任务",
@@ -830,6 +879,8 @@ export class ZhidaoOperations {
   private validatePublication(ids: string[]) {
     for (const itemId of ids) {
       const item = this.store.item(itemId);
+      if (item.independentShare && (item.independentShare.state !== "ready" || !item.link))
+        throw new AppError("SHARE_NOT_READY", "此长尾词的独立分享尚未生成并核验，请先返回百度扩词完成建链。");
       if (
         !["template", "answer"].includes(this.store.run(item.runId).kind) ||
         item.status !== "ready" ||
@@ -902,6 +953,8 @@ export class ZhidaoOperations {
     const input = operationItemEdit.parse(raw);
     const item = this.store.item(input.id);
     const run = this.store.run(item.runId);
+    if (item.independentShare && (run.status === "running" || item.independentShare.state !== "ready"))
+      throw new AppError("ITEM_LOCKED", "请先在百度扩词中完成此问答的独立建链，再编辑和审核。");
     if (
       this.active.has(run.id) ||
       this.referencedByActivePublication(item.id) ||
@@ -1039,6 +1092,8 @@ export class ZhidaoOperations {
   removeItems(ids: string[]) {
     for (const itemId of ids) {
       const item = this.store.item(itemId);
+      if (item.independentShare && (this.store.run(item.runId).status === "running" || ["pending", "uncertain"].includes(item.independentShare.state)))
+        throw new AppError("ITEM_LOCKED", "独立分享正在生成或结果待核对，请先在百度扩词中完成处理，保留建链记录。");
       if (
         this.active.has(item.runId) ||
         this.referencedByActivePublication(item.id) ||
@@ -1065,7 +1120,7 @@ export class ZhidaoOperations {
       ? [
           ["qid", "问题标题", "回答内容"],
           ...items
-            .filter((i) => !!i.question && !!i.answer)
+            .filter((i) => !!i.question && !!i.answer && (!i.independentShare || i.independentShare.state === "ready"))
             .map((i) => [i.questionId, i.question, i.answer]),
         ]
       : run.kind === "mine"

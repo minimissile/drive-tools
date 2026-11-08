@@ -1,8 +1,21 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
+  bilibili?: import("../shared/bilibili").BilibiliContentPort;
+  localVideoBundlePath?: string;
+  localVideoTemplateEntryPoint?: string;
+  readVideoImages?(): Promise<{ name: string; bytes: Buffer }[]>;
+  readVideoAudio?(): Promise<{ name: string; mime: string; bytes: Buffer } | null>;
+  tieba?: import("./tieba/types").TiebaAutocareBrowser;
+  tiebaParticipation?: import("./tieba/participation-types").TiebaParticipationBrowser;
+  tiebaTopics?: import("./tieba/topic-types").TiebaTopicPublisher;
+  tiebaInsights?: import("./tieba-insights/types").TiebaInsightsBrowser;
+  tiebaPostStats?: import("./tieba-post-stats/types").TiebaPostStatsBrowser;
   /** Isolated TikHub network transport. Never reuses an account's browser cookies. */
   pipixFetch?(url: string, init: RequestInit): Promise<Response>;
+  /** Independent music requests and CDN downloads, without account cookies. */
+  musicFetch?(url: string, init: RequestInit): Promise<Response>;
+  wechatDiscoveryFetch?(url: string, init: RequestInit): Promise<Response>;
   readLandingDocument?(
     name: string,
   ): Promise<{ name: string; bytes: Uint8Array } | null>;
@@ -29,6 +42,9 @@ export interface AppPorts {
   /** Fixed-entry service requests use the desktop network stack when available. */
   resourceLinksFetch?(url: string, init: RequestInit): Promise<Response>;
   smzdm?: import("../shared/smzdm").SmzdmPort;
+  wechat?: import("../shared/wechat").WechatPort;
+  readWechatImage?(): Promise<{ name: string; bytes: Buffer } | null>;
+  readWechatRemoteImage?(url: string): Promise<{ bytes: Buffer }>;
   collectionWebSession?: {
     search(
       source: import("../shared/resource-collection").CollectionWebSource,
@@ -87,7 +103,7 @@ export interface AppPorts {
     ): Promise<import("../shared/weibo-publishing").WeiboSubmitReceipt>;
   };
   readWeiboImages?(
-    platform?: "weibo" | "zhihu",
+    platform?: "weibo" | "zhihu" | "tieba",
   ): Promise<{ name: string; bytes: Buffer }[] | null>;
   weiboStatistics?: {
     read(

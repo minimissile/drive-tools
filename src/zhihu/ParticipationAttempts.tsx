@@ -181,7 +181,11 @@ function AttemptDetail({
         <div className="participation-decision">
           <strong>
             {a.decision.relevance === null
-              ? "本人确认的互动依据"
+              ? a.decision.source === "rule"
+                ? a.decision.rule === "autocare_random_comment"
+                  ? "随机评论规则"
+                  : "随机点赞规则"
+                : "本人确认的互动依据"
               : `AI相关性判断 · ${Math.round(a.decision.relevance * 100)}%`}
           </strong>
           <p>{a.decision.basis}</p>

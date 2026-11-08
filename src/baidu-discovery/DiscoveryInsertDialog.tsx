@@ -1,5 +1,6 @@
+import { AiIcon } from "../ui/AiIcon";
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, FolderTree, Sparkles, X } from "lucide-react";
+import { ExternalLink, FolderTree, X } from "lucide-react";
 import { z } from "zod";
 import type { DiscoveryRun } from "../../shared/baidu-discovery";
 import type { QuestionDraftInsertResult } from "../../shared/zhidao-publishing";
@@ -9,9 +10,13 @@ import { ipc } from "../api/client";
 import { Dialog } from "../ui/Dialog";
 import { Button, Field, Notice } from "../ui/primitives";
 import { readMaterialBrief } from "./material-brief";
+import { OwnedResourcePicker } from "../zhidao/OwnedResourcePicker";
+import { useIpcQuery } from "../api/useIpcQuery";
+import { QueryError } from "../ui/QueryError";
+import { QuestionImportProgress } from "./QuestionImportProgress";
 
 const schema = z.object({
-  links: z.string().max(30000),
+  copyIds: z.array(z.string()).max(100).default([]),
   brief: z.string().max(6000),
   count: z.number(),
   materials: z.string().max(210000),
@@ -38,7 +43,7 @@ export function DiscoveryInsertDialog({
   const draft = useLocalDraft(
     `panxu-baidu-discovery-insert:${workspace}:${run.id}`,
     {
-      links: "",
+      copyIds: [] as string[],
       brief: run.materialPool?.brief || "",
       count: 3,
       materials: run.materialPool?.entries.join("\n\n---\n\n") || "",
@@ -49,6 +54,16 @@ export function DiscoveryInsertDialog({
   const materials = splitMaterials(value.materials);
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
+  const [pausing, setPausing] = useState(false);
+  const progress = useIpcQuery(
+    "baiduDiscovery.questionImport",
+    { id: run.id },
+    {
+      keepPrevious: true,
+      refreshInterval: 1500,
+    },
+  );
+  const busy = !!pending || !!progress.data?.running;
   const [fileProgress, setFileProgress] = useState("");
   const [fileBrowserIssue, setFileBrowserIssue] = useState(false);
   const [generationWarnings, setGenerationWarnings] = useState(() =>
@@ -98,8 +113,16 @@ export function DiscoveryInsertDialog({
       setFileBrowserIssue(false);
       setFileProgress("正在识别链接…");
       try {
+        const resources = await ipc("zhidao.template.sources", {
+          copyIds: value.copyIds,
+        });
         const result = await readMaterialBrief({
-          links: value.links,
+          links: resources
+            .map(
+              (resource) =>
+                `${resource.link}${resource.code ? ` 提取码：${resource.code}` : ""}`,
+            )
+            .join("\n"),
           signal: controller.signal,
           onProgress: setFileProgress,
         });
@@ -126,7 +149,9 @@ export function DiscoveryInsertDialog({
     });
   const insert = () =>
     void act("insert", async () => {
-      if (!value.links.trim()) throw new Error("请先填写网盘链接。");
+      setPausing(false);
+      if (!value.copyIds.length)
+        throw new Error("请先选择关联的本人百度网盘资源。");
       if (
         !materials.length ||
         materials.some((material) => material.length > 2000) ||
@@ -136,49 +161,82 @@ export function DiscoveryInsertDialog({
       const result = await ipc("baiduDiscovery.insertZhidao", {
         id: run.id,
         keys,
-        links: value.links,
+        copyIds: value.copyIds,
         materials,
       });
+      progress.reload();
       onInserted(result);
     });
   return (
     <Dialog
-      title="配资料并插入问答"
+      title="配资料并生成独立链接"
       onClose={onClose}
-      busy={!!pending}
+      busy={busy}
       className="baidu-discovery-insert-dialog"
       footer={
         <>
-          <span>将插入 {keys.length} 个关键词 · 同名问题跳过</span>
-          <Button disabled={!!pending} onClick={onClose}>
+          <span>{keys.length} 个关键词 · 每词一条新分享 · 同名问题跳过</span>
+          {progress.data?.running ? (
+            <Button
+              disabled={pausing}
+              onClick={() => {
+                setPausing(true);
+                void ipc("baiduDiscovery.pauseQuestionImport", {
+                  id: run.id,
+                }).catch((cause) => {
+                  setPausing(false);
+                  setError(
+                    cause instanceof Error
+                      ? cause.message
+                      : "暂停未完成，请重试。",
+                  );
+                });
+              }}
+            >
+              {pausing ? "等待当前分享结果…" : "暂停建链"}
+            </Button>
+          ) : null}
+          <Button disabled={busy} onClick={onClose}>
             取消
           </Button>
           <Button
             primary
-            disabled={!!pending || !value.links.trim() || !materials.length}
+            disabled={
+              busy ||
+              !progress.data ||
+              !!progress.error ||
+              !value.copyIds.length ||
+              !materials.length ||
+              keys.length > 500
+            }
             onClick={insert}
           >
-            {pending === "insert" ? "正在插入…" : "随机分配并插入问答"}
+            {pending === "insert" || progress.data?.running
+              ? "正在逐词建链…"
+              : "生成独立链接并入表"}
           </Button>
         </>
       }
     >
       <div className="baidu-material-layout">
         <section className="baidu-material-inputs" aria-label="链接与生成设置">
-          <Field label="百度网盘链接" hint="每行一条，可附提取码">
-            <textarea
-              aria-label="批量百度网盘链接"
-              rows={3}
-              maxLength={30000}
-              disabled={!!pending}
-              value={value.links}
-              placeholder="粘贴百度网盘分享链接，可在同一行填写提取码"
-              onChange={(event) => {
-                update({ links: event.target.value });
+          <Field label="关联百度网盘资源" hint="选择已核验的本人资源" as="div">
+            <OwnedResourcePicker
+              selected={value.copyIds}
+              disabled={busy}
+              showLinks={false}
+              onChange={(copyIds) => {
+                update({ copyIds });
                 setFileProgress("");
               }}
             />
           </Field>
+          <p className="baidu-discovery-caption">
+            入表时为每个长尾词创建永久分享，链接只随问答保存，不新增资源库记录，也不替换原链接。多份资源按数量均衡分配。
+          </p>
+          {keys.length > 500 ? (
+            <Notice warning>每次最多500个长尾词，请关闭后分批选择。</Notice>
+          ) : null}
           <section
             className="baidu-material-generator"
             aria-label="AI生成资料文案"
@@ -191,7 +249,7 @@ export function DiscoveryInsertDialog({
               <div className="baidu-material-brief-actions">
                 <Button
                   size="compact"
-                  disabled={!!pending || !value.links.trim()}
+                  disabled={busy || !value.copyIds.length}
                   onClick={generateBrief}
                 >
                   <FolderTree size={14} />
@@ -214,7 +272,7 @@ export function DiscoveryInsertDialog({
                 aria-label="资料主题与依据"
                 rows={4}
                 maxLength={6000}
-                disabled={!!pending}
+                disabled={busy}
                 value={value.brief}
                 onChange={(event) => {
                   update({ brief: event.target.value });
@@ -231,7 +289,7 @@ export function DiscoveryInsertDialog({
               <div className="baidu-material-browser-actions">
                 <Button
                   size="compact"
-                  disabled={!!pending}
+                  disabled={busy}
                   onClick={() =>
                     void act("viewShare", () =>
                       ipc("baiduDiscovery.openShareBrowser"),
@@ -244,7 +302,7 @@ export function DiscoveryInsertDialog({
                 <Button
                   quiet
                   size="compact"
-                  disabled={!!pending}
+                  disabled={busy}
                   onClick={() =>
                     void act("closeShare", async () => {
                       await ipc("baiduDiscovery.closeShareBrowser");
@@ -264,18 +322,15 @@ export function DiscoveryInsertDialog({
                   min={1}
                   max={10}
                   aria-label="资料生成篇数"
-                  disabled={!!pending}
+                  disabled={busy}
                   value={value.count || ""}
                   onChange={(event) =>
                     update({ count: Number(event.target.value) })
                   }
                 />
               </Field>
-              <Button
-                disabled={!!pending || !value.brief.trim()}
-                onClick={generate}
-              >
-                <Sparkles size={14} />
+              <Button disabled={busy || !value.brief.trim()} onClick={generate}>
+                <AiIcon size={14} />
                 {pending === "generate"
                   ? `正在生成 ${value.count} 篇…`
                   : `AI生成 ${value.count} 篇文案`}
@@ -288,6 +343,22 @@ export function DiscoveryInsertDialog({
           </section>
           {error || draft.error ? (
             <Notice danger>{error || draft.error}</Notice>
+          ) : null}
+          <QueryError
+            error={
+              progress.error === "不支持此操作。"
+                ? "请先点击窗口顶部“应用更新并重启”，加载本次建链功能后重试。"
+                : progress.error
+            }
+            loading={progress.loading}
+            onRetry={progress.reload}
+          />
+          {progress.data?.total ? (
+            <QuestionImportProgress
+              value={progress.data}
+              disabled={busy}
+              onChanged={progress.reload}
+            />
           ) : null}
         </section>
         <section className="baidu-material-editor" aria-label="编辑待分配文案">
@@ -303,7 +374,7 @@ export function DiscoveryInsertDialog({
               aria-label="资料文案池"
               rows={13}
               maxLength={210000}
-              disabled={!!pending}
+              disabled={busy}
               value={value.materials}
               placeholder={
                 "第一篇资料文案，写明内容、适用对象与使用方法。\n\n---\n\n第二篇资料文案。"
@@ -321,7 +392,7 @@ export function DiscoveryInsertDialog({
             <Button
               quiet
               size="compact"
-              disabled={!!pending}
+              disabled={busy}
               onClick={() => {
                 update({
                   brief: run.materialPool!.brief,
@@ -334,7 +405,7 @@ export function DiscoveryInsertDialog({
             </Button>
           ) : null}
           <p className="baidu-discovery-caption">
-            文案与链接随机、均衡分配；插入后请逐条核对，再审核上传。
+            文案均衡分配，每个词单独建链；成功后可直接前往问答发布页审核上传。未完成项保留进度，再次点击可继续。
           </p>
         </section>
       </div>

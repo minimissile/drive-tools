@@ -3,7 +3,7 @@ import { id } from "../database";
 import { inspectBackup, stageRestore } from "../backups";
 import { AppError } from "../errors";
 import type { BackupPreview } from "../../shared/types";
-import { platformSpecs } from "../../shared/platforms";
+import { externalLinkInput } from "../external-links";
 
 import type { HandlerServices, HandlerMap } from "./types";
 
@@ -105,26 +105,7 @@ export function createWorkspaceHandlers(
       return true;
     },
     "system.external": async (object) => {
-      const { url } = z.object({ url: z.url().max(2000) }).parse(object);
-      const u = new URL(url);
-      const allowed = [
-        "www.5118.com",
-        "account.5118.com",
-        "openrouter.ai",
-        "doc.bitbrowser.cn",
-        "www.bitbrowser.cn",
-        ...platformSpecs.flatMap((p) => [new URL(p.ruleUrl).hostname]),
-      ];
-      if (
-        u.protocol !== "https:" ||
-        !allowed.includes(u.hostname) ||
-        u.username ||
-        u.password
-      )
-        throw new AppError(
-          "EXTERNAL_URL_BLOCKED",
-          "此外部地址未在应用允许列表内。",
-        );
+      const { url } = externalLinkInput.parse(object);
       await services.ports.openExternal(url);
       return true;
     },

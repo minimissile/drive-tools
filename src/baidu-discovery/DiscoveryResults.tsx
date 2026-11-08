@@ -196,6 +196,9 @@ export function DiscoveryResults({
               ? `，跳过 ${inserted.duplicates} 条重复问题`
               : ""}
             。
+            {inserted.failed || inserted.uncertain || inserted.pending
+              ? `另有 ${(inserted.failed || 0) + (inserted.uncertain || 0) + (inserted.pending || 0)} 条建链未完成，已完成项可先发布。`
+              : ""}
             {inserted.titleIssues
               ? `${inserted.titleIssues} 条标题需在审核前修改。`
               : "请核对问题与回答是否匹配，再审核上传。"}
@@ -276,7 +279,8 @@ export function DiscoveryResults({
           onClose={() => setInserting(null)}
           onInserted={(result) => {
             setInserted(result);
-            setInserting(null);
+            if (!result.failed && !result.uncertain && !result.pending)
+              setInserting(null);
           }}
         />
       ) : null}

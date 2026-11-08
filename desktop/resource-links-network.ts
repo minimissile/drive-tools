@@ -10,11 +10,12 @@ export function resourceLinksTarget(url: string, method: string) {
     target.port ||
     target.search ||
     target.hash ||
-    !/^\/api\/(?:connection|(?:links|pages)\/[A-Za-z0-9_-]{8,128})$/.test(
+    !/^\/api\/(?:connection|(?:links|pages|traffic)\/[A-Za-z0-9_-]{8,128}|catalogs\/catalog_[\w-]{1,100})$/.test(
       target.pathname,
     ) ||
-    !["GET", "PUT"].includes(method) ||
-    (method === "PUT" && target.pathname === "/api/connection")
+    !["GET", "PUT", "DELETE"].includes(method) ||
+    (method === "DELETE" && !target.pathname.startsWith("/api/catalogs/")) ||
+    (method === "PUT" && (target.pathname === "/api/connection" || target.pathname.startsWith("/api/traffic/")))
   )
     throw new AppError(
       "RESOURCE_LINK_REQUEST_BLOCKED",

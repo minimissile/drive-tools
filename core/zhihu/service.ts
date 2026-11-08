@@ -1,3 +1,4 @@
+import { zhihuTaskNeedsReconciliation } from "../../shared/zhihu";
 import { id, now, type Database } from "../database";
 import { AppError, safeMessage } from "../errors";
 import type { WebsiteAccounts } from "../website-accounts";
@@ -43,6 +44,13 @@ export class ZhihuOperations {
   private ruleAuthority?: {
     owns(accountId: string): boolean;
     approved(content: ZhihuContent, accountId: string): boolean;
+    allowReachedTarget?(content: ZhihuContent, accountId: string): boolean;
+    executionPolicy?(accountId: string): {
+      dailyLimit: number;
+      weeklyLimit: number;
+      gapMinutes: number;
+      deadlineAt: string;
+    } | null;
     record?(
       taskId: string,
       event: {
@@ -65,7 +73,7 @@ export class ZhihuOperations {
   private interactionHistory() {
     return readParticipationState(this.d.db).activities.flatMap((activity) =>
       (activity.attempts ?? []).map((attempt) => ({
-        at: attempt.startedAt,
+        at: attempt.submittedAt ?? attempt.startedAt,
         accountId: activity.accountId,
         networkKey: attempt.networkKey || "unknown",
       })),
@@ -86,13 +94,30 @@ export class ZhihuOperations {
     this.store = new ZhihuStore(d.db);
     this.logs = new RuntimeLog(d.db, d.dataPath, "zhihu");
     this.time = d.clock ?? Date.now;
-    for (const task of this.tasks())
+    for (const task of this.tasks()) {
+      // This legacy error is thrown before the answer editor is opened. Keep
+      // the failed attempt, but do not treat it as an unknown submission.
+      if (
+        task.status === "attention" &&
+        !task.submittedAt &&
+        !task.failure &&
+        task.message === "未找到唯一的写回答入口，可能已回答或页面结构变化。"
+      )
+        this.saveTask({
+          ...task,
+          failure: {
+            phase: "before_submit",
+            code: "ZHIHU_ANSWER_ENTRY_UNAVAILABLE",
+            at: now(),
+          },
+        });
       if (["running", "submitting"].includes(task.status))
         this.saveTask({
           ...task,
           status: "attention",
           message: "上次执行中断，请核对官方页面后登记结果；不会自动重发。",
         });
+    }
     for (const plan of this.plans())
       if (plan.active)
         this.savePlan({
@@ -336,6 +361,7 @@ export class ZhihuOperations {
     purpose: "warming" | "regular",
     firstPost = false,
     retryTaskId?: string,
+    ruleAllowsReachedTarget = false,
   ) {
     const account = this.account(accountId),
       plan = this.plan(accountId);
@@ -367,7 +393,7 @@ export class ZhihuOperations {
       this.tasks().some(
         (t) =>
           t.accountId === accountId &&
-          t.status === "attention" &&
+          zhihuTaskNeedsReconciliation(t) &&
           t.id !== retryTaskId,
       )
     )
@@ -375,6 +401,7 @@ export class ZhihuOperations {
     if (
       !firstPost &&
       purpose === "warming" &&
+      !ruleAllowsReachedTarget &&
       progress.level! >= plan.targetLevel
     )
       fail("账号已达到目标等级，养号结束。");
@@ -486,7 +513,13 @@ export class ZhihuOperations {
       )
     )
       fail("此账号已有首篇开通任务，请核对结果，避免重复提交。");
-    const account = this.ready(accountId, content.purpose, firstPost);
+    const account = this.ready(
+      accountId,
+      content.purpose,
+      firstPost,
+      undefined,
+      !!this.ruleAuthority?.allowReachedTarget?.(content, accountId),
+    );
     const questionId =
       content.kind === "answer" ? zhihuQuestionId(content.questionUrl) : null;
     if (
@@ -570,6 +603,7 @@ export class ZhihuOperations {
       ...task,
       status: "queued",
       scheduledAt: new Date(this.time()).toISOString(),
+      failure: undefined,
       message: "已恢复未提交的原任务，继续核验后执行",
     });
   }
@@ -745,10 +779,21 @@ export class ZhihuOperations {
                 !this.plan(task.accountId).active
               )
                 fail("账号养号计划已暂停，未继续提交。");
+              const ruleContent = managed?.ruleOwned
+                ? this.store.get("zhihu_contents", task.contentId)
+                : undefined;
               const a = this.ready(
                 task.accountId,
                 task.purpose,
                 task.firstPost,
+                undefined,
+                !!(
+                  ruleContent &&
+                  this.ruleAuthority?.allowReachedTarget?.(
+                    ruleContent,
+                    task.accountId,
+                  )
+                ),
               );
               if (a.uid !== task.uid) fail("账号身份与任务不一致。");
               this.d.environments.assertStamp(
@@ -765,6 +810,15 @@ export class ZhihuOperations {
                 fail("内容已被修改，请核对后重新排队。");
               return c;
             };
+            const executionPlan = () => {
+              const base = this.plan(task.accountId);
+              if (!managed?.ruleOwned) return base;
+              const policy = this.ruleAuthority?.executionPolicy?.(
+                task.accountId,
+              );
+              if (!policy) fail("本轮自动养号执行窗口已结束，未继续提交");
+              return { ...base, ...policy };
+            };
             const content = assertCurrent();
             const env = await this.d.environments.checkNetwork(
               this.d.environments.forAccount(ref(task.accountId)).id,
@@ -774,12 +828,25 @@ export class ZhihuOperations {
             const due = zhihuDue(
               this.tasks(),
               task,
-              this.plan(task.accountId),
+              executionPlan(),
               networkKey,
               this.time(),
               this.interactionHistory(),
+              managed?.ruleOwned ? 5 : 60,
             );
             if (due.at > this.time()) {
+              const ruleDeadline = managed?.ruleOwned
+                ? this.ruleAuthority?.executionPolicy?.(task.accountId)
+                    ?.deadlineAt
+                : undefined;
+              if (ruleDeadline && due.at >= Date.parse(ruleDeadline)) {
+                this.saveTask({
+                  ...task,
+                  status: "cancelled",
+                  message: "本轮截止前无可用发布时段，原稿保留，不安排跨日补做",
+                });
+                return;
+              }
               this.saveTask({
                 ...task,
                 scheduledAt: new Date(due.at).toISOString(),
@@ -802,6 +869,7 @@ export class ZhihuOperations {
               ...task,
               networkKey,
               status: "running",
+              failure: undefined,
               attemptedAt: new Date(this.time()).toISOString(),
               message: "正在核验身份并填写官方编辑器",
             });
@@ -818,10 +886,11 @@ export class ZhihuOperations {
                       zhihuDue(
                         [],
                         task,
-                        this.plan(task.accountId),
+                        executionPlan(),
                         networkKey,
                         this.time(),
                         this.interactionHistory(),
+                        managed?.ruleOwned ? 5 : 60,
                       ).at > this.time()
                     )
                       fail(
@@ -885,10 +954,32 @@ export class ZhihuOperations {
         const current = this.store.get("zhihu_tasks", task.id);
         const ruleStopped =
           managed?.ruleOwned && !managed.canContinue() && !current.submittedAt;
+        const beforeSubmit =
+          !current.submittedAt &&
+          error instanceof AppError &&
+          !error.uncertain &&
+          [
+            "ZHIHU_ANSWER_ENTRY_UNAVAILABLE",
+            "ZHIHU_ANSWER_ALREADY_PRESENT",
+            "AUTH_EXPIRED",
+            "ZHIHU_LOGIN_REQUIRED",
+            "WEBSITE_LOGIN_REQUIRED",
+          ].includes(error.code);
+        const failure =
+          error instanceof AppError && (beforeSubmit || current.submittedAt)
+            ? {
+                phase: beforeSubmit
+                  ? ("before_submit" as const)
+                  : ("after_submit" as const),
+                code: error.code,
+                at: now(),
+              }
+            : undefined;
         if (current.status !== "cancelled")
           this.saveTask({
             ...current,
             status: ruleStopped ? "cancelled" : "attention",
+            failure,
             message: ruleStopped
               ? "自动养号已关闭，尚未提交，原稿保留"
               : safeMessage(error),

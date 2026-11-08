@@ -1,10 +1,28 @@
+import { TiebaPublishing } from "./tieba-publishing/service";
+import { stopTiebaPublishingForBackup } from "./tieba-publishing/store";
+import { TiebaPostStats } from "./tieba-post-stats/service";
 import { ZhihuAutocare } from "./zhihu-autocare/service";
+import { TiebaAutocare } from "./tieba-autocare/service";
+import { TiebaParticipation } from "./tieba-participation/service";
+import { TiebaAutomation } from "./tieba-automation/service";
+import { TiebaTopics } from "./tieba-topics/service";
+import {
+  TiebaInsights,
+  stopTiebaInsightsForBackup,
+} from "./tieba-insights/service";
+import { tiebaReplyPublications } from "./tieba-insights/sources";
+import { stopTiebaAutomationForBackup } from "./tieba-automation/store";
+import { stopTiebaTopicsForBackup } from "./tieba-topics/store";
+import { stopTiebaAutocareForBackup } from "./tieba-autocare/store";
+import { stopTiebaParticipationForBackup } from "./tieba-participation/store";
 import { ResourceCatalogs } from "./resource-catalog";
 import { BaiduDiscovery } from "./baidu-discovery";
+import { BaiduDiscoveryQuestions } from "./baidu-discovery-questions";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
 import { DriveBrowserSessions } from "./drive-browser-sessions";
 import { PhotoPosts } from "./photo-posts";
 import { SmzdmArticles } from "./smzdm/service";
+import { WechatArticles } from "./wechat/service";
 import { PipixSources } from "./pipix/service";
 import { ContentSupply } from "./content-supply/service";
 import { ZhihuOperations } from "./zhihu/service";
@@ -27,7 +45,6 @@ import { assertResourceUnique } from "./resource-duplicates";
 import { resourceTags } from "./resource-tags";
 import { hasVerifiedShare } from "../shared/share-status";
 import { Distribution } from "./distribution";
-import { requirePermanentShare } from "./distribution/permanent-share";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
 import { coverFilePattern, saveResourceCover } from "./cover-assets";
 import { InsertionService } from "./insertion";
@@ -50,7 +67,6 @@ import {
 import { createHash } from "node:crypto";
 import {
   mkdir,
-  readFile,
   writeFile,
   copyFile,
   readdir,
@@ -58,6 +74,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { Database, id, now } from "./database";
+import { assertBackupDatabaseFile, fileHash } from "./backups";
 import { Repository } from "./repository";
 import { SecretStore, type SecretCodec } from "./secrets";
 import { AccountMutex, TransferQueue } from "./queue";
@@ -66,6 +83,10 @@ import { AiService } from "./ai";
 import { KeywordIdeas } from "./ideas";
 import { ResourceExports } from "./resource-export";
 import { StudioService, studioAssetPattern } from "./studio";
+import { VideoService } from "./video-service";
+import { MusicService, stopMusicForBackup } from "./music/service";
+import { readMusicAsset } from "./music/assets";
+import { BilibiliContent } from "./bilibili/content";
 import { TrafficService } from "./traffic";
 import { BitBrowser } from "./bitbrowser";
 import { CsdnWorkflows } from "./csdn/workflow";
@@ -73,6 +94,7 @@ import { CsdnBrowserEditor } from "./csdn/editor";
 import { WeiboMarketing } from "./weibo/marketing";
 import { WeiboPosts } from "./weibo/posts";
 import { WeiboStatistics } from "./weibo/statistics";
+import { WeiboWorkspace } from "./weibo/workspace";
 import {
   canUseLinkPosition,
   includesOwnShareLink,
@@ -98,21 +120,31 @@ export class AppService {
   readonly photoPosts: PhotoPosts;
   readonly driveBrowsers: DriveBrowserSessions;
   readonly baiduDiscovery: BaiduDiscovery;
+  readonly baiduDiscoveryQuestions: BaiduDiscoveryQuestions;
   readonly accountDeletion: AccountDeletion;
   readonly resourceLinks: ResourceLinks;
   readonly resourceLanding: ResourceLanding;
   readonly shareCreation: ShareCreation;
   readonly resourceDeletion: ResourceDeletion;
   readonly smzdm: SmzdmArticles;
+  readonly wechat: WechatArticles;
   readonly distribution: Distribution;
   readonly zhihu: ZhihuOperations;
   readonly zhihuAutocare: ZhihuAutocare;
+  readonly tiebaAutocare: TiebaAutocare;
+  readonly tiebaParticipation: TiebaParticipation;
+  readonly tiebaAutomation: TiebaAutomation;
+  readonly tiebaTopics: TiebaTopics;
+  readonly tiebaInsights: TiebaInsights;
+  readonly tiebaPublishing: TiebaPublishing;
+  readonly tiebaPostStats: TiebaPostStats;
   readonly zhihuParticipation: ZhihuParticipation;
   readonly intelligentOps: IntelligentOperations;
   readonly pipix: PipixSources;
   readonly contentSupply: ContentSupply;
   readonly weiboPosts: WeiboPosts;
   readonly weiboStatistics: WeiboStatistics;
+  readonly weiboWorkspace: WeiboWorkspace;
   readonly weibo: WeiboMarketing;
   readonly csdn: CsdnWorkflows;
   readonly csdnEditor: CsdnBrowserEditor;
@@ -131,6 +163,9 @@ export class AppService {
   readonly ideas: KeywordIdeas;
   readonly resourceExports: ResourceExports;
   readonly studio: StudioService;
+  readonly video: VideoService;
+  readonly music: MusicService;
+  readonly bilibili: BilibiliContent;
   readonly resourceAnswers: ResourceAnswers;
   readonly resourceCatalogs: ResourceCatalogs;
   readonly traffic: TrafficService;
@@ -156,26 +191,62 @@ export class AppService {
   ) {
     this.db = new Database(dbPath);
     this.repo = new Repository(this.db);
-    this.baiduDiscovery = new BaiduDiscovery(this.db,ports,changed);
-    this.distribution = new Distribution(this.db, ports, async (source, permanentOnly) => {
-      const result = await this.invoke(source.splitItemId ? "split.link" : "copy.link", source.splitItemId ? { itemId: source.splitItemId } : { copyId: source.copyId }) as { text: string };
-      if (permanentOnly)
-        await this.authenticated(this.repo.getCopy(source.copyId).accountId, (account, provider) =>
-          requirePermanentShare(account, provider, source.shareId, result.text));
-      return result.text;
-    }, changed);
+    this.baiduDiscovery = new BaiduDiscovery(this.db, ports, changed);
     this.secrets = new SecretStore(this.db, codec);
-    this.environments = new BrowserEnvironments(this.db, this.secrets, ports, dataPath, changed);
-    this.environmentQueue = new BrowserEnvironmentQueue(this.db, this.environments, changed);
-    const browserPorts = createBrowserPlatformPorts(ports, this.environments, () => this.bit);
+    this.distribution = new Distribution(this.db, ports, this.secrets, changed);
+    this.environments = new BrowserEnvironments(
+      this.db,
+      this.secrets,
+      ports,
+      dataPath,
+      changed,
+    );
+    this.environmentQueue = new BrowserEnvironmentQueue(
+      this.db,
+      this.environments,
+      changed,
+    );
+    const browserPorts = createBrowserPlatformPorts(
+      ports,
+      this.environments,
+      () => this.bit,
+    );
     this.ports = browserPorts;
-    this.websiteAccounts = new WebsiteAccounts(this.db, browserPorts, changed, this.environments, this.environmentQueue);
-    this.zhihu = new ZhihuOperations({db: this.db, accounts: this.websiteAccounts, environments: this.environments, queue: this.environmentQueue, ports: browserPorts, dataPath, changed});
-    this.weiboPosts = new WeiboPosts({ db: this.db, accounts: this.websiteAccounts, dataPath: this.dataPath, ports: browserPorts, changed });
-    this.pipix = new PipixSources({ db: this.db, dataPath, ports: browserPorts, secrets: this.secrets, changed, destinations: {
-      zhihu: material => this.zhihu.saveSource(material),
-      weibo: (material, accountId) => this.weiboPosts.saveSource(material, accountId),
-    } });
+    this.websiteAccounts = new WebsiteAccounts(
+      this.db,
+      browserPorts,
+      changed,
+      this.environments,
+      this.environmentQueue,
+    );
+    this.zhihu = new ZhihuOperations({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      ports: browserPorts,
+      dataPath,
+      changed,
+    });
+    this.weiboPosts = new WeiboPosts({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      dataPath: this.dataPath,
+      ports: browserPorts,
+      changed,
+    });
+    this.pipix = new PipixSources({
+      db: this.db,
+      dataPath,
+      ports: browserPorts,
+      secrets: this.secrets,
+      changed,
+      destinations: {
+        zhihu: (material) => this.zhihu.saveSource(material),
+        weibo: (material, accountId) =>
+          this.weiboPosts.saveSource(material, accountId),
+      },
+    });
     this.notes = new NoteExporter(this.repo, this.secrets, dataPath);
     this.queue = new TransferQueue(
       this.repo,
@@ -196,7 +267,28 @@ export class AppService {
       saveResource: (input) => this.saveResource(input),
       assertOwnCopy: (copy) => this.assertOwnCopy(copy),
       checkShare: (copyId) => this.checkShare(copyId),
-      environmentStamp: (accountId) => this.environments.stamp({kind: "website", id: accountId}),
+      environmentStamp: (accountId) =>
+        this.environments.stamp({ kind: "website", id: accountId }),
+      changed,
+    });
+    this.wechat = new WechatArticles({
+      repo: this.repo,
+      secrets: this.secrets,
+      ai: this.ai,
+      accounts: this.websiteAccounts,
+      port: browserPorts.wechat,
+      dataPath,
+      discoveryFetch: browserPorts.wechatDiscoveryFetch,
+      readImage: browserPorts.readWechatImage,
+      readRemoteImage: browserPorts.readWechatRemoteImage,
+      generateImage: (bytes, prompt) =>
+        this.studio.generateReferenceImage(bytes, prompt),
+      generateThemeImage: (prompt) => this.studio.generateThemeImage(prompt),
+      saveResource: (input) => this.saveResource(input),
+      assertOwnCopy: (copy) => this.assertOwnCopy(copy),
+      checkShare: (copyId) => this.checkShare(copyId),
+      environmentStamp: (accountId) =>
+        this.environments.stamp({ kind: "website", id: accountId }),
       changed,
     });
     this.zhidao = new ZhidaoOperations(
@@ -208,7 +300,10 @@ export class AppService {
       changed,
       {
         environments: this.environments,
-        schedule: (refs, label, action, signal) => this.environmentQueue.schedule(refs, label, action, signal),
+        pauseQuestionImport: (sourceId) =>
+          this.baiduDiscoveryQuestions?.pause(sourceId),
+        schedule: (refs, label, action, signal) =>
+          this.environmentQueue.schedule(refs, label, action, signal),
         verifyCopy: async (copyId) => {
           const check = await this.checkShare(copyId);
           if (check.status !== "valid")
@@ -219,7 +314,11 @@ export class AppService {
         },
       },
     );
-    this.zhidaoPages = new ZhidaoPageDiscovery(this.db, this.ports.zhidaoPages, changed);
+    this.zhidaoPages = new ZhidaoPageDiscovery(
+      this.db,
+      this.ports.zhidaoPages,
+      changed,
+    );
     this.ideas = new KeywordIdeas(this.repo, this.ai, changed);
     this.resourceExports = new ResourceExports(this.repo, this.ai, changed);
     this.studio = new StudioService(
@@ -230,20 +329,73 @@ export class AppService {
       (bytes) => ports.normalizeCover(bytes),
       changed,
     );
-    this.resourceAnswers = new ResourceAnswers(this.repo,this.ai,this.studio,ports,changed);
-    this.photoPosts = new PhotoPosts({repo:this.repo,db:this.db,ports,changed,assertOwnCopy:copy=>this.assertOwnCopy(copy),checkShare:copyId=>this.checkShare(copyId)});
-    this.traffic = new TrafficService(this.db, this.secrets, changed);
-    this.bit = new BitBrowser(async () => ({
-      url: this.db.setting("bitUrl", ""),
-      key: await this.secrets.get("bit"),
-    }), undefined, (binding, action) => {
-      this.environments.syncBinding(binding.id);
-      return this.environments.run({ kind: "binding", id: binding.id }, action);
+    this.video = new VideoService(this.db, dataPath, changed, {
+      bundlePath: ports.localVideoBundlePath,
+      templateEntryPoint: ports.localVideoTemplateEntryPoint,
     });
-    this.environments.setExternalConfigurationReader((profileId) => this.bit.environmentConfiguration(profileId));
-    this.environments.setExternalNetworkChecker((profileId, headless) => this.bit.environmentExitIp(profileId, headless));
-    this.environments.setExternalIdleGuard((profileId) => this.bit.assertProfileIdle(profileId));
-    this.driveBrowsers = new DriveBrowserSessions({ repo: this.repo, bit: this.bit, environments: this.environments, locked: (id, action) => this.mutex.run(id, action), assertIdle: (id) => this.assertNoActiveJobs(id), changed });
+    this.music = new MusicService({
+      db: this.db,
+      dataPath,
+      secrets: this.secrets,
+      request: ports.musicFetch,
+      changed,
+    });
+    this.bilibili = new BilibiliContent({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      video: this.video,
+      repo: this.repo,
+      dataPath,
+      port: ports.bilibili,
+      changed,
+    });
+    this.resourceAnswers = new ResourceAnswers(
+      this.repo,
+      this.ai,
+      this.studio,
+      ports,
+      changed,
+    );
+    this.photoPosts = new PhotoPosts({
+      repo: this.repo,
+      db: this.db,
+      ports,
+      changed,
+      assertOwnCopy: (copy) => this.assertOwnCopy(copy),
+      checkShare: (copyId) => this.checkShare(copyId),
+    });
+    this.traffic = new TrafficService(this.db, this.secrets, changed);
+    this.bit = new BitBrowser(
+      async () => ({
+        url: this.db.setting("bitUrl", ""),
+        key: await this.secrets.get("bit"),
+      }),
+      undefined,
+      (binding, action) => {
+        this.environments.syncBinding(binding.id);
+        return this.environments.run(
+          { kind: "binding", id: binding.id },
+          action,
+        );
+      },
+    );
+    this.environments.setExternalConfigurationReader((profileId) =>
+      this.bit.environmentConfiguration(profileId),
+    );
+    this.environments.setExternalNetworkChecker((profileId, headless) =>
+      this.bit.environmentExitIp(profileId, headless),
+    );
+    this.environments.setExternalIdleGuard((profileId) =>
+      this.bit.assertProfileIdle(profileId),
+    );
+    this.driveBrowsers = new DriveBrowserSessions({
+      repo: this.repo,
+      bit: this.bit,
+      environments: this.environments,
+      locked: (id, action) => this.mutex.run(id, action),
+      assertIdle: (id) => this.assertNoActiveJobs(id),
+      changed,
+    });
     this.importer = new BulkImporter(this.repo, (input) =>
       this.saveResource(input),
     );
@@ -271,20 +423,32 @@ export class AppService {
     );
     this.csdnEditor = new CsdnBrowserEditor(this.bit);
     this.csdn = new CsdnWorkflows({
-      environmentStamp: (bindingId) => this.environments.stamp({ kind: "binding", id: bindingId }),
+      environmentStamp: (bindingId) =>
+        this.environments.stamp({ kind: "binding", id: bindingId }),
       withEnvironment: (bindingId, action) => {
         this.environments.syncBinding(bindingId);
-        return this.environmentQueue.schedule([{ kind: "binding", id: bindingId }], "CSDN 内容操作", action);
+        return this.environmentQueue.schedule(
+          [{ kind: "binding", id: bindingId }],
+          "CSDN 内容操作",
+          action,
+        );
       },
       repo: this.repo,
       search: this.search,
       ai: this.ai,
       editor: this.csdnEditor,
       verifyTarget: async (topicId) => {
-        const result = await this.invoke("search.check", { id: topicId }) as ShareCheck;
-        if (result.status && result.status !== "valid") throw new AppError("SHARE_INVALID", result.message || "配套本人分享未通过实时核验，请先恢复分享。");
+        const result = (await this.invoke("search.check", {
+          id: topicId,
+        })) as ShareCheck;
+        if (result.status && result.status !== "valid")
+          throw new AppError(
+            "SHARE_INVALID",
+            result.message || "配套本人分享未通过实时核验，请先恢复分享。",
+          );
       },
-      contentPackage: (draftId, bindingId, includeLink) => this.contentPackage(draftId, bindingId, includeLink),
+      contentPackage: (draftId, bindingId, includeLink) =>
+        this.contentPackage(draftId, bindingId, includeLink),
       record: (input) => this.invoke("publication.mark", input),
       changed,
     });
@@ -297,10 +461,17 @@ export class AppService {
       dataPath: this.dataPath,
       ports: this.ports,
       verifyTarget: async (topicId) => {
-        const result = await this.invoke("search.check", { id: topicId }) as ShareCheck;
-        if (result.status !== "valid") throw new AppError("SHARE_INVALID", result.message || "配套本人分享未通过实时核验。");
+        const result = (await this.invoke("search.check", {
+          id: topicId,
+        })) as ShareCheck;
+        if (result.status !== "valid")
+          throw new AppError(
+            "SHARE_INVALID",
+            result.message || "配套本人分享未通过实时核验。",
+          );
       },
-      contentPackage: (draftId, bindingId, includeLink) => this.contentPackage(draftId, bindingId, includeLink),
+      contentPackage: (draftId, bindingId, includeLink) =>
+        this.contentPackage(draftId, bindingId, includeLink),
       record: (input) => this.invoke("publication.mark", input),
       changed,
     });
@@ -322,7 +493,8 @@ export class AppService {
       db: this.db,
       repo: this.repo,
       secrets: this.secrets,
-      afterResourceSaved: (resourceId) => this.resourceLinks.afterResourceSaved(resourceId),
+      afterResourceSaved: (resourceId) =>
+        this.resourceLinks.afterResourceSaved(resourceId),
       afterShareSaved: (copyId) => this.resourceLinks.afterShareSaved(copyId),
       changed,
       authenticated: (id, action) => this.authenticated(id, action),
@@ -332,8 +504,21 @@ export class AppService {
       for (const ref of refs) {
         if (ref.kind === "drive") this.assertNoActiveJobs(ref.id);
         if (ref.kind === "zhidao") this.zhidao.assertAccountIdle(ref.id);
-        if (ref.kind === "website" && (this.websiteAccounts.isBusy || this.weiboPosts.isBusy || this.weibo.isBusy)) throw new AppError("ENVIRONMENT_BUSY", "此环境的平台任务正在执行，请完成后再修改。");
-        if (ref.kind === "binding" && this.csdn.isBusy) throw new AppError("ENVIRONMENT_BUSY", "发布任务正在执行，请完成后再修改环境。");
+        if (
+          ref.kind === "website" &&
+          (this.websiteAccounts.isBusy ||
+            this.weiboPosts.isBusy ||
+            this.weibo.isBusy)
+        )
+          throw new AppError(
+            "ENVIRONMENT_BUSY",
+            "此环境的平台任务正在执行，请完成后再修改。",
+          );
+        if (ref.kind === "binding" && this.csdn.isBusy)
+          throw new AppError(
+            "ENVIRONMENT_BUSY",
+            "发布任务正在执行，请完成后再修改环境。",
+          );
       }
     });
     const environmentStatus = createEnvironmentStatus({
@@ -350,15 +535,27 @@ export class AppService {
       accountState: (ref) => environmentStatus.account(ref),
       pendingOperations: (refs) => environmentStatus.pending(refs),
       openAccount: async (ref) => {
-        if (ref.kind === "drive") return this.driveBrowsers.open(ref.id).then(() => true);
+        if (ref.kind === "drive")
+          return this.driveBrowsers.open(ref.id).then(() => true);
         if (ref.kind === "website") return this.websiteAccounts.login(ref.id);
         if (ref.kind === "zhidao") return this.zhidao.login(ref.id);
-        const binding = this.repo.bindings().find((binding) => binding.id === ref.id);
-        if (!binding) throw new AppError("NOT_FOUND", "发布账号映射不存在，请刷新后重试。");
+        const binding = this.repo
+          .bindings()
+          .find((binding) => binding.id === ref.id);
+        if (!binding)
+          throw new AppError("NOT_FOUND", "发布账号映射不存在，请刷新后重试。");
         return this.openBinding(binding);
       },
     });
-    this.weiboStatistics = new WeiboStatistics({ db: this.db, accounts: this.websiteAccounts, ports: this.ports, changed, posts: (accountId) => this.weiboPosts.list(accountId), marketing: () => this.weibo.history() });
+    this.weiboStatistics = new WeiboStatistics({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      ports: this.ports,
+      changed,
+      posts: (accountId) => this.weiboPosts.list(accountId),
+      marketing: () => this.weibo.history(),
+    });
+    this.weiboWorkspace = new WeiboWorkspace({db:this.db,accounts:this.websiteAccounts,posts:this.weiboPosts,marketing:this.weibo,statistics:this.weiboStatistics,ai:this.ai,changed});
     this.resourceDeletion = new ResourceDeletion({
       repo: this.repo,
       driveFiles: this.driveFiles,
@@ -370,8 +567,10 @@ export class AppService {
       secrets: this.secrets,
       fetch: this.ports.resourceLinksFetch,
       changed: () => this.changed(),
-      authenticated: (accountId, action) => this.authenticated(accountId, action),
-      assertMutable: (resourceId) => this.resourceDeletion.assertMutable(resourceId),
+      authenticated: (accountId, action) =>
+        this.authenticated(accountId, action),
+      assertMutable: (resourceId) =>
+        this.resourceDeletion.assertMutable(resourceId),
       assertIdle: (accountId) => this.assertNoActiveJobs(accountId),
     });
     this.resourceLanding = new ResourceLanding({
@@ -379,7 +578,8 @@ export class AppService {
       ai: this.ai,
       links: this.resourceLinks,
       changed: () => this.changed(),
-      readContent: (copyId, fileId, limit) => this.driveFiles.readContent(copyId, fileId, limit),
+      readContent: (copyId, fileId, limit) =>
+        this.driveFiles.readContent(copyId, fileId, limit),
       readLocal: this.ports.readLandingDocument,
     });
     this.accountDeletion = new AccountDeletion({
@@ -395,39 +595,162 @@ export class AppService {
       repo: this.repo,
       secrets: this.secrets,
       driveFiles: this.driveFiles,
-      hasRunningJobs: () => this.hasRunningJobs(),
+      hasRunningJobs: () => this.hasRunningJobs(false, true),
       assertIdle: (accountId) => this.assertNoActiveJobs(accountId, true),
-      assertMutable: (resourceId) => this.resourceDeletion.assertMutable(resourceId),
-      authenticated: (accountId, action) => this.authenticated(accountId, action),
+      assertMutable: (resourceId) =>
+        this.resourceDeletion.assertMutable(resourceId),
+      authenticated: (accountId, action) =>
+        this.authenticated(accountId, action),
       changed,
     });
-    this.resourceCatalogs = new ResourceCatalogs(this.repo, this.ports, this.websiteAccounts, changed, (key) => this.secrets.get(key));
+    this.baiduDiscoveryQuestions = new BaiduDiscoveryQuestions({
+      repo: this.repo,
+      store: this.zhidao.store,
+      shares: this.shareCreation,
+      changed,
+    });
+    this.resourceCatalogs = new ResourceCatalogs(
+      this.repo,
+      this.ports,
+      this.websiteAccounts,
+      changed,
+      (key) => this.secrets.get(key),
+      this.resourceLinks,
+      this.ai,
+    );
     this.zhihuParticipation = new ZhihuParticipation({
-      db: this.db, accounts: this.websiteAccounts, ports: browserPorts,
-      zhihu: this.zhihu, dataPath, changed,
+      db: this.db,
+      accounts: this.websiteAccounts,
+      ports: browserPorts,
+      zhihu: this.zhihu,
+      dataPath,
+      changed,
     });
     this.intelligentOps = new IntelligentOperations({
-      accountOwnedByRules: (accountId) => this.zhihuAutocare?.owns(accountId) ?? false,
-      db: this.db, repo: this.repo, accounts: this.websiteAccounts,
-      environments: this.environments, zhihu: this.zhihu,
-      weiboPosts: this.weiboPosts, weiboStatistics: this.weiboStatistics,
-      ai: this.ai, dataPath: this.dataPath, changed,
+      accountOwnedByRules: (accountId) =>
+        this.zhihuAutocare?.owns(accountId) ?? false,
+      db: this.db,
+      repo: this.repo,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      zhihu: this.zhihu,
+      weiboPosts: this.weiboPosts,
+      weiboStatistics: this.weiboStatistics,
+      ai: this.ai,
+      dataPath: this.dataPath,
+      changed,
       zhihuParticipation: this.zhihuParticipation,
     });
     this.contentSupply = new ContentSupply({
-      db: this.db, dataPath: this.dataPath, pipix: this.pipix, ai: this.ai, changed,
+      db: this.db,
+      dataPath: this.dataPath,
+      pipix: this.pipix,
+      ai: this.ai,
+      changed,
       operations: () => this.intelligentOps.snapshot(),
-      linkMaterial: (planId, materialId, accountId) => this.intelligentOps.linkSuppliedMaterial(planId, materialId, accountId),
+      linkMaterial: (planId, materialId, accountId) =>
+        this.intelligentOps.linkSuppliedMaterial(planId, materialId, accountId),
       destinations: {
-        zhihu: material => this.zhihu.saveSource(material),
-        weibo: (material, accountId) => this.weiboPosts.saveSource(material, accountId),
+        zhihu: (material) => this.zhihu.saveSource(material),
+        weibo: (material, accountId) =>
+          this.weiboPosts.saveSource(material, accountId),
       },
     });
     this.zhihuAutocare = new ZhihuAutocare({
-      db: this.db, dataPath, zhihu: this.zhihu, pipix: this.pipix,
-      ai: this.ai, operations: this.intelligentOps, participation: this.zhihuParticipation, changed,
+      db: this.db,
+      dataPath,
+      zhihu: this.zhihu,
+      pipix: this.pipix,
+      ai: this.ai,
+      operations: this.intelligentOps,
+      participation: this.zhihuParticipation,
+      changed,
+    });
+    this.tiebaAutocare = new TiebaAutocare({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      ports: browserPorts,
+      dataPath,
+      changed,
+    });
+    this.tiebaParticipation = new TiebaParticipation({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      ports: browserPorts,
+      ai: this.ai,
+      dataPath,
+      changed,
+    });
+    this.tiebaAutomation = new TiebaAutomation({
+      db: this.db,
+      participation: this.tiebaParticipation,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      dataPath,
+      changed,
+    });
+    this.tiebaTopics = new TiebaTopics({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      ports: browserPorts,
+      ai: this.ai,
+      dataPath,
+      changed,
+      readImages: () =>
+        ports.readWeiboImages?.("tieba") ?? Promise.resolve(null),
+    });
+    this.tiebaPublishing = new TiebaPublishing({
+      db: this.db,
+      repo: this.repo,
+      search: this.search,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      ports: browserPorts,
+      secrets: this.secrets,
+      dataPath,
+      changed,
+    });
+    this.tiebaPostStats = new TiebaPostStats({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      browser: browserPorts.tiebaPostStats,
+      publications: () => [
+        ...this.tiebaPublishing.publications(),
+        ...this.tiebaTopics.publications(),
+      ],
+      changed,
+    });
+    this.tiebaInsights = new TiebaInsights({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      environments: this.environments,
+      queue: this.environmentQueue,
+      ports: browserPorts,
+      automation: this.tiebaAutomation,
+      publications: () => [
+        ...tiebaReplyPublications(this.db),
+        ...this.tiebaTopics.publications(),
+      ],
+      dataPath,
+      changed,
     });
     this.handlers = createApplicationHandlers({
+      tiebaAutomation: this.tiebaAutomation,
+      tiebaTopics: this.tiebaTopics,
+      tiebaInsights: this.tiebaInsights,
+      tiebaPublishing: this.tiebaPublishing,
+      tiebaPostStats: this.tiebaPostStats,
+      tiebaParticipation: this.tiebaParticipation,
+      tiebaAutocare: this.tiebaAutocare,
       zhihuAutocare: this.zhihuAutocare,
       zhihuParticipation: this.zhihuParticipation,
       contentSupply: this.contentSupply,
@@ -436,6 +759,7 @@ export class AppService {
       lockedAccount: (id, action) => this.mutex.run(id, action),
       driveBrowsers: this.driveBrowsers,
       baiduDiscovery: this.baiduDiscovery,
+      baiduDiscoveryQuestions: this.baiduDiscoveryQuestions,
       accountDeletion: this.accountDeletion,
       resourceLinks: this.resourceLinks,
       resourceLanding: this.resourceLanding,
@@ -443,6 +767,7 @@ export class AppService {
       shareCreation: this.shareCreation,
       resourceDeletion: this.resourceDeletion,
       smzdm: this.smzdm,
+      wechat: this.wechat,
       distribution: this.distribution,
       zhihu: this.zhihu,
       pipix: this.pipix,
@@ -452,6 +777,7 @@ export class AppService {
       environmentQueue: this.environmentQueue,
       weibo: this.weibo,
       weiboPosts: this.weiboPosts,
+      weiboWorkspace: this.weiboWorkspace,
       csdn: this.csdn,
       websiteAccounts: this.websiteAccounts,
       driveFiles: this.driveFiles,
@@ -467,6 +793,9 @@ export class AppService {
       resourceExports: this.resourceExports,
       studio: this.studio,
       resourceAnswers: this.resourceAnswers,
+      video: this.video,
+      music: this.music,
+      bilibili: this.bilibili,
       traffic: this.traffic,
       bit: this.bit,
       importer: this.importer,
@@ -493,10 +822,15 @@ export class AppService {
       backup: () => this.backup(),
       setSwitchingWorkspace: (switching) => {
         if (switching) this.intelligentOps.scheduler(false);
+        this.tiebaAutocare.scheduler(!switching);
+        this.tiebaAutomation.start(!switching);
+        this.tiebaInsights.start(!switching);
+        this.music.start(!switching);
         this.switchingWorkspace = switching;
       },
       invoke: (method, raw) => this.invoke(method, raw),
     });
+    this.music.start();
   }
   snapshot(resourceId?: string) {
     return this.repo.snapshot(
@@ -550,8 +884,17 @@ export class AppService {
           `此UID已绑定「${duplicate.alias}」，请使用该账号记录。`,
         );
       if (account.provider === "baidu") {
-        if (!this.db.get("SELECT account_id FROM browser_environment_accounts WHERE kind='drive' AND account_id=?", account.id)) this.environments.registerAccount({ kind: "drive", id: account.id });
-        this.environments.confirm({ kind: "drive", id: account.id }, identity.uid);
+        if (
+          !this.db.get(
+            "SELECT account_id FROM browser_environment_accounts WHERE kind='drive' AND account_id=?",
+            account.id,
+          )
+        )
+          this.environments.registerAccount({ kind: "drive", id: account.id });
+        this.environments.confirm(
+          { kind: "drive", id: account.id },
+          identity.uid,
+        );
       }
       this.db.run(
         "UPDATE accounts SET uid=?,status=?,verified_at=?,error=NULL,updated_at=? WHERE id=?",
@@ -684,6 +1027,14 @@ export class AppService {
   }
 
   private assertNoActiveJobs(accountId: string, allowShareCreation = false) {
+    if (
+      !allowShareCreation &&
+      this.baiduDiscoveryQuestions?.busyAccount(accountId)
+    )
+      throw new AppError(
+        "ACTIVE_JOBS",
+        "此账号正在为长尾词创建分享，请等待完成。",
+      );
     if (!allowShareCreation && this.shareCreation?.busyAccount(accountId))
       throw new AppError("ACTIVE_JOBS", "此账号正在创建新分享，请等待完成。");
     if (this.driveFiles?.busyAccount(accountId))
@@ -763,7 +1114,8 @@ export class AppService {
         unchangedWebp ? bytes : await this.ports.normalizeCover(bytes, "webp"),
       );
     }
-    if (source.code) await this.secrets.set(`source:${resourceId}`, source.code);
+    if (source.code)
+      await this.secrets.set(`source:${resourceId}`, source.code);
     const resourceExists = !!existing || !!input.id;
     let directory = input.isOwnResource
       ? normalizedDirectory(input.directory || "/")
@@ -787,18 +1139,17 @@ export class AppService {
         );
       directory = editedCopy.directory;
     }
-    const priorCopy =
-      input.copyId
-        ? this.db.get<{ id: string; status: string }>(
-            "SELECT id,status FROM copies WHERE id=?",
-            input.copyId,
-          )
-        : this.db.get<{ id: string; status: string }>(
-            "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? AND directory=?",
-            resourceId,
-            account.id,
-            directory,
-          );
+    const priorCopy = input.copyId
+      ? this.db.get<{ id: string; status: string }>(
+          "SELECT id,status FROM copies WHERE id=?",
+          input.copyId,
+        )
+      : this.db.get<{ id: string; status: string }>(
+          "SELECT id,status FROM copies WHERE resource_id=? AND account_id=? AND directory=?",
+          resourceId,
+          account.id,
+          directory,
+        );
     if (
       input.isOwnResource &&
       priorCopy &&
@@ -940,7 +1291,8 @@ export class AppService {
         }
       }
     });
-    if (!resourceExists) await this.resourceLinks.afterResourceSaved(resourceId);
+    if (!resourceExists)
+      await this.resourceLinks.afterResourceSaved(resourceId);
     if (input.id) await this.notes.flush();
     this.changed();
     if (input.enqueue) {
@@ -955,10 +1307,12 @@ export class AppService {
     contentFormat?: ContentFormat,
   ) {
     try {
-      const result = binding.websiteAccountId ? await this.websiteAccounts.open(binding.websiteAccountId) : await this.bit.open({
-        ...binding,
-        editorUrl: bindingEditorUrl(binding, contentFormat),
-      });
+      const result = binding.websiteAccountId
+        ? await this.websiteAccounts.open(binding.websiteAccountId)
+        : await this.bit.open({
+            ...binding,
+            editorUrl: bindingEditorUrl(binding, contentFormat),
+          });
       this.db.run(
         "UPDATE browser_bindings SET last_checked_at=?,last_opened_at=?,open_error=NULL WHERE id=?",
         now(),
@@ -978,11 +1332,16 @@ export class AppService {
       this.changed();
     }
   }
-  private hasRunningJobs(ignoreAccountDeletion = false) {
+  private hasRunningJobs(
+    ignoreAccountDeletion = false,
+    ignoreDiscoveryQuestions = false,
+  ) {
     return (
-      this.photoPosts.isBusy || !!this.ports.photoPostBrowser?.isOpen() ||
+      this.photoPosts.isBusy ||
+      !!this.ports.photoPostBrowser?.isOpen() ||
       (!ignoreAccountDeletion && this.accountDeletion?.isBusy) ||
       this.baiduDiscovery.isBusy ||
+      (!ignoreDiscoveryQuestions && this.baiduDiscoveryQuestions?.isBusy) ||
       this.driveBrowsers.isBusy ||
       !!this.ports.baiduDiscovery?.isOpen() ||
       !!this.ports.baiduShareReader?.isOpen() ||
@@ -990,6 +1349,7 @@ export class AppService {
       this.resourceLanding?.isBusy ||
       this.shareCreation?.isBusy ||
       this.smzdm.isBusy ||
+      this.wechat.isBusy ||
       this.distribution.isBusy ||
       !!this.ports.distributionSessions?.isOpen() ||
       this.environmentQueue.isBusy ||
@@ -999,7 +1359,15 @@ export class AppService {
       this.websiteAccounts.isBusy ||
       this.weibo.isBusy ||
       this.weiboPosts.isBusy ||
+      this.weiboWorkspace?.isBusy ||
       this.zhihuAutocare?.isBusy ||
+      this.tiebaAutocare?.isBusy ||
+      this.tiebaParticipation?.isBusy ||
+      this.tiebaAutomation?.isBusy ||
+      this.tiebaTopics?.isBusy ||
+      this.tiebaInsights?.isBusy ||
+      this.tiebaPublishing?.isBusy ||
+      this.tiebaPostStats?.isBusy ||
       this.zhihu.isBusy ||
       this.zhihuParticipation?.isBusy ||
       this.intelligentOps?.isBusy ||
@@ -1010,6 +1378,9 @@ export class AppService {
       this.zhidaoPages.isBusy ||
       this.insertion.isBusy ||
       this.studio.isBusy ||
+      this.video.isBusy ||
+      this.music.isBusy ||
+      this.bilibili.isBusy ||
       this.resourceAnswers.isBusy ||
       this.resourceCatalogs.isBusy ||
       this.shareStatistics.isBusy ||
@@ -1029,7 +1400,10 @@ export class AppService {
           const copy = this.repo.getCopy(copyId);
           const resource = this.repo.getResource(copy.resourceId);
           if (copy.accountId !== account.id)
-            throw new AppError("COPY_MISMATCH", "资源所属账号已变化，请重新打开资源。");
+            throw new AppError(
+              "COPY_MISMATCH",
+              "资源所属账号已变化，请重新打开资源。",
+            );
           if (copy.status === "recorded" && resource.sourceKind === "owned") {
             await verifyRecordedOwnShare(
               this.repo,
@@ -1093,7 +1467,10 @@ export class AppService {
         "OWNERSHIP_UNVERIFIED",
         "资源副本与本人分享尚未通过同账号UID核验，禁止分发。",
       );
-    if (copy.shareUrl === this.repo.getResource(copy.resourceId).sourceUrl && this.repo.getResource(copy.resourceId).sourceKind !== "owned")
+    if (
+      copy.shareUrl === this.repo.getResource(copy.resourceId).sourceUrl &&
+      this.repo.getResource(copy.resourceId).sourceKind !== "owned"
+    )
       throw new AppError(
         "FOREIGN_SHARE_BLOCKED",
         "本人分享与来源链接相同，禁止分发。",
@@ -1235,9 +1612,22 @@ export class AppService {
     copy.run("DELETE FROM secrets");
     copy.run("UPDATE accounts SET status=?,verified_at=NULL", "disconnected");
     copy.run("UPDATE website_accounts SET status='disconnected'");
-    const operationsState = copy.setting<unknown>(intelligentOperationsStateKey, null);
+    stopTiebaAutocareForBackup(copy);
+    stopTiebaParticipationForBackup(copy);
+    stopTiebaAutomationForBackup(copy);
+    stopTiebaTopicsForBackup(copy);
+    stopTiebaPublishingForBackup(copy);
+    stopTiebaInsightsForBackup(copy);
+    stopMusicForBackup(copy);
+    const operationsState = copy.setting<unknown>(
+      intelligentOperationsStateKey,
+      null,
+    );
     if (operationsState != null)
-      copy.setSetting(intelligentOperationsStateKey, restoreIntelligentOperationsState(operationsState));
+      copy.setSetting(
+        intelligentOperationsStateKey,
+        restoreIntelligentOperationsState(operationsState),
+      );
     copy.run(
       "UPDATE zhidao_accounts SET data=json_set(data,'$.status','disconnected','$.bulkPermission',NULL,'$.publishingRights',NULL,'$.checkedAt',NULL,'$.message','从备份恢复，请重新登录并检查')",
     );
@@ -1245,6 +1635,7 @@ export class AppService {
     copy.run("PRAGMA journal_mode=DELETE");
     copy.close();
     await chmod(file, 0o600);
+    await assertBackupDatabaseFile(file);
     const covers = join(this.dataPath, "covers");
     await mkdir(join(folder, "covers"), { mode: 0o700 });
     try {
@@ -1265,13 +1656,39 @@ export class AppService {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    await mkdir(join(folder, "music"), { mode: 0o700 });
+    try {
+      for (const entry of await readdir(join(this.dataPath, "music")))
+        if (/^[a-f0-9]{64}\.(mp3|wav|ogg|m4a|aac)$/.test(entry)) {
+          const mime = {
+            mp3: "audio/mpeg",
+            wav: "audio/wav",
+            ogg: "audio/ogg",
+            m4a: "audio/mp4",
+            aac: "audio/aac",
+          }[entry.split(".").at(-1)!]!;
+          const src = await readMusicAsset(this.dataPath, { file: entry, mime });
+          await writeFile(
+            join(folder, "music", entry),
+            Buffer.from(src.slice(src.indexOf(",") + 1), "base64"),
+            { mode: 0o600 },
+          );
+        }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     for (const directory of ["zhihu-assets", "content-assets"]) {
-      await mkdir(join(folder, directory), {mode: 0o700});
+      await mkdir(join(folder, directory), { mode: 0o700 });
       try {
         for (const entry of await readdir(join(this.dataPath, directory)))
           if (/^[a-f0-9]{64}\.(png|jpg|gif)$/.test(entry))
-            await copyFile(join(this.dataPath, directory, entry), join(folder, directory, entry));
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+            await copyFile(
+              join(this.dataPath, directory, entry),
+              join(folder, directory, entry),
+            );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
     await writeFile(
       join(folder, "manifest.json"),
@@ -1284,9 +1701,7 @@ export class AppService {
           ),
           createdAt: now(),
           credentialsIncluded: false,
-          databaseSha256: createHash("sha256")
-            .update(await readFile(file))
-            .digest("hex"),
+          databaseSha256: await fileHash(file),
         },
         null,
         2,
@@ -1296,12 +1711,23 @@ export class AppService {
     return folder;
   }
   close() {
+    this.video.close();
+    this.music.close();
+    this.bilibili.close();
+    this.tiebaAutomation.dispose();
+    this.tiebaInsights.dispose();
+    this.tiebaTopics.dispose();
+    this.tiebaPublishing.dispose();
+    this.tiebaPostStats.dispose();
+    this.tiebaParticipation.dispose();
+    this.tiebaAutocare.dispose();
     this.zhihuAutocare.close();
     this.intelligentOps.close();
     this.ports.photoPostBrowser?.close();
     this.baiduDiscovery.close();
     this.ports.baiduShareReader?.close(true);
     this.smzdm.close();
+    this.wechat.close();
     this.distribution.close();
     this.pipix.close();
     this.contentSupply.close();

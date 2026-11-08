@@ -4,6 +4,7 @@ import { isIP } from "node:net";
 import { Database, id, now } from "./database";
 import { AppError } from "./errors";
 import { environmentAllowsAccount } from "../shared/browser-environment-sharing";
+import { maxEnvironmentsPerExitIp } from "../shared/browser-environments";
 import type { SecretStore } from "./secrets";
 import type { AppPorts } from "./ports";
 import type {
@@ -336,12 +337,12 @@ export class BrowserEnvironments {
         "文档平台当前使用内置浏览器保存会话，请选择内置环境。",
       );
     if (
-      info.platform === "smzdm" &&
+      ["smzdm", "wechat"].includes(info.platform) &&
       this.get(environmentId).engine !== "electron"
     )
       throw new AppError(
         "SMZDM_NATIVE_SESSION",
-        "什么值得买单账号目前使用内置浏览器环境，请选择内置环境。",
+        "什么值得买与微信公众号目前使用内置浏览器环境，请选择内置环境。",
       );
     if (
       ref.kind !== "binding" &&
@@ -987,19 +988,22 @@ export class BrowserEnvironments {
         "ENVIRONMENT_NETWORK_UNKNOWN",
         "未能确认环境实际出口 IP，已阻止任务继续；请检查网络后重试。",
       );
-    const duplicate =
-      (env.requireProxy || requireProxy) &&
-      this.list().find(
-        (other) =>
-          other.id !== env.id &&
-          other.requireProxy &&
-          other.network?.revision === other.revision &&
-          other.network.ip === ip,
-      );
-    if (duplicate)
+    const peers =
+      env.requireProxy || requireProxy
+        ? this.list().filter(
+            (other) =>
+              other.id !== env.id &&
+              other.requireProxy &&
+              other.network?.revision === other.revision &&
+              other.network.ip === ip,
+          )
+        : [];
+    // Count environments once, regardless of their linked accounts. Keep this
+    // check and the following write synchronous so concurrent probes cannot overbook.
+    if (peers.length >= maxEnvironmentsPerExitIp)
       throw new AppError(
         "ENVIRONMENT_IP_DUPLICATE",
-        `此环境与“${duplicate.name}”使用相同出口 IP，请调整代理后重试。`,
+        `此出口 IP 已有 ${peers.length} 个浏览器环境使用，最多支持 ${maxEnvironmentsPerExitIp} 个。请为当前环境更换代理出口后重试。`,
       );
     const changed = !!env.network && env.network.ip !== ip;
     const revision = env.revision + (changed ? 1 : 0);

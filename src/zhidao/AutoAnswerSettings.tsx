@@ -1,6 +1,10 @@
 import type { z } from "zod";
 import { useId } from "react";
 import type { ZhidaoAccount } from "../../shared/zhidao";
+import {
+  zhidaoAccountLabel,
+  zhidaoAnswerAccountLimit,
+} from "../../shared/zhidao";
 import { Button, Empty, Field, Status } from "../ui/primitives";
 import { ShieldCheck, Shuffle, UserRound } from "lucide-react";
 import { Select } from "../ui/Select";
@@ -16,17 +20,21 @@ export function AutoAnswerSettings({
   onLogin,
   onQuota,
   onAccounts,
+  runningAccounts,
 }: {
   value: Draft;
   update(patch: Partial<Draft>): void;
   accounts: ZhidaoAccount[] | null;
   busy: boolean;
-  onCheck(): void;
-  onLogin(): void;
-  onQuota(): void;
+  onCheck(id: string): void;
+  onLogin(id: string): void;
+  onQuota(id: string): void;
   onAccounts(): void;
+  runningAccounts: Set<string>;
 }) {
-  const account = accounts?.find((a) => a.id === value.accountId);
+  const selectedAccounts = (accounts ?? []).filter((a) =>
+    value.accountIds.includes(a.id),
+  );
   const id = useId();
   const invalidCount =
     !Number.isInteger(value.count) || value.count < 1 || value.count > 200;
@@ -50,58 +58,86 @@ export function AutoAnswerSettings({
           在官方弹窗完成登录并检查身份，即可使用同一会话自动答题。
         </Empty>
       ) : null}
-      <Field label="回答账号">
+      <Field
+        label="回答账号"
+        hint={`可多选 · 已选${value.accountIds.length}个账号`}
+      >
         <Select
-          value={value.accountId}
-          disabled={!accounts}
-          onValueChange={(accountId) => update({ accountId })}
+          multiple
+          placeholder="选择百度知道账号"
+          maxSelected={zhidaoAnswerAccountLimit}
+          value={value.accountIds}
+          disabled={!accounts || busy}
+          onValueChange={(accountIds) =>
+            update({ accountIds, accountId: accountIds[0] ?? "" })
+          }
           items={[
-            { value: "", label: "选择百度知道账号" },
-            ...(value.accountId && !account
-              ? [
-                  {
-                    value: value.accountId,
-                    label: accounts
-                      ? "原账号已移除，请重新选择"
-                      : "已选账号（待读取）",
-                    disabled: true,
-                  },
-                ]
-              : []),
+            ...value.accountIds
+              .filter((id) => !accounts?.some((a) => a.id === id))
+              .map((id) => ({
+                value: id,
+                label: accounts
+                  ? "原账号已移除，请取消选择"
+                  : "已选账号（待读取）",
+              })),
             ...(accounts ?? []).map((a) => ({
               value: a.id,
-              label: `${a.alias}${a.status === "connected" ? "" : " · 需登录检查"}`,
+              label: `${zhidaoAccountLabel(a)}${runningAccounts.has(a.id) ? " · 回答中" : a.status === "connected" ? "" : " · 需登录检查"}`,
             })),
           ]}
         />
       </Field>
-      {account ? (
-        <div className="answer-account-state">
-          <div>
-            <Status kind={account.status === "connected" ? "good" : "warning"}>
-              {account.status === "connected" ? "已检查登录" : "需要登录检查"}
-            </Status>
-            <span title={account.nickname || account.alias}>
-              {account.nickname || account.alias}
-            </span>
+      <div className="answer-selected-accounts">
+        {selectedAccounts.map((account) => (
+          <div className="answer-account-state" key={account.id}>
+            <div>
+              <Status
+                kind={account.status === "connected" ? "good" : "warning"}
+              >
+                {runningAccounts.has(account.id)
+                  ? "回答中"
+                  : account.status === "connected"
+                    ? "已检查登录"
+                    : "需要登录检查"}
+              </Status>
+              <span title={account.nickname || account.alias}>
+                {zhidaoAccountLabel(account)}
+              </span>
+            </div>
+            <div className="answer-account-actions">
+              <Button
+                quiet
+                size="compact"
+                disabled={busy || runningAccounts.has(account.id)}
+                onClick={() => onCheck(account.id)}
+              >
+                检查登录
+              </Button>
+              <Button
+                quiet
+                size="compact"
+                disabled={busy || runningAccounts.has(account.id)}
+                onClick={() => onLogin(account.id)}
+              >
+                打开账号窗口
+              </Button>
+              <Button
+                quiet
+                size="compact"
+                disabled={busy || runningAccounts.has(account.id)}
+                onClick={() => onQuota(account.id)}
+              >
+                查看发布权益
+              </Button>
+            </div>
+            {account.status !== "connected" ? <p>{account.message}</p> : null}
           </div>
-          <div className="answer-account-actions">
-            <Button quiet size="compact" disabled={busy} onClick={onCheck}>
-              检查登录
-            </Button>
-            <Button quiet size="compact" disabled={busy} onClick={onLogin}>
-              打开账号窗口
-            </Button>
-            <Button quiet size="compact" disabled={busy} onClick={onQuota}>
-              查看发布权益
-            </Button>
-          </div>
-          {account.status !== "connected" ? <p>{account.message}</p> : null}
-        </div>
-      ) : null}
+        ))}
+      </div>
       <div className="answer-quantity-grid">
-        <Field label="目标回答数">
+        <Field label="每个账号回答数">
           <input
+            aria-label="每个账号回答数"
             type="number"
             min={1}
             max={200}
@@ -119,6 +155,7 @@ export function AutoAnswerSettings({
         </Field>
         <Field label="提交间隔（秒）">
           <input
+            aria-label="提交间隔（秒）"
             type="number"
             min={18}
             max={600}

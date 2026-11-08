@@ -4,21 +4,9 @@ import {
   generationColumns,
   generationColumnLabels,
 } from "../../shared/zhidao-generation";
-import {
-  Button,
-  Field,
-  Empty,
-  LoadingState,
-  Notice,
-  SearchField,
-} from "../ui/primitives";
+import { Button, Field, LoadingState, Notice } from "../ui/primitives";
 import { CheckboxField } from "../ui/CheckboxField";
 import { Select } from "../ui/Select";
-import { Pagination } from "../ui/Pagination";
-import { QueryError } from "../ui/QueryError";
-import { SelectionCheckbox } from "../ui/SelectionCheckbox";
-import { useIpcQuery } from "../api/useIpcQuery";
-import { updateSelection } from "../lib/selection";
 import type { GenerationForm } from "./useGenerationForm";
 
 export function GenerationTableSource({
@@ -168,109 +156,4 @@ export function GenerationTableSource({
   );
 }
 
-export function GenerationOwnedSource({
-  selected,
-  onChange,
-  disabled,
-}: {
-  selected: string[];
-  onChange(ids: string[]): void;
-  disabled: boolean;
-}) {
-  const [query, setQuery] = useState(""),
-    [page, setPage] = useState(1);
-  const targets = useIpcQuery(
-    "zhidao.targets",
-    { query, page },
-    { keepPrevious: true, delay: 180 },
-  );
-  return (
-    <>
-      <SearchField
-        value={query}
-        onChange={(value) => {
-          setQuery(value);
-          setPage(1);
-        }}
-        label="搜索本人资料"
-        placeholder="搜索已核验的本人百度分享"
-      />
-      <QueryError
-        error={targets.error}
-        loading={targets.loading}
-        onRetry={targets.reload}
-      />
-      {!targets.data && !targets.error ? (
-        <LoadingState compact label="正在读取本人资源…" />
-      ) : targets.data?.items.length ? (
-        <>
-          <label className="check">
-            <SelectionCheckbox
-              aria-label="选择本页资料"
-              disabled={disabled}
-              selected={
-                targets.data.items.filter((item) =>
-                  selected.includes(item.copyId),
-                ).length
-              }
-              total={targets.data.items.length}
-              onChange={(event) =>
-                onChange(
-                  updateSelection(
-                    selected,
-                    targets.data!.items.map((item) => item.copyId),
-                    event.target.checked,
-                    100,
-                  ),
-                )
-              }
-            />
-            选择本页 · 已选{selected.length}份
-          </label>
-          <div className="generation-owned-list">
-            {targets.data.items.map((item) => (
-              <label className="operation-target" key={item.copyId}>
-                <input
-                  type="checkbox"
-                  disabled={
-                    disabled ||
-                    (!selected.includes(item.copyId) && selected.length >= 100)
-                  }
-                  checked={selected.includes(item.copyId)}
-                  onChange={(event) =>
-                    onChange(
-                      updateSelection(
-                        selected,
-                        [item.copyId],
-                        event.target.checked,
-                        100,
-                      ),
-                    )
-                  }
-                />
-                <span>
-                  <strong>{item.title}</strong>
-                  <small>{item.url}</small>
-                </span>
-              </label>
-            ))}
-          </div>
-          <Pagination
-            page={page}
-            pageSize={25}
-            total={targets.data.total}
-            onPageChange={setPage}
-            label="模板资源分页"
-          />
-        </>
-      ) : targets.data ? (
-        <Empty
-          compact
-          title={query ? "没有匹配的本人资料" : "还没有已核验的本人百度分享"}
-        >
-          可改用资源表格，或先在网盘文件中分享已有资料。
-        </Empty>
-      ) : null}
-    </>
-  );
-}
+export { OwnedResourcePicker as GenerationOwnedSource } from "./OwnedResourcePicker";

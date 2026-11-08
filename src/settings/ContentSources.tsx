@@ -33,7 +33,7 @@ export function ContentSourcesSettings() {
       }
     >
       <p className="muted">
-        用于皮皮虾图文搜索、推荐、作者、话题列表及真实评论补采，采集内容供多个发布渠道复用。密钥仅保存在当前工作空间的系统加密凭据中。
+        用于微信公众号文章搜索、阅读数查询，以及皮皮虾图文和评论采集。密钥仅保存在当前工作空间的系统加密凭据中。
       </p>
       <QueryError
         error={config.error}
@@ -53,7 +53,7 @@ export function ContentSourcesSettings() {
       ) : null}
       <small>
         可粘贴原始 Key 或带 Bearer
-        前缀的一行令牌；保存不发起外部请求。查询按服务商规则计费，已获取的数据优先复用本地知识库。
+        前缀的一行令牌；保存不发起外部请求。查询按服务商规则计费，皮皮虾已获取的数据优先复用本地知识库。
       </small>
       <PipixRequestPolicySettings />
       <details>

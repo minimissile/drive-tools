@@ -4,11 +4,20 @@ import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { migrateDistribution } from "./distribution/migration";
+import { migrateTiebaAutocare } from "./tieba-autocare/migration";
+import { migrateTiebaParticipation } from "./tieba-participation/migration";
+import { migrateTiebaAutomation } from "./tieba-automation/migration";
+import { migrateTiebaTopics } from "./tieba-topics/migration";
+import { migrateTiebaInsights } from "./tieba-insights/migration";
+import {
+  migrateTrafficCurrentEntries,
+  migrateTrafficKnowledge,
+} from "./traffic-knowledge-store";
 
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 30;
+export const databaseSchemaVersion = 35;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -73,20 +82,90 @@ export class Database {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()?.user_version ?? 0,
     );
-    if (version > databaseSchemaVersion) throw new Error("数据库来自更新版本，请升级盘序后打开。");
+    if (version > databaseSchemaVersion)
+      throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 34) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v35-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTrafficCurrentEntries(this.db);
+        this.db.exec("PRAGMA user_version=35;");
+      });
+      return;
+    }
+    if (version === 33) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v34-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTrafficKnowledge(this.db);
+        this.db.exec("PRAGMA user_version=34;");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 32) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v33-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaAutomation(this.db);
+        migrateTiebaTopics(this.db);
+        migrateTiebaInsights(this.db);
+        this.db.exec("PRAGMA user_version=33;");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 31) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v32-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaParticipation(this.db);
+        this.db.exec("PRAGMA user_version=32;");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 30) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v31-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaAutocare(this.db);
+        this.db.exec("PRAGMA user_version=31;");
+      });
+      this.migrate(false);
+      return;
+    }
     if (version === 29) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v30-${randomUUID()}.bak`;
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE runtime_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,domain TEXT NOT NULL,level TEXT NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL,account_id TEXT,task_id TEXT,details TEXT NOT NULL,created_at TEXT NOT NULL);
         CREATE INDEX runtime_logs_domain ON runtime_logs(domain,id DESC);
         CREATE INDEX runtime_logs_account ON runtime_logs(domain,account_id,id DESC);
         PRAGMA user_version=30;
-      `));
+      `),
+      );
+      this.migrate(false);
       return;
     }
     if (version === 28) {
@@ -95,11 +174,13 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE resource_landing_pages(resource_id TEXT PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE,data TEXT NOT NULL);
         CREATE TABLE resource_landing_generations(request_id TEXT PRIMARY KEY,resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,status TEXT NOT NULL,created_at TEXT NOT NULL,error TEXT);
         PRAGMA user_version=29;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -109,11 +190,13 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE zhidao_answer_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES operation_runs(id) ON DELETE CASCADE,level TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL);
         CREATE INDEX zhidao_answer_logs_run ON zhidao_answer_logs(run_id,id DESC);
         PRAGMA user_version=28;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -123,10 +206,12 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE resource_links(id TEXT PRIMARY KEY, resource_id TEXT NOT NULL UNIQUE REFERENCES resources(id) ON DELETE CASCADE, slug TEXT NOT NULL, base_url TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(base_url,slug));
         PRAGMA user_version=27;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -136,7 +221,8 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         ALTER TABLE distribution_task_sources RENAME TO distribution_task_sources_v1;
         CREATE TABLE distribution_task_sources(platform_id TEXT NOT NULL,share_record_id TEXT NOT NULL,
           task_id TEXT NOT NULL REFERENCES distribution_tasks(id),resource_id TEXT NOT NULL,
@@ -149,7 +235,8 @@ export class Database {
         CREATE INDEX distribution_source_resource ON distribution_task_sources(platform_id,resource_id,split_item_id,task_id);
         UPDATE distribution_tasks SET status='superseded' WHERE status='skipped' AND submitted_at IS NULL AND message='尚未投稿的旧链接已被资源库中的新分享替换。';
         PRAGMA user_version=26;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -159,13 +246,15 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         ALTER TABLE distribution_tasks ADD COLUMN accepted_at TEXT;
         UPDATE distribution_tasks SET accepted_at=(SELECT MIN(at) FROM distribution_events e WHERE e.task_id=distribution_tasks.id AND e.status IN ('submitted','processing','reviewing','published'));
         CREATE INDEX distribution_delivery_progress ON distribution_tasks(platform_id,accepted_at);
         CREATE INDEX distribution_source_lookup ON distribution_task_sources(task_id,share_record_id);
         PRAGMA user_version=25;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -185,11 +274,13 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE distribution_tasks(id TEXT PRIMARY KEY,platform_id TEXT NOT NULL,resource_id TEXT NOT NULL,copy_id TEXT NOT NULL,share_key TEXT NOT NULL,status TEXT NOT NULL,submitted_at TEXT,data TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(platform_id,resource_id),UNIQUE(platform_id,share_key));
         CREATE INDEX distribution_platform_status ON distribution_tasks(platform_id,status,updated_at);
         PRAGMA user_version=23;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -199,14 +290,16 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE content_source_responses(id TEXT PRIMARY KEY,provider TEXT NOT NULL,query_key TEXT NOT NULL,cursor TEXT NOT NULL,page INTEGER NOT NULL,generation TEXT NOT NULL,request TEXT NOT NULL,status TEXT NOT NULL,http_status INTEGER,response TEXT,parsed TEXT,message TEXT NOT NULL DEFAULT '',fetched_at TEXT NOT NULL);
         CREATE INDEX content_responses_query ON content_source_responses(provider,query_key,generation,page);
         CREATE TABLE content_knowledge_items(provider TEXT NOT NULL,source_id TEXT NOT NULL,text TEXT NOT NULL,author TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,raw TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(provider,source_id));
         CREATE TABLE content_knowledge_hits(response_id TEXT NOT NULL REFERENCES content_source_responses(id),provider TEXT NOT NULL,source_id TEXT NOT NULL,PRIMARY KEY(response_id,source_id));
         CREATE INDEX content_knowledge_source ON content_knowledge_hits(provider,source_id);
         PRAGMA user_version=22;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -217,18 +310,50 @@ export class Database {
         chmodSync(backup, 0o600);
       }
       this.transaction(() => {
-        this.db.exec("CREATE TABLE content_source_exports(id TEXT PRIMARY KEY,provider TEXT NOT NULL,source_id TEXT NOT NULL,channel TEXT NOT NULL,account_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(provider,source_id,channel,account_id));");
-        for (const row of this.all<{id:string; data:string}>("SELECT id,data FROM pipix_sources")) {
-          const source = JSON.parse(row.data), contentId = source.contentId;
+        this.db.exec(
+          "CREATE TABLE content_source_exports(id TEXT PRIMARY KEY,provider TEXT NOT NULL,source_id TEXT NOT NULL,channel TEXT NOT NULL,account_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(provider,source_id,channel,account_id));",
+        );
+        for (const row of this.all<{ id: string; data: string }>(
+          "SELECT id,data FROM pipix_sources",
+        )) {
+          const source = JSON.parse(row.data),
+            contentId = source.contentId;
           delete source.contentId;
           for (const image of source.images ?? [])
-            if (image.asset && !image.asset.storage) image.asset.storage = "zhihu-assets";
+            if (image.asset && !image.asset.storage)
+              image.asset.storage = "zhihu-assets";
           if (contentId) {
-            const content = this.get<{data:string}>("SELECT data FROM zhihu_contents WHERE id=?", contentId);
-            const delivery = { id: id("sourceexport"), provider: "pipix", sourceId: row.id, channel: "zhihu", accountId: "", targetId: contentId, title: content ? JSON.parse(content.data).title : source.text?.slice(0,100) || "已有知乎素材", createdAt: source.collectedAt };
-            this.run("INSERT INTO content_source_exports VALUES(?,?,?,?,?,?)", delivery.id, "pipix", row.id, "zhihu", "", JSON.stringify(delivery));
+            const content = this.get<{ data: string }>(
+              "SELECT data FROM zhihu_contents WHERE id=?",
+              contentId,
+            );
+            const delivery = {
+              id: id("sourceexport"),
+              provider: "pipix",
+              sourceId: row.id,
+              channel: "zhihu",
+              accountId: "",
+              targetId: contentId,
+              title: content
+                ? JSON.parse(content.data).title
+                : source.text?.slice(0, 100) || "已有知乎素材",
+              createdAt: source.collectedAt,
+            };
+            this.run(
+              "INSERT INTO content_source_exports VALUES(?,?,?,?,?,?)",
+              delivery.id,
+              "pipix",
+              row.id,
+              "zhihu",
+              "",
+              JSON.stringify(delivery),
+            );
           }
-          this.run("UPDATE pipix_sources SET data=? WHERE id=?", JSON.stringify(source), row.id);
+          this.run(
+            "UPDATE pipix_sources SET data=? WHERE id=?",
+            JSON.stringify(source),
+            row.id,
+          );
         }
         this.db.exec("PRAGMA user_version=21");
       });
@@ -241,10 +366,12 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE pipix_sources(id TEXT PRIMARY KEY,data TEXT NOT NULL);
         PRAGMA user_version=20;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -254,12 +381,14 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE zhihu_contents(id TEXT PRIMARY KEY,data TEXT NOT NULL);
         CREATE TABLE zhihu_tasks(id TEXT PRIMARY KEY,data TEXT NOT NULL);
         CREATE TABLE zhihu_plans(id TEXT PRIMARY KEY,data TEXT NOT NULL);
         PRAGMA user_version=19;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -269,7 +398,8 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         ALTER TABLE browser_environment_accounts RENAME TO browser_environment_accounts_v17;
         CREATE TABLE browser_environment_accounts(kind TEXT NOT NULL,account_id TEXT NOT NULL,environment_id TEXT NOT NULL REFERENCES browser_environments(id),identity_id TEXT NOT NULL REFERENCES browser_environment_identities(id),realm TEXT NOT NULL,platform TEXT NOT NULL,uid TEXT,verified_revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(kind,account_id));
         INSERT INTO browser_environment_accounts SELECT * FROM browser_environment_accounts_v17;
@@ -278,7 +408,8 @@ export class Database {
         CREATE TABLE browser_environment_jobs(id TEXT PRIMARY KEY,status TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
         CREATE INDEX environment_jobs_history ON browser_environment_jobs(created_at DESC);
         PRAGMA user_version=18;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -288,13 +419,15 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE browser_environments(id TEXT PRIMARY KEY,engine TEXT NOT NULL,profile_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(engine,profile_id));
         CREATE TABLE browser_environment_identities(id TEXT PRIMARY KEY,environment_id TEXT NOT NULL REFERENCES browser_environments(id),realm TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,UNIQUE(environment_id,realm));
         CREATE TABLE browser_environment_accounts(kind TEXT NOT NULL,account_id TEXT NOT NULL,environment_id TEXT NOT NULL REFERENCES browser_environments(id),identity_id TEXT NOT NULL REFERENCES browser_environment_identities(id),realm TEXT NOT NULL,platform TEXT NOT NULL,uid TEXT,verified_revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(kind,account_id));
         CREATE INDEX environment_account_identity ON browser_environment_accounts(identity_id);
         PRAGMA user_version=17;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -304,13 +437,15 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         ALTER TABLE website_accounts ADD COLUMN nickname TEXT;
         ALTER TABLE website_accounts ADD COLUMN checked_at TEXT;
         ALTER TABLE browser_bindings ADD COLUMN website_account_id TEXT;
         CREATE UNIQUE INDEX binding_website_account ON browser_bindings(website_account_id) WHERE website_account_id IS NOT NULL;
         PRAGMA user_version=16;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }
@@ -320,10 +455,12 @@ export class Database {
         this.db.prepare("VACUUM INTO ?").run(backup);
         chmodSync(backup, 0o600);
       }
-      this.transaction(() => this.db.exec(`
+      this.transaction(() =>
+        this.db.exec(`
         CREATE TABLE website_accounts(id TEXT PRIMARY KEY,provider TEXT NOT NULL,alias TEXT NOT NULL,uid TEXT,status TEXT NOT NULL DEFAULT 'disconnected',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
         PRAGMA user_version=15;
-      `));
+      `),
+      );
       this.migrate(false);
       return;
     }

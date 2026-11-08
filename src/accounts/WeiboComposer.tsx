@@ -247,7 +247,7 @@ export function WeiboComposer({
           value={form.value.visibility}
           disabled={busy || locked}
           items={[
-            { value: "self", label: "仅自己可见（适合流程验证）" },
+            { value: "self", label: "仅自己可见" },
             { value: "public", label: "公开" },
           ]}
           onValueChange={(visibility) => {

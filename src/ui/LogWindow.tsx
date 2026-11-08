@@ -10,12 +10,16 @@ export function LogWindow({
   context,
   follow,
   onFollowChange,
+  simple = false,
+  formatMessage,
 }: {
   items: RuntimeLogEntry[];
   label: string;
   context(entry: RuntimeLogEntry): string;
   follow: boolean;
   onFollowChange(value: boolean): void;
+  simple?: boolean;
+  formatMessage?(entry: RuntimeLogEntry): string;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -33,11 +37,11 @@ export function LogWindow({
     element.scrollTop = element.scrollHeight;
   }, [items, follow]);
   return (
-    <div className="log-window">
+    <div className={`log-window${simple ? " log-window-simple" : ""}`}>
       <div className="log-window-columns" aria-hidden="true">
         <span>时间</span>
-        <span>级别</span>
-        <span>账号 · 事件 · 消息</span>
+        <span>{simple ? "状态" : "级别"}</span>
+        <span>{simple ? "账号 · 运行情况" : "账号 · 事件 · 消息"}</span>
       </div>
       <div
         className="log-window-viewport"
@@ -60,22 +64,39 @@ export function LogWindow({
               data-level={entry.level}
             >
               <time dateTime={entry.createdAt}>
-                {formatTime(entry.createdAt)}
+                {simple
+                  ? new Date(entry.createdAt).toLocaleString("zh-CN", {
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                      hour12: false,
+                      timeZone: "Asia/Shanghai",
+                    })
+                  : formatTime(entry.createdAt)}
               </time>
               <span className="log-window-level">
                 {entry.level === "error"
-                  ? "ERROR"
+                  ? simple
+                    ? "异常"
+                    : "ERROR"
                   : entry.level === "warning"
-                    ? "WARN"
-                    : "INFO"}
+                    ? simple
+                      ? "提醒"
+                      : "WARN"
+                    : simple
+                      ? "进展"
+                      : "INFO"}
               </span>
               <div className="log-window-content">
                 <div className="log-window-context">
                   <span>{context(entry)}</span>
-                  <code>{entry.event}</code>
+                  {!simple ? <code>{entry.event}</code> : null}
                 </div>
-                <p>{entry.message}</p>
-                {Object.keys(entry.details).length || entry.taskId ? (
+                <p>{formatMessage ? formatMessage(entry) : entry.message}</p>
+                {!simple &&
+                (Object.keys(entry.details).length || entry.taskId) ? (
                   <details
                     onToggle={(e) => {
                       if (e.currentTarget.open) onFollowChange(false);

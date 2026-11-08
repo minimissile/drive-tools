@@ -1,0 +1,33 @@
+.dev-update-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  flex: none;
+  padding: var(--space-2) var(--page-padding);
+  background: var(--amber-bg);
+  color: var(--amber);
+  border-bottom: 1px solid var(--line);
+}
+.dev-update-summary {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.dev-update-summary strong {
+  font-size: 13px;
+}
+.dev-update-reason {
+  flex-basis: 100%;
+}
+.dev-update-banner > .button {
+  flex: none;
+}
+.dev-update-banner > .data-state {
+  flex-basis: 100%;
+}

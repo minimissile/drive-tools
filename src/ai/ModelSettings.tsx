@@ -1,6 +1,7 @@
+import { AiIcon } from "../ui/AiIcon";
 import { TextSuggestions } from "../ui/TextSuggestions";
 import { QueryError } from "../ui/QueryError";
-import { RefreshCw, Sparkles } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button, Field, LoadingState } from "../ui/primitives";
 import { useAppActions, useAppActivity } from "../state";
 import {
@@ -83,7 +84,7 @@ export default function ModelSettings({
               );
             }}
           >
-            <Sparkles size={14} />
+            <AiIcon size={14} />
             效果优先推荐
           </Button>
         </div>

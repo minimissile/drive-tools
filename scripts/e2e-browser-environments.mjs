@@ -440,9 +440,24 @@ try {
   });
   await f.app.invoke("environments.checkNetwork", { id: proxyOne.id });
   duplicateIp = true;
+  await f.app.invoke("environments.checkNetwork", { id: proxyTwo.id });
+  const proxyThree = await f.app.invoke("environments.save", {
+    name: "独立代理三",
+    engine: "electron",
+    proxy: { mode: "http", host: "127.0.0.1", port: 18082 },
+    requireProxy: true,
+  });
+  const proxyFour = await f.app.invoke("environments.save", {
+    name: "独立代理四",
+    engine: "electron",
+    proxy: { mode: "http", host: "127.0.0.1", port: 18083 },
+    requireProxy: true,
+  });
+  await f.app.invoke("environments.checkNetwork", { id: proxyThree.id });
+  await f.app.invoke("environments.checkNetwork", { id: proxyOne.id });
   await assert.rejects(
-    f.app.invoke("environments.checkNetwork", { id: proxyTwo.id }),
-    /相同出口 IP/,
+    f.app.invoke("environments.checkNetwork", { id: proxyFour.id }),
+    /已有 3 个浏览器环境使用，最多支持 3 个/,
   );
   duplicateIp = false;
   await f.app.invoke("environments.checkNetwork", { id: proxyTwo.id });
@@ -460,7 +475,7 @@ try {
     JSON.stringify(f.app.environments.list()).includes("local-user"),
     false,
   );
-  checks.push("独立出口重复与代理失败被阻止；列表不暴露加密代理凭据");
+  checks.push("同出口允许三个环境、第四个与代理失败被阻止；列表不暴露加密代理凭据");
   let signature = "fingerprint-v1";
   const bitContext = await browser.newContext();
   await bitContext.route("**/*", async (route) => {

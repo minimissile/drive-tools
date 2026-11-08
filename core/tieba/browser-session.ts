@@ -25,7 +25,7 @@ export async function verifyBitTieba(
           return;
         }
       }
-      await route.continue();
+      await route.fallback();
     });
     const read = async (path: "/dc/common/tbs" | "/f/user/json_userinfo") => {
       const response = await page.goto(`https://tieba.baidu.com${path}`, {

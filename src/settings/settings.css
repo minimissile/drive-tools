@@ -43,6 +43,10 @@
   min-width: 0;
   container: settings-content / inline-size;
 }
+.settings-section-title {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
 .settings-content > [id] {
   scroll-margin-top: 20px;
   outline: none;

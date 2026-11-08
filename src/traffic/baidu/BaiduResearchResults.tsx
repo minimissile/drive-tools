@@ -143,7 +143,7 @@ export function BaiduResearchResults({
       {result.warning ? <Notice warning>{result.warning}</Notice> : null}
       {result.knowledge ? (
         <Notice>
-          月均搜索量大于10：{result.knowledge.indexed}词已入库或更新；另更新
+          月均搜索量至少10：{result.knowledge.indexed}词已入库或更新；另更新
           {result.knowledge.refreshedBelowThreshold}个已收录的低搜索量词。
           <Button quiet onClick={onOpenKnowledge}>
             查看本地词库

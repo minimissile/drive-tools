@@ -76,7 +76,9 @@ export function createTrafficHandlers(
               c.phase,
               c.request_count,
               c.units,
-              c.endpoint === "openrouter" ? "USD" : "CNY",
+              c.endpoint === "openrouter" || c.endpoint === "tikhub:music"
+                ? "USD"
+                : "CNY",
               c.estimated_micros == null ? null : c.estimated_micros / 1e6,
               c.reserved_micros == null ? null : c.reserved_micros / 1e6,
               c.confirmed_micros == null ? null : c.confirmed_micros / 1e6,
@@ -108,6 +110,12 @@ export function createTrafficHandlers(
     "traffic.knowledge.list": async (object) => {
       return services.traffic.knowledge.list(object);
     },
+    "traffic.knowledge.overview": async () =>
+      services.traffic.knowledge.overview(),
+    "traffic.knowledge.resolve": async (object) =>
+      services.traffic.knowledge.resolve(object),
+    "traffic.knowledge.history": async (object) =>
+      services.traffic.knowledge.history(object),
     "traffic.knowledge.detail": async (object) => {
       return services.traffic.knowledge.detail(
         z.object({ id: z.string().max(100) }).parse(object).id,
@@ -144,6 +152,13 @@ export function createTrafficHandlers(
         .parse(object);
       return services.traffic.resumeSuggestion(id);
     },
+    "pool.get": async (object) => {
+      const { id } = z.object({ id: z.string().min(1).max(100) }).parse(object);
+      const pool = services.repo.getPool(id);
+      if (!pool) throw new AppError("NOT_FOUND", "词池不存在。");
+      return pool;
+    },
+    "pool.list": async () => services.repo.poolSummaries(),
     "pool.save": async (object) => {
       const input = z
         .object({
@@ -163,7 +178,7 @@ export function createTrafficHandlers(
         now(),
       );
       services.changed();
-      return services.repo.pools().find((p) => p.id === poolId);
+      return services.repo.getPool(poolId)!;
     },
     "pool.manual": async (object) => {
       const input = z

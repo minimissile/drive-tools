@@ -122,6 +122,8 @@ export function purposeForCall(
     "keyword_ideas",
     "resource_export_plan",
     "resource_export_match",
+    "resource_catalog_match",
+    "resource_catalog_description",
     "resource_landing_review",
     "intelligent_operations_advice",
     "zhidao_hot_names",

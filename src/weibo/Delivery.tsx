@@ -90,7 +90,7 @@ export function WeiboDelivery({ detail }: { detail: WeiboMarketingDetail }) {
   const issue = weiboContentIssue(draft);
   const linkReady =
     !!binding && canUseLinkPosition("weibo", binding, "shortpost", "body");
-  const prepare = async () => {
+  const prepare = async (exportPackage = false) => {
     const parsed = weiboDeliveryOptions.safeParse(options);
     if (!parsed.success) {
       setFailure(parsed.error.issues[0].message);
@@ -102,11 +102,11 @@ export function WeiboDelivery({ detail }: { detail: WeiboMarketingDetail }) {
       id: run.id,
       options: parsed.data,
     });
-    if (saved && alive.current) await command("weibo.prepare", { id: run.id });
+    if (saved && alive.current) await command("weibo.prepare", { id: run.id, export: exportPackage });
   };
   return (
     <Panel
-      title="准备图文与发布账号"
+      title="发布设置"
       extra={
         <Button quiet onClick={() => navigate("website-accounts")}>
           管理微博账号
@@ -261,9 +261,10 @@ export function WeiboDelivery({ detail }: { detail: WeiboMarketingDetail }) {
             onClick={() => void prepare()}
           >
             <Download size={15} />
-            核验并导出图文包
+            核验并准备发布
           </Button>
-          <small>选择保存目录，导出文案、1–9 张图片及清单。</small>
+          <Button disabled={busy > 0 || working.blocked || !!issue || !draft.reviewed || !binding || !accountReady || !hasVerifiedFormat(binding,"shortpost")} onClick={()=>void prepare(true)}>导出图文包</Button>
+          <small>文案与附件保存在应用内；导出可选，不会自动上传或发布。</small>
         </div>
       ) : null}
       {run.prepared ? (

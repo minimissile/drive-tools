@@ -37,12 +37,21 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  bilibili: import("../bilibili/content").BilibiliContent;
+  tiebaParticipation: import("../tieba-participation/service").TiebaParticipation;
+  tiebaAutocare: import("../tieba-autocare/service").TiebaAutocare;
+  tiebaAutomation: import("../tieba-automation/service").TiebaAutomation;
+  tiebaTopics: import("../tieba-topics/service").TiebaTopics;
+  tiebaInsights: import("../tieba-insights/service").TiebaInsights;
+  tiebaPublishing: import("../tieba-publishing/service").TiebaPublishing;
+  tiebaPostStats: import("../tieba-post-stats/service").TiebaPostStats;
   zhihuAutocare: import("../zhihu-autocare/service").ZhihuAutocare;
   contentSupply: import("../content-supply/service").ContentSupply;
   intelligentOps: import("../intelligent-operations/service").IntelligentOperations;
   photoPosts: import("../photo-posts").PhotoPosts;
   driveBrowsers: import("../drive-browser-sessions").DriveBrowserSessions;
   baiduDiscovery: import("../baidu-discovery").BaiduDiscovery;
+  baiduDiscoveryQuestions: import("../baidu-discovery-questions").BaiduDiscoveryQuestions;
   accountDeletion: import("../account-deletion").AccountDeletion;
   resourceLinks: import("../resource-links").ResourceLinks;
   resourceLanding: import("../resource-landing").ResourceLanding;
@@ -50,6 +59,7 @@ export interface HandlerServices {
   shareCreation: import("../share-creation").ShareCreation;
   resourceDeletion: import("../resource-deletion").ResourceDeletion;
   smzdm: import("../smzdm/service").SmzdmArticles;
+  wechat: import("../wechat/service").WechatArticles;
   distribution: import("../distribution").Distribution;
   pipix: import("../pipix/service").PipixSources;
   zhihu: import("../zhihu/service").ZhihuOperations;
@@ -58,6 +68,7 @@ export interface HandlerServices {
   environmentQueue: import("../browser-environment-queue").BrowserEnvironmentQueue;
   resourceAnswers: import("../resource-answers").ResourceAnswers;
   weiboPosts: import("../weibo/posts").WeiboPosts;
+  weiboWorkspace: import("../weibo/workspace").WeiboWorkspace;
   weiboStatistics: import("../weibo/statistics").WeiboStatistics;
   weibo: import("../weibo/marketing").WeiboMarketing;
   csdn: import("../csdn/workflow").CsdnWorkflows;
@@ -74,6 +85,8 @@ export interface HandlerServices {
   ideas: KeywordIdeas;
   resourceExports: ResourceExports;
   studio: StudioService;
+  video: import("../video-service").VideoService;
+  music: import("../music/service").MusicService;
   traffic: TrafficService;
   bit: BitBrowser;
   bitManagement: import("../bitbrowser-management").BitBrowserManagement;

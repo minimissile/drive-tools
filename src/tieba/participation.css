@@ -1,0 +1,204 @@
+.tieba-participation-content {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.tieba-participation-intro,
+.tieba-participation-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tieba-participation-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2) var(--space-3);
+}
+.tieba-participation-toolbar > .field {
+  width: 320px;
+  max-width: 100%;
+}
+.tieba-participation-search {
+  flex: 1;
+  min-width: 180px;
+}
+.tieba-participation-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.tieba-participation-table th:first-child {
+  width: 39%;
+}
+.tieba-participation-table th:nth-child(2) {
+  width: 140px;
+}
+.tieba-participation-table th:last-child {
+  width: 148px;
+}
+.tieba-participation-table td {
+  padding: var(--space-2) 10px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.tieba-participation-table td strong {
+  font-weight: 500;
+}
+.tieba-participation-table td small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-participation-log {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.tieba-participation-log > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-participation-log > .log-window {
+  margin-top: var(--space-3);
+}
+.modal.tieba-participation-dialog {
+  width: 900px;
+  max-width: 90vw;
+  max-height: calc(100dvh - 48px);
+}
+.tieba-participation-dialog .dialog-body {
+  gap: var(--space-3);
+}
+.tieba-reply-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  min-height: 0;
+}
+.tieba-reply-columns > .tieba-reply-draft {
+  border-left: 1px solid var(--line);
+  padding-left: var(--space-6);
+}
+.tieba-reply-context,
+.tieba-reply-draft {
+  min-width: 0;
+}
+.tieba-reply-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.tieba-reply-section-heading h3,
+.tieba-reply-context h4,
+.tieba-reply-receipt h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.tieba-reply-meta {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.tieba-reply-context-content {
+  max-height: 48vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.tieba-reply-original,
+.tieba-reply-saved-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.tieba-reply-existing,
+.tieba-reply-evidence,
+.tieba-reply-checks,
+.tieba-reply-local-copy,
+.tieba-reply-receipt {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.tieba-reply-existing summary,
+.tieba-reply-evidence summary,
+.tieba-reply-checks summary,
+.tieba-reply-local-copy summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.tieba-reply-existing ol,
+.tieba-reply-evidence ul,
+.tieba-reply-checks ul {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+}
+.tieba-reply-existing li + li {
+  margin-top: var(--space-3);
+}
+.tieba-reply-existing p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.tieba-reply-draft textarea {
+  min-height: 230px;
+  resize: vertical;
+}
+.tieba-reply-draft-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-reply-draft-meta > span,
+.tieba-reply-draft-meta > button {
+  white-space: nowrap;
+}
+.tieba-reply-draft-meta [data-invalid] {
+  color: var(--red);
+}
+.tieba-reply-message {
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.tieba-reply-receipt p,
+.tieba-reply-url {
+  overflow-wrap: anywhere;
+}
+.tieba-reply-receipt > small {
+  color: var(--muted);
+}
+.tieba-reply-source-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+  font-size: 12px;
+  color: var(--muted);
+}
+.tieba-reply-source-link > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tieba-reply-cost {
+  flex: 1;
+  min-width: 180px;
+  font-size: 12px;
+  color: var(--muted);
+}

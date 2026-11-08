@@ -1,7 +1,8 @@
+import { AiIcon } from "../ui/AiIcon";
 import { providerIds, providerSpecs } from "../../shared/providers";
 import { Select } from "../ui/Select";
 import { QueryError } from "../ui/QueryError";
-import { FileImage, Sparkles, Trash2 } from "lucide-react";
+import { FileImage, Trash2 } from "lucide-react";
 import {
   Button,
   Empty,
@@ -262,7 +263,7 @@ export function ExportRequest({ model }: { model: ExportModel }) {
           }
           onClick={() => void createPlan()}
         >
-          <Sparkles size={15} />
+          <AiIcon size={15} />
           {working ? "正在处理…" : "解析需求与表头"}
         </Button>
       </Panel>

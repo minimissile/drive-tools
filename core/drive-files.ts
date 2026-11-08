@@ -107,7 +107,7 @@ export class DriveFiles {
     if (file.size != null && file.size > maxBytes)
       throw new AppError("DOCUMENT_TOO_LARGE", "正文读取支持 20MB 以内的文件。");
     return this.d.authenticated(located.directory.accountId, async (account, provider) => {
-      if (!provider.readFile) throw new AppError("UNSUPPORTED", "此网盘暂不支持直接读取正文，请导入同名本地 PDF 或文本文件。");
+      if (!provider.readFile) throw new AppError("UNSUPPORTED", "此网盘暂不支持直接读取正文，请导入同名本地 PDF、DOCX 或文本原文件。");
       return provider.readFile(account, file, maxBytes);
     });
   }

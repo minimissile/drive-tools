@@ -3,7 +3,9 @@ import type {
   LandingSource,
   PublishedLanding,
 } from "../shared/resource-landing";
+import { landingSearchPolicyVersion } from "../shared/resource-landing";
 export const review = {
+  policyVersion: landingSearchPolicyVersion,
   score: 92,
   dimensions: {
     evidence: 24,

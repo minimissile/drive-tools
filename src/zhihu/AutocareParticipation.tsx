@@ -1,5 +1,11 @@
 import { useRef, useState } from "react";
-import type { AutocareSnapshot } from "../../shared/zhihu-autocare";
+import {
+  autocareRandomLikeScope,
+  autocareRandomCommentScope,
+  autocareRandomFollowScope,
+  type AutocareCommentJob,
+  type AutocareSnapshot,
+} from "../../shared/zhihu-autocare";
 import type { ZhihuParticipationActivity } from "../../shared/zhihu-participation";
 import { ipc } from "../api/client";
 import { useAppActions } from "../state";
@@ -8,6 +14,41 @@ import { Pagination } from "../ui/Pagination";
 import { formatTime } from "../lib/format";
 import { ParticipationContext } from "./ParticipationContext";
 import "./participation.css";
+
+const ruleInteractionKind = (a: ZhihuParticipationActivity) => {
+  if (a.planId === autocareRandomFollowScope) return "follow";
+  if (a.planId === autocareRandomLikeScope) return "like";
+  if (a.planId === autocareRandomCommentScope) return "comment";
+  const decision = a.attempts?.at(-1)?.decision;
+  if (decision?.relevance !== null || decision.source !== "rule") return null;
+  if (decision.rule === "autocare_random_follow") return "follow";
+  if (decision.rule === "autocare_random_comment") return "comment";
+  return decision.rule === "autocare_random_like" ? "like" : null;
+};
+const isRuleInteraction = (a: ZhihuParticipationActivity) =>
+  ruleInteractionKind(a) !== null;
+const interactionLabel = (a: ZhihuParticipationActivity) => {
+  const ruleKind = ruleInteractionKind(a);
+  if (ruleKind)
+    return ruleKind === "follow"
+      ? "自动关注作者"
+      : ruleKind === "comment"
+        ? "随机评论"
+        : "随机点赞";
+  return a.kind === "like"
+    ? "点赞"
+    : a.kind === "comment"
+      ? "评论"
+      : "关注作者";
+};
+const commentPreparationLabels: Record<AutocareCommentJob["status"], string> = {
+  generating: "正在生成",
+  ready: "正文已保存",
+  skipped: "已跳过",
+  attention: "需要处理",
+  completed: "准备完成",
+  cancelled: "已取消",
+};
 
 export function AutocareParticipation({
   snapshot: s,
@@ -27,12 +68,15 @@ export function AutocareParticipation({
     Record<string, ZhihuParticipationActivity>
   >({});
   const activities = s.participation.activities
-    .filter((a) => ["like", "follow"].includes(a.kind))
+    .filter((a) => ["like", "follow", "comment"].includes(a.kind))
     .map((a) =>
       (received[a.id]?.version ?? 0) > a.version ? received[a.id] : a,
     )
     .reverse();
   const current = activities.find((a) => a.id === selected);
+  const commentPreparations = (s.commentJobs ?? []).filter(
+    (job) => !job.activityId,
+  );
   const names = new Map(s.accounts.map((a) => [a.id, a.nickname || a.alias]));
   const result = (a: ZhihuParticipationActivity) => {
     const attempt = a.attempts?.at(-1);
@@ -42,67 +86,43 @@ export function AutocareParticipation({
         ? "官方已核实"
         : a.status === "attention"
           ? "需要核对"
-          : a.status === "failed"
-            ? "未完成"
-            : a.resolution
-              ? "已跳过"
-              : "待本人确认";
+          : a.status === "executing"
+            ? "正在执行"
+            : a.status === "failed"
+              ? "未完成"
+              : a.resolution || a.status === "skipped"
+                ? "已跳过"
+                : isRuleInteraction(a)
+                  ? "已选择 · 未执行"
+                  : "历史待办 · 将重新核对";
   };
   const open = (url: string) => {
     void ipc("system.external", { url }).catch((e) =>
       notify(e instanceof Error ? e.message : "无法打开原文", "error"),
     );
   };
-  const run = async (
-    a: ZhihuParticipationActivity,
-    operation: "execute" | "reconcile" | "refresh" = "execute",
-  ) => {
+  const reconcile = async (a: ZhihuParticipationActivity) => {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
     setError("");
     try {
-      const text = a.context?.text;
-      if (
-        operation === "execute" &&
-        (!text || text.length < 8 || a.context?.truncated)
-      )
-        throw new Error("完整上下文不足，请先重新读取");
-      const updated =
-        operation === "refresh"
-          ? await ipc("zhihu.autocare.refreshInteraction", {
-              id: a.id,
-              version: a.version,
-            })
-          : operation === "reconcile"
-            ? await ipc("zhihu.autocare.reconcile", {
-                id: a.id,
-                version: a.version,
-              })
-            : await ipc("zhihu.autocare.interact", {
-                id: a.id,
-                version: a.version,
-                revision: s.revision,
-                confirmed: true,
-                quote: text!.slice(0, 120),
-                basis: `本人在运营面板查看所示准确目标后，确认对《${a.context!.title.slice(0, 300)}》执行${a.kind === "like" ? "赞同" : "关注"}。这是本人单项选择，未使用AI相关性评分。`,
-              });
+      const updated = await ipc("zhihu.autocare.reconcile", {
+        id: a.id,
+        version: a.version,
+      });
       const actual = updated.participation.activities.find(
         (item) => item.id === a.id,
       );
       if (actual) setReceived((old) => ({ ...old, [a.id]: actual }));
       notify(
-        operation === "refresh"
-          ? "上下文已更新，未执行互动"
-          : actual?.attempts?.at(-1)?.receipt?.summary ||
-              "已保留原执行记录，请查看处理结果",
-        actual?.status === "succeeded" || operation === "refresh"
-          ? "success"
-          : "warning",
+        actual?.attempts?.at(-1)?.receipt?.summary ||
+          "已保留原执行记录，请查看核对结果",
+        actual?.status === "succeeded" ? "success" : "warning",
       );
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "本次操作未完成，原记录保留");
+      setError(e instanceof Error ? e.message : "核对未完成，原记录保留");
     } finally {
       setBusy(false);
       lock.current = false;
@@ -110,19 +130,11 @@ export function AutocareParticipation({
   };
   return (
     <Panel
-      title="点赞与关注待办"
-      extra={
-        <small className="muted">
-          {
-            activities.filter((a) => !a.attempts?.length && !a.resolution)
-              .length
-          }{" "}
-          项待确认
-        </small>
-      }
+      title="互动记录"
+      extra={<small className="muted">失败与未知结果保留原记录</small>}
     >
       <p className="muted autocare-help">
-        从已读内容发现具体文章和作者。查看上下文后确认，系统核对账号、间隔及官方结果；已有状态不重复点击。
+        点赞、评论和作者关注由程序自动安排。未尝试的历史待办会先重新核对；失败和未知结果不会自动重发。
       </p>
       {error ? <Notice danger>{error}</Notice> : null}
       {activities.length ? (
@@ -142,7 +154,7 @@ export function AutocareParticipation({
                   <tr key={a.id}>
                     <td>
                       {names.get(a.accountId)}
-                      <small>{a.kind === "like" ? "点赞" : "关注作者"}</small>
+                      <small>{interactionLabel(a)}</small>
                     </td>
                     <td>
                       <span>{a.context?.title || "原上下文待读取"}</span>
@@ -187,8 +199,8 @@ export function AutocareParticipation({
           />
         </>
       ) : (
-        <Empty compact title="尚无互动待办">
-          开启“准备点赞”或“发现作者与关注”，系统会在运营时段按读取上限准备真实目标。
+        <Empty compact title="尚无互动记录">
+          开启对应自动操作后，系统会在启动后2小时内按读取与互动额度安排准确目标。
         </Empty>
       )}
       {current?.context ? (
@@ -198,8 +210,7 @@ export function AutocareParticipation({
         >
           <div className="row between">
             <h3>
-              {current.kind === "like" ? "确认赞同的内容" : "确认关注的作者"} ·{" "}
-              {names.get(current.accountId)}
+              {interactionLabel(current)}的目标 · {names.get(current.accountId)}
             </h3>
             <Button
               quiet
@@ -214,47 +225,25 @@ export function AutocareParticipation({
             open={open}
             busy={busy}
           />
+          {current.kind === "comment" && current.draft ? (
+            <div className="participation-decision">
+              <strong>本次评论正文</strong>
+              <p>{current.draft}</p>
+            </div>
+          ) : null}
           <div className="row compact">
-            {!current.attempts?.length && !current.resolution ? (
-              <Button
-                primary
-                size="compact"
-                disabled={
-                  !s.enabled ||
-                  s.busy ||
-                  busy ||
-                  !(current.kind === "like"
-                    ? s.config.likeCandidates
-                    : s.config.followCandidates)
-                }
-                onClick={() => void run(current)}
-              >
-                {current.kind === "like" ? "确认赞同此内容" : "确认关注此作者"}
-              </Button>
-            ) : null}
-            {!current.attempts?.length && !current.resolution ? (
-              <Button
-                size="compact"
-                disabled={s.busy || busy}
-                onClick={() => void run(current, "refresh")}
-              >
-                更新上下文
-              </Button>
-            ) : null}
             {current.attempts?.at(-1)?.submittedAt &&
             current.status === "attention" ? (
               <Button
                 size="compact"
                 disabled={s.busy || busy}
-                onClick={() => void run(current, "reconcile")}
+                onClick={() => void reconcile(current)}
               >
                 只读核对原结果
               </Button>
             ) : null}
             <small className="muted">
-              {s.enabled
-                ? "确认后执行这一项，仍受每日互动上限与至少60分钟间隔约束。"
-                : "总开关已关闭，可查看记录与核对原提交结果。"}
+              历史待办会由当前规则重新核对后纳入；已有失败或提交记录不会自动重放，未知结果仅核对原提交。
             </small>
           </div>
           {current.attempts?.at(-1) ? (
@@ -268,6 +257,39 @@ export function AutocareParticipation({
             </p>
           ) : null}
         </section>
+      ) : null}
+      {commentPreparations.length ? (
+        <details className="autocare-more">
+          <summary>评论准备记录 · {commentPreparations.length} 条</summary>
+          {commentPreparations.length > 5 ? (
+            <p className="muted">显示最近5条，完整过程可查看运行日志。</p>
+          ) : null}
+          {commentPreparations
+            .slice(-5)
+            .reverse()
+            .map((job) => (
+              <div className="autocare-interaction-detail" key={job.id}>
+                <div className="row between">
+                  <strong>{names.get(job.accountId) || job.accountId}</strong>
+                  <Status
+                    kind={job.status === "attention" ? "warning" : "normal"}
+                  >
+                    {commentPreparationLabels[job.status]}
+                  </Status>
+                </div>
+                <small className="muted">
+                  更新 {formatTime(job.updatedAt)}
+                </small>
+                <p className="autocare-wrap autocare-help">{job.message}</p>
+                {job.body ? (
+                  <details className="participation-decision">
+                    <summary>查看已保存评论正文</summary>
+                    <p>{job.body}</p>
+                  </details>
+                ) : null}
+              </div>
+            ))}
+        </details>
       ) : null}
     </Panel>
   );

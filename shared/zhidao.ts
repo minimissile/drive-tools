@@ -50,6 +50,14 @@ export interface ZhidaoAccount {
   checkedAt: string | null;
   message: string;
 }
+export function zhidaoAccountName(account: Pick<ZhidaoAccount, "nickname" | "alias">) {
+  return account.nickname.trim() || account.alias.trim() || "未命名账号";
+}
+export function zhidaoAccountLabel(account: Pick<ZhidaoAccount, "nickname" | "alias">) {
+  const name = zhidaoAccountName(account);
+  return account.alias.trim() && account.alias.trim() !== name
+    ? `${name} · ${account.alias.trim()}` : name;
+}
 export interface OperationRun {
   id: string;
   kind: OperationKind;
@@ -84,6 +92,13 @@ export interface OperationItem {
   uploadBatchSize?: number;
   copyId: string;
   shareVersion: number;
+  /** Standalone question share; never replaces the resource copy's library link. */
+  independentShare?: {
+    copyId: string;
+    operationId: string;
+    state: "pending" | "ready" | "failed" | "uncertain";
+    linkConflict?: boolean;
+  };
   reviewed: boolean;
   status: ItemStatus;
   message: string;
@@ -147,12 +162,8 @@ export const collectionInput = z
     (v) => !v.zhidao || v.accountIds.length > 0,
     "百度知道采集需要选择账号",
   );
-export const answerInput = z
-  .object({
-    mode: z.enum(["manual", "auto"]),
-    question: text.max(5000).default(""),
+const answerOptions = {
     style: answerStyle.default("清晰实用"),
-    accountId: text.max(100).default(""),
     count: z.number().int().min(1).max(200).default(1),
     categories: z
       .array(z.enum(["emotion", "general", "education"]))
@@ -161,6 +172,21 @@ export const answerInput = z
       .default(["emotion"]),
     intervalSeconds: z.number().int().min(18).max(600).default(18),
     instructions: text.max(2000).default(""),
+};
+export const zhidaoAnswerAccountLimit = 20;
+export const autoAnswersStart = z.object({
+  ...answerOptions,
+  accountIds: z.array(text.min(1).max(100)).min(1, "请选择答题账号").max(zhidaoAnswerAccountLimit, "一次最多选择20个答题账号")
+    .refine((ids) => new Set(ids).size === ids.length, "答题账号不能重复"),
+  authorized: z.literal(true),
+});
+export type AutoAnswersStart = z.infer<typeof autoAnswersStart>;
+export const answerInput = z
+  .object({
+    ...answerOptions,
+    mode: z.enum(["manual", "auto"]),
+    question: text.max(5000).default(""),
+    accountId: text.max(100).default(""),
   })
   .refine(
     (v) => (v.mode === "manual" ? !!v.question : !!v.accountId),

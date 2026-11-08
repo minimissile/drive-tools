@@ -1,5 +1,8 @@
 import { useState } from "react";
-import type { RuntimeLogPage } from "../../shared/runtime-logs";
+import type {
+  RuntimeLogEntry,
+  RuntimeLogPage,
+} from "../../shared/runtime-logs";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useAppActions } from "../state";
 import { formatRuntimeLogs } from "../lib/runtime-log";
@@ -9,12 +12,18 @@ import { QueryError } from "../ui/QueryError";
 import { LogWindow } from "../ui/LogWindow";
 import { Dialog } from "../ui/Dialog";
 import { Pagination } from "../ui/Pagination";
+const plainMessage = (entry: RuntimeLogEntry) =>
+  entry.message.replace(
+    /[；;]\s*(?:zhactivity|autocare|carecycle)_[\w-]+$/u,
+    "",
+  );
 export function AutocareLogs({ names }: { names: Map<string, string> }) {
   const [search, setSearch] = useState(""),
     [onlyErrors, setOnlyErrors] = useState(false),
     [page, setPage] = useState(1),
     [follow, setFollow] = useState(true),
     [full, setFull] = useState(false),
+    [technical, setTechnical] = useState(false),
     [held, setHeld] = useState<{ key: string; data: RuntimeLogPage } | null>(
       null,
     );
@@ -22,7 +31,12 @@ export function AutocareLogs({ names }: { names: Map<string, string> }) {
     paused = held?.key === key;
   const q = useIpcQuery(
     "zhihu.autocare.logs",
-    { search, page, level: onlyErrors ? "issues" : "all" },
+    {
+      search,
+      page,
+      level: onlyErrors ? "issues" : "all",
+      excludeHeartbeats: true,
+    },
     { keepPrevious: true, delay: 150, refreshInterval: paused ? 0 : 3000 },
   );
   const data = paused ? held!.data : q.data;
@@ -52,7 +66,15 @@ export function AutocareLogs({ names }: { names: Map<string, string> }) {
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(
-              formatRuntimeLogs(data!.items, context),
+              technical
+                ? formatRuntimeLogs(data!.items, context)
+                : [...data!.items]
+                    .reverse()
+                    .map(
+                      (entry) =>
+                        `${new Date(entry.createdAt).toLocaleTimeString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" })} ${context(entry)} · ${plainMessage(entry)}`,
+                    )
+                    .join("\n"),
             );
             notify("本页日志已复制", "success");
           } catch {
@@ -77,40 +99,48 @@ export function AutocareLogs({ names }: { names: Map<string, string> }) {
   );
   const body = (
     <div className="autocare-log-body">
-      <div className="autocare-log-tools">
-        <Field label="搜索日志">
-          <input
-            value={search}
-            placeholder="消息、动作或任务ID"
-            maxLength={200}
+      <details className="autocare-log-options">
+        <summary>筛选与详细日志</summary>
+        <div className="autocare-log-tools">
+          <Field label="搜索日志">
+            <input
+              value={search}
+              placeholder="消息、动作或任务ID"
+              maxLength={200}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+                setHeld(null);
+              }}
+            />
+          </Field>
+          <CheckboxField
+            label="只看异常"
+            checked={onlyErrors}
             onChange={(e) => {
-              setSearch(e.target.value);
+              setOnlyErrors(e.target.checked);
               setPage(1);
               setHeld(null);
             }}
           />
-        </Field>
-        <CheckboxField
-          label="只看异常"
-          checked={onlyErrors}
-          onChange={(e) => {
-            setOnlyErrors(e.target.checked);
-            setPage(1);
-            setHeld(null);
-          }}
-        />
-        <CheckboxField
-          label="跟随最新"
-          checked={follow && !paused && page === 1}
-          onChange={(e) => {
-            setFollow(e.target.checked);
-            if (e.target.checked) {
-              setHeld(null);
-              setPage(1);
-            }
-          }}
-        />
-      </div>
+          <CheckboxField
+            label="跟随最新"
+            checked={follow && !paused && page === 1}
+            onChange={(e) => {
+              setFollow(e.target.checked);
+              if (e.target.checked) {
+                setHeld(null);
+                setPage(1);
+              }
+            }}
+          />
+          <CheckboxField
+            label="技术详情"
+            checked={technical}
+            onChange={(event) => setTechnical(event.target.checked)}
+          />
+        </div>
+      </details>
       <QueryError
         error={paused ? "" : q.error}
         loading={!paused && q.loading}
@@ -122,6 +152,8 @@ export function AutocareLogs({ names }: { names: Map<string, string> }) {
       {data?.items.length ? (
         <LogWindow
           items={data.items}
+          simple={!technical}
+          formatMessage={technical ? undefined : plainMessage}
           label="自动养号运行日志"
           context={context}
           follow={follow && !paused && page === 1}
@@ -151,7 +183,11 @@ export function AutocareLogs({ names }: { names: Map<string, string> }) {
             }}
             label="养号日志分页"
           />
-          <small className="muted autocare-wrap">本地日志：{data.folder}</small>
+          {technical ? (
+            <small className="muted autocare-wrap">
+              本地日志：{data.folder}
+            </small>
+          ) : null}
         </>
       ) : null}
     </div>

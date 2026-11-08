@@ -4,11 +4,11 @@
     "argumentHint": "[feature description]"
   },
   "init": {
-    "description": "Sets up a project for impeccable. Runs a multi-round discovery interview when context is missing and writes PRODUCT.md (strategic: users, brand, principles); offers DESIGN.md (visual: colors, typography, components) when code exists; pre-configures live mode; then recommends the best commands to run next. Every other command reads these files before doing work. Use once per project.",
+    "description": "Sets up product context from the request and repository evidence, writes PRODUCT.md, and configures useful workflow defaults. Ask only about material factual gaps; do not require a routine interview or approval round when the task is clear.",
     "argumentHint": ""
   },
   "document": {
-    "description": "Generate a DESIGN.md file that captures the current visual design system. Auto-extracts colors, typography, spacing, radii, and component patterns from the codebase, then asks the user to confirm descriptive language for atmosphere and color character. Follows the Google Stitch DESIGN.md format so the file is tool-compatible. Use when you need a visual design spec an AI agent can follow to stay on-brand.",
+    "description": "Generate or update DESIGN.md from the observed visual system: colors, typography, spacing, shapes, components, and evidence-based descriptive language. Preserve unrelated content and ask only about material unresolved facts, without a routine confirmation step. Follows the Google Stitch DESIGN.md format.",
     "argumentHint": ""
   },
   "extract": {
@@ -88,7 +88,7 @@
     "argumentHint": "[target]"
   },
   "shape": {
-    "description": "Plan UX and UI before code. Runs a required multi-round discovery interview, uses visual probes when available, and produces a user-confirmed design brief for implementation.",
+    "description": "Plan UX and UI before code. Derive a concise design brief from the request and available project evidence, using visual probes when useful; ask only about material unresolved requirements. Routine design decisions are made by the agent without an approval round.",
     "argumentHint": "[feature to shape]"
   },
   "typeset": {

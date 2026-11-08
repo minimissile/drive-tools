@@ -1,10 +1,17 @@
 import { z } from "zod";
+import type { LandingTraffic } from "./landing-traffic";
 
 const text = (min: number, max: number) => z.string().trim().min(min).max(max);
 const references = z.array(text(1, 80)).max(12);
+export const landingDescriptionLimit = 120;
+export const landingSearchPolicyVersion = "panxu-search-2026-11-04";
+export const landingDescriptionSchema = text(25, landingDescriptionLimit).regex(
+  /[。！？.!?][”’"']?$/,
+  "搜索摘要须以完整句子结束，不能截断。",
+);
 export const landingDraftSchema = z.object({
   title: text(8, 90),
-  description: text(25, 180),
+  description: landingDescriptionSchema,
   summary: text(30, 600),
   highlights: z.array(text(4, 160)).max(6),
   sections: z
@@ -30,10 +37,38 @@ export const landingDraftSchema = z.object({
     .max(6),
 });
 export type LandingDraft = z.infer<typeof landingDraftSchema>;
+/** Incomplete edits can be restored and repaired; publication remains strict. */
+const editableText = z.string().max(12000);
+export const landingEditableDraftSchema = z.object({
+  title: editableText,
+  description: editableText,
+  summary: editableText,
+  highlights: z.array(editableText).max(6),
+  sections: z
+    .array(
+      z.object({
+        heading: editableText,
+        kind: z.enum(["facts", "guide"]),
+        body: editableText,
+        evidenceIds: references,
+      }),
+    )
+    .max(7),
+  faq: z
+    .array(
+      z.object({
+        question: editableText,
+        answer: editableText,
+        kind: z.enum(["facts", "guide"]),
+        evidenceIds: references,
+      }),
+    )
+    .max(6),
+});
 /** Accept short model candidates for one repair pass; publication stays strict. */
 export const landingCandidateSchema = landingDraftSchema.extend({
   title: text(1, 90),
-  description: text(1, 180),
+  description: text(1, landingDescriptionLimit),
   summary: text(1, 600),
   highlights: z.array(text(1, 160)).max(6),
   sections: z
@@ -63,6 +98,7 @@ export const landingDimensionsSchema = z.object({
   trust: z.number().int().min(0).max(15),
 });
 export const landingReviewSchema = z.object({
+  policyVersion: text(1, 80).optional(),
   score: z.number().int().min(0).max(100),
   dimensions: landingDimensionsSchema.optional(),
   verdict: z.enum(["pass", "revise"]),
@@ -169,9 +205,7 @@ export function landingQuality(
     },
     {
       label: "搜索摘要是完整句子，没有超长或截断",
-      ok:
-        draft.description.length <= 120 &&
-        /[。！？.!?][”’"']?$/.test(draft.description),
+      ok: landingDescriptionSchema.safeParse(draft.description).success,
     },
     { label: "有可核对的文件信息", ok: source.files.length > 0 },
     {
@@ -328,6 +362,10 @@ export interface LandingContext {
   generating: boolean;
 }
 export interface ResourceLandingContract {
+  "resourceLanding.traffic": {
+    args: { resourceId: string };
+    value: LandingTraffic;
+  };
   "resourceLanding.readDocument": {
     args: { resourceId: string; fileEvidenceId: string; local?: boolean };
     value: LandingContext;
@@ -338,6 +376,16 @@ export interface ResourceLandingContract {
   };
   "resourceLanding.generate": {
     args: { resourceId: string; requestId: string; notes: string };
+    value: LandingContext;
+  };
+  "resourceLanding.optimize": {
+    args: {
+      resourceId: string;
+      requestId: string;
+      expectedDraftVersion: number;
+      notes: string;
+      draft: LandingDraft;
+    };
     value: LandingContext;
   };
   "resourceLanding.saveDraft": {

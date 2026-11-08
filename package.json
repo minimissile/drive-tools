@@ -12,9 +12,18 @@
     "dev:window": "node scripts/dev-window.mjs",
     "test:session": "node --import tsx scripts/run-dev-test-session.mjs",
     "build:icons": "node scripts/generate-icons.mjs",
-    "build": "tsc --noEmit && vite build && node scripts/build-desktop.mjs",
+    "build": "tsc --noEmit && vite build && npm run build:video && node scripts/build-desktop.mjs",
+    "build:video": "node scripts/build-video.mjs",
     "start": "electron .",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:video": "node --import tsx --test tests/video-renderer.test.ts tests/video-service.test.ts tests/video-ipc.test.ts tests/resource-video-source.test.ts tests/studio.test.ts",
+    "test:video:render": "npm run build:video && node --import tsx scripts/check-local-video-render.ts",
+    "test:video:frames": "node --import tsx scripts/check-video-directory-frames.ts",
+    "test:music": "node --import tsx --test tests/music-service.test.ts tests/music-backup.test.ts tests/music-ipc.test.ts",
+    "test:bilibili": "node --import tsx --test tests/bilibili-accounts.test.ts tests/bilibili-content.test.ts tests/bilibili-editor-page.test.ts",
+    "test:e2e:bilibili": "npm run test:session -- --module scripts/qa-bilibili-ui.mjs --label 哔哩哔哩内容界面 --close",
+    "test:e2e:hot-music": "npm run test:session -- --module scripts/qa-hot-music-ui.mjs --label 热门配乐界面 --close",
+    "test:e2e:local-video": "npm run test:session -- --module scripts/qa-local-video-ui.mjs --label 本地视频制作界面 --close",
     "test:e2e": "node scripts/e2e.mjs",
     "test:e2e:csdn": "node --import tsx scripts/e2e-csdn.mjs",
     "test:e2e:drives": "node scripts/e2e-drives.mjs",
@@ -59,13 +68,17 @@
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
+    "@remotion/bundler": "4.0.541",
+    "@remotion/renderer": "4.0.541",
     "builder-util-runtime": "9.7.0",
     "electron-updater": "6.8.9",
     "lucide-react": "1.57.0",
+    "mammoth": "1.13.0",
     "pdfjs-dist": "6.5.438",
     "playwright-core": "1.64.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "remotion": "4.0.541",
     "semver": "7.7.3",
     "zod": "4.6.7"
   },
@@ -100,6 +113,10 @@
     ],
     "asar": true,
     "extraResources": [
+      {
+        "from": "build/video-remotion",
+        "to": "video-remotion"
+      },
       {
         "from": "build/icon.png",
         "to": "brand/icon.png"
@@ -144,6 +161,8 @@
       "title": "盘序安装"
     },
     "asarUnpack": [
+      "node_modules/@remotion/compositor*/**",
+      "node_modules/@remotion/renderer/**",
       "node_modules/playwright-core/**"
     ],
     "artifactName": "Panxu-Studio-${version}-${os}-${arch}.${ext}",

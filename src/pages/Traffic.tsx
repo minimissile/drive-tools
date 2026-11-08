@@ -3,7 +3,6 @@ import { Header } from "../ui/primitives";
 import { useAppActions } from "../state";
 import TrafficKnowledge from "../traffic/TrafficKnowledge";
 import { useTrafficDiscovery } from "../traffic/useTrafficDiscovery";
-import { TrafficCosts } from "../traffic/TrafficCosts";
 import { TrafficQuery } from "../traffic/TrafficQuery";
 import { TrafficResults } from "../traffic/TrafficResults";
 import { TrafficPools } from "../traffic/TrafficPools";
@@ -22,17 +21,17 @@ export default function Traffic() {
       }}
     >
       <Header
-        title="发现新词，也发现新的内容机会。"
-        description="百度关键词、5118找词与热点候选；整理搜索需求，积累本地词池。"
+        title="流量词库"
+        description="筛选积累的关键词，整理词池，带入找词与内容创作。"
       />
       <TabList
-        label="流量发现功能"
+        label="流量词库功能"
         items={[
-          ["words", "找词与词池"],
+          ["knowledge", "关键词库"],
+          ["pools", "我的词池"],
+          ["words", "5118找词"],
           ["baidu", "百度营销"],
           ["hotspots", "找热点"],
-          ["costs", "调用与费用"],
-          ["knowledge", "本地知识库"],
         ]}
       />
       <TabPanel value={tab}>
@@ -40,6 +39,7 @@ export default function Traffic() {
           <BaiduTraffic onOpenKnowledge={() => setTab("knowledge")} />
         ) : tab === "knowledge" ? (
           <TrafficKnowledge
+            onOpenPools={() => setTab("pools")}
             onAppend={(words) => {
               const current = seeds
                 .split(/[,，\n]/)
@@ -61,13 +61,12 @@ export default function Traffic() {
               notify("已带入找词，可展开AI联想；尚未发出外部请求。", "info");
             }}
           />
-        ) : tab === "costs" ? (
-          <TrafficCosts />
+        ) : tab === "pools" ? (
+          <TrafficPools model={model} />
         ) : (
           <>
             <TrafficQuery model={model} />
             <TrafficResults model={model} />
-            <TrafficPools model={model} />
           </>
         )}
       </TabPanel>

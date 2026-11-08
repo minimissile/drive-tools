@@ -13,12 +13,25 @@ type SelectProps = Omit<
   ComponentProps<"button">,
   "value" | "onChange" | "children"
 > & {
-  value: string | number | undefined;
   items: SelectItem[];
-  onValueChange(value: string): void;
-};
+} & (
+    | {
+        multiple?: false;
+        value: string | number | undefined;
+        onValueChange(value: string): void;
+        placeholder?: never;
+        maxSelected?: never;
+      }
+    | {
+        multiple: true;
+        value: string[];
+        onValueChange(value: string[]): void;
+        placeholder: string;
+        maxSelected?: number;
+      }
+  );
 
-/** A single selection with native keyboard conventions and an app-owned popup. */
+/** Single and multiple selection share keyboard conventions, focus and popup styling. */
 export function Select({
   value,
   items,
@@ -27,20 +40,34 @@ export function Select({
   disabled,
   id,
   name,
+  multiple = false,
+  placeholder,
+  maxSelected,
   ...props
 }: SelectProps) {
   const fieldLabel = useContext(FieldLabelContext);
   const normalized = items.map((item) => ({
     ...item,
     value: String(item.value),
+    disabled:
+      item.disabled ||
+      (multiple &&
+        !!maxSelected &&
+        Array.isArray(value) &&
+        value.length >= maxSelected &&
+        !value.includes(String(item.value))),
   }));
-  const selectedValue = String(value ?? "");
+  const selectedValue = multiple ? (value as string[]) : String(value ?? "");
   return (
     <BaseSelect.Root
+      multiple={multiple}
       items={normalized}
       value={selectedValue}
       onValueChange={(next) => {
-        if (next !== null) onValueChange(next);
+        if (multiple && Array.isArray(next))
+          (onValueChange as (value: string[]) => void)(next);
+        else if (!multiple && typeof next === "string")
+          (onValueChange as (value: string) => void)(next);
       }}
       disabled={disabled}
       id={id}
@@ -53,9 +80,31 @@ export function Select({
           (props["aria-label"] ? undefined : fieldLabel)
         }
         className={`select-control ${className}`}
-        data-value={selectedValue}
+        data-value={
+          Array.isArray(selectedValue) ? selectedValue.join(",") : selectedValue
+        }
       >
-        <BaseSelect.Value className="select-value" />
+        <BaseSelect.Value className="select-value">
+          {multiple
+            ? (selected: string[]) =>
+                selected.length
+                  ? selected
+                      .map(
+                        (id) =>
+                          normalized.find((item) => item.value === id)?.label ??
+                          id,
+                      )
+                      .reduce<ReactNode[]>(
+                        (all, label, index) => [
+                          ...all,
+                          ...(index ? ["、"] : []),
+                          label,
+                        ],
+                        [],
+                      )
+                  : placeholder
+            : undefined}
+        </BaseSelect.Value>
         <BaseSelect.Icon className="select-chevron">
           <ChevronDown size={15} />
         </BaseSelect.Icon>

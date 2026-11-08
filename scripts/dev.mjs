@@ -10,6 +10,7 @@ import { createServer } from "vite";
 import updateConfig from "./update-config.cjs";
 import { syncMacDevIdentity } from "./dev-macos.mjs";
 import { acquireDevLock, stopDevChild } from "./dev-lifecycle.mjs";
+import { DevUpdates } from "./dev-updates.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const devPort = Number(process.env.PANXU_DEV_PORT || 8070);
@@ -20,29 +21,30 @@ const output = join(root, "dist-dev");
 const descriptorPath = join(root, ".panxu-dev-session.json");
 const sessionToken = randomBytes(32).toString("hex");
 const sessionRequests = new Map();
-let sessions = [],
+let sessions = process.env.PANXU_DEV_SESSIONS
+    ? JSON.parse(process.env.PANXU_DEV_SESSIONS)
+    : [],
   desktopReady = false,
   cdpPort;
 const require = createRequire(import.meta.url);
-const states = new Map(),
-  builds = [];
+const builds = [];
 let devExecutable = require("electron");
 let child,
   server,
   releaseDevLock,
   starting,
-  debounce,
-  retry,
   stopping = false,
   restartPending = false,
   revision = 0;
-let lastBusy = "";
 const log = (message) => console.log(`[盘序开发] ${message}`);
+const updates = new DevUpdates(["main", "preload"], publishUpdates);
+function publishUpdates() {
+  if (desktopReady && child?.connected && !stopping)
+    child.send({ type: "panxu:dev-updates", state: updates.state }, () => {});
+}
 async function stop(code = 0) {
   if (stopping) return;
   stopping = true;
-  clearTimeout(debounce);
-  clearTimeout(retry);
   // Let in-flight startup finish assigning resources before disposing them.
   // launch() checks stopping, so cancellation cannot open another desktop.
   await starting?.catch(() => {});
@@ -106,15 +108,19 @@ function launch() {
       }
     }
     if (message?.type === "panxu:dev-busy") {
-      if (message.reason !== lastBusy)
-        log(`后端已更新，等待安全重启：${message.reason}`);
-      lastBusy = message.reason;
-      clearTimeout(retry);
-      retry = setTimeout(requestRestart, 1500);
+      restartPending = false;
+      updates.cancel(
+        message.reason || "当前还有任务，请稍后再次点击应用更新。",
+      );
+      log(`本次未重启；完成当前操作后请再次点击应用更新。`);
+    }
+    if (message?.type === "panxu:dev-apply-updates") {
+      void applyUpdates().catch((error) => log(error.message));
     }
     if (message?.type === "panxu:dev-ready") {
       ready = true;
       desktopReady = true;
+      updates.ready();
       log(`开发窗口就绪 · 后端 #${message.revision} · PID ${current.pid}`);
     }
   });
@@ -133,8 +139,7 @@ function launch() {
     sessionRequests.clear();
     if (restartPending && !stopping) {
       restartPending = false;
-      lastBusy = "";
-      launch();
+      void installAndLaunch();
     } else if (!stopping) {
       if (code || !ready)
         console.error(
@@ -202,10 +207,17 @@ function sessionsMiddleware(request, response, next) {
           "dev.session.update",
           "dev.session.close",
           "dev.session.focus",
+          "dev.updates",
+          "dev.applyUpdates",
         ].includes(input.action)
       )
         throw new Error("未知的会话操作。");
-      const value = await sessionRequest(input.action, input.args);
+      const value =
+        input.action === "dev.updates"
+          ? updates.state
+          : input.action === "dev.applyUpdates"
+            ? await applyUpdates()
+            : await sessionRequest(input.action, input.args);
       response.end(JSON.stringify({ value }));
     } catch (error) {
       response.statusCode = 400;
@@ -233,33 +245,63 @@ async function debuggingPort() {
   );
   return port;
 }
-function requestRestart() {
-  if (stopping || [...states.values()].some((v) => !v)) return;
-  if (!child) {
+async function installAndLaunch() {
+  try {
+    revision = await updates.install();
     launch();
-    return;
+  } catch (error) {
+    updates.cancel(`后端更新写入失败：${error.message}`);
+    console.error(error.message);
+    await stop(1);
   }
-  restartPending = true;
-  if (child.connected) child.send({ type: "panxu:dev-restart" }, () => {});
+}
+async function applyUpdates() {
+  if (stopping) throw new Error("开发服务正在停止。");
+  if (updates.state.applying) return updates.state;
+  // No retry timer: one user action authorizes exactly one restart attempt.
+  try {
+    updates.begin();
+    if (!child) {
+      await installAndLaunch();
+    } else if (desktopReady && child.connected) {
+      restartPending = true;
+      child.send({ type: "panxu:dev-restart" }, (error) => {
+        if (!error) return;
+        restartPending = false;
+        updates.cancel("重启请求发送失败，请检查开发服务后重试。");
+      });
+    } else {
+      throw new Error("开发窗口尚未就绪，请稍后重试。");
+    }
+  } catch (error) {
+    updates.cancel(error.message);
+  }
+  return updates.state;
 }
 function watchPlugin(name) {
   return {
     name: `panxu-dev-${name}`,
     setup(build) {
       build.onStart(() => {
-        states.set(name, false);
+        updates.start(name);
       });
       build.onEnd((result) => {
-        states.set(name, result.errors.length === 0);
+        const previousRevision = updates.state.revision;
+        updates.finish(name, result);
         if (result.errors.length) {
-          log(
-            `${name}编译失败，当前窗口继续使用上一次可用后端；修复后自动重试。`,
-          );
+          log(`${name}编译失败，当前窗口继续使用上一次可用后端。`);
           return;
         }
-        revision++;
-        clearTimeout(debounce);
-        debounce = setTimeout(requestRestart, 250);
+        if (updates.state.revision !== previousRevision && child)
+          log(`后端 #${updates.state.revision} 编译完成，等待手动应用。`);
+        // Only first startup is automatic; all later generations stay pending.
+        if (
+          !child &&
+          !updates.state.compiling &&
+          !updates.state.buildError &&
+          !stopping
+        )
+          void applyUpdates();
       });
     },
   };
@@ -325,7 +367,12 @@ async function start() {
             response.setHeader("Content-Type", "application/json");
             response.setHeader("Cache-Control", "no-store");
             response.end(
-              JSON.stringify({ root, mode: "development", revision }),
+              JSON.stringify({
+                root,
+                mode: "development",
+                revision,
+                updatePolicy: "manual",
+              }),
             );
           });
         },
@@ -352,6 +399,7 @@ async function start() {
     platform: "node",
     target: "node24",
     sourcemap: true,
+    write: false,
     logLevel: "info",
   };
   for (const [name, options] of [
@@ -374,14 +422,13 @@ async function start() {
       },
     ],
   ]) {
-    states.set(name, false);
     builds.push(
       await context({ ...common, ...options, plugins: [watchPlugin(name)] }),
     );
   }
   log(`源码：${root}`);
   log(
-    `前端 ${devUrl} · React/CSS热更新 · core/shared/desktop修改后自动编译，空闲时重启后端。`,
+    `前端 ${devUrl} · React/CSS热更新 · 后端修改自动编译，点击“应用更新并重启”后统一加载。`,
   );
   log(
     "开发输出使用 dist-dev，生产 build 不会覆盖当前调试后端。Ctrl+C停止开发服务。",

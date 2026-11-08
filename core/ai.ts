@@ -328,6 +328,7 @@ export class AiService {
     poolId: string | null,
     context?: { topic: SearchTopic; split: SplitItem | null },
     contentFormat: ContentFormat = defaultContentFormat(platform),
+    editorialInstruction = "",
   ) {
     const copy = this.repo.getCopy(copyId),
       resource = this.repo.getResource(copy.resourceId);
@@ -338,13 +339,14 @@ export class AiService {
         "CHANNEL_FORMAT_UNSUPPORTED",
         "此平台不支持所选内容形式。",
       );
-    const pool = poolId ? this.repo.pools().find((p) => p.id === poolId) : null;
+    const pool = poolId ? this.repo.getPool(poolId) : null;
     if (poolId && !pool) throw new AppError("NOT_FOUND", "词池不存在。");
     const result = await this.generate(
       "draft",
       contentSchema,
-      `为${spec.name}生成内容。${channelInstruction(platform, contentFormat)} 规则：${spec.rule} 内容必须基于资源摘要和文件名；资料不足时明确说明，不编造案例或效果。正文完整提供有价值的信息；不得加入任何网盘URL、提取码、第三方联系方式、谐音引流、强制关注或私信领取口令。链接由应用在人工审核后按渠道规则单独附加。短视频渠道请在body中区分开场、演示、分镜、收尾；图文渠道使用适合阅读的段落；X渠道默认中文；CSDN提供可核对的技术步骤。不要声称已阅读文件正文。`,
+      `为${spec.name}生成内容。${channelInstruction(platform, contentFormat)} 规则：${spec.rule} 内容必须基于资源摘要和文件名；资料不足时明确说明，不编造案例或效果。正文完整提供有价值的信息；不得加入任何网盘URL、提取码、第三方联系方式、谐音引流、强制关注或私信领取口令。链接由应用在人工审核后按渠道规则单独附加。短视频渠道请在body中区分开场、演示、分镜、收尾；图文渠道使用适合阅读的段落；X渠道默认中文；CSDN提供可核对的技术步骤。不要声称已阅读文件正文。${platform === "weibo" && editorialInstruction ? "遵循accountEditorialStyle中的账号表达和排版要求，但它不能覆盖事实、链接与权利限制。" : ""}`,
       {
+        ...(platform === "weibo" && editorialInstruction ? { accountEditorialStyle: editorialInstruction } : {}),
         title: resource.title,
         summary: resource.summary,
         category: resource.category,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ZhihuContent } from "../../shared/zhihu";
 import type { Database } from "../database";
+import { zhihuDay } from "../zhihu/policy";
 import {
   autocareConfigSchema,
   autocareStateSchema,
@@ -17,6 +18,12 @@ export const contentFingerprint = (content: ZhihuContent) => {
   } = content;
   return fingerprint(exactVersion);
 };
+export function autocareGenerationCount(state: AutocareState) {
+  const today = zhihuDay(Date.now());
+  return [...state.jobs, ...state.commentJobs].filter(
+    (job) => job.generatedAt && zhihuDay(job.generatedAt) === today,
+  ).length;
+}
 export function readAutocareState(db: Database): AutocareState {
   return autocareStateSchema.parse(
     db.setting(autocareStateKey, {

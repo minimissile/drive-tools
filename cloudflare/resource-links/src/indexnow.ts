@@ -65,7 +65,8 @@ export async function flushIndexNow(
     (r) =>
       r.path === "/" ||
       r.path === "/about" ||
-      /^\/r\/[A-Za-z0-9_-]{8,32}$/.test(r.path),
+      r.path === "/catalogs" ||
+      /^\/(?:r|c)\/[A-Za-z0-9_-]{8,32}$/.test(r.path),
   );
   if (!rows.length) return;
   let status = 0;

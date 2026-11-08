@@ -249,9 +249,19 @@ test("Baidu task tables require a genuine monthly column and support stable repl
   assert.equal(a.received, 2);
   assert.equal(a.chunks[0].id, b.chunks[0].id);
   assert.equal(a.chunks[0].keywords[1].metrics.averageMonthPv, "<5");
-  const repeated=baiduTaskKeywordChunks("web_test","123456","same-word","结果.xlsx",xlsx([["关键词","月均搜索量"],["Ａ","20"],["a","30"]]));
-  assert.equal(repeated.received,1);
-  assert.equal(repeated.chunks[0].keywords[0].metrics.averageMonthPv,"30");
+  const repeated = baiduTaskKeywordChunks(
+    "web_test",
+    "123456",
+    "same-word",
+    "结果.xlsx",
+    xlsx([
+      ["关键词", "月均搜索量"],
+      ["Ａ", "20"],
+      ["a", "30"],
+    ]),
+  );
+  assert.equal(repeated.received, 1);
+  assert.equal(repeated.chunks[0].keywords[0].metrics.averageMonthPv, "30");
   assert.throws(
     () =>
       baiduTaskKeywordChunks(
@@ -267,15 +277,30 @@ test("Baidu task tables require a genuine monthly column and support stable repl
     { code: "BAIDU_TASK_MONTHLY_MISSING" },
   );
 });
-test("Malformed rows and template metadata are rejected before they can replace a successful result",()=>{
-  for(const [v,data] of [
-    [{operation:"rank",businessId:"2001_200103_0"},{pageData:[null],total:1}],
-    [{operation:"flow",words:["网盘"]},{data:[{keywordName:""}],totalCount:1}],
-    [{operation:"massList"},{keywordSuggestAsynTaskInfos:[{taskId:1}],totalCount:1}],
-    [{operation:"templates"},[null]],
-    [{operation:"templateDetail",templateId:1},[{dimensionName:"词性"}]],
-    [{operation:"industryTree"},{changed:[]}],
-  ] as const)assert.throws(()=>parse(input(v),response(data)),{code:"BAIDU_SCHEMA_CHANGED"});
+test("Malformed rows and template metadata are rejected before they can replace a successful result", () => {
+  for (const [v, data] of [
+    [
+      { operation: "rank", businessId: "2001_200103_0" },
+      { pageData: [null], total: 1 },
+    ],
+    [
+      { operation: "flow", words: ["网盘"] },
+      { data: [{ keywordName: "" }], totalCount: 1 },
+    ],
+    [
+      { operation: "massList" },
+      { keywordSuggestAsynTaskInfos: [{ taskId: 1 }], totalCount: 1 },
+    ],
+    [{ operation: "templates" }, [null]],
+    [
+      { operation: "templateDetail", templateId: 1 },
+      [{ dimensionName: "词性" }],
+    ],
+    [{ operation: "industryTree" }, { changed: [] }],
+  ] as const)
+    assert.throws(() => parse(input(v), response(data)), {
+      code: "BAIDU_SCHEMA_CHANGED",
+    });
 });
 test("Baidu research cache is local, account-isolated, durable ingestion is idempotent and failures retain prior result", async () => {
   const f = await fixture();
@@ -319,6 +344,7 @@ test("Baidu research cache is local, account-isolated, durable ingestion is idem
         provider: "baidu-marketing",
       }),
       v = input({ accountId: a.id, operation: "flow", words: ["网盘"] });
+    await invoke("websiteAccounts.check", { id: a.id });
     assert.equal(
       await invoke("baiduResearch.latest", {
         accountId: a.id,
@@ -343,7 +369,10 @@ test("Baidu research cache is local, account-isolated, durable ingestion is idem
       endpoint: "baidu-keywords",
     });
     assert.equal(before.total, 1);
-    assert.equal(before.summary.observations, 1);
+    assert.equal(
+      (await invoke("traffic.knowledge.overview")).summary.observations,
+      1,
+    );
     bad = true;
     await assert.rejects(invoke("baiduResearch.run", v), {
       code: "BAIDU_SCHEMA_CHANGED",
@@ -381,23 +410,32 @@ test("Baidu research cache is local, account-isolated, durable ingestion is idem
         resultId: tasks.id,
         row: 0,
       });
-      assert.equal(stats.indexed, 1);
+      assert.equal(stats.indexed, 2);
       assert.equal(stats.refreshedBelowThreshold, 1);
     }
     const after = await invoke("traffic.knowledge.list", {
       endpoint: "baidu-keywords",
     });
-    assert.equal(after.total, 2);
-    assert.equal(after.summary.observations, 3);
+    assert.equal(after.total, 3);
+    assert.equal(
+      (await invoke("traffic.knowledge.overview")).summary.observations,
+      4,
+    );
     assert.equal(
       after.items.find((x) => x.word === "网盘")?.metrics.averageMonthPv,
       "<5",
     );
     assert.equal(
       after.items.some((x) => x.word === "十次"),
-      false,
+      true,
     );
-    uid = "654321";
+    // A cached result from another identity must not be read or exported.
+    f.app.db.run(
+      "UPDATE api_cache SET value=json_set(value,'$.accountUid',?) WHERE key IN (?,?)",
+      "654321",
+      `baidu-research:latest:${a.id}:flow`,
+      `baidu-research:result:${a.id}:${r.id}`,
+    );
     assert.equal(
       await invoke("baiduResearch.latest", {
         accountId: a.id,

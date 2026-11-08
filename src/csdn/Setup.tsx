@@ -103,7 +103,7 @@ export function CsdnSetup({ onCreated }: { onCreated(id: string): void }) {
         extra={
           <Button quiet onClick={() => navigate("traffic")}>
             <Radar size={14} />
-            去流量发现找词
+            去流量词库找词
           </Button>
         }
       >

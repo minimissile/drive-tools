@@ -253,7 +253,7 @@ export function CatalogPublishing({
       <Panel
         title="发布交接"
         extra={
-          <Button quiet disabled={!!pending} onClick={onManageAccounts}>
+          <Button disabled={!!pending} onClick={onManageAccounts}>
             管理文档账号
           </Button>
         }
@@ -335,7 +335,7 @@ export function CatalogPublishing({
               <Notice>
                 尚未连接{documentPlatformSpecs[provider].name}。请到“账号管理 →
                 其他账号”添加账号并登录。
-                <Button quiet disabled={!!pending} onClick={onManageAccounts}>
+                <Button disabled={!!pending} onClick={onManageAccounts}>
                   去添加账号
                 </Button>
               </Notice>
@@ -427,7 +427,6 @@ export function CatalogPublishing({
                     {active.publicationId ? "打开原文档" : "打开官方工作台"}
                   </Button>
                   <Button
-                    quiet
                     disabled={!!pending || archived}
                     onClick={() => exportContent("xlsx")}
                   >
@@ -435,7 +434,6 @@ export function CatalogPublishing({
                     导出表格
                   </Button>
                   <Button
-                    quiet
                     disabled={!!pending || archived}
                     onClick={() => exportContent("md")}
                   >
@@ -542,7 +540,6 @@ export function CatalogPublishing({
                     打开原文档
                   </Button>
                   <Button
-                    quiet
                     disabled={!!pending}
                     onClick={() => copyLink(publication.url, publication.id)}
                   >
@@ -626,7 +623,6 @@ export function CatalogPublishing({
                     </span>
                     <p className="catalog-publication-url">{receipt.url}</p>
                     <Button
-                      quiet
                       disabled={!!pending}
                       onClick={() => copyLink(receipt.url, "history")}
                     >

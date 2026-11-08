@@ -16,12 +16,12 @@ import { Database, now } from "./database";
 import { AppError, safeMessage } from "./errors";
 import { parseShare } from "./links";
 import type { AppPorts } from "./ports";
+import type { SecretStore } from "./secrets";
 import { DistributionStore } from "./distribution/store";
 import {
   libraryShareCounts,
   shareSource,
   shareSourcePage,
-  type ShareSource,
 } from "./distribution/sources";
 
 /** Platform-local durable queues. Only explicit Prepare/Start may access remote websites. */
@@ -32,10 +32,7 @@ export class Distribution {
   constructor(
     private db: Database,
     private ports: AppPorts,
-    private link: (
-      source: ShareSource,
-      permanentOnly: boolean,
-    ) => Promise<string>,
+    private secrets: Pick<SecretStore, "get">,
     private changed: () => void,
   ) {
     this.store = new DistributionStore(db);
@@ -168,6 +165,7 @@ export class Distribution {
       [
         "ready",
         "blocked",
+        "preparing",
         "verifying",
         "waiting_verification",
         "submitting",
@@ -425,18 +423,19 @@ export class Distribution {
                 continue;
               }
             }
+            // Read the existing URL and locally encrypted extraction code only.
+            // Distribution never invokes copy.link/split.link or drive providers.
             const source = this.current(task),
-              raw = await this.link(source, !!platform.permanentOnly);
+              code = await this.secrets.get(
+                source.splitItemId
+                  ? `split:${source.splitItemId}`
+                  : `share:${source.copyId}`,
+              );
             if (this.closed) return;
             signal.throwIfAborted();
             this.current(task);
-            const share = parseShare(raw),
+            const share = parseShare(source.shareUrl!, code ?? ""),
               url = new URL(share.url);
-            if (share.url !== task.shareUrl)
-              throw new AppError(
-                "DISTRIBUTION_SHARE_CHANGED",
-                "核验返回了不同分享，已停止该条分发。",
-              );
             if (share.code)
               url.searchParams.set(
                 share.provider === "guangya" ? "code" : "pwd",
@@ -458,7 +457,7 @@ export class Distribution {
             this.store.state(
               platformId,
               "running",
-              `正在核验本批本人分享 ${ready.length}/${tasks.length}，已提交 ${summary.submitted + summary.processing + summary.reviewing + summary.published} 条。`,
+              `正在准备本批已入库链接 ${ready.length}/${tasks.length}，已提交 ${summary.delivered} 条。`,
             );
             this.changed();
           } catch (error) {
@@ -473,7 +472,7 @@ export class Distribution {
             batchId,
             [],
             "skipped",
-            "本批没有通过核验的分享，未向平台提交。",
+            "本批没有可提交的已入库链接，未向平台提交。",
           );
           continue;
         }
@@ -508,15 +507,22 @@ export class Distribution {
           () => {
             if (this.closed) throw new AppError("CLOSED", "工作空间已关闭。");
             signal.throwIfAborted();
-            const message = `本批 ${ready.length} 条链接已填入官网。请在验证码窗口手动输入验证码，然后回盘序点击“提交本批”。`;
+            const message =
+              platform.manualVerification !== true
+                ? `本批 ${ready.length} 条链接正在等待官网安全验证。请在打开的官网窗口完成验证，官网随后会继续提交。`
+                : `本批 ${ready.length} 条链接已填入官网。请在验证码窗口手动输入验证码，然后回盘序点击“提交本批”。`;
             this.db.transaction(() => {
-              for (const task of ready)
-                this.store.event(task.id, "waiting_verification", message);
-              this.db.run(
-                "UPDATE distribution_batches SET status='waiting_verification',message=? WHERE id=?",
-                message,
-                batchId,
-              );
+              // A website may open its CAPTCHA only after the official submit
+              // click. Keep that checkpoint durable until its outcome is known.
+              if (!sent) {
+                for (const task of ready)
+                  this.store.event(task.id, "waiting_verification", message);
+                this.db.run(
+                  "UPDATE distribution_batches SET status='waiting_verification',message=? WHERE id=?",
+                  message,
+                  batchId,
+                );
+              }
               this.store.state(platformId, "waiting_verification", message);
             });
             this.changed();
@@ -588,9 +594,12 @@ export class Distribution {
             ? "已暂停，尚未发送的记录保留待分发。"
             : safeMessage(error);
         const outstanding = tasks.filter((task) =>
-          ["verifying", "waiting_verification", "submitting"].includes(
-            this.store.get(task.id).status,
-          ),
+          [
+            "preparing",
+            "verifying",
+            "waiting_verification",
+            "submitting",
+          ].includes(this.store.get(task.id).status),
         );
         this.store.finishBatch(
           batchId,

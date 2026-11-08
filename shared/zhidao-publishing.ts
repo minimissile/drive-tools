@@ -13,6 +13,9 @@ export interface QuestionDraftInsertResult {
   duplicates: number;
   titleIssues: number;
   runId: string | null;
+  failed?: number;
+  uncertain?: number;
+  pending?: number;
 }
 
 export function zhidaoContentIssue(item: { question: string; answer: string }) {

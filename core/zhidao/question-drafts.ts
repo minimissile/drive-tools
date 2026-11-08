@@ -10,13 +10,33 @@ import { safeHtmlAnswer } from "./parsers";
 import { parseShare } from "../links";
 import { AppError } from "../errors";
 
-function shuffled<T>(entries: T[]): T[] {
+export function shuffled<T>(entries: T[]): T[] {
   const values = [...entries];
   for (let index = values.length - 1; index > 0; index--) {
     const next = randomInt(index + 1);
     [values[index], values[next]] = [values[next], values[index]];
   }
   return values;
+}
+
+export function questionDraftCandidates<
+  T extends { key: string; title: string },
+>(store: OperationsStore, sourceId: string, questions: T[]): T[] {
+  const existing = store.db.all<{ question: string; key: string }>(
+    "SELECT json_extract(i.data,'$.question') question,i.item_key key FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE r.kind IN ('template','answer','publish') AND i.status!='skipped'",
+  );
+  const titles = new Set(
+    existing.map((row) => questionFingerprint(row.question || "")),
+  );
+  const sourceKeys = new Set(existing.map((row) => row.key));
+  return questions.filter((question) => {
+    const key = `question-import:${sourceId}:${question.key}`;
+    const title = questionFingerprint(question.title);
+    if (sourceKeys.has(key) || titles.has(title)) return false;
+    sourceKeys.add(key);
+    titles.add(title);
+    return true;
+  });
 }
 
 /** Local question rows join the existing edit, review and upload workflow. No model or platform calls. */
@@ -67,21 +87,11 @@ export function insertQuestionDrafts(
       "请填写有具体内容的资料文案，不能只有链接或提取码。",
     );
   return store.db.transaction(() => {
-    const existing = store.db.all<{ question: string; key: string }>(
-      "SELECT json_extract(i.data,'$.question') question,i.item_key key FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE r.kind IN ('template','answer','publish') AND i.status!='skipped'",
+    const questions = questionDraftCandidates(
+      store,
+      source.id,
+      source.questions,
     );
-    const titles = new Set(
-      existing.map((row) => questionFingerprint(row.question || "")),
-    );
-    const sourceKeys = new Set(existing.map((row) => row.key));
-    const questions = source.questions.filter((question) => {
-      const key = `question-import:${source.id}:${question.key}`;
-      const title = questionFingerprint(question.title);
-      if (sourceKeys.has(key) || titles.has(title)) return false;
-      sourceKeys.add(key);
-      titles.add(title);
-      return true;
-    });
     if (!questions.length)
       return {
         added: 0,

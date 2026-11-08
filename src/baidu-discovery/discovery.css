@@ -345,6 +345,31 @@
   align-content: start;
   min-width: 0;
 }
+.baidu-question-import {
+  display: grid;
+  gap: var(--space-2);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+  font-size: 12px;
+}
+.baidu-question-import p {
+  margin: 0;
+}
+.baidu-question-import small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.baidu-question-import-issue {
+  display: grid;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+}
+.baidu-question-import-issue > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
 .baidu-material-generator {
   padding-top: var(--space-3);
   border-top: 1px solid var(--line);

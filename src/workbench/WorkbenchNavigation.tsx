@@ -13,12 +13,28 @@ const items = workbenchEntries.map((entry) => ({
     : entry.title,
 }));
 
-/** One return path and tool switcher for every operational page. */
+/** Window history and the current workspace hierarchy share one navigation row. */
 export function WorkbenchNavigation() {
-  const { page, navigate, edit } = useAppNavigation();
+  const { page, navigate, edit, goBack, previousPage } = useAppNavigation();
   const secondary = sidebarPage(page) === "workbench" && page !== "workbench";
   return (
     <nav className="workspace-breadcrumb" aria-label="当前位置">
+      <Button
+        quiet
+        size="compact"
+        className="navigation-back"
+        aria-label="返回上一页"
+        title={
+          previousPage
+            ? `返回${pageTitle(previousPage) ?? "上一页"}`
+            : "暂无上一页"
+        }
+        disabled={!previousPage}
+        onClick={goBack}
+      >
+        <ArrowLeft size={15} aria-hidden="true" />
+        返回
+      </Button>
       <span>我的工作空间</span>
       <ChevronRight size={13} aria-hidden="true" />
       {secondary ? (
@@ -29,7 +45,6 @@ export function WorkbenchNavigation() {
             aria-label="返回工作台"
             onClick={() => navigate("workbench")}
           >
-            <ArrowLeft size={13} aria-hidden="true" />
             工作台
           </Button>
           <ChevronRight size={13} aria-hidden="true" />

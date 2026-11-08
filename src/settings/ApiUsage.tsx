@@ -1,21 +1,16 @@
-import {
-  useAppActions,
-  useAppActivity,
-  useAppData,
-  useAppNavigation,
-} from "../state";
+import { useAppActions, useAppActivity, useAppData } from "../state";
 import { Button, Empty, Notice, Panel } from "../ui/primitives";
+import { focusSection } from "../ui/SectionNav";
 
 import { formatMoney, formatTime } from "../lib/format";
 import { endpointSpecs } from "../../shared/platforms";
 
 import type { Endpoint } from "../../shared/types";
 
-export function TrafficCosts() {
+export function ApiUsage() {
   const { data } = useAppData();
 
   const { command, notify } = useAppActions();
-  const { navigate } = useAppNavigation();
   const { busy } = useAppActivity();
   const { cny, usd } = data!.apiUsage;
   return (
@@ -75,7 +70,9 @@ export function TrafficCosts() {
       <Panel
         title="计费口径"
         extra={
-          <Button onClick={() => navigate("settings")}>接口与套餐设置</Button>
+          <Button onClick={() => focusSection("settings-traffic")}>
+            接口与套餐设置
+          </Button>
         }
       >
         <div className="table-scroll">
@@ -139,8 +136,10 @@ export function TrafficCosts() {
                     <small>
                       {c.endpoint === "openrouter"
                         ? "OpenRouter（美元）"
-                        : (endpointSpecs[c.endpoint as Endpoint]?.name ??
-                          c.endpoint)}
+                        : c.endpoint === "tikhub:music"
+                          ? "TikHub 音乐（美元）"
+                          : (endpointSpecs[c.endpoint as Endpoint]?.name ??
+                            c.endpoint)}
                     </small>
                   </td>
                   <td>{c.requestCount}</td>
@@ -148,7 +147,10 @@ export function TrafficCosts() {
                   <td>
                     {formatMoney(
                       c.estimatedMicros,
-                      c.endpoint === "openrouter" ? "USD" : "CNY",
+                      c.endpoint === "openrouter" ||
+                        c.endpoint === "tikhub:music"
+                        ? "USD"
+                        : "CNY",
                     )}
                   </td>
                   <td>
@@ -156,7 +158,10 @@ export function TrafficCosts() {
                       ? "未返回/未同步"
                       : formatMoney(
                           c.confirmedMicros,
-                          c.endpoint === "openrouter" ? "USD" : "CNY",
+                          c.endpoint === "openrouter" ||
+                            c.endpoint === "tikhub:music"
+                            ? "USD"
+                            : "CNY",
                         )}
                   </td>
                   <td>
@@ -169,6 +174,7 @@ export function TrafficCosts() {
                             uncertain: "待核实",
                             reserved: "已预留",
                             failed: "失败",
+                            error: "失败",
                           } as Record<string, string>
                         )[c.status]
                       }

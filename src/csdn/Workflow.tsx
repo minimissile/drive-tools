@@ -1,6 +1,7 @@
+import { AiIcon } from "../ui/AiIcon";
 import { useState } from "react";
 import { z } from "zod";
-import { Plus, Sparkles } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppActions, useAppActivity, useAppData } from "../state";
@@ -217,7 +218,7 @@ export default function CsdnWorkflowPage() {
                           void command("csdn.generate", { id: run.id })
                         }
                       >
-                        <Sparkles size={15} />
+                        <AiIcon size={15} />
                         {run.stage === "attention"
                           ? "重试生成教程"
                           : "使用 AI 生成教程"}

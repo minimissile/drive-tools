@@ -10,6 +10,7 @@ import { SecretField } from "../settings/SecretField";
 import { ApiPlanForm } from "../settings/ApiPlanForm";
 import { ContentSourcesSettings } from "../settings/ContentSources";
 import { ResourceLinksSettings } from "../settings/ResourceLinksSettings";
+import { ApiUsage } from "../settings/ApiUsage";
 
 import { useState } from "react";
 import { Database, FolderOpen, Link, Save } from "lucide-react";
@@ -181,10 +182,15 @@ export default function Settings() {
                 文案、分析、识图、图片和视频共用此Key及预算。留空不限制本地每日金额，服务商额度仍以账号实际状态为准。费用台账继续保留。
               </small>
               <div className="settings-operation-row">
-                <Button size="compact" onClick={() => navigate("intelligent-operations")}>
+                <Button
+                  size="compact"
+                  onClick={() => navigate("intelligent-operations")}
+                >
                   智能运营中心
                 </Button>
-                <small>运营计划共用此处的分析模型和预算；普通排期在本地完成。</small>
+                <small>
+                  运营计划共用此处的分析模型和预算；普通排期在本地完成。
+                </small>
               </div>
               <small>
                 OpenRouter按实际返回的usage.cost记录美元金额。AI资源导出还会发送你提交的参考图片及范围内的资源文字、个人笔记片段；文字中的链接和常见凭据字段会剔除。图片请自行遮盖敏感信息。
@@ -224,6 +230,16 @@ export default function Settings() {
               </div>
             </Panel>
           </div>
+          <section
+            id="settings-costs"
+            tabIndex={-1}
+            aria-labelledby="settings-costs-title"
+          >
+            <h2 id="settings-costs-title" className="settings-section-title">
+              调用与费用
+            </h2>
+            <ApiUsage />
+          </section>
           <div id="settings-sources" tabIndex={-1}>
             <ContentSourcesSettings />
           </div>

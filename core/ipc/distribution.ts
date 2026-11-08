@@ -17,10 +17,7 @@ export function createDistributionHandlers(
     "distribution.prepare": (object) =>
       services.distribution.prepare(platformInput.parse(object).platformId),
     "distribution.start": (object) =>
-      services.distribution.start(
-        platformInput.extend({ rightsConfirmed: z.literal(true) }).parse(object)
-          .platformId,
-      ),
+      services.distribution.start(platformInput.parse(object).platformId),
     "distribution.pause": (object) =>
       services.distribution.pause(platformInput.parse(object).platformId),
     "distribution.continue": (object) =>

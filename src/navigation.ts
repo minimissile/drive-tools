@@ -36,7 +36,7 @@ export const sidebarEntries: NavigationEntry[] = [
   { page: "workbench", title: "工作台", Icon: LayoutDashboard },
   { page: "library", title: "资源库", Icon: Library, group: "内容资产" },
   { page: "resource-catalog", title: "资源清单", Icon: ListChecks },
-  { page: "traffic", title: "流量发现", Icon: Radar, group: "内容规划" },
+  { page: "traffic", title: "流量词库", Icon: Radar, group: "内容规划" },
   { page: "intelligent-operations", title: "智能运营", Icon: BrainCircuit },
   { page: "search", title: "搜索运营", Icon: Workflow },
   { page: "distribution", title: "内容分发", Icon: Share2 },
@@ -122,10 +122,26 @@ export const csdnOperations: WorkbenchEntry[] = [
   },
 ];
 export const weiboOperations: WorkbenchEntry[] = [
-  { page: "weibo-marketing", title: "微博图文营销", description: "选词配资料，准备图文包，回填发布与效果", Icon: Send },
+  { page: "weibo-marketing", title: "微博内容", description: "按账号管理选题、草稿、发布与数据复盘", Icon: Send },
+];
+export const bilibiliOperations: WorkbenchEntry[] = [
+  {
+    page: "bilibili-content",
+    title: "哔哩哔哩内容",
+    description: "连接账号，制作视频、图文动态与专栏稿件并准备投稿",
+    Icon: NotebookPen,
+  },
 ];
 export const zhihuOperations: WorkbenchEntry[] = [
-  { page: "zhihu-operations", title: "知乎自动养号", description: "规则发文、推荐问题回答、内容读取与点赞关注待办", Icon: Send },
+  { page: "zhihu-operations", title: "知乎自动养号", description: "规则发文、推荐回答、随机点赞与评论、关注待办", Icon: Send },
+];
+export const tiebaOperations: WorkbenchEntry[] = [
+  { page: "tieba-autocare", title: "贴吧自动养号", description: "同步关注吧，按目标签到并核对官网结果", Icon: ListChecks },
+  { page: "tieba-publishing", title: "贴吧资源发帖", description: "选流量词和网盘资源，发布并统计帖子数据", Icon: Send },
+];
+export const wechatOperations: WorkbenchEntry[] = [
+  { page: "wechat-workflow", title: "公众号草稿箱", description: "导入文章、替换资源与插图，发送到微信草稿箱", Icon: NotebookPen },
+  { page: "wechat-discovery", title: "发现爆款", description: "按主题搜索公众号文章，查看原文或导入草稿", Icon: Radar },
 ];
 export const smzdmOperations: WorkbenchEntry[] = [
   {
@@ -142,15 +158,20 @@ export const workbenchEntries: readonly WorkbenchEntry[] = [
   ...operationEntries,
   ...csdnOperations,
   ...weiboOperations,
+  ...bilibiliOperations,
   ...zhihuOperations,
+  ...tiebaOperations,
   ...smzdmOperations,
+  ...wechatOperations,
   ...contentOperations,
 ];
 
 const accountPages: Page[] = [
   "accounts",
   "website-accounts",
+  "bilibili-accounts",
   "smzdm-accounts",
+  "wechat-accounts",
   "zhidao-accounts",
 ];
 export function sidebarPage(page: Page): Page {

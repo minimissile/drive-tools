@@ -19,6 +19,7 @@ import { Dialog } from "../ui/Dialog";
 import { Tabs, TabList, TabPanel } from "../ui/Tabs";
 import { CatalogPreview } from "./CatalogPreview";
 import { CatalogPublishing } from "./CatalogPublishing";
+import { CatalogSitePublishing } from "./CatalogSitePublishing";
 
 export function CatalogWorkspace({
   id,
@@ -27,6 +28,7 @@ export function CatalogWorkspace({
   onChanged,
   onRemoved,
   onManageAccounts,
+  onSettings,
 }: {
   id: string;
   revision?: number;
@@ -34,6 +36,7 @@ export function CatalogWorkspace({
   onChanged(): void;
   onRemoved(): void;
   onManageAccounts(): void;
+  onSettings(): void;
 }) {
   const query = useIpcQuery(
     "resourceCatalog.get",
@@ -44,6 +47,12 @@ export function CatalogWorkspace({
   const [removing, setRemoving] = useState(false);
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
+  const [committed, setCommitted] = useState<CatalogDetail | null>(null);
+  const [undo, setUndo] = useState<{
+    catalog: Catalog;
+    revision: number;
+    count: number;
+  } | null>(null);
   const { notify } = useAppActions();
   const alive = useRef(true),
     lock = useRef(false);
@@ -79,7 +88,11 @@ export function CatalogWorkspace({
       if (alive.current) setPending("");
     }
   };
-  const detail: CatalogDetail | null = query.data;
+  const detail: CatalogDetail | null =
+    committed &&
+    (!query.data || committed.catalog.revision > query.data.catalog.revision)
+      ? committed
+      : query.data;
   if (!detail)
     return (
       <>
@@ -92,13 +105,51 @@ export function CatalogWorkspace({
       </>
     );
   const { catalog, current } = detail;
+  const canUndo =
+    undo && undo.revision === catalog.revision && !catalog.archived;
+  const removeItems = (resourceIds: string[]) =>
+    void run(
+      "removeItems",
+      async () => {
+        const saved = await ipc("resourceCatalog.removeItems", {
+          id,
+          expectedRevision: catalog.revision,
+          resourceIds,
+        });
+        if (alive.current) {
+          setCommitted(saved);
+          setUndo({
+            catalog,
+            revision: saved.catalog.revision,
+            count: resourceIds.length,
+          });
+          changed();
+        }
+      },
+      `已从当前清单删除 ${resourceIds.length} 项，原资源保留。`,
+    );
   return (
     <>
-      <QueryError
-        error={query.error}
-        loading={query.loading}
-        onRetry={query.reload}
-      />
+      {committed &&
+      query.error &&
+      committed.catalog.revision >= (query.data?.catalog.revision ?? 0) ? (
+        <Notice warning>
+          条目变更已保存，重新读取清单失败：{query.error}
+          <Button
+            size="compact"
+            disabled={query.loading}
+            onClick={query.reload}
+          >
+            重新读取
+          </Button>
+        </Notice>
+      ) : (
+        <QueryError
+          error={query.error}
+          loading={query.loading}
+          onRetry={query.reload}
+        />
+      )}
       <section className="catalog-detail-header">
         <div>
           <div className="catalog-title-line">
@@ -110,14 +161,19 @@ export function CatalogWorkspace({
             )}
           </div>
           <p className="muted">
-            {catalog.category === "all" ? "全部分类" : catalog.category} ·{" "}
-            {current.items.length} 项可访问资源 · {detail.publications.length}{" "}
+            {catalog.selectionMode === "manual"
+              ? "手动选取"
+              : catalog.category === "all"
+                ? "全部分类"
+                : catalog.category}{" "}
+            · {current.items.length} 项可访问资源 ·{" "}
+            {detail.publications.length +
+              Number(!!detail.site?.publication?.active)}{" "}
             处发布
           </p>
         </div>
         <div className="catalog-detail-actions">
           <Button
-            quiet
             size="compact"
             disabled={!!pending || query.loading}
             onClick={changed}
@@ -126,7 +182,6 @@ export function CatalogWorkspace({
             刷新资源
           </Button>
           <Button
-            quiet
             size="compact"
             disabled={!!pending || catalog.archived}
             onClick={() => onEdit(catalog)}
@@ -135,7 +190,6 @@ export function CatalogWorkspace({
             编辑
           </Button>
           <Button
-            quiet
             size="compact"
             disabled={!!pending}
             onClick={() =>
@@ -152,7 +206,6 @@ export function CatalogWorkspace({
             {pending === "export" ? "正在导出…" : "导出 Excel"}
           </Button>
           <Button
-            quiet
             size="compact"
             disabled={!!pending}
             onClick={() =>
@@ -168,16 +221,15 @@ export function CatalogWorkspace({
                 },
                 catalog.archived
                   ? "已恢复清单维护。"
-                  : "清单已归档，远端文档仍保留。",
+                  : "清单已归档，站点页面和远端文档仍保留。",
               )
             }
           >
             <Archive size={15} />
             {catalog.archived ? "恢复维护" : "归档"}
           </Button>
-          {catalog.archived ? (
+          {
             <Button
-              quiet
               size="compact"
               disabled={!!pending}
               onClick={() => setRemoving(true)}
@@ -185,7 +237,7 @@ export function CatalogWorkspace({
             >
               <Trash2 size={15} />
             </Button>
-          ) : null}
+          }
         </div>
       </section>
       {error ? (
@@ -195,23 +247,79 @@ export function CatalogWorkspace({
       ) : null}
       {catalog.archived ? (
         <Notice>
-          此清单已归档，仍可查看和导出。需要更新文档时，请先恢复维护。
+          此清单已归档，仍可查看和导出；站点页面和远端文档不会自动撤下。需要更新内容时，请先恢复维护。
         </Notice>
       ) : null}
-      <Tabs value={tab} onChange={setTab}>
+      {canUndo ? (
+        <Notice>
+          已删除 {undo.count} 项，仅影响当前清单。已发布页面和文档需单独更新。
+          <Button
+            size="compact"
+            disabled={!!pending || query.loading}
+            onClick={() =>
+              void run(
+                "undoItems",
+                async () => {
+                  const {
+                    revision: _revision,
+                    archived: _archived,
+                    createdAt: _created,
+                    updatedAt: _updated,
+                    ...previous
+                  } = undo.catalog;
+                  const restored = await ipc(
+                    previous.selectionMode === "manual"
+                      ? "resourceCatalog.saveManual"
+                      : "resourceCatalog.save",
+                    {
+                      ...previous,
+                      excludedResourceIds:
+                        undo.catalog.excludedResourceIds ?? [],
+                      expectedRevision: undo.revision,
+                    },
+                  );
+                  if (alive.current) {
+                    setCommitted(restored);
+                    setUndo(null);
+                    changed();
+                  }
+                },
+                "已撤销上一次条目删除。",
+              )
+            }
+          >
+            撤销删除
+          </Button>
+        </Notice>
+      ) : null}
+      <Tabs className="catalog-workspace-tabs" value={tab} onChange={setTab}>
         <TabList
           label="清单工作区"
           items={[
             ["preview", "资源预览"],
             [
+              "site",
+              `落地页站点${detail.site?.pending || (detail.site?.publication?.active && detail.site.needsUpdate) ? " · 待处理" : ""}`,
+            ],
+            [
               "publishing",
-              `发布维护${detail.publications.some((p) => p.needsUpdate) ? " · 待更新" : ""}`,
+              `文档平台${detail.publications.some((p) => p.needsUpdate) ? " · 待更新" : ""}`,
             ],
           ]}
         />
         <TabPanel value={tab}>
           {tab === "preview" ? (
-            <CatalogPreview snapshot={current} />
+            <CatalogPreview
+              snapshot={current}
+              busy={!!pending || query.loading}
+              onRemove={catalog.archived ? undefined : removeItems}
+            />
+          ) : tab === "site" ? (
+            <CatalogSitePublishing
+              detail={detail}
+              onChanged={changed}
+              onSettings={onSettings}
+            />
           ) : (
             <CatalogPublishing
               detail={detail}
@@ -232,7 +340,11 @@ export function CatalogWorkspace({
                 保留清单
               </Button>
               <Button
-                disabled={!!pending}
+                disabled={
+                  !!pending ||
+                  !!detail.site?.publication?.active ||
+                  !!detail.site?.pending
+                }
                 onClick={() =>
                   void run(
                     "remove",
@@ -254,8 +366,18 @@ export function CatalogWorkspace({
           }
         >
           <Notice warning>
-            将删除此清单的本地配置、版本与发布记录。已发布的云端文档不会删除，请先确认不再需要这些维护记录。
+            将删除此清单的本地配置、版本与发布记录。已发布的云端文档不会删除；站点页面必须先撤下，待核对请求必须先处理。
           </Notice>
+          {detail.site?.publication?.active || detail.site?.pending ? (
+            <Button
+              onClick={() => {
+                setRemoving(false);
+                setTab("site");
+              }}
+            >
+              前往站点处理
+            </Button>
+          ) : null}
         </Dialog>
       ) : null}
     </>

@@ -1,19 +1,16 @@
+import { AiIcon } from "../ui/AiIcon";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { z } from "zod";
-import {
-  Check,
-  ExternalLink,
-  Eye,
-  FileText,
-  Pencil,
-  Sparkles,
-} from "lucide-react";
+import { Check, ExternalLink, Eye, FileText, Pencil } from "lucide-react";
 import {
   landingDraftSchema,
+  landingEditableDraftSchema,
+  landingDescriptionLimit,
   type LandingContext,
   type LandingDraft,
 } from "../../shared/resource-landing";
+import { isLandingDocument } from "../../shared/landing-document";
 import { ipc } from "../api/client";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
@@ -29,6 +26,7 @@ import {
   Status,
 } from "../ui/primitives";
 import "./landing-editor.css";
+import { LandingTrafficPanel } from "./LandingTrafficPanel";
 
 function LandingProse({ text }: { text: string }) {
   return text
@@ -50,38 +48,10 @@ function LandingProse({ text }: { text: string }) {
 }
 
 // Incomplete edits also survive a refresh; publication uses the strict domain schema.
-const text = z.string().max(12000);
 const editSchema = z.object({
   notes: z.string().max(8000),
   version: z.number().int().nonnegative(),
-  article: z
-    .object({
-      title: text,
-      description: text,
-      summary: text,
-      highlights: z.array(text).max(6),
-      sections: z
-        .array(
-          z.object({
-            heading: text,
-            kind: z.enum(["facts", "guide"]),
-            body: text,
-            evidenceIds: z.array(text),
-          }),
-        )
-        .max(7),
-      faq: z
-        .array(
-          z.object({
-            question: text,
-            answer: text,
-            kind: z.enum(["facts", "guide"]),
-            evidenceIds: z.array(text),
-          }),
-        )
-        .max(6),
-    })
-    .nullable(),
+  article: landingEditableDraftSchema.nullable(),
 });
 
 export function ResourceLandingDialog({
@@ -168,6 +138,10 @@ function LandingEditor({
   const busy = !!action || context.generating;
   const dirty = JSON.stringify(article) !== JSON.stringify(context.draft);
   const conflict = version !== context.draftVersion && dirty;
+  const notesChanged = notes.trim() !== context.notes.trim();
+  const needsOptimization =
+    !!article &&
+    (!context.quality?.eligible || dirty || context.stale || notesChanged);
   const published = !!context.published?.document;
   const hasUnpublishedChanges =
     published &&
@@ -204,10 +178,13 @@ function LandingEditor({
         notify("正文依据未更改。", "info");
         return;
       }
-      const needsWork = name === "generate" && !next.quality?.eligible;
+      const needsWork =
+        (name === "generate" || name === "optimize") && !next.quality?.eligible;
       notify(
         needsWork
-          ? "草稿已生成，内容尚需完善。"
+          ? name === "optimize"
+            ? "优化已完成，仍有待完善内容，请查看检查结果。"
+            : "草稿已生成，内容尚需完善。"
           : next.pending || next.error
             ? "操作结果需要核对，请查看当前状态。"
             : message,
@@ -234,6 +211,12 @@ function LandingEditor({
   const save = async (publish: boolean) => {
     const parsed = landingDraftSchema.safeParse(article);
     if (!parsed.success) {
+      if (article && article.description.length > landingDescriptionLimit) {
+        setError(
+          `搜索摘要共${article.description.length}字，请精简到${landingDescriptionLimit}字以内后保存。`,
+        );
+        return;
+      }
       setError(
         `内容尚未完整：${parsed.error.issues[0]?.path.join(" · ")}。请检查标题、摘要与正文；要点和问答可留空。`,
       );
@@ -284,6 +267,22 @@ function LandingEditor({
       faq: article!.faq.map((f, i) => (i === index ? { ...f, ...patch } : f)),
     });
   const issue = error || context.error || local.error;
+  const optimize = () => {
+    if (!article || conflict) return;
+    void run(
+      "optimize",
+      () =>
+        ipc("resourceLanding.optimize", {
+          resourceId: context.resourceId,
+          requestId: crypto.randomUUID(),
+          expectedDraftVersion: version,
+          notes,
+          draft: article,
+        }),
+      "草稿已优化并通过内容检查，尚未发布。",
+      true,
+    );
+  };
   return (
     <>
       <div className="landing-editor-top">
@@ -305,7 +304,46 @@ function LandingEditor({
                 : "尚未生成"}
         </Status>
       </div>
-      {issue ? <Notice warning>{issue}</Notice> : null}
+      {issue || needsOptimization || action === "optimize" ? (
+        <Notice warning>
+          <div className="landing-optimization">
+            <div role="status">
+              <strong>
+                {action === "optimize"
+                  ? "正在优化并重新审核…"
+                  : issue ||
+                    (context.stale || notesChanged
+                      ? "资料已更新，可根据最新依据优化草稿。"
+                      : dirty
+                        ? "当前编辑可检查并优化。"
+                        : "内容尚未达到发布要求。")}
+              </strong>
+              {needsOptimization ? (
+                <p>
+                  {action === "optimize"
+                    ? "完成后更新草稿；若依据不足，会保留待完善项。"
+                    : "根据当前草稿和检查问题修订，完成后重新审核，不自动发布。"}
+                </p>
+              ) : null}
+            </div>
+            {needsOptimization ? (
+              <Button
+                size="compact"
+                disabled={
+                  busy ||
+                  context.pending ||
+                  conflict ||
+                  !context.source.documents?.length
+                }
+                onClick={optimize}
+              >
+                <AiIcon size={14} />
+                {action === "optimize" ? "正在优化…" : "自动优化"}
+              </Button>
+            ) : null}
+          </div>
+        </Notice>
+      ) : null}
       {context.pending ? (
         <Notice warning>
           上次发布结果待核对。请重试原操作或读取云端状态，无需重新生成内容。
@@ -324,18 +362,19 @@ function LandingEditor({
           <section>
             <h3>生成依据</h3>
             <p className="landing-editor-help">
-              先读取核心文件，再生成介绍。支持20MB以内的 PDF、TXT 和 Markdown。
+              先读取一份核心文件，再生成介绍。支持20MB以内的 PDF、DOCX、TXT 和
+              Markdown。
             </p>
-            <details>
+            <details open={context.source.files.length <= 3}>
               <summary>
                 {context.source.files.length} 项文件记录 ·{" "}
                 {context.source.category}
               </summary>
-              <ul>
-                {context.source.files.slice(0, 12).map((f) => (
+              <ul className="landing-document-list">
+                {context.source.files.map((f) => (
                   <li key={f.evidenceId}>
                     <span>{f.name}</span>
-                    {!f.directory && /\.(pdf|txt|md)$/i.test(f.name) ? (
+                    {!f.directory && isLandingDocument(f.name) ? (
                       <div className="landing-reading-actions">
                         <Button
                           size="compact"
@@ -374,14 +413,24 @@ function LandingEditor({
                           导入原文件
                         </Button>
                       </div>
-                    ) : null}
+                    ) : (
+                      <p className="landing-editor-help">
+                        {f.directory
+                          ? "文件夹不能直接读取正文，请绑定其中的具体文档。"
+                          : /\.doc$/i.test(f.name)
+                            ? "旧版DOC暂不支持，请另存为DOCX或PDF。"
+                            : "此格式暂不支持正文读取，请使用PDF、DOCX或文本原文件。"}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
-              {context.source.files.length > 12 ? (
-                <p>其余文件也会作为生成依据。</p>
-              ) : null}
             </details>
+            {action === "read" ? (
+              <p className="landing-editor-help" role="status">
+                正在读取文件并提取正文…
+              </p>
+            ) : null}
             {context.source.documents?.length ? (
               context.source.documents.map((d) => (
                 <p className="landing-editor-help" key={d.sha256}>
@@ -393,7 +442,11 @@ function LandingEditor({
               ))
             ) : (
               <p className="landing-editor-help">
-                尚未读取正文。展开文件记录，读取一份核心文件。
+                {context.source.files.some(
+                  (f) => !f.directory && isLandingDocument(f.name),
+                )
+                  ? "读取上方文件正文后，即可生成草稿。"
+                  : "当前文件尚不能读取正文，请绑定支持的文档后再生成。"}
               </p>
             )}
             <Field label="编辑补充" hint="仅填写可公开、已核实的信息">
@@ -408,7 +461,7 @@ function LandingEditor({
               />
             </Field>
             <Button
-              primary
+              primary={!article}
               disabled={
                 busy || context.pending || !context.source.documents?.length
               }
@@ -426,7 +479,7 @@ function LandingEditor({
                 )
               }
             >
-              <Sparkles size={14} />
+              <AiIcon size={14} />
               {action === "generate" || context.generating
                 ? "正在撰写并检查…"
                 : article
@@ -503,6 +556,11 @@ function LandingEditor({
               通过检查并发布后才进入公开目录与站点地图。收录与引用由搜索服务决定。
             </p>
           </section>
+          <LandingTrafficPanel
+            resourceId={context.resourceId}
+            pageUrl={context.pageUrl}
+            published={published}
+          />
         </aside>
         <section className="landing-editor-main" aria-label="落地页内容">
           <div
@@ -533,11 +591,23 @@ function LandingEditor({
           {!article ? (
             <Empty
               icon={FileText}
-              title={busy ? "正在生成可公开的资源说明" : "先生成一份内容草稿"}
+              title={
+                action === "read"
+                  ? "正在读取资源正文"
+                  : action === "generate"
+                    ? "正在生成可公开的资源说明"
+                    : context.source.documents?.length
+                      ? "正文已就绪，可以生成草稿"
+                      : "先读取一份资源正文"
+              }
             >
-              {busy
-                ? "正在撰写并独立检查事实依据，通常需要一到三分钟，修订可能更久。完成后可以编辑和预览。"
-                : "展开左侧文件记录并读取正文，再按需补充已核实的信息。"}
+              {action === "read"
+                ? "正在提取文件中的文字，完成后即可生成介绍。"
+                : action === "generate"
+                  ? "正在撰写并独立检查事实依据，通常需要一到三分钟，修订可能更久。完成后可以编辑和预览。"
+                  : context.source.documents?.length
+                    ? "点击左侧“生成落地页草稿”，完成后可编辑、审核并发布。"
+                    : "在左侧读取网盘文档，或导入同名原文件，再按需补充已核实的信息。"}
             </Empty>
           ) : mode === "preview" ? (
             <article className="landing-reading-preview">
@@ -579,11 +649,14 @@ function LandingEditor({
                   onChange={(e) => change({ title: e.target.value })}
                 />
               </Field>
-              <Field label="搜索摘要" hint="准确概括页面，不堆砌关键词">
+              <Field
+                label="搜索摘要"
+                hint={`完整句子，最多${landingDescriptionLimit}字`}
+              >
                 <textarea
                   aria-label="落地页搜索摘要"
                   rows={3}
-                  maxLength={180}
+                  maxLength={landingDescriptionLimit}
                   value={article.description}
                   onChange={(e) => change({ description: e.target.value })}
                 />

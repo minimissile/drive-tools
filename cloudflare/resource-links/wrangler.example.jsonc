@@ -7,6 +7,7 @@
   "vars": { "PUBLIC_ORIGIN": "https://resources.example.com", "BING_SITE_VERIFICATION": "" },
   "preview_urls": false,
   "triggers": { "crons": ["*/5 * * * *"] },
+  "ratelimits": [{ "name": "LANDING_EVENTS_LIMITER", "namespace_id": "11042026", "simple": { "limit": 100, "period": 60 } }],
   "secrets": { "required": ["ADMIN_TOKEN", "INDEXNOW_KEY"] },
   "observability": { "enabled": false },
   "d1_databases": [

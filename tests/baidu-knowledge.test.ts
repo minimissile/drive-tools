@@ -31,13 +31,16 @@ function result(
     })),
   };
 }
-test("Baidu library admits only monthly volume >10, refreshes by source/word and preserves first seen/history", async () => {
+test("Baidu library admits monthly volume >=10, refreshes by source/word and preserves first seen/history", async () => {
   const f = await fixture();
   try {
     const k = f.app.traffic.knowledge;
     const first = result("run-1", "2026-10-20T01:00:00.000Z", [
       ["网盘", 11],
       ["边界", 10],
+      ["字符串边界", "10"],
+      ["九次", 9],
+      ["小于10", "<10"],
       ["零值", 0],
       ["未知", null],
       ["字符串", "1,200"],
@@ -46,15 +49,15 @@ test("Baidu library admits only monthly volume >10, refreshes by source/word and
       ["ＡＩ", 13],
     ]);
     assert.deepEqual(k.ingestBaidu(first), {
-      indexed: 3,
+      indexed: 5,
       refreshedBelowThreshold: 0,
       minimumMonthlySearches: 10,
     });
     let list = k.list({ endpoint: "baidu-keywords" });
-    assert.equal(list.total, 3);
-    assert.equal(list.summary.queries, 1);
+    assert.equal(list.total, 5);
+    assert.equal(k.overview().summary.queries, 1);
     k.ingestBaidu(first);
-    assert.equal(k.list({}).summary.observations, 3);
+    assert.equal(k.overview().summary.observations, 5);
     const second = result("run-2", "2026-10-21T01:00:00.000Z", [
       ["网盘", 100],
       ["边界", 11],
@@ -66,7 +69,7 @@ test("Baidu library admits only monthly volume >10, refreshes by source/word and
       minimumMonthlySearches: 10,
     });
     list = k.list({ endpoint: "baidu-keywords" });
-    assert.equal(list.total, 4);
+    assert.equal(list.total, 5);
     const word = list.items.find((w) => w.word === "网盘")!;
     assert.equal(word.metrics.averageMonthPv, 100);
     assert.equal(word.observations, 2);
@@ -104,7 +107,7 @@ test("Baidu cache backfill is local, idempotent, survives cache removal, and nev
   try {
     const r = result("cached", "2026-10-20T01:00:00.000Z", [
       ["持久词", 12],
-      ["排除词", 10],
+      ["排除词", 9],
     ]);
     f.app.db.run(
       "INSERT INTO api_cache VALUES(?,?,?)",
@@ -118,7 +121,7 @@ test("Baidu cache backfill is local, idempotent, survives cache removal, and nev
     k.recoverBaidu();
     k.recoverBaidu();
     assert.equal(k.list({}).total, 1);
-    assert.equal(k.list({}).summary.queries, 1);
+    assert.equal(k.overview().summary.queries, 1);
     assert.equal(k.list({}).items[0].source, "百度营销 · 关键词规划师");
     f.app.db.run("DELETE FROM api_cache");
     assert.equal(k.list({}).total, 1);

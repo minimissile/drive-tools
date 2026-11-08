@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { AppError } from "./errors";
+import { extractDocxText } from "./landing-docx";
 
 export interface LandingReading {
   copyId: string;
@@ -87,6 +88,10 @@ export async function extractLandingDocument(
     } finally {
       await task.destroy();
     }
+  } else if (/\.docx$/i.test(name)) {
+    const full = await extractDocxText(bytes);
+    sampled = full.length > 60000;
+    pages.push({ page: 1, text: full.slice(0, 60000) });
   } else if (/\.(txt|md)$/i.test(name)) {
     const full = new TextDecoder("utf-8", { fatal: false })
       .decode(bytes)
@@ -101,12 +106,12 @@ export async function extractLandingDocument(
   } else
     throw new AppError(
       "DOCUMENT_FORMAT",
-      "正文读取暂支持 PDF、TXT 和 Markdown，其他格式可补充已核实的文本资料。",
+      "正文读取支持 PDF、DOCX、TXT 和 Markdown；旧版DOC请另存为DOCX或PDF。",
     );
   if (pages.reduce((n, p) => n + p.text.replace(/\s/g, "").length, 0) < 120)
     throw new AppError(
       "DOCUMENT_NO_TEXT",
-      "正文文字不足，可能是扫描件。尚未读取内容，不能据此生成高质量页面；请导入可提取文字的版本。",
+      "提取到的正文不足以生成可靠介绍，文件可能为空白、扫描件或主要为图片。请导入包含可读取文字的原文件。",
     );
   return {
     name,

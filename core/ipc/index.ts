@@ -1,4 +1,11 @@
 import { createZhihuAutocareHandlers } from "./zhihu-autocare";
+import { createTiebaAutocareHandlers } from "./tieba-autocare";
+import { createTiebaParticipationHandlers } from "./tieba-participation";
+import { createTiebaAutomationHandlers } from "./tieba-automation";
+import { createTiebaTopicsHandlers } from "./tieba-topics";
+import { createTiebaInsightsHandlers } from "./tieba-insights";
+import { createTiebaPublishingHandlers } from "./tieba-publishing";
+import { createTiebaPostStatsHandlers } from "./tieba-post-stats";
 import { createPhotoPostHandlers } from "./photo-posts";
 import { createResourceCatalogHandlers } from "./resource-catalog";
 import { createResourceAnswerHandlers } from "./resource-answers";
@@ -7,6 +14,7 @@ import { createShareCreationHandlers } from "./share-creation";
 import { createResourceLinksHandlers } from "./resource-links";
 import { createResourceLandingHandlers } from "./resource-landing";
 import { createSmzdmHandlers } from "./smzdm";
+import { createWechatHandlers } from "./wechat";
 import { createDriveFilesHandlers } from "./drive-files";
 import { createDriveBrowserHandlers } from "./drive-browser";
 import { createDistributionHandlers } from "./distribution";
@@ -39,15 +47,26 @@ import { createShareStatisticsHandlers } from "./share-statistics";
 import { createAiHandlers } from "./ai";
 import { createSearchHandlers } from "./search";
 import { createStudioHandlers } from "./studio";
+import { createVideoHandlers } from "./video";
+import { createMusicHandlers } from "./music";
+import { createBilibiliHandlers } from "./bilibili";
 import { createBindingsHandlers } from "./bindings";
 import { createPublicationHandlers } from "./publication";
 import { createCsdnHandlers } from "./csdn";
 import { createWeiboHandlers } from "./weibo";
 import { createWeiboPostHandlers } from "./weibo-posts";
 import { createWeiboStatisticsHandlers } from "./weibo-statistics";
+import { createWeiboWorkspaceHandlers } from "./weibo-workspace";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createTiebaAutomationHandlers(services),
+    createTiebaTopicsHandlers(services),
+    createTiebaInsightsHandlers(services),
+    createTiebaPublishingHandlers(services),
+    createTiebaPostStatsHandlers(services),
+    createTiebaParticipationHandlers(services),
+    createTiebaAutocareHandlers(services),
     createZhihuAutocareHandlers(services),
     createContentSupplyHandlers(services),
     createIntelligentOperationsHandlers(services),
@@ -60,6 +79,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createResourceDeletionHandlers(services),
     createShareCreationHandlers(services),
     createSmzdmHandlers(services),
+    createWechatHandlers(services),
     createDriveFilesHandlers(services),
     createDriveBrowserHandlers(services),
     createDistributionHandlers(services),
@@ -70,6 +90,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createBitBrowserHandlers(services),
     createResourceAnswerHandlers(services),
     createWeiboPostHandlers(services),
+    createWeiboWorkspaceHandlers(services),
     createWeiboStatisticsHandlers(services),
     createWeiboHandlers(services),
     createCsdnHandlers(services),
@@ -91,6 +112,9 @@ export function createApplicationHandlers(services: HandlerServices) {
     createAiHandlers(services),
     createSearchHandlers(services),
     createStudioHandlers(services),
+    createVideoHandlers(services),
+    createMusicHandlers(services),
+    createBilibiliHandlers(services),
     createBindingsHandlers(services),
     createPublicationHandlers(services),
   );

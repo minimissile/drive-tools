@@ -17,20 +17,34 @@ import { ZhihuContents } from "./Contents";
 import { ZhihuTasks } from "./Tasks";
 import { ZhihuParticipation } from "./Participation";
 import "./zhihu.css";
+export type ZhihuAdvancedTab =
+  | "overview"
+  | "accounts"
+  | "contents"
+  | "tasks"
+  | "participation"
+  | "logs"
+  | "guide";
 export default function ZhihuWorkflow() {
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState<{ tab?: ZhihuAdvancedTab } | null>(
+    null,
+  );
   return advanced ? (
     <>
-      <Button size="compact" onClick={() => setAdvanced(false)}>
+      <Button size="compact" onClick={() => setAdvanced(null)}>
         返回自动养号
       </Button>
-      <LegacyZhihuWorkflow />
+      <LegacyZhihuWorkflow initialTab={advanced.tab} />
     </>
   ) : (
-    <AutocarePanel openAdvanced={() => setAdvanced(true)} />
+    <AutocarePanel openAdvanced={(tab) => setAdvanced({ tab })} />
   );
 }
-function LegacyZhihuWorkflow() {
+function LegacyZhihuWorkflow({
+  initialTab,
+}: {
+  initialTab?: ZhihuAdvancedTab;
+}) {
   const { data } = useAppData(),
     { navigate } = useAppNavigation(),
     { notify } = useAppActions();
@@ -56,6 +70,9 @@ function LegacyZhihuWorkflow() {
         })
         .parse(value),
   );
+  useEffect(() => {
+    if (initialTab) navigation.update({ tab: initialTab });
+  }, [initialTab]);
   const tab = navigation.value.tab;
   const setTab = (tab: string) => navigation.update({ tab });
   const [pending, setPending] = useState(false),

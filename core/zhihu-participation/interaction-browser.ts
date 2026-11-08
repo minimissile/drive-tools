@@ -587,21 +587,87 @@ async function assertContext(
   if (document.truncated || plain(document.text) !== plain(request.contextText))
     fail("目标正文已变化、折叠或不完整，请重新阅读后作出决定，未提交互动。");
 }
+async function interactionButtonState(
+  control: Locator | ElementHandle<HTMLElement | SVGElement>,
+  kind: "like" | "follow",
+) {
+  const className = (await control.getAttribute("class")) ?? "",
+    pressed = await control.getAttribute("aria-pressed"),
+    states: boolean[] = [];
+  // Icon buttons can expose their action only through title. Conflicting
+  // explicit labels remain unknown; a class alone never proves an inactive vote.
+  for (const attribute of ["aria-label", "title"]) {
+    const label = (await control.getAttribute(attribute))?.trim();
+    if (!label) continue;
+    const state = parseZhihuInteractionButtonState(kind, {
+      label,
+      className,
+      pressed,
+    });
+    if (state === null) return null;
+    states.push(state);
+  }
+  const textState = parseZhihuInteractionButtonState(kind, {
+    label: await control.innerText(),
+    className,
+    pressed,
+  });
+  if (textState !== null) states.push(textState);
+  return states.length && states.every((state) => state === states[0])
+    ? states[0]
+    : null;
+}
+
+async function assertActionButtonScope(
+  root: Locator,
+  control: ElementHandle<HTMLElement | SVGElement>,
+) {
+  const owned = await root.evaluate((element, selected) => {
+    if (!element.contains(selected) || !selected.isConnected) return false;
+    for (
+      let parent = selected.parentElement;
+      parent && parent !== element;
+      parent = parent.parentElement
+    )
+      if (
+        parent.matches(
+          ".AnswerItem,.CommentItem,.CommentItemV2,[data-comment-id],.Comments-container,.CommentsV2,.Comments",
+        )
+      )
+        return false;
+    return true;
+  }, control);
+  if (!owned) fail("赞同或关注按钮位于其他回答或评论区域，未点击。");
+}
+
 async function button(root: Locator, kind: "like" | "follow") {
   const control =
     kind === "like"
-      ? root.locator("button.VoteButton--up:visible")
+      ? root
+          .getByRole("button", {
+            name: /^(?:赞同|已赞同|取消赞同)(?:[\s,+＋]*\d[\d,.]*\s*[万亿kK]?)?$/,
+          })
+          .or(
+            root.locator(
+              'button.VoteButton--up,button[title="赞同"],button[title="已赞同"],button[title="取消赞同"],[role="button"][title="赞同"],[role="button"][title="已赞同"],[role="button"][title="取消赞同"]',
+            ),
+          )
+          .filter({ visible: true })
       : root.locator("button.FollowButton:visible");
   if ((await control.count()) === 0)
-    await control.waitFor({ state: "visible", timeout: 5000 });
+    await control.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
   if ((await control.count()) !== 1 || !(await control.isEnabled()))
-    fail("没有找到此目标唯一可用的赞同/关注按钮，未点击其他区域。");
-  const state = parseZhihuInteractionButtonState(kind, {
-    label:
-      (await control.getAttribute("aria-label")) || (await control.innerText()),
-    className: (await control.getAttribute("class")) ?? "",
-    pressed: await control.getAttribute("aria-pressed"),
-  });
+    fail(
+      `准确目标内没有唯一可用的${kind === "like" ? "赞同" : "关注"}按钮（可见候选${await control.count()}）；未选择其他回答或全页控件。`,
+    );
+  const handle = await control.elementHandle();
+  if (!handle) return fail("目标按钮已被替换，未点击。");
+  try {
+    await assertActionButtonScope(root, handle);
+  } finally {
+    await handle.dispose();
+  }
+  const state = await interactionButtonState(control, kind);
   if (state === null) fail("赞同或关注状态不明确，未将未知状态当作未操作。");
   return { control, state };
 }
@@ -914,6 +980,15 @@ export function zhihuInteractionBrowser(
         if ((await control.count()) !== 1 || !(await control.isEnabled()))
           fail("提交检查点后控件变化，未点击。");
         fixedClick = await boundControl(page, target, root, control);
+        if (request.kind !== "comment") {
+          await assertActionButtonScope(root, fixedClick);
+          const finalState = await interactionButtonState(
+            fixedClick,
+            request.kind,
+          );
+          if (finalState === null) fail("最终按钮语义或状态已变化，未点击。");
+          if (finalState) return await receipt("already_present", null);
+        }
         if (editor) await assertTopLevelEditor(editor, fixedClick);
         const responsePromise = page.waitForResponse(
           (response) => {

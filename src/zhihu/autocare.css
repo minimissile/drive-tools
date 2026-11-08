@@ -15,7 +15,7 @@
   justify-content: space-between;
   gap: 16px;
 }
-.autocare-master > div {
+.autocare-master > div:first-child {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -30,6 +30,63 @@
 .autocare-status-list small {
   color: var(--muted);
   font-size: 12px;
+}
+.autocare-master-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  flex-shrink: 0;
+}
+.autocare-config > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.autocare-config > summary::-webkit-details-marker {
+  display: none;
+}
+.autocare-config > summary::after {
+  content: "展开设置";
+  margin-left: auto;
+  color: var(--blue);
+  white-space: nowrap;
+  font-size: 12px;
+}
+.autocare-config[open] > summary::after {
+  content: "收起设置";
+}
+.autocare-config > summary strong {
+  font-size: 14px;
+}
+.autocare-config > summary span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.autocare-config-content {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.autocare-config-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+.autocare-operation-group {
+  display: grid;
+  gap: 8px;
+}
+.autocare-operation-group h3 {
+  margin: 0;
+  font-size: 13px;
 }
 .autocare-power {
   display: flex;
@@ -60,10 +117,6 @@
   gap: 16px;
   flex-wrap: wrap;
 }
-.autocare-flow {
-  color: var(--muted);
-  font-size: 12px;
-}
 .autocare-primary-fields {
   display: grid;
   grid-template-columns: 1.3fr 1fr 1fr 1fr;
@@ -72,12 +125,6 @@
 }
 .autocare-primary-fields .field + .field {
   margin-top: 0;
-}
-.autocare-preset {
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  font-size: 13px;
 }
 .autocare-more {
   border-top: 1px solid var(--line);
@@ -214,4 +261,33 @@
 .autocare-interaction-detail h3 {
   margin: 0;
   font-size: 14px;
+}
+
+.autocare-history > summary,
+.autocare-records > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.autocare-history > summary span {
+  margin-left: 12px;
+  font-weight: 400;
+}
+.autocare-history-content {
+  margin-top: 16px;
+}
+.autocare-records > summary {
+  margin: 0 0 12px 4px;
+}
+.autocare-source-settings {
+  margin-top: 16px;
+}
+
+.autocare-log-options > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.autocare-log-options[open] > summary {
+  margin-bottom: 12px;
 }

@@ -1,0 +1,43 @@
+.hot-music-picker {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.hot-music-picker > summary {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hot-music-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+}
+.hot-music-toolbar,
+.hot-music-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.hot-music-toolbar > span,
+.hot-music-actions > span {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hot-music-meta,
+.hot-music-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.hot-music-body > .field {
+  margin: 0;
+}

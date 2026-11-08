@@ -298,7 +298,7 @@ export class SearchOperations {
     let keyword = i.keyword,
       intent = i.intent;
     if (i.poolId) {
-      const pool = this.repo.pools().find((p) => p.id === i.poolId),
+      const pool = this.repo.getPool(i.poolId),
         word = pool?.keywords.find((k) => k.id === i.keywordId);
       if (!pool || !word || word.word !== i.keyword)
         throw new AppError("KEYWORD_MISMATCH", "该关键词不属于所选词池。");
@@ -350,7 +350,7 @@ export class SearchOperations {
           platform: topicInput.shape.platform,
         })
         .parse(raw),
-      pool = this.repo.pools().find((p) => p.id === i.poolId);
+      pool = this.repo.getPool(i.poolId);
     if (
       !pool ||
       i.keywordIds.some((id) => !pool.keywords.some((k) => k.id === id))
@@ -398,7 +398,7 @@ export class SearchOperations {
       topic = this.row(i.id);
     const { copy } = this.assertTarget(i.copyId, i.splitItemId);
     if (topic.pool_id) {
-      const pool = this.repo.pools().find((p) => p.id === topic.pool_id);
+      const pool = this.repo.getPool(topic.pool_id);
       if (pool?.resourceId && pool.resourceId !== copy.resourceId)
         throw new AppError(
           "RESOURCE_MISMATCH",

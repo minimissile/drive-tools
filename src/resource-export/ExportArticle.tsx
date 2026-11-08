@@ -1,4 +1,5 @@
-import { Download, Sparkles, Save } from "lucide-react";
+import { AiIcon } from "../ui/AiIcon";
+import { Download, Save } from "lucide-react";
 import { Button, Field, Notice, Panel } from "../ui/primitives";
 import { useAppActions } from "../state";
 
@@ -51,7 +52,7 @@ export function ExportArticle({ model }: { model: ExportModel }) {
           }
         }}
       >
-        <Sparkles size={14} />
+        <AiIcon size={14} />
         {article ? "重新生成短文" : "生成主题短文"}
       </Button>
       {article ? (

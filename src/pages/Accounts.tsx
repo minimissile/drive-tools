@@ -34,11 +34,15 @@ export default function Accounts() {
           ) : (
             <OtherAccounts
               initialProvider={
-                page === "smzdm-accounts"
-                  ? "smzdm"
-                  : page === "website-accounts"
-                    ? "weibo"
-                    : "baidu-zhidao"
+                page === "bilibili-accounts"
+                  ? "bilibili"
+                  : page === "wechat-accounts"
+                  ? "wechat"
+                  : page === "smzdm-accounts"
+                    ? "smzdm"
+                    : page === "website-accounts"
+                      ? "weibo"
+                      : "baidu-zhidao"
               }
             />
           )}

@@ -17,8 +17,8 @@ import { sidebarEntries, sidebarPage } from "./navigation";
 import { ActiveTaskSwitcher } from "./tasks/ActiveTaskSwitcher";
 import { WorkbenchNavigation } from "./workbench/WorkbenchNavigation";
 import { SessionWindows } from "./dev/SessionWindows";
+import { DevUpdateBanner } from "./dev/DevUpdateBanner";
 import { OperationsFocusProvider } from "./operations/OperationsFocus";
-import { OperationsQuickAccess } from "./operations/QuickAccess";
 const Workbench = lazy(() => import("./pages/Workbench"));
 const PhotoPosts = lazy(() => import("./pages/PhotoPosts"));
 const BaiduDiscovery = lazy(() => import("./pages/BaiduDiscovery"));
@@ -40,10 +40,14 @@ const Studio = lazy(() => import("./pages/Studio"));
 const Publish = lazy(() => import("./pages/Publish"));
 const Distribution = lazy(() => import("./pages/Distribution"));
 const CsdnWorkflow = lazy(() => import("./csdn/Workflow"));
-const WeiboWorkflow = lazy(() => import("./weibo/Workflow"));
+const WeiboWorkflow = lazy(() => import("./weibo/Workspace"));
+const BilibiliWorkspace = lazy(() => import("./bilibili/Workspace"));
 const PipixWorkflow = lazy(() => import("./pipix/Workflow"));
 const ZhihuWorkflow = lazy(() => import("./zhihu/Workflow"));
+const TiebaWorkflow = lazy(() => import("./tieba/Workflow"));
+const TiebaPublishingWorkflow = lazy(() => import("./tieba-publishing/Workflow"));
 const IntelligentOperations = lazy(() => import("./operations/Workflow"));
+const WechatWorkflow = lazy(() => import("./wechat/Workflow"));
 const SmzdmWorkflow = lazy(() => import("./smzdm/Workflow"));
 const Settings = lazy(() => import("./pages/Settings"));
 const BatchProcessing = lazy(() => import("./pages/BatchProcessing"));
@@ -77,8 +81,12 @@ const surfaces = {
   "resource-catalog": ResourceCatalog,
   accounts: Accounts,
   "website-accounts": Accounts,
+  "bilibili-accounts": Accounts,
   "smzdm-accounts": Accounts,
   "smzdm-workflow": SmzdmWorkflow,
+  "wechat-workflow": WechatWorkflow,
+  "wechat-discovery": WechatWorkflow,
+  "wechat-accounts": Accounts,
   "browser-environments": FingerprintBrowser,
   intake: Intake,
   tasks: Tasks,
@@ -89,7 +97,10 @@ const surfaces = {
   "csdn-publish": CsdnPublish,
   "csdn-workflow": CsdnWorkflow,
   "weibo-marketing": WeiboWorkflow,
+  "bilibili-content": BilibiliWorkspace,
   "zhihu-operations": ZhihuWorkflow,
+  "tieba-autocare": TiebaWorkflow,
+  "tieba-publishing": TiebaPublishingWorkflow,
   "pipix-sources": PipixWorkflow,
   settings: Settings,
   bulk: BatchProcessing,
@@ -105,6 +116,8 @@ export default function App() {
     { page, navigate, editResourceId, editCopyId, openSearch } =
       useAppNavigation();
   const Surface = surfaces[page];
+  // Keep workflow state and discovery results across the two WeChat pages.
+  const surfaceKey = page === "wechat-discovery" ? "wechat-workflow" : page;
   const pendingJobs =
     data?.jobs.filter((job) => !["completed", "cancelled"].includes(job.stage))
       .length ?? 0;
@@ -132,7 +145,7 @@ export default function App() {
     );
   return (
     <OperationsFocusProvider key={data.dataPath}>
-      <div className="app-shell app-shell--quick-access">
+      <div className="app-shell">
         <a
           className="skip-link"
           href="#main-content"
@@ -187,7 +200,7 @@ export default function App() {
             {import.meta.env.DEV ? (
               <button
                 className="dev-mode"
-                title="当前工作区源码 · 前端热更新 · 后端空闲时自动重启。点击打开开发者工具。"
+                title="当前工作区源码 · 前端热更新 · 后端编译后手动应用更新。点击打开开发者工具。"
                 onClick={() => void ipc("dev.tools")}
               >
                 <Code2 size={13} aria-hidden="true" />
@@ -207,8 +220,9 @@ export default function App() {
               <BusyStatus />
             </div>
           </div>
+          <DevUpdateBanner />
           <main
-            key={page}
+            key={surfaceKey}
             id="main-content"
             tabIndex={-1}
             className="main-content"
@@ -226,13 +240,12 @@ export default function App() {
                 key={
                   page === "intake"
                     ? `${editResourceId ?? "new"}:${editCopyId ?? "new"}`
-                    : page
+                    : surfaceKey
                 }
               />
             </Suspense>
           </main>
         </div>
-        <OperationsQuickAccess />
       </div>
     </OperationsFocusProvider>
   );

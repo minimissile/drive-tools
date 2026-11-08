@@ -1,10 +1,15 @@
 import { runtimeDataPath } from "./runtime-paths";
+import { createVideoInputs } from "./video-inputs";
+import { landingDocumentExtensions } from "../shared/landing-document";
 import { resourceLinksTarget } from "./resource-links-network";
 import { pipixNetworkTarget } from "./pipix-network";
+import { musicNetworkTarget } from "../core/music/network";
+import { wechatDiscoveryPaths } from "../core/wechat/discovery";
 import { normalizeCover } from "./cover-image";
 import { watchDevParent } from "./dev-parent";
 import { loadProviderPage } from "./provider-navigation";
 import { WorkbenchWindows } from "./workbench-windows";
+import type { DevUpdateState } from "../shared/dev-updates";
 import { devSessionIdSchema, type DevSession, type OpenDevSession } from "../shared/dev-sessions";
 import {
   app,
@@ -31,6 +36,7 @@ import { createBaiduDiscoverySession } from "./baidu-discovery-session";
 import { createZhidaoPageDiscovery } from "./zhidao-page-discovery";
 import { createBaiduShareReader } from "./baidu-share-reader";
 import { createWebsiteSessions } from "./website-sessions";
+import { wechatPreviewImageSource } from "./wechat-image-policy";
 import { createDistributionSessions } from "./distribution-sessions";
 import { createEnvironmentSessions } from "./browser-environment-session";
 import { readTableBytes } from "../core/table-files";
@@ -122,7 +128,9 @@ let updater: UpdateManager;
 let activeOperations = 0;
 let installingUpdate = false;
 let quitting = false;
+let videoQuitPending = false;
 let devRestarting = false;
+let devUpdates: DevUpdateState | null = null;
 const developmentUrl = `http://127.0.0.1:${Number(process.env.PANXU_DEV_PORT || 8070)}`;
 const development =
   !app.isPackaged && process.env.PANXU_DEV_URL === developmentUrl;
@@ -472,10 +480,36 @@ function changed() {
 const environmentSessions = createEnvironmentSessions((ref) => service.environments.forAccount(ref));
 const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
 const ports: AppPorts = {
+  wechatDiscoveryFetch(url, init) {
+    if (
+      init.method !== "POST" ||
+      !Object.values(wechatDiscoveryPaths).some((path) => url === `https://api.tikhub.io${path}`)
+    )
+      throw new AppError("WECHAT_DISCOVERY_TARGET", "数据源请求地址不受支持。");
+    return session
+      .fromPartition("panxu-wechat-discovery-network", { cache: false })
+      .fetch(url, {
+        ...init,
+        credentials: "omit",
+        redirect: "error",
+        bypassCustomProtocolHandlers: true,
+      });
+  },
   pipixFetch(url, init) {
     const target = pipixNetworkTarget(url, init.method ?? "GET");
     return session
       .fromPartition("panxu-pipix-network", { cache: false })
+      .fetch(target.href, {
+        ...init,
+        credentials: "omit",
+        redirect: "error",
+        bypassCustomProtocolHandlers: true,
+      });
+  },
+  musicFetch(url, init) {
+    const target = musicNetworkTarget(url, init.method ?? "GET");
+    return session
+      .fromPartition("panxu-music-network", { cache: false })
       .fetch(target.href, {
         ...init,
         credentials: "omit",
@@ -502,36 +536,56 @@ const ports: AppPorts = {
   baiduShareReader: createBaiduShareReader(() => service.dataPath),
   distributionSessions: createDistributionSessions(() => service.dataPath),
   photoPostBrowser: createPhotoPostSessions(() => service.dataPath),
+  ...createVideoInputs(() => windows.owner()),
+  localVideoBundlePath: app.isPackaged ? join(process.resourcesPath, "video-remotion") : undefined,
+  localVideoTemplateEntryPoint: app.isPackaged ? undefined : join(process.env.PANXU_DEV_ROOT || process.cwd(), "video-templates/index.tsx"),
   browserEnvironments: environmentSessions,
   zhidaoSession: createZhidaoSession((id) => environmentSessions.profile({ kind: "zhidao", id })),
   baiduKeywords: websiteSessions.baiduKeywords,
   websiteSessions: websiteSessions.sessions,
+  bilibili: websiteSessions.bilibili,
   smzdm: websiteSessions.smzdm,
+  wechat: websiteSessions.wechat,
+  readWechatRemoteImage: websiteSessions.readWechatPreviewImage,
   weiboPublisher: websiteSessions.weiboPublisher,
   weiboStatistics: websiteSessions.weiboStatistics,
+  async readWechatImage() {
+    const result = await dialog.showOpenDialog(windows.owner(), {
+      title: "选择公众号插图",
+      properties: ["openFile"],
+      filters: [{ name: "文章插图", extensions: ["png", "jpg", "jpeg", "gif"] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const path = result.filePaths[0], info = await stat(path);
+    if (!info.isFile() || info.size <= 0 || info.size > 10 * 1024 * 1024)
+      throw new AppError("WECHAT_IMAGE_INVALID", "请选择 10MB 以内的 PNG、JPG 或 GIF 图片。");
+    return { name: basename(path), bytes: await readFile(path) };
+  },
   async readLandingDocument(name) {
     const result = await dialog.showOpenDialog(windows.owner(), {
       title: `导入资源正文：${name}`, properties: ["openFile"],
-      filters: [{ name: "资源正文", extensions: ["pdf", "txt", "md"] }],
+      filters: [{ name: "资源正文", extensions: [...landingDocumentExtensions] }],
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const path = result.filePaths[0], info = await stat(path);
     if (!info.isFile() || info.size <= 0 || info.size > 20 * 1024 * 1024)
-      throw new AppError("DOCUMENT_TOO_LARGE", "请选择20MB以内的 PDF 或文本文件。");
+      throw new AppError("DOCUMENT_TOO_LARGE", "请选择20MB以内的 PDF、DOCX 或文本文件。");
     return { name: basename(path), bytes: await readFile(path) };
   },
   async readWeiboImages(platform = "weibo") {
     const result = await dialog.showOpenDialog(windows.owner(), {
-      title: `选择${platform === "zhihu" ? "知乎" : "微博"}配图（最多 9 张）`,
+      title: `选择${platform === "tieba" ? "贴吧" : platform === "zhihu" ? "知乎" : "微博"}配图（最多 ${platform === "tieba" ? 6 : 9} 张）`,
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "内容图片", extensions: platform === "zhihu" ? ["png", "jpg", "jpeg"] : ["png", "jpg", "jpeg", "gif"] }],
+      filters: [{ name: "内容图片", extensions: platform === "zhihu" || platform === "tieba" ? ["png", "jpg", "jpeg"] : ["png", "jpg", "jpeg", "gif"] }],
     });
     if (result.canceled) return null;
-    if (result.filePaths.length > 9) throw new AppError("WEIBO_IMAGE_LIMIT", "一次最多选择 9 张图片。");
+    const imageLimit = platform === "tieba" ? 6 : 9;
+    if (result.filePaths.length > imageLimit) throw new AppError(platform === "tieba" ? "TIEBA_IMAGE_LIMIT" : "WEIBO_IMAGE_LIMIT", `一次最多选择 ${imageLimit} 张图片。`);
     const images = [];
     for (const path of result.filePaths) {
       const info = await stat(path);
-      if (!info.isFile() || info.size <= 0 || info.size >= 20 * 1024 * 1024) throw new AppError("WEIBO_IMAGE_INVALID", "每张图片必须为小于 20MB 的本地文件。");
+      const imageSize = platform === "tieba" ? 10 : 20;
+      if (!info.isFile() || info.size <= 0 || info.size >= imageSize * 1024 * 1024) throw new AppError(platform === "tieba" ? "TIEBA_IMAGE_INVALID" : "WEIBO_IMAGE_INVALID", `每张图片必须为小于 ${imageSize}MB 的本地文件。`);
       images.push({ name: basename(path), bytes: await readFile(path) });
     }
     return images;
@@ -662,6 +716,9 @@ const ports: AppPorts = {
         "恢复工作空间不存在，未重启应用。",
       );
     service.intelligentOps.scheduler(false);
+    service.tiebaAutocare.scheduler(false);
+    service.tiebaAutomation.start(false);
+    service.tiebaInsights.start(false);
     if (process.env.PANXU_DATA_DIR) process.env.PANXU_DATA_DIR = path;
     else {
       const { mkdir, writeFile, rename } = await import("node:fs/promises");
@@ -789,6 +846,9 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
       !!ports.baiduShareReader?.isOpen() ||
       service.accountDeletion.isBusy ||
       service.studio.isBusy ||
+      service.video.isBusy ||
+      service.music.isBusy ||
+      service.bilibili.isBusy ||
       service.websiteAccounts.isBusy ||
       service.zhihu.isBusy ||
       service.pipix.isBusy ||
@@ -867,13 +927,26 @@ else {
       protocol.handle("panxu-media", async (request) => {
         try {
           const url = new URL(request.url);
+          if (url.hostname === "wechat-image") {
+            const source = wechatPreviewImageSource(request.url, request.method);
+            const image = await websiteSessions.readWechatPreviewImage(source);
+            return new Response(request.method === "HEAD" ? null : new Uint8Array(image.bytes), {
+              headers: { "Content-Type": image.mime, "Content-Length": String(image.bytes.length), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+            });
+          }
+          if (url.hostname === "wechat" && ["GET", "HEAD"].includes(request.method) && !url.search && !url.hash) {
+            const image = await service.wechat.image(url.pathname.slice(1));
+            return new Response(request.method === "HEAD" ? null : new Uint8Array(image.bytes), {
+              headers: { "Content-Type": image.mime, "Content-Length": String(image.bytes.length), "Cache-Control": "no-store" },
+            });
+          }
           if (
-            url.hostname !== "asset" ||
-            !["GET", "HEAD"].includes(request.method)
+            !["asset", "local-video"].includes(url.hostname) ||
+            !["GET", "HEAD"].includes(request.method) || url.search || url.hash
           )
             return new Response("Not found", { status: 404 });
           const name = url.pathname.slice(1),
-            path = await service.studio.assetPath(name),
+            path = url.hostname === "local-video" ? await service.video.assetPath(name) : await service.studio.assetPath(name),
             size = (await stat(path)).size;
           let start = 0,
             end = size - 1,
@@ -934,6 +1007,9 @@ else {
         ports,
         changed,
       );
+      service.tiebaAutocare.scheduler(true);
+      service.tiebaAutomation.start(true);
+      service.tiebaInsights.start(true);
       updater = createUpdater(
         service,
         (state) => {
@@ -959,6 +1035,9 @@ else {
           assertIdle();
           installingUpdate = true;
           service.intelligentOps.scheduler(false);
+          service.tiebaAutocare.scheduler(false);
+          service.tiebaAutomation.start(false);
+          service.tiebaInsights.start(false);
           service.queue.stop();
           await service.notes.flush();
           const backup = await snapshotBeforeUpdate(
@@ -980,6 +1059,9 @@ else {
           installingUpdate = false;
           quitting = false;
           service.queue.start();
+          service.tiebaAutocare.scheduler(true);
+          service.tiebaAutomation.start(true);
+          service.tiebaInsights.start(true);
         },
       );
       ipcMain.handle(
@@ -1014,10 +1096,24 @@ else {
                     revision: process.env.PANXU_DEV_REVISION,
                     builtAt: process.env.PANXU_DEV_BUILT_AT,
                     pid: process.pid,
+                    updatePolicy: devUpdates ? "manual" : "legacy",
                   },
                 };
               if (development && request.method === "dev.session")
                 return { ok: true, value: windows.info(entry.info.id) };
+              if (development && request.method === "dev.updates")
+                return { ok: true, value: devUpdates };
+              if (development && request.method === "dev.applyUpdates") {
+                if (!devUpdates?.pending || devUpdates.compiling || devUpdates.buildError)
+                  throw new AppError("DEV_UPDATE_NOT_READY", "后端更新尚未准备好，请等待编译完成。");
+                if (devRestarting || devUpdates.applying)
+                  throw new AppError("DEV_RESTARTING", "正在应用后端更新，请稍候。");
+                await new Promise<void>((resolve, reject) => {
+                  if (!process.send || !process.connected) return reject(new Error("开发监听器连接已断开。"));
+                  process.send({ type: "panxu:dev-apply-updates" }, (error: Error | null) => error ? reject(error) : resolve());
+                });
+                return { ok: true, value: true };
+              }
               if (development && (request.method === "dev.sessions" || request.method.startsWith("dev.session.")))
                 return { ok: true, value: sessionRequest(request.method, args) };
               if (development && request.method === "dev.tools") {
@@ -1087,6 +1183,10 @@ else {
           revision: process.env.PANXU_DEV_REVISION,
         });
         process.on("message", async (message) => {
+          if (message && typeof message === "object" && "type" in message && message.type === "panxu:dev-updates" && "state" in message) {
+            devUpdates = message.state as DevUpdateState;
+            return;
+          }
           if (message && typeof message === "object" && "type" in message && message.type === "panxu:session-request") {
             const request = message as { requestId?: string; action?: string; args?: unknown };
             try {
@@ -1119,21 +1219,25 @@ else {
               throw new Error("请先完成并关闭账号登录窗口。");
             devRestarting = true;
             service.intelligentOps.scheduler(false);
+            service.tiebaAutocare.scheduler(false);
+            service.tiebaAutomation.start(false);
+            service.tiebaInsights.start(false);
             service.queue.stop();
             await service.notes.flush();
             service.db.run("PRAGMA wal_checkpoint(FULL)");
             quitting = true;
             app.quit();
-          } catch {
+          } catch (error) {
             if (devRestarting) {
               devRestarting = false;
               service.queue.start();
+              service.tiebaAutocare.scheduler(true);
+              service.tiebaAutomation.start(true);
+              service.tiebaInsights.start(true);
             }
             process.send?.({
               type: "panxu:dev-busy",
-              reason: windows.testing
-                ? "自动化测试窗口正在运行或暂停，结束或手动接管后再重启。"
-                : "仍有任务、接口操作或账号窗口，请完成或停止后自动重启。",
+              reason: `${error instanceof AppError && error.code === "UPDATE_TASKS_RUNNING" ? "仍有任务、接口或账号操作正在进行。" : safeMessage(error)} 完成当前操作后，请再次点击“应用更新并重启”。`,
             });
           }
         });
@@ -1153,9 +1257,26 @@ else {
       );
       app.quit();
     });
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
     quitting = true;
+    if (service?.video.isBusy) {
+      event.preventDefault();
+      if (!videoQuitPending) {
+        videoQuitPending = true;
+        void service.video.shutdown()
+          .catch((error) => console.error("结束本地视频制作失败:", safeMessage(error)))
+          .finally(() => app.quit());
+      }
+    } else service?.video.close();
     service?.intelligentOps.close();
+    service?.music.close();
+    service?.tiebaAutomation.dispose();
+    service?.tiebaInsights.dispose();
+    service?.tiebaTopics.dispose();
+    service?.tiebaPublishing.dispose();
+    service?.tiebaPostStats.dispose();
+    service?.tiebaAutocare.dispose();
+    service?.tiebaParticipation.dispose();
     service?.baiduDiscovery.close();
     service?.zhidaoPages.close();
     ports.baiduShareReader?.close(true);

@@ -68,16 +68,16 @@ Omit irrelevant sections rather than filling them with invented rules. Put respo
 - An existing `DESIGN.md` is stale (the design has drifted).
 - Before a large redesign, to capture the current state as a reference.
 
-If a `DESIGN.md` already exists, **do not silently overwrite it**. Show the user the existing file first. Ask with Codex's structured user-input/question tool when available, or directly in chat if it is not, and wait for the answer before continuing. The choice is refresh, overwrite, or merge.
+If a `DESIGN.md` already exists, preserve unrelated content and merge the evidence-backed updates needed by the request. An explicit request to replace it authorizes replacement. Explain the resulting changes without asking for routine refresh/merge approval; ask only when an unresolved factual conflict prevents a correct update.
 
 ## Two paths
 
-- **Scan mode** (default): the project has design tokens, components, or rendered output. Extract, then confirm descriptive language. Use when there's code to analyze.
+- **Scan mode** (default): the project has design tokens, components, or rendered output. Extract and derive descriptive language from observed evidence. Use when there's code to analyze.
 - **Seed mode**: the project is pre-implementation. Ensure PRODUCT.md exists, then reuse new-work's visual-world workshop and write its directional DESIGN.md seed. Re-run in scan mode once there's code.
 
-Decide by scanning first (Scan mode Step 1). If the scan finds no tokens, no component files, and no rendered site, offer seed mode; don't silently switch. `$impeccable document --seed` requests new-work's world workshop, but it does not authorize replacing coherent code: when an incumbent system exists, offer scan mode or route an explicit identity-replacement request through new-work.
+Decide by scanning first (Scan mode Step 1). If no tokens, components, or rendered site exist, use seed mode and state that scope. An incumbent visual system uses scan mode; an explicit identity-replacement request routes through new-work. Do not turn this evidence-based routing choice into another confirmation question.
 
-## Scan mode (approach C: auto-extract, then confirm descriptive language)
+## Scan mode (approach C: extract and describe observed design)
 
 ### Step 1: Find the design assets
 
@@ -113,13 +113,13 @@ From the auto-extracted tokens, draft the YAML frontmatter now (you'll write it 
 
 Skip anything the project doesn't have. Empty scale keys or fabricated tokens pollute the spec.
 
-### Step 3: Ask the user for qualitative language
+### Step 3: Derive qualitative language
 
-The following require creative input that cannot be auto-extracted. Ask them in two structured rounds of no more than three questions each (or the harness's lower limit), waiting between rounds:
+Use the request, PRODUCT.md commitments, observed interface, and extracted tokens to write concise, evidence-based descriptions. Qualitative wording is a routine design decision for the agent, not a required interview. Ask only when a material brand or product fact is genuinely missing and cannot be inferred; do not ask the user to approve adjectives, color names, or ordinary component descriptions.
 
-- **Creative North Star**: a single named metaphor for the whole system ("The Editorial Sanctuary", "The Golden State Curator", "The Lab Notebook"). Offer 2-3 options that honor PRODUCT.md's brand personality.
+- **Creative North Star**: a single named metaphor for the whole system ("The Editorial Sanctuary", "The Golden State Curator", "The Lab Notebook"). Choose a name grounded in PRODUCT.md and the observed interface; omit a metaphor when none is useful.
 - **Overview voice**: mood adjectives, aesthetic philosophy in 2-3 sentences, and any confirmed visual anti-reference.
-- **Color character** (for auto-extracted colors): descriptive names ("Deep Muted Teal-Navy", not "blue-800"). Suggest 2-3 options per key color based on hue/saturation.
+- **Color character** (for auto-extracted colors): descriptive names ("Deep Muted Teal-Navy", not "blue-800"). Name the observed hue/saturation directly rather than asking the user to choose wording.
 - **Elevation philosophy**: flat/layered/lifted. If shadows exist, is their role ambient or structural?
 - **Component philosophy**: the feel of buttons, cards, inputs in one phrase ("tactile and confident" vs. "refined and restrained").
 
@@ -339,23 +339,23 @@ Pull directly from the DESIGN.md you just wrote:
 
 Do not reword. The panel shows these as secondary collapsible context; the same voice that's in the Markdown carries through.
 
-### Step 5: Confirm and refine
+### Step 5: Report the completed documentation
 
-1. Show the user the full DESIGN.md you wrote. Briefly highlight the non-obvious creative choices (descriptive color names, atmosphere language, named rules).
-2. Mention that `.impeccable/design.json` was also written alongside; the live panel will now render this project's actual button/input/nav primitives instead of generic approximations.
-3. Offer to refine any section: "Want me to revise a section, add component patterns I missed, or adjust the atmosphere language?"
+1. Link the completed DESIGN.md and briefly report the material updates and their evidence.
+2. Mention the generated `.impeccable/design.json` when relevant to using the live panel.
+3. Continue the authorized task without a confirmation prompt. The user can request revisions; reporting completion does not create another approval gate.
 
 Your own write is the freshest source; subsequent commands in this session don't need a reload.
 
 ## Seed mode
 
-For projects with no visual system to extract yet. Produces a user-chosen visual-world scaffold, not a fabricated token spec.
+For projects with no visual system to extract yet. Produces a selected visual-world scaffold, not a fabricated token spec. Record whether the reference was selected by the agent or the user.
 
 ### Step 1: Route through new-work's workshop
 
-PRODUCT.md is the prerequisite. If it is missing, load [init.md](init.md) and complete its product interview first. Do not create a visual identity without durable product context.
+PRODUCT.md is the prerequisite. If it is missing, load [init.md](init.md) and capture the evidence-supported product context first. Do not create a visual identity without durable product context.
 
-If PRODUCT.md exists, load [new-work.md](new-work.md) and resolve visual authority. Seed mode requires a concrete first surface: use the target the user named, or ask what they want to make first. Run new-work's **Create or replace the visual world** flow, then **Commit the world**, so the visual world and its first expression are chosen together. Stop after the directional DESIGN.md seed and surface brief; do not implement. A structured simulated user counts as the user and must get the same choice.
+If PRODUCT.md exists, load [new-work.md](new-work.md) and resolve visual authority. Seed mode requires a concrete first surface: use the target the user named, or ask what they want to make first. Run new-work's **Create or replace the visual world** flow, then **Commit the world**, so the visual world and its first expression are chosen together. Stop after the directional DESIGN.md seed and surface brief when only documentation was requested; resume implementation when the original request authorized it. Make routine visual choices from the brief and evidence. Present options only when the user explicitly requested a design review or when a material unresolved requirement needs their answer.
 
 If new-work already completed the workshop in this session, use its chosen direction directly. Do not ask again.
 
@@ -366,7 +366,7 @@ Use the canonical section order from Scan mode. Populate the selected workshop d
 Lead the file with:
 
 ```markdown
-<!-- SEED: established with the user before implementation; re-run $impeccable document once there's code to capture the actual tokens and components. -->
+<!-- SEED: selected from the task brief before implementation; record selectionSource as agent or user in the surface brief. Re-run $impeccable document once there is code to capture actual tokens and components. -->
 ```
 
 Per-section guidance in seed mode:
@@ -382,10 +382,10 @@ Per-section guidance in seed mode:
 
 Seed mode writes a minimal frontmatter with `name` and `description` only; no colors, typography, rounded, spacing, or components yet. Real tokens land on the next Scan-mode run. Skip the `.impeccable/design.json` sidecar in seed mode for the same reason: nothing to render.
 
-### Step 3: Confirm
+### Step 3: Report the seed
 
-1. Show the seed DESIGN.md. Call out that it is a seed (the marker is the literal commitment).
-2. Tell the user: "Re-run `$impeccable document` once you have some code. That pass will extract real tokens and generate the sidecar."
+1. Link the seed DESIGN.md, identify it as a seed, and state the selection source honestly.
+2. Note that a later scan of implemented code will capture real tokens and generate the sidecar. Do not stop for routine approval; resume any already-authorized implementation.
 
 Your own write is the freshest source; no reload needed.
 

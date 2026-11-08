@@ -1,0 +1,88 @@
+import { z } from "zod";
+import { wechatTextInput } from "../../shared/wechat";
+import { AppError } from "../errors";
+import { formatArticle } from "../smzdm/content";
+import { redactPromptText } from "../text-safety";
+
+const protectedText =
+  /(?:https?:|panxu-media:)\/\/|www\.|!\[|\[[^\]\n]+\]\s*\(|(?:提取码|访问码|密码)\s*[:：]?\s*(?:\*\*|\x60)?\s*[a-zA-Z0-9]{4,8}/i;
+const htmlMarkup =
+  /<\/?[a-z][^>]*>|<!--[\s\S]*?-->|<![a-z][^>]*>|<\?[\s\S]*?\?>/i;
+
+export const wechatRewriteResponse = z.object({
+  title: wechatTextInput.shape.title,
+  digest: wechatTextInput.shape.digest,
+  sections: z.array(z.object({ id: z.number().int(), text: z.string() })),
+});
+
+export function wechatRewriteBody(body: string) {
+  const blocks = body.split(/(\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*)/);
+  const sections: { id: number; text: string; locked: boolean }[] = [];
+  const entries: { id: number | null; text: string }[] = [];
+  for (const block of blocks) {
+    if (!block.trim()) {
+      entries.push({ id: null, text: block });
+      continue;
+    }
+    const locked = protectedText.test(block);
+    const id = sections.length;
+    const text = locked
+      ? redactPromptText(
+          block.replace(/panxu-media:\/\/[^\s)\]]+/gi, "[本地图片]"),
+        )
+      : block;
+    sections.push({ id, text, locked });
+    entries.push({ id: locked ? null : id, text: block });
+  }
+  const expectedIds = sections
+    .filter((section) => !section.locked)
+    .map((section) => section.id);
+  return { sections, entries, expectedIds };
+}
+
+export function checkRewriteText(value: string) {
+  if (protectedText.test(value) || htmlMarkup.test(value))
+    throw new AppError(
+      "WECHAT_REWRITE",
+      "改写结果加入了链接、图片或不支持的排版，原稿已保留。",
+    );
+}
+
+export function restoreWechatRewrite(
+  entries: ReturnType<typeof wechatRewriteBody>["entries"],
+  output: z.infer<typeof wechatRewriteResponse>["sections"],
+) {
+  const texts = new Map(
+    output.map(({ id, text }) => {
+      const normalized = formatArticle(text.replace(/<br\s*\/?>/gi, "\n"));
+      checkRewriteText(normalized);
+      return [id, normalized];
+    }),
+  );
+  const body = entries
+    .map((entry) => {
+      if (entry.id === null) return entry.text;
+      const rewritten = texts.get(entry.id);
+      if (!rewritten)
+        throw new AppError(
+          "WECHAT_REWRITE",
+          "改写结果缺少有效正文，原稿已保留。",
+        );
+      const fenceParity = (text: string) =>
+        (text.match(/^```/gm)?.length ?? 0) % 2;
+      if (fenceParity(rewritten) !== fenceParity(entry.text))
+        throw new AppError(
+          "WECHAT_REWRITE",
+          "改写结果的代码块边界不完整，原稿已保留。",
+        );
+      return rewritten;
+    })
+    .join("");
+  const parsed = wechatTextInput.shape.body.safeParse(body);
+  if (!parsed.success)
+    throw new AppError(
+      "WECHAT_REWRITE",
+      "改写结果超出正文长度限制，原稿已保留。",
+    );
+  return parsed.data;
+}

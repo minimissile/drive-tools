@@ -1,4 +1,5 @@
 node_modules/
+/build/video-remotion/
 dist/
 dist-desktop/
 release/

@@ -29,9 +29,9 @@ export function useTrafficDiscovery() {
     editor.update({ manualWords });
   const setSeeds = (seeds: string) => editor.update({ seeds });
   const [manualBound, setManualBound] = useState(true);
-  const [tab, setTab] = useState<"words" | "baidu" | "hotspots" | "costs" | "knowledge">(
-      "words",
-    ),
+  const [tab, setTab] = useState<
+      "words" | "baidu" | "hotspots" | "knowledge" | "pools"
+    >("knowledge"),
     [method, setMethod] = useState<Endpoint>("longtail"),
     [pages, setPages] = useState(1),
     [platform, setPlatform] = useState("xiaohongshu"),
@@ -74,11 +74,11 @@ export function useTrafficDiscovery() {
         );
       else if (!res.keywords.length && !res.hotspots.length)
         setQueryFeedback(
-          "接口已返回，本次没有候选结果。可在调用与费用中核对请求记录。",
+          "接口已返回，本次没有候选结果。可在“设置 → 调用与费用”中核对请求记录。",
         );
     } else
       setQueryFeedback(
-        "查询未完成。请先在“调用与费用”查看接口返回及待核费用，避免重复提交造成再次计费。",
+        "查询未完成。请先在“设置 → 调用与费用”查看接口返回及待核费用，避免重复提交造成再次计费。",
       );
   };
   const extract = async () => {

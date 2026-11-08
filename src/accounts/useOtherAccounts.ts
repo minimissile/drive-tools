@@ -12,6 +12,8 @@ export const defaultOtherAccountBrowser = (provider: OtherProvider) => ({
   fingerprint:
     provider !== "baidu-marketing" &&
     provider !== "smzdm" &&
+    provider !== "wechat" &&
+    provider !== "bilibili" &&
     !isDocumentProvider(provider),
   environmentId: "",
 });

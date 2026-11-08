@@ -7,7 +7,7 @@ import type { AppPorts } from "./ports";
 import type { WebsiteAccounts } from "./website-accounts";
 import { AppError } from "./errors";
 import { parseShare } from "./links";
-import { redactPromptText } from "./text-safety";
+import { catalogPublicText as publicText } from "./catalog-content";
 import { hasVerifiedShare } from "../shared/share-status";
 import { providerSpecs } from "../shared/providers";
 import {
@@ -26,8 +26,15 @@ import {
   type CatalogReceipt,
   type CatalogDetail,
   type CatalogSummary,
+  catalogResourcesSchema,
+  catalogRemoveItemsSchema,
+  type CatalogResourceOption,
 } from "../shared/resource-catalog";
 import { xlsx } from "./export-formats";
+import { CatalogLandings } from "./catalog-landing";
+import type { ResourceLinks } from "./resource-links";
+import type { AiService } from "./ai";
+import { CatalogAiDrafts } from "./catalog-ai";
 
 const indexKey = "resourceCatalogs:index:v1";
 const catalogKey = (catalogId: string) => `resourceCatalog:v1:${catalogId}`;
@@ -40,19 +47,22 @@ interface StoredCatalog {
   history: CatalogReceipt[];
   nextVersion: number;
 }
+interface CatalogResourceRow {
+  id: string;
+  title: string;
+  category: string;
+  summary: string;
+  tags: string;
+}
+const resourceOption = (row: CatalogResourceRow): CatalogResourceOption => ({
+  resourceId: row.id,
+  title: publicText(row.title),
+  category: publicText(row.category),
+  summary: publicText(row.summary),
+  tags: resourceTags(parseJson<string[]>(row.tags, [])).map(publicText),
+});
 const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const publicText = (text: string) =>
-  redactPromptText(text)
-    .replace(
-      /\b(?:access_token|refresh_token|authorization|bdstoken|stoken|pass_code_token|captcha_token)\s*[:：=]\s*["']?[^\s,，;；。！？"']+/gi,
-      "[凭据已省略]",
-    )
-    .replace(
-      /file:\/\/[^\s<>"'，。；）)]+|\b[A-Z]:[\\/][^\s<>"'，。；）)]+|\\\\[^\\\s]+\\[^\s<>"'，。；）)]+|\/(?:Users|home|private|Volumes|var|tmp|mnt|opt|etc)\/[^\s<>"'，。；）)]+/gi,
-      "[本地路径已省略]",
-    )
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
 const escapeHtml = (text: string) =>
   text.replace(
     /[&<>"']/g,
@@ -174,6 +184,8 @@ export function catalogDocument(snapshot: CatalogSnapshot) {
 
 /** Local curation and explicit handoff. No cloud document is created or changed here. */
 export class ResourceCatalogs {
+  private aiDrafts?: CatalogAiDrafts;
+  private site?: CatalogLandings;
   private active = new Set<string>();
   private readers = 0;
   private previewCache = new Map<
@@ -187,9 +199,71 @@ export class ResourceCatalogs {
     private changed: () => void,
     private readSecret: (key: string) => Promise<string | null> = async () =>
       null,
-  ) {}
+    links?: ResourceLinks,
+    ai?: AiService,
+  ) {
+    if (links) this.site = new CatalogLandings(repo, links, changed);
+    if (ai) this.aiDrafts = new CatalogAiDrafts(repo, ai, changed);
+  }
   get isBusy() {
-    return this.active.size > 0 || this.readers > 0;
+    return this.active.size > 0 || this.readers > 0 || !!this.aiDrafts?.isBusy;
+  }
+  private get aiCatalogs() {
+    if (!this.aiDrafts)
+      throw new AppError(
+        "CATALOG_AI_UNAVAILABLE",
+        "请先应用当前后端更新，再使用AI清单。",
+      );
+    return this.aiDrafts;
+  }
+  aiStart(input: unknown) {
+    return this.aiCatalogs.start(input);
+  }
+  aiGet(id: string) {
+    return this.aiCatalogs.get(id);
+  }
+  aiStep(id: string, retryUncertain = false) {
+    return this.aiCatalogs.step(id, retryUncertain);
+  }
+  resourceDetails(ids: string[]): CatalogResourceOption[] {
+    return this.repo.db
+      .all<{
+        id: string;
+        title: string;
+        category: string;
+        summary: string;
+        tags: string;
+      }>(
+        "SELECT id,title,category,summary,tags FROM resources WHERE id IN (SELECT value FROM json_each(?))",
+        JSON.stringify(ids),
+      )
+      .map(resourceOption);
+  }
+  resources(raw: unknown) {
+    const input = catalogResourcesSchema.parse(raw);
+    const where =
+      "WHERE (?='all' OR category=?) AND (?='' OR instr(lower(title || char(10) || summary || char(10) || tags),lower(?))>0)";
+    const values = [input.category, input.category, input.query, input.query];
+    const total =
+      this.repo.db.get<{ n: number }>(
+        `SELECT COUNT(*) n FROM resources ${where}`,
+        ...values,
+      )?.n ?? 0;
+    const rows = this.repo.db.all<{
+      id: string;
+      title: string;
+      category: string;
+      summary: string;
+      tags: string;
+    }>(
+      `SELECT id,title,category,summary,tags FROM resources ${where} ORDER BY title COLLATE NOCASE,id LIMIT 30 OFFSET ?`,
+      ...values,
+      (input.page - 1) * 30,
+    );
+    return {
+      total,
+      items: rows.map(resourceOption),
+    };
   }
   private async read<T>(action: () => Promise<T>): Promise<T> {
     this.readers++;
@@ -272,7 +346,17 @@ export class ResourceCatalogs {
     catalog: ResourceCatalog,
     attempt = 0,
   ): Promise<CatalogSnapshot> {
-    const sourceRevision = this.sourceFingerprint(catalog);
+    const selection =
+      catalog.selectionMode === "manual"
+        ? new Map(
+            (catalog.entries ?? []).map((entry) => [entry.resourceId, entry]),
+          )
+        : null;
+    const scope = selection ? { ...catalog, category: "all" } : catalog;
+    const removed = new Set(
+      selection ? [] : (catalog.excludedResourceIds ?? []),
+    );
+    const sourceRevision = this.sourceFingerprint(scope);
     const definitionKey = digest({
       title: catalog.title,
       category: catalog.category,
@@ -280,6 +364,9 @@ export class ResourceCatalogs {
       includeSummary: catalog.includeSummary,
       includeTags: catalog.includeTags,
       sort: catalog.sort,
+      selectionMode: catalog.selectionMode,
+      entries: catalog.entries,
+      excludedResourceIds: catalog.excludedResourceIds,
     });
     const cached = this.previewCache.get(definitionKey);
     if (cached?.sourceRevision === sourceRevision) return cached.snapshot;
@@ -296,15 +383,14 @@ export class ResourceCatalogs {
       tags: string;
       summary: string;
     }>(
-      `SELECT id,title,source_url,source_kind,provider,category,tags,summary FROM resources ${catalog.category === "all" ? "" : "WHERE category=?"} ORDER BY ${catalog.sort === "title" ? "title COLLATE NOCASE,id" : "updated_at DESC,id"}`,
-      ...(catalog.category === "all" ? [] : [catalog.category]),
+      `SELECT id,title,source_url,source_kind,provider,category,tags,summary FROM resources ${scope.category === "all" ? "" : "WHERE category=?"} ORDER BY ${catalog.sort === "title" ? "title COLLATE NOCASE,id" : "updated_at DESC,id"}`,
+      ...(scope.category === "all" ? [] : [scope.category]),
     );
     const accountMap = new Map(
       this.repo.accounts().map((account) => [account.id, account]),
     );
-    const categoryFilter =
-      catalog.category === "all" ? "" : "WHERE r.category=?";
-    const categoryValues = catalog.category === "all" ? [] : [catalog.category];
+    const categoryFilter = scope.category === "all" ? "" : "WHERE r.category=?";
+    const categoryValues = scope.category === "all" ? [] : [scope.category];
     const copiesByResource = new Map<string, ResourceCopy[]>();
     for (const row of this.repo.db.all<Row>(
       `SELECT c.* FROM copies c JOIN resources r ON r.id=c.resource_id ${categoryFilter} ORDER BY c.resource_id,c.created_at,c.id`,
@@ -338,7 +424,7 @@ export class ResourceCatalogs {
        WHERE s.status='ready' AND s.verified_at IS NOT NULL AND s.share_url IS NOT NULL AND s.share_id IS NOT NULL
        AND c.status='ready' AND c.verified_at IS NOT NULL AND a.enabled=1 AND a.uid IS NOT NULL
        AND c.owner_uid=a.uid AND s.owner_uid=a.uid AND a.provider=r.provider
-       ${catalog.category === "all" ? "" : "AND r.category=?"} ORDER BY c.resource_id,s.path,s.id`,
+       ${scope.category === "all" ? "" : "AND r.category=?"} ORDER BY c.resource_id,s.path,s.id`,
       ...categoryValues,
     )) {
       const shares = splitByResource.get(split.resource_id) ?? [];
@@ -346,6 +432,9 @@ export class ResourceCatalogs {
       splitByResource.set(split.resource_id, shares);
     }
     for (const resource of resourceRows) {
+      if (selection && !selection.has(resource.id)) continue;
+      if (removed.has(resource.id)) continue;
+      const entry = selection?.get(resource.id);
       const links: CatalogItem["links"] = [];
       for (const copy of copiesByResource.get(resource.id) ?? []) {
         const account = accountMap.get(copy.accountId);
@@ -420,14 +509,36 @@ export class ResourceCatalogs {
       }
       items.push({
         resourceId: resource.id,
-        title: publicText(resource.title),
-        category: publicText(resource.category),
-        summary: catalog.includeSummary ? publicText(resource.summary) : "",
+        title: publicText(entry?.title ?? resource.title),
+        category: publicText(entry?.category ?? resource.category),
+        summary: catalog.includeSummary
+          ? publicText(entry?.summary ?? resource.summary)
+          : "",
         tags: catalog.includeTags
-          ? resourceTags(parseJson<string[]>(resource.tags, [])).map(publicText)
+          ? resourceTags(
+              entry?.tags ?? parseJson<string[]>(resource.tags, []),
+            ).map(publicText)
           : [],
         links,
       });
+    }
+    if (selection) {
+      const known = new Set(resourceRows.map((row) => row.id));
+      for (const entry of selection.values())
+        if (!known.has(entry.resourceId))
+          excluded.push({
+            resourceId: entry.resourceId,
+            title: publicText(entry.title ?? "已删除的资源"),
+            reason: "此资源已不在资源库中，请从清单移除或重新添加",
+          });
+      if (catalog.sort === "manual") {
+        const order = new Map(
+          [...selection.keys()].map((resourceId, index) => [resourceId, index]),
+        );
+        items.sort(
+          (a, b) => order.get(a.resourceId)! - order.get(b.resourceId)!,
+        );
+      }
     }
     const content = {
       title: publicText(catalog.title),
@@ -435,7 +546,7 @@ export class ResourceCatalogs {
       introduction: publicText(catalog.introduction),
       items,
     };
-    if (sourceRevision !== this.sourceFingerprint(catalog)) {
+    if (sourceRevision !== this.sourceFingerprint(scope)) {
       if (attempt < 1) return this.snapshot(catalog, attempt + 1);
       throw new AppError(
         "CATALOG_RESOURCES_CHANGED",
@@ -501,6 +612,7 @@ export class ResourceCatalogs {
       current,
       preparations: [...stored.preparations].reverse(),
       history: [...stored.history].reverse(),
+      site: this.siteState(stored.catalog.id, current),
       publications: stored.publications.map((publication) => ({
         ...publication,
         needsUpdate: publication.hash !== current.hash,
@@ -511,6 +623,100 @@ export class ResourceCatalogs {
       })),
     };
   }
+  private siteState(catalogId: string, current: CatalogSnapshot) {
+    const state = this.site?.state(catalogId, current) ?? {
+      baseUrl: "",
+      publication: null,
+      needsUpdate: false,
+      pending: null,
+      error: null,
+      checkedAt: null,
+    };
+    const previous = state.publication?.snapshot;
+    const diff = previous
+      ? catalogDiff(
+          {
+            ...previous,
+            excluded: [],
+            items: previous.items.map(
+              ({ landingSlug: _slug, ...item }) => item,
+            ),
+          },
+          current,
+        )
+      : null;
+    if (
+      diff &&
+      state.needsUpdate &&
+      !diff.added.length &&
+      !diff.changed.length &&
+      !diff.removed.length &&
+      !diff.metadataChanged
+    )
+      diff.metadataChanged = true;
+    return { ...state, diff };
+  }
+  sitePublish(input: {
+    id: string;
+    expectedRevision: number;
+    expectedHash: string;
+  }) {
+    return this.exclusive(input.id, async () => {
+      const stored = this.load(input.id);
+      this.assertMutable(stored);
+      this.assertRevision(stored, input.expectedRevision);
+      const snapshot = await this.snapshot(stored.catalog);
+      if (snapshot.hash !== input.expectedHash)
+        throw new AppError(
+          "CATALOG_RESOURCES_CHANGED",
+          "资源或分享已变化，请刷新清单、核对内容后再发布。",
+        );
+      if (!this.site)
+        throw new AppError(
+          "CATALOG_SITE_CONFIG",
+          "当前环境未接入清单站点发布。",
+        );
+      await this.site.publish(stored.catalog, snapshot);
+      return this.siteState(input.id, snapshot);
+    });
+  }
+  siteWithdraw(id: string, expectedVersion: number) {
+    return this.exclusive(id, async () => {
+      this.load(id);
+      if (!this.site)
+        throw new AppError(
+          "CATALOG_SITE_CONFIG",
+          "当前环境未接入清单站点发布。",
+        );
+      await this.site.withdraw(id, expectedVersion);
+      // Withdrawal must remain possible even if current local shares cannot be read.
+      return { ...this.site.state(id), diff: null };
+    });
+  }
+  siteRead(id: string, retry = false) {
+    return this.exclusive(id, async () => {
+      const stored = this.load(id);
+      if (!this.site)
+        throw new AppError(
+          "CATALOG_SITE_CONFIG",
+          "当前环境未接入清单站点发布。",
+        );
+      if (retry) await this.site.retry(id);
+      else await this.site.refresh(id);
+      try {
+        return this.siteState(id, await this.snapshot(stored.catalog));
+      } catch {
+        const state = this.site.state(id);
+        return {
+          ...state,
+          diff: null,
+          error:
+            state.error ||
+            "已读取站点状态，但当前资源预览读取失败，暂时无法核对内容差异。请刷新资源后重试读取。",
+        };
+      }
+    });
+  }
   async list(): Promise<CatalogSummary[]> {
     return this.read(async () => {
       const catalogIds = this.repo.db.setting<string[]>(indexKey, []);
@@ -518,14 +724,20 @@ export class ResourceCatalogs {
       for (const catalogId of catalogIds) {
         const stored = this.load(catalogId);
         const current = await this.snapshot(stored.catalog);
+        const site = this.siteState(catalogId, current);
         result.push({
           ...stored.catalog,
           resourceCount: current.items.length,
           excludedCount: current.excluded.length,
-          publicationCount: stored.publications.length,
-          pendingCount: stored.publications.filter(
-            (item) => item.hash !== current.hash,
-          ).length,
+          publicationCount:
+            stored.publications.length + Number(!!site.publication?.active),
+          pendingCount:
+            stored.publications.filter((item) => item.hash !== current.hash)
+              .length +
+            Number(
+              !!site.pending ||
+                (!!site.publication?.active && site.needsUpdate),
+            ),
         });
       }
       return result.sort(
@@ -549,6 +761,41 @@ export class ResourceCatalogs {
       }
       const time = now();
       const { id: _id, expectedRevision: _revision, ...definition } = input;
+      definition.selectionMode ??=
+        existing?.catalog.selectionMode ?? "category";
+      definition.entries ??= existing?.catalog.entries ?? [];
+      definition.excludedResourceIds = [
+        ...new Set(
+          definition.excludedResourceIds ??
+            existing?.catalog.excludedResourceIds ??
+            [],
+        ),
+      ];
+      if (
+        new Set(definition.entries.map((entry) => entry.resourceId)).size !==
+        definition.entries.length
+      )
+        throw new AppError(
+          "CATALOG_DUPLICATE_ENTRY",
+          "清单中有重复资源，请移除重复项后保存。",
+        );
+      if (definition.selectionMode === "manual") {
+        const previous = new Set(
+          existing?.catalog.entries?.map((entry) => entry.resourceId),
+        );
+        for (const entry of definition.entries)
+          if (
+            !previous.has(entry.resourceId) &&
+            !this.repo.db.get(
+              "SELECT id FROM resources WHERE id=?",
+              entry.resourceId,
+            )
+          )
+            throw new AppError(
+              "CATALOG_RESOURCE_MISSING",
+              "部分所选资源已不存在，请重新检索并选择。",
+            );
+      }
       const stored: StoredCatalog = existing ?? {
         catalog: {} as ResourceCatalog,
         preparations: [],
@@ -592,11 +839,62 @@ export class ResourceCatalogs {
       return detail;
     });
   }
+  removeItems(raw: unknown) {
+    const input = catalogRemoveItemsSchema.parse(raw);
+    return this.exclusive(input.id, async () => {
+      const stored = this.load(input.id);
+      this.assertRevision(stored, input.expectedRevision);
+      this.assertMutable(stored);
+      const ids = new Set(input.resourceIds);
+      const catalog = stored.catalog;
+      const manual = catalog.selectionMode === "manual";
+      const excluded = new Set(catalog.excludedResourceIds ?? []);
+      const members = new Set(
+        manual
+          ? (catalog.entries ?? []).map((entry) => entry.resourceId)
+          : this.repo.db
+              .all<{ id: string }>(
+                `SELECT id FROM resources ${catalog.category === "all" ? "" : "WHERE category=?"}`,
+                ...(catalog.category === "all" ? [] : [catalog.category]),
+              )
+              .map((resource) => resource.id)
+              .filter((id) => !excluded.has(id)),
+      );
+      if ([...ids].some((id) => !members.has(id)))
+        throw new AppError(
+          "CATALOG_ITEM_CHANGED",
+          "部分条目已移出此清单或分类发生变化，请刷新资源后重试。",
+        );
+      if (!manual && excluded.size + ids.size > 100000)
+        throw new AppError(
+          "CATALOG_EXCLUSIONS_LIMIT",
+          "此清单已排除过多资源，请改用手动选取维护条目。",
+        );
+      stored.catalog = {
+        ...catalog,
+        ...(manual
+          ? {
+              entries: (catalog.entries ?? []).filter(
+                (entry) => !ids.has(entry.resourceId),
+              ),
+            }
+          : { excludedResourceIds: [...new Set([...excluded, ...ids])] }),
+        revision: catalog.revision + 1,
+        updatedAt: now(),
+      };
+      // Build the new snapshot before committing, so a read failure cannot look like a failed deletion.
+      const detail = await this.detail(stored);
+      this.persist(stored);
+      return detail;
+    });
+  }
   remove(catalogId: string, expectedRevision: number) {
     return this.exclusive(catalogId, async () => {
       const stored = this.load(catalogId);
       this.assertRevision(stored, expectedRevision);
+      this.site?.assertRemovable(catalogId);
       this.repo.db.transaction(() => {
+        this.site?.remove(catalogId);
         this.repo.db.run(
           "DELETE FROM settings WHERE key=? OR key GLOB ?",
           catalogKey(catalogId),

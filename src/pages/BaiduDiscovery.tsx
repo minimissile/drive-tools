@@ -17,7 +17,7 @@ function DiscoveryWorkspace({ workspace }: { workspace: string }) {
     <div className="baidu-discovery-workspace">
       <OperationsWorkspace
         title="百度批量扩词"
-        description="后台采集联想词与相关搜索，清理后导出或配资料生成问答。"
+        description="采集联想词与相关搜索，清理后逐词建链，生成待发布问答。采集词按默认月搜索量10收录到流量词库，非实测值。"
       >
         <div className="baidu-discovery-layout">
           <DiscoveryForm

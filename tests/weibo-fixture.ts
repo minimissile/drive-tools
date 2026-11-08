@@ -8,6 +8,10 @@ export async function weiboFixture() {
   const f = await fixture();
   const invoke = <M extends IpcMethod>(method: M, args?: unknown) =>
     f.app.invoke(method, args) as Promise<IpcValue<M>>;
+  // This fixture mocks image conversion; resource storage now requires WebP.
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9U8AAAAASUVORK5CYII=", "base64");
+  const webp = Buffer.from("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA", "base64");
+  f.ports.normalizeCover = async (_bytes, format) => format === "webp" ? webp : png;
   const saved = await f.add(true, {
     title: "Python 入门练习资料",
     summary: "本人制作的 Python 基础练习和配套清单。",

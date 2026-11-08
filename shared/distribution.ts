@@ -10,6 +10,8 @@ export const distributionPlatformId = z.enum([
 export type DistributionPlatformId = z.infer<typeof distributionPlatformId>;
 export const distributionStatus = z.enum([
   "ready",
+  "preparing",
+  // Retained for records created before direct use of saved library links.
   "verifying",
   "waiting_verification",
   "submitting",
@@ -36,6 +38,7 @@ export const distributionSubmittedStatuses: readonly DistributionStatus[] = [
 ];
 export const distributionStatusLabels: Record<DistributionStatus, string> = {
   ready: "待分发",
+  preparing: "准备提交中",
   verifying: "核验分享中",
   waiting_verification: "待人工打码",
   submitting: "提交中",
@@ -69,9 +72,8 @@ export interface DistributionPlatform {
   unknowns: string[];
   stages: DistributionStatus[];
   supportedProviders?: readonly string[];
-  permanentOnly?: boolean;
   distinctResource?: boolean;
-  manualVerification?: boolean;
+  manualVerification?: boolean | "website";
   localBatchLimit?: number;
 }
 const commonStages: DistributionStatus[] = [
@@ -93,19 +95,21 @@ export const distributionPlatforms: readonly DistributionPlatform[] = [
     loginUrl: null,
     login: "not_observed",
     format: "links",
+    manualVerification: "website",
     batchLimit: 500,
     dailyLimit: null,
     characterLimit: 50000,
     checkedAt: "2026-10-26",
-    summary: "批量链接导入，后台异步处理",
+    summary: "批量链接导入，运行中在官网完成人工验证",
     rules: [
       "每行一个完整分享链接，建议带提取码。",
+      "点击提交后会打开官网安全验证；请在官网完成验证，官网随后会继续提交本批。",
       "单次提交建议不超过 500 条，盘序按此检查单批数量。",
       "后台处理，提交后通过原页面的“查询状态”核对。",
       "禁止带广告性质和版权争议的资源，广告资源可能被屏蔽并加入黑名单。",
     ],
     unknowns: [
-      "未登录页面可见提交按钮；实际提交是否有额外验证尚未实测。",
+      "2026-11-05 公开投稿脚本确认提交前需人工验证；已补上显示原页面并等待的代码，真实投稿回执仍待验收。",
       "未见公开每日限额、处理时限与完整状态枚举。",
       "UC、光鸭、PikPak 等其他网盘未在投稿页明确列出，兼容性需另行确认。",
     ],
@@ -196,12 +200,11 @@ export const distributionPlatforms: readonly DistributionPlatform[] = [
     ],
     unknowns: [
       "官网未公开单批和每日限额；本地逐条提交上限不代表平台配额。",
-      "仅发送已核实永久有效的分享；有限期或有效期无法核实的分享保留为未就绪，不自动建链。",
+      "直接使用资源库已保存的本人分享与提取码，不重新查询有效期；是否符合永久有效要求由官网处理。",
       "真实投稿尚未验收；开头的成功提示不是最终回执，未知结果会暂停并保留官网页面供核对。",
     ],
     stages: commonStages,
     supportedProviders: ["quark", "baidu", "xunlei"],
-    permanentOnly: true,
     distinctResource: true,
   },
   {
@@ -383,7 +386,7 @@ export interface DistributionContract {
     value: boolean;
   };
   "distribution.start": {
-    args: { platformId: DistributionPlatformId; rightsConfirmed: true };
+    args: { platformId: DistributionPlatformId };
     value: boolean;
   };
   "distribution.pause": {

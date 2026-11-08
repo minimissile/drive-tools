@@ -8,24 +8,39 @@ export const answerCategories = [
   { value: "general", label: "综合" },
   { value: "education", label: "教育" },
 ] as const;
-export const answerDraftSchema = z.object({
-  mode: z.enum(["manual", "auto"]),
-  question: z.string(),
-  style: answerStyle,
-  accountId: z.string(),
-  count: z.number(),
-  categories: z
-    .array(z.enum(["emotion", "general", "education"]))
-    .default(["emotion"])
-    .transform((categories) => [categories[0] ?? "emotion"]),
-  intervalSeconds: z.number().default(30),
-  instructions: z.string().default(""),
-});
+export const answerDraftSchema = z
+  .object({
+    mode: z.enum(["manual", "auto"]),
+    question: z.string(),
+    style: answerStyle,
+    accountId: z.string().default(""),
+    accountIds: z.array(z.string()).default([]),
+    count: z.number(),
+    categories: z
+      .array(z.enum(["emotion", "general", "education"]))
+      .default(["emotion"])
+      .transform((categories) => [categories[0] ?? "emotion"]),
+    intervalSeconds: z.number().default(30),
+    instructions: z.string().default(""),
+  })
+  .transform((value) => ({
+    ...value,
+    accountIds: [
+      ...new Set(
+        value.accountIds.length
+          ? value.accountIds
+          : value.accountId
+            ? [value.accountId]
+            : [],
+      ),
+    ],
+  }));
 export const defaultAnswerDraft: z.infer<typeof answerDraftSchema> = {
   mode: "manual",
   question: "",
   style: "清晰实用",
   accountId: "",
+  accountIds: [],
   count: 30,
   categories: ["emotion"],
   intervalSeconds: 30,
@@ -45,6 +60,7 @@ export function prepareAutoAnswer(workspace: string, accountId: string) {
       ...(previous ?? defaultAnswerDraft),
       mode: "auto",
       accountId,
+      accountIds: [accountId],
       ...(!previous ? { style: "第一人称共鸣" as const } : {}),
     })
   )

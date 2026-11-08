@@ -136,6 +136,7 @@ test("Baidu account cache is isolated, local reads never query, errors retain su
     const account = await invoke("websiteAccounts.add", {
       provider: "baidu-marketing",
     });
+    await invoke("websiteAccounts.check", { id: account.id });
     const query = { ...input, accountId: account.id };
     assert.equal(
       await invoke("baiduKeywords.latest", { accountId: account.id }),
@@ -159,7 +160,7 @@ test("Baidu account cache is isolated, local reads never query, errors retain su
         id: account.id,
         confirmed: true,
       }),
-      { code: "WEBSITE_ACCOUNT_BUSY" },
+      { code: "ENVIRONMENT_BUSY" },
     );
     await assert.rejects(invoke("websiteAccounts.login", { id: account.id }), {
       code: "WEBSITE_ACCOUNT_BUSY",
@@ -192,12 +193,21 @@ test("Baidu account cache is isolated, local reads never query, errors retain su
       await invoke("baiduKeywords.latest", { accountId: second.id }),
       null,
     );
-    uid = "654321";
+    // Local caches belong to the registered identity, independent of session status.
+    f.app.db.run(
+      "UPDATE api_cache SET value=? WHERE key=?",
+      JSON.stringify({ ...result, accountUid: "654321" }),
+      `baidu-keywords:latest:${account.id}`,
+    );
     assert.equal(
       await invoke("baiduKeywords.latest", { accountId: account.id }),
       null,
     );
-    uid = "123456";
+    f.app.db.run(
+      "UPDATE api_cache SET value=? WHERE key=?",
+      JSON.stringify(result),
+      `baidu-keywords:latest:${account.id}`,
+    );
     broken = false;
     const original = f.app.db.run.bind(f.app.db);
     f.app.db.run = (sql, ...values) => {

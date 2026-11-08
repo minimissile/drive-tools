@@ -361,7 +361,7 @@ function BaiduKeywordWorkspace({
             </div>
           </details>
           <div className="row spread">
-            <small>单次最多返回3000词 · 月搜索量大于10自动入库</small>
+            <small>单次最多返回3000词 · 月搜索量至少10自动入库</small>
             <Button
               primary
               disabled={
@@ -405,7 +405,7 @@ function BaiduKeywordWorkspace({
         {result?.knowledge ? (
           <Notice>
             本次 {result.knowledge.indexed.toLocaleString()}{" "}
-            个词符合月均搜索量大于10的收录规则，已入库或更新。
+            个词符合月均搜索量至少10的收录规则，已入库或更新。
             {result.knowledge.refreshedBelowThreshold
               ? `另更新${result.knowledge.refreshedBelowThreshold}个已收录的低搜索量词。`
               : ""}
@@ -610,7 +610,7 @@ function BaiduKeywordWorkspace({
                           selected.includes(k.id),
                         ),
                       },
-                      "百度关键词已保存，可在“找词与词池”中使用。",
+                      "百度关键词已保存，可在“我的词池”中使用。",
                     );
                   } finally {
                     setSaving(false);

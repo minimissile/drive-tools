@@ -404,7 +404,7 @@ export class ResourceLinks {
         },
         ...(payload ? { body: JSON.stringify(payload) } : {}),
       });
-      text = await readLimited(response, path.startsWith("/api/pages/") ? 262_144 : 32_768);
+      text = await readLimited(response, path.startsWith("/api/catalogs/") ? 4_194_304 : path.startsWith("/api/pages/") ? 262_144 : 32_768);
     } catch (cause) {
       if (cause instanceof AppError) throw cause;
       const error = new AppError(
@@ -429,7 +429,7 @@ export class ResourceLinks {
     if (
       response.status === 404 &&
       method === "GET" &&
-      (path.startsWith("/api/links/") || path.startsWith("/api/pages/")) && value === null
+      (path.startsWith("/api/links/") || path.startsWith("/api/pages/") || path.startsWith("/api/catalogs/")) && value === null
     )
       return null;
     if (!response.ok) {
@@ -437,9 +437,9 @@ export class ResourceLinks {
         .object({ error: z.object({ code: z.string() }) })
         .safeParse(value);
       const rejectedBeforeWrite =
-        method === "PUT" &&
+        (method === "PUT" || method === "DELETE") &&
         failure.success &&
-        ((path.startsWith("/api/pages/") && response.status >= 400 && response.status < 500 && response.status !== 429) || (response.status === 400 &&
+        (((path.startsWith("/api/pages/") || path.startsWith("/api/catalogs/")) && response.status >= 400 && response.status < 500 && response.status !== 429) || (response.status === 400 &&
           ["INVALID_INPUT", "INVALID_ID", "INVALID_JSON"].includes(
             failure.data.error.code,
           )) ||
@@ -508,6 +508,41 @@ export class ResourceLinks {
     if (!record || record.revision < 1) throw new AppError("RESOURCE_LINK_NOT_READY", "请先创建并同步此资源的固定入口。");
     this.assertSettled(record);
     return this.request(record.baseUrl, `/api/pages/${record.id}`, method, input);
+  }
+  async landingTraffic(resourceId: string) {
+    this.d.repo.getResource(resourceId);
+    const record = this.record(resourceId);
+    if (!record || record.revision < 1)
+      throw new AppError("RESOURCE_LINK_NOT_READY", "请先创建并同步此资源的固定入口。");
+    return this.request(record.baseUrl, `/api/traffic/${record.id}`);
+  }
+  /** Catalogs reuse the configured service and credential; never create resource links. */
+  async catalogCloud(baseUrl: string, catalogId: string, method: "GET" | "PUT" | "DELETE", input?: unknown) {
+    if (!/^catalog_[\w-]{1,100}$/.test(catalogId))
+      throw new AppError("CATALOG_INVALID_ID", "清单标识不符合服务要求。");
+    const key = `catalog:${catalogId}`;
+    if (this.configuring || this.active.has(key))
+      throw new AppError("CATALOG_BUSY", "清单站点请求正在处理，请稍后重试。");
+    this.active.add(key);
+    try {
+      return await this.request(serviceUrl(baseUrl), `/api/catalogs/${catalogId}`, method, input);
+    } finally {
+      this.active.delete(key);
+    }
+  }
+  /** Return only an existing published page URL, without any read or generation request. */
+  catalogResourceSlug(resourceId: string, baseUrl: string): string | undefined {
+    const link = this.record(resourceId);
+    if (!link || link.baseUrl !== baseUrl || !link.enabled || link.revision < 1 || link.operationId)
+      return undefined;
+    const row = this.db.get<{ data: string }>("SELECT data FROM resource_landing_pages WHERE resource_id=?", resourceId);
+    if (!row) return undefined;
+    try {
+      const landing = JSON.parse(row.data) as { published?: { document?: unknown } | null };
+      return landing.published?.document ? link.slug : undefined;
+    } catch {
+      return undefined;
+    }
   }
   private currentCopy(resource: Resource) {
     return (

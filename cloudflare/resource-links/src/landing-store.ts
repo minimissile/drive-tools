@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   landingQuality,
+  landingSearchPolicyVersion,
   publishedLandingSchema,
   type LandingWrite,
   type RemoteLanding,
@@ -127,6 +128,8 @@ export async function putPage(
   const row = await findById(env, id);
   if (!row) throw new HttpError(404, "NOT_FOUND", "固定入口不存在。");
   const doc = input.document;
+  if (doc && doc.review.policyVersion !== landingSearchPolicyVersion)
+    throw new HttpError(400, "PAGE_REVIEW_REQUIRED", "请使用当前版本的搜索与内容规则重新审核后发布。");
   if (
     doc &&
     (doc.source.resourceTitle !== row.title ||

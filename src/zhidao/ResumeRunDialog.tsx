@@ -1,5 +1,5 @@
 import type { OperationRun } from "../../shared/zhidao";
-import { operationLabels } from "../../shared/zhidao";
+import { operationLabels, zhidaoAccountLabel } from "../../shared/zhidao";
 import { templateUsesAi } from "../../shared/zhidao-generation";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
@@ -94,12 +94,13 @@ export function ResumeRunDialog({
           <div>
             <dt>账号</dt>
             <dd>
-              {account?.alias ??
-                (missingAccount
+              {account
+                ? zhidaoAccountLabel(account)
+                : missingAccount
                   ? "原账号已移除"
                   : accounts.error
                     ? "账号暂未读取"
-                    : "正在读取账号…")}
+                    : "正在读取账号…"}
             </dd>
           </div>
         ) : null}

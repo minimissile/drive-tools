@@ -4,6 +4,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Database } from "../core/database";
 import { BaiduDiscovery } from "../core/baidu-discovery";
 import { AppError } from "../core/errors";
+import { TrafficKnowledge } from "../core/traffic-knowledge";
+import { baiduKeywordInputSchema } from "../shared/baidu-keywords";
 import {
   discoverySeeds,
   discoveryInputSchema,
@@ -33,6 +35,7 @@ const fixture = (read: BaiduDiscoveryPort["read"]) => {
     db,
     port,
     service,
+    knowledge: new TrafficKnowledge(db),
     close: () => {
       service.close();
       db.close();
@@ -91,6 +94,34 @@ test("两种来源合并同词且保存全部来源；CSV、TXT都按词去重",
     );
     assert.equal(f.service.list()[0].wordCount, 3);
     assert.equal(f.service.list()[0].completedCount, 1);
+    const library = f.knowledge.list({ endpoint: "baidu-discovery" });
+    assert.equal(library.total, 3);
+    assert.equal(f.knowledge.overview().summary.queries, 2);
+    assert.equal(f.knowledge.overview().summary.observations, 4);
+    assert.ok(library.items.every((word) => word.source === "百度批量扩词"));
+    assert.ok(
+      library.items.every((word) => word.metrics.averageMonthPv === 10),
+    );
+    assert.ok(
+      library.items.every(
+        (word) => word.metrics.averageMonthPvSource === "默认值（非实测）",
+      ),
+    );
+    assert.equal(
+      library.items.find((word) => word.word === "竹子画法")?.observations,
+      2,
+    );
+    const archive = f.knowledge.detail(library.items[0].queryId);
+    assert.equal(archive.query.endpoint, "baidu-discovery");
+    assert.deepEqual(archive.query.seeds, ["画竹子教程"]);
+    assert.match(archive.response!, /baidu.com/);
+    assert.match(
+      f.knowledge.export({ endpoint: "baidu-discovery" }),
+      /默认值（非实测）/,
+    );
+    f.service.list();
+    f.service.get(run.id);
+    assert.equal(f.knowledge.overview().summary.observations, 4);
     const csv = f.service.exportBytes(run.id, "csv").toString();
     assert.match(csv, /下拉联想词；相关搜索/);
     assert.equal(csv.split('"竹子画法"').length - 1, 1);
@@ -118,11 +149,13 @@ test("相关搜索验证失败时保留联想词，继续只重试未完成来�
     assert.equal(paused.status, "waiting");
     assert.equal(paused.words.length, 1);
     assert.deepEqual(paused.queries[0].completedSources, ["suggest"]);
+    assert.equal(f.knowledge.list({}).total, 1);
     verify = false;
     f.service.resume(start.id);
     const run = await settled(f.service, start.id);
     assert.equal(run.status, "completed");
     assert.deepEqual(calls, ["suggest", "related", "related"]);
+    assert.equal(f.knowledge.overview().summary.observations, 2);
   } finally {
     f.close();
   }
@@ -220,7 +253,7 @@ test("重启只恢复断点，不自动发送请求；损坏任务不阻止应�
       ],
       words: [],
       removedKeys: [],
-      materialPool:null,
+      materialPool: null,
       message: "",
       currentWord: "画竹子教程",
       limited: false,
@@ -246,6 +279,158 @@ test("重启只恢复断点，不自动发送请求；损坏任务不阻止应�
     assert.equal(calls, 0);
     assert.throws(() => recovered.list());
     recovered.close();
+  } finally {
+    f.close();
+  }
+});
+
+test("历史扩词在启动时本地回填，删除词不回填、归档不依赖任务缓存且默认值不覆盖实测来源", async () => {
+  let calls = 0;
+  const f = fixture(async () => {
+    calls++;
+    return ["竹子画法", "国画入门"];
+  });
+  let recovered: BaiduDiscovery | undefined;
+  try {
+    const start = f.service.start(input({ sources: ["suggest"] }));
+    const run = await settled(f.service, start.id);
+    f.service.removeWord(
+      run.id,
+      run.words.find((word) => word.word === "国画入门")!.key,
+    );
+    // Simulate the task-only storage used before discovery indexing was introduced.
+    f.db.run("DELETE FROM traffic_items");
+    f.db.run("DELETE FROM traffic_queries");
+    f.knowledge.ingestBaidu({
+      id: "measured",
+      accountUid: "123456",
+      input: baiduKeywordInputSchema.parse({
+        accountId: "web_test",
+        seeds: ["画竹子教程"],
+      }),
+      total: 1,
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+      keywords: [
+        {
+          id: "measured-word",
+          word: "竹子画法",
+          source: "百度营销 · 关键词规划师",
+          platform: "baidu",
+          metrics: { averageMonthPv: 1200 },
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+          sourceUpdatedAt: null,
+        },
+      ],
+    });
+    f.db.run(
+      "INSERT INTO api_cache(key,value,expires_at) VALUES(?,?,?)",
+      "baidu-discovery:broken",
+      "invalid",
+      "9999",
+    );
+    recovered = new BaiduDiscovery(f.db, { baiduDiscovery: f.port }, () => {});
+    assert.equal(calls, 1);
+    const library = f.knowledge.list({ endpoint: "baidu-discovery" });
+    assert.equal(library.total, 1);
+    assert.equal(library.items[0].word, "竹子画法");
+    assert.equal(library.items[0].metrics.averageMonthPv, 10);
+    assert.equal(
+      f.knowledge.list({ endpoint: "baidu-keywords" }).items[0].metrics
+        .averageMonthPv,
+      1200,
+    );
+    f.knowledge.archiveDiscovery(recovered.get(run.id));
+    assert.equal(f.knowledge.overview().summary.observations, 2);
+    recovered.removeWord(
+      run.id,
+      library.items[0].word.toLocaleLowerCase("zh-CN"),
+    );
+    assert.equal(f.knowledge.list({ endpoint: "baidu-discovery" }).total, 1);
+    f.db.run("DELETE FROM api_cache");
+    assert.equal(f.knowledge.list({ endpoint: "baidu-discovery" }).total, 1);
+  } finally {
+    recovered?.close();
+    f.close();
+  }
+});
+
+test("扩词入库失败保留采集结果，下一次启动只重试本地入库", async () => {
+  let calls = 0;
+  const f = fixture(async () => {
+    calls++;
+    return ["竹子画法"];
+  });
+  const original = f.db.run.bind(f.db);
+  let recovered: BaiduDiscovery | undefined;
+  try {
+    f.db.run = (sql, ...values) => {
+      if (sql.startsWith("INSERT INTO traffic_items")) throw Error("disk full");
+      return original(sql, ...values);
+    };
+    const start = f.service.start(input({ sources: ["suggest"] }));
+    const run = await settled(f.service, start.id);
+    assert.equal(run.status, "completed");
+    assert.equal(run.words.length, 1);
+    assert.match(run.knowledgeWarning!, /无需重复采集/);
+    assert.doesNotMatch(run.message, /入库失败/);
+    assert.equal(f.knowledge.list({}).total, 0);
+    f.db.run = original;
+    recovered = new BaiduDiscovery(f.db, { baiduDiscovery: f.port }, () => {});
+    assert.equal(calls, 1);
+    assert.equal(recovered.get(run.id).knowledgeWarning, undefined);
+    assert.doesNotMatch(recovered.get(run.id).message, /入库失败/);
+    assert.equal(f.knowledge.list({}).total, 1);
+  } finally {
+    f.db.run = original;
+    recovered?.close();
+    f.close();
+  }
+});
+
+test("百度实测月搜索量10边界及未知值规则，已收录低量词继续更新", () => {
+  const f = fixture(async () => []);
+  try {
+    const result = {
+      id: "threshold",
+      accountUid: "123456",
+      input: baiduKeywordInputSchema.parse({
+        accountId: "web_test",
+        seeds: ["画竹子教程"],
+      }),
+      total: 8,
+      fetchedAt: "2026-11-07T00:00:00.000Z",
+      keywords: [
+        ["数值10", 10],
+        ["字符串10", "10"],
+        ["数值9", 9],
+        ["字符串9", "9"],
+        ["小于10", "<10"],
+        ["零值", 0],
+        ["未知", null],
+        ["无效", "unknown"],
+      ].map(([word, monthly]) => ({
+        id: String(word),
+        word: String(word),
+        source: "百度营销 · 关键词规划师",
+        platform: "baidu",
+        metrics: { averageMonthPv: monthly },
+        fetchedAt: "2026-11-07T00:00:00.000Z",
+        sourceUpdatedAt: null,
+      })),
+    };
+    assert.equal(f.knowledge.ingestBaidu(result).indexed, 2);
+    assert.equal(f.knowledge.list({}).total, 2);
+    const updated = {
+      ...result,
+      id: "threshold-update",
+      fetchedAt: "2026-11-08T00:00:00.000Z",
+      keywords: [{ ...result.keywords[0], metrics: { averageMonthPv: 9 } }],
+    };
+    assert.equal(f.knowledge.ingestBaidu(updated).refreshedBelowThreshold, 1);
+    assert.equal(
+      f.knowledge.list({ search: "数值10" }).items[0].metrics.averageMonthPv,
+      9,
+    );
   } finally {
     f.close();
   }

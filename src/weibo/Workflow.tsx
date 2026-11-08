@@ -1,26 +1,14 @@
+import { AiIcon } from "../ui/AiIcon";
 import { useEffect, useRef, useState } from "react";
-import { z } from "zod";
-import { Plus, Sparkles } from "lucide-react";
-import { useIpcQuery } from "../api/useIpcQuery";
-import { useLocalDraft } from "../hooks/useLocalDraft";
+
 import {
   useAppActions,
   useAppActivity,
   useAppData,
   useAppNavigation,
 } from "../state";
-import {
-  Button,
-  Empty,
-  Header,
-  LoadingState,
-  Notice,
-  Panel,
-  Status,
-} from "../ui/primitives";
-import { QueryError } from "../ui/QueryError";
+import { Button, Notice, Panel, Status } from "../ui/primitives";
 import { Select } from "../ui/Select";
-import { Pagination } from "../ui/Pagination";
 import DraftEditor from "../studio/DraftEditor";
 import { Cover } from "../resources/components";
 import {
@@ -29,160 +17,25 @@ import {
   type WeiboMarketingDetail,
 } from "../../shared/weibo-marketing";
 import { formatTime } from "../lib/format";
-import { WeiboSetup } from "./Setup";
 import { WeiboDelivery, WeiboReceipt } from "./Delivery";
 import { WeiboStatistics } from "./Statistics";
 import "../studio/studio.css";
 import "./weibo.css";
 
-export default function WeiboWorkflow() {
-  const { data } = useAppData(),
-    { busy } = useAppActivity();
-  const { navigate } = useAppNavigation();
-  const selection = useLocalDraft(
-    `panxu-weibo-selection-v1:${data!.dataPath}`,
-    { id: "" },
-    (raw) => z.object({ id: z.string() }).parse(raw),
-  );
-  const runId = selection.value.id;
-  const history = useIpcQuery("weibo.history", undefined, {
-    revision: busy,
-    keepPrevious: true,
-  });
-  const detail = useIpcQuery(
-    "weibo.get",
-    { id: runId },
-    {
-      enabled: !!runId,
-      revision: busy,
-      invalidate: data?.drafts,
-      keepPrevious: true,
-      refreshInterval: busy > 0 ? 2000 : 0,
-    },
-  );
-  const [historyPage, setHistoryPage] = useState(1);
-  const page = Math.min(
-    historyPage,
-    Math.max(1, Math.ceil((history.data?.length ?? 0) / 6)),
-  );
-  const open = (id: string) => selection.update({ id });
-  // Previous data may be retained while refreshing, but must never display another task after selection changes.
-  const selected = detail.data?.run.id === runId ? detail.data : null;
-  return (
-    <div className="weibo-workflow">
-      <Header
-        title="微博图文营销"
-        description="从本人资料出发，准备推荐图文，在指定窗口发布，再把微博链接与资料效果关联。"
-        action={
-          <div className="row">
-            <Button onClick={() => navigate("pipix-sources")}>公共素材采集</Button>
-            <Button onClick={() => navigate("website-accounts")}>
-              管理微博账号
-            </Button>
-            {runId ? (
-              <Button onClick={() => open("")}>
-                <Plus size={15} />
-                新建图文任务
-              </Button>
-            ) : null}
-          </div>
-        }
-      />
-      {selection.error ? <Notice warning>{selection.error}</Notice> : null}
-      <div className="weibo-workflow-layout">
-        <section className="weibo-workflow-main" aria-label="微博图文工作区">
-          {!runId ? (
-            <WeiboSetup onCreated={open} />
-          ) : (
-            <>
-              <QueryError
-                error={detail.error}
-                loading={detail.loading}
-                onRetry={detail.reload}
-                title="微博任务读取失败"
-              />
-              {!selected && detail.loading ? (
-                <LoadingState label="正在读取微博图文任务…" />
-              ) : null}
-              {selected ? (
-                <WeiboTask key={selected.run.id} detail={selected} />
-              ) : null}
-            </>
-          )}
-        </section>
-        <aside className="weibo-workflow-aside" aria-label="微博任务历史">
-          <Panel
-            title="图文任务"
-            extra={
-              <Button
-                quiet
-                size="compact"
-                disabled={history.loading}
-                onClick={history.reload}
-              >
-                刷新
-              </Button>
-            }
-          >
-            <QueryError
-              error={history.error}
-              loading={history.loading}
-              onRetry={history.reload}
-            />
-            {!history.data && history.loading ? (
-              <LoadingState compact label="正在读取图文任务…" />
-            ) : history.data?.length ? (
-              <>
-                <div className="weibo-task-list">
-                  {history.data.slice((page - 1) * 6, page * 6).map((run) => (
-                    <button
-                      key={run.id}
-                      type="button"
-                      aria-current={run.id === runId ? "true" : undefined}
-                      onClick={() => open(run.id)}
-                    >
-                      <strong>{run.input.keyword}</strong>
-                      <span>{weiboStageLabels[run.stage]}</span>
-                      <small>{formatTime(run.updatedAt)}</small>
-                    </button>
-                  ))}
-                </div>
-                {history.data.length > 6 ? (
-                  <Pagination
-                    page={page}
-                    pageSize={6}
-                    total={history.data.length}
-                    onPageChange={setHistoryPage}
-                    label="微博任务分页"
-                  />
-                ) : null}
-              </>
-            ) : history.data && !history.error ? (
-              <Empty compact title="还没有微博任务">
-                从左侧选题和本人资料开始。
-              </Empty>
-            ) : null}
-          </Panel>
-          <div className="weibo-process-note">
-            <strong>资料 → 图文 → 发布 → 复盘</strong>
-            <p>
-              网盘转存与建链沿用原流程。这里负责资源推荐图文、发布交接和回执。
-            </p>
-            <p>自动填写并上传后确认发布，官方回执会自动保存；安全验证和异常结果可在窗口核对。</p>
-          </div>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function WeiboTask({ detail }: { detail: WeiboMarketingDetail }) {
+export function WeiboTask({ detail }: { detail: WeiboMarketingDetail }) {
   const { run, draft } = detail;
   const { data } = useAppData(),
     { command } = useAppActions(),
     { busy } = useAppActivity(),
     { navigate } = useAppNavigation();
-  const locked = ["filled", "submitting", "uncertain", "handoff", "submitted", "published"].includes(run.stage);
+  const locked = [
+    "filled",
+    "submitting",
+    "uncertain",
+    "handoff",
+    "submitted",
+    "published",
+  ].includes(run.stage);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -283,7 +136,7 @@ function WeiboTask({ detail }: { detail: WeiboMarketingDetail }) {
                 disabled={busy > 0 || !data!.settings.openrouterConfigured}
                 onClick={() => void generated()}
               >
-                <Sparkles size={15} />
+                <AiIcon size={15} />
                 生成推荐图文方案
               </Button>
               <Select
@@ -311,7 +164,7 @@ function WeiboTask({ detail }: { detail: WeiboMarketingDetail }) {
               key={draft.id}
               draft={draft}
               onSaved={attach}
-              continueLabel="准备微博图文包"
+              continueLabel="准备发布"
               onContinue={() =>
                 document
                   .getElementById("weibo-delivery")
@@ -334,7 +187,14 @@ function WeiboTask({ detail }: { detail: WeiboMarketingDetail }) {
         <WeiboDelivery detail={detail} />
       </div>
       <WeiboReceipt detail={detail} />
-      {run.url && (run.options?.accountId || run.prepared?.accountId) ? <Panel title="微博数据统计"><WeiboStatistics accountId={(run.options?.accountId || run.prepared?.accountId)!} url={run.url} /></Panel> : null}
+      {run.url && (run.options?.accountId || run.prepared?.accountId) ? (
+        <Panel title="微博数据统计">
+          <WeiboStatistics
+            accountId={(run.options?.accountId || run.prepared?.accountId)!}
+            url={run.url}
+          />
+        </Panel>
+      ) : null}
       <details className="weibo-events">
         <summary>任务记录 · {run.events.length} 项</summary>
         <ol>

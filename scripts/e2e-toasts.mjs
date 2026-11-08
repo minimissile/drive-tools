@@ -72,7 +72,7 @@ try {
     }
     if (method === "account.update" && window.__toastMode === "dialog-error") return Promise.reject(new Error("模拟账号设置保存失败，请检查本地文件权限后重试。"));
     if (method === "snapshot" && window.__toastMode === "snapshot-fail") {window.__toastMode="";return Promise.reject(new Error("模拟提交后读取失败"))}
-    if (method === "traffic.knowledge.list") return Promise.resolve({total:1,page:1,pageSize:25,items:[{id:"local-keyword",queryId:"local-query",kind:"keyword",word:"本地验收关键词",platform:null,source:"模拟本地记录",metrics:{},observedAt:null,sourceUpdatedAt:null,observations:1}],queries:[],summary:{queries:1,responses:1,words:1,hotspots:0,observations:1,legacy:0},seeds:[],patterns:[]});
+    if (method === "traffic.knowledge.list") return Promise.resolve({total:1,page:1,pageSize:25,items:[{id:"local-keyword",entryId:"local-entry",queryId:"local-query",kind:"word",word:"本地验收关键词",platform:null,source:"模拟本地记录",metrics:{},observedAt:null,firstObservedAt:null,sourceUpdatedAt:null,observations:1}],queries:[],summary:{queries:1,responses:1,words:1,hotspots:0,observations:1,legacy:0},seeds:[],patterns:[]});
     return window.panxu.invoke`,
   );
   assert.notEqual(source, client);
@@ -226,13 +226,13 @@ try {
   assert.equal(await page.evaluate(() => window.__toastAddCalls), before + 1);
   await dismiss();
   checks.push("提交成功、刷新失败显示警告；重试只恢复读取，不重复创建账号");
-  await nav("流量发现").click();
-  await page.getByRole("tab", { name: "本地知识库", exact: true }).click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "关键词库", exact: true }).click();
   await page
-    .getByRole("checkbox", { name: "选择知识库词 本地验收关键词", exact: true })
+    .getByRole("checkbox", { name: "选择词条 本地验收关键词", exact: true })
     .check();
   await page
-    .getByRole("button", { name: "带入找词 / AI联想", exact: true })
+    .getByRole("button", { name: "带入找词", exact: true })
     .click();
   await inspect("info", "status");
   assert.equal(colors.at(-1).color, "rgb(46, 97, 213)");

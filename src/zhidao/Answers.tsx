@@ -3,7 +3,7 @@ import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { Button, Field, LoadingState, Notice, Panel } from "../ui/primitives";
-import { answerInput } from "../../shared/zhidao";
+import { answerInput, autoAnswersStart } from "../../shared/zhidao";
 import { Tabs, TabList } from "../ui/Tabs";
 import { QueryError } from "../ui/QueryError";
 import { OperationsWorkspace } from "../workbench/OperationsWorkspace";
@@ -12,6 +12,7 @@ import { AnswerActivity } from "./AnswerActivity";
 import { AnswerLogs } from "./AnswerLogs";
 import { AutoAnswerSettings } from "./AutoAnswerSettings";
 import { AnswerExpression } from "./AnswerExpression";
+import { AnswerAccountsProgress } from "./AnswerAccountsProgress";
 import { CheckboxField } from "../ui/CheckboxField";
 import "./answers.css";
 import {
@@ -35,7 +36,24 @@ export default function Answers() {
     draft.update(patch);
     setConsent(false);
   };
-  const account = accounts.data?.find((a) => a.id === draft.value.accountId);
+  const sessions = useIpcQuery("zhidao.answer.sessions", undefined, {
+    enabled: draft.value.mode === "auto",
+    refreshInterval: 2000,
+    keepPrevious: true,
+  });
+  const runningAccounts = new Set(
+    (sessions.data ?? [])
+      .filter((run) => run.status === "running")
+      .map((run) => String(run.config.accountId)),
+  );
+  const selectedRunning = draft.value.accountIds.some((id) =>
+    runningAccounts.has(id),
+  );
+  const accountsReady =
+    draft.value.accountIds.length > 0 &&
+    draft.value.accountIds.every((id) =>
+      accounts.data?.some((a) => a.id === id && a.status === "connected"),
+    );
   const input =
     draft.value.mode === "manual"
       ? {
@@ -44,7 +62,13 @@ export default function Answers() {
           style: draft.value.style,
         }
       : draft.value;
-  const validInput = answerInput.safeParse(input).success;
+  const batchInput = { ...draft.value, authorized: true as const };
+  const validInput =
+    draft.value.mode === "manual"
+      ? answerInput.safeParse(input).success
+      : autoAnswersStart.safeParse(batchInput).success;
+  const manualRunning =
+    model.running && model.detail.data?.run.config.mode === "manual";
   const aiIssue = !data!.settings.openrouterConfigured
     ? "请先到连接与设置保存 OpenRouter API Key。"
     : !data!.settings.aiModels.copy
@@ -117,25 +141,26 @@ export default function Answers() {
                     value={draft.value}
                     update={update}
                     accounts={accounts.data ?? null}
-                    busy={!!action.pending || model.running}
+                    busy={!!action.pending}
+                    runningAccounts={runningAccounts}
                     onAccounts={() => navigate("zhidao-accounts")}
-                    onCheck={() => {
+                    onCheck={(id) => {
                       setConsent(false);
                       void action.run(
                         "zhidao.account.check",
-                        { id: draft.value.accountId },
+                        { id },
                         accounts.reload,
                         "账号状态已更新",
                       );
                     }}
-                    onLogin={() =>
+                    onLogin={(id) =>
                       void action.run("zhidao.account.login", {
-                        id: draft.value.accountId,
+                        id,
                       })
                     }
-                    onQuota={() =>
+                    onQuota={(id) =>
                       void action.run("zhidao.account.openRights", {
-                        id: draft.value.accountId,
+                        id,
                         page: "quota",
                       })
                     }
@@ -152,12 +177,12 @@ export default function Answers() {
                 <CheckboxField
                   checked={consent}
                   onChange={(e) => setConsent(e.target.checked)}
-                  label="我已核对账号与数量，授权本次 AI 生成和自动提交"
+                  label={`我已核对${draft.value.accountIds.length}个账号与每号${draft.value.count}条，授权本次 AI 生成和自动提交`}
                 />
               ) : null}
               <small>
                 {draft.value.mode === "auto"
-                  ? "安全验证会暂停任务；提交与审核结果以百度记录为准。"
+                  ? `本次目标共${draft.value.accountIds.length * draft.value.count}条。各账号独立执行，安全验证只暂停对应账号。`
                   : "使用现有文案模型，生成费用计入 AI 台账。"}
               </small>
             </div>
@@ -169,16 +194,33 @@ export default function Answers() {
                 primary
                 disabled={
                   !!action.pending ||
-                  model.running ||
+                  (draft.value.mode === "manual"
+                    ? manualRunning
+                    : selectedRunning) ||
                   !!aiIssue ||
                   !validInput ||
                   (draft.value.mode === "manual"
                     ? !draft.value.question.trim()
                     : !consent ||
-                      account?.status !== "connected" ||
+                      !accountsReady ||
+                      !!sessions.error ||
+                      !sessions.data ||
                       !draft.value.categories.length)
                 }
-                onClick={() =>
+                onClick={() => {
+                  if (draft.value.mode === "auto") {
+                    void action.run(
+                      "zhidao.answer.startMany",
+                      autoAnswersStart.parse(batchInput),
+                      (runs) => {
+                        setConsent(false);
+                        if (runs[0]) model.pick(runs[0]);
+                        sessions.reload();
+                      },
+                      "所选账号的回答任务已开始",
+                    );
+                    return;
+                  }
                   void action.run(
                     "zhidao.start",
                     {
@@ -191,15 +233,40 @@ export default function Answers() {
                       model.pick(run);
                     },
                     "问答任务已开始",
-                  )
-                }
+                  );
+                }}
               >
-                {draft.value.mode === "manual" ? "生成回答" : "开始自动回答"}
+                {draft.value.mode === "manual"
+                  ? "生成回答"
+                  : selectedRunning
+                    ? "所选账号正在回答"
+                    : "开始自动回答"}
               </Button>
             </div>
           </div>
         </Panel>
-        <AnswerActivity model={model} />
+        <AnswerActivity
+          model={model}
+          accounts={accounts.data ?? []}
+          accountOverview={
+            draft.value.mode === "auto" ? (
+              <AnswerAccountsProgress
+                sessions={sessions.data ?? []}
+                accounts={accounts.data ?? []}
+                selected={draft.value.accountIds}
+                currentId={model.id}
+                onPick={model.pick}
+                onChanged={() => {
+                  sessions.reload();
+                  model.refresh();
+                }}
+                error={sessions.error}
+                loading={sessions.loading}
+                onRetry={sessions.reload}
+              />
+            ) : undefined
+          }
+        />
         <AnswerLogs
           key={model.id || "idle"}
           runId={model.id}

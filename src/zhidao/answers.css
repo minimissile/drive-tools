@@ -82,6 +82,44 @@
   gap: var(--space-2) var(--space-4);
   margin-top: var(--space-2);
 }
+.answer-selected-accounts {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: var(--space-4);
+}
+.answer-account-runs {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.answer-account-run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.answer-account-run[data-selected] {
+  background: var(--blue-bg);
+  border-radius: var(--control-radius);
+}
+.answer-account-run .answer-account-run-pick {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+}
+.answer-account-run-pick strong {
+  flex: 1;
+  min-width: 140px;
+  overflow-wrap: anywhere;
+}
 .answer-account-state > div {
   display: flex;
   align-items: center;

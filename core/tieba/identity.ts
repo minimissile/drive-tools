@@ -2,12 +2,28 @@
 export function tiebaCurrentUser(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const user = value as Record<string, unknown>;
-  const rawUid = user.user_id ?? user.id ?? user.uid;
+  if ([false, 0, "0"].includes(user.is_login as boolean | number | string))
+    return null;
+  // The current-viewer JSON endpoint now returns open_uid instead of user_id.
+  // Accept that field only with an explicit signed-in result from the same payload.
+  const rawUid =
+    user.user_id ??
+    user.id ??
+    user.uid ??
+    ([true, 1, "1"].includes(user.is_login as boolean | number | string)
+      ? user.open_uid
+      : undefined);
   if (typeof rawUid === "number" && !Number.isSafeInteger(rawUid)) return null;
   const uid = String(rawUid ?? "");
   if (!/^[1-9][0-9]{0,19}$/.test(uid)) return null;
   const nickname =
-    user.user_nickname ?? user.name_show ?? user.user_name ?? user.name ?? "";
+    user.user_nickname ??
+    user.name_show ??
+    user.user_name ??
+    user.name ??
+    user.user_name_show ??
+    user.show_nickname ??
+    "";
   return {
     uid,
     nickname: typeof nickname === "string" ? nickname.slice(0, 100) : "",
@@ -45,18 +61,21 @@ export function tiebaIdentityScript() {
         throw Error('贴吧身份接口未返回账号数据，请在官方窗口完成登录或安全验证后重试');
       }
     };
-    const login = await read('/dc/common/tbs');
-    if ([false, 0, '0'].includes(login.is_login)) return null;
-    if (![true, 1, '1'].includes(login.is_login))
-      throw Error('贴吧登录状态响应已变化，请稍后重试');
     let info;
-    try { info = (await read('/f/user/json_userinfo')).data; } catch {}
+    let identityError;
+    try { info = (await read('/f/user/json_userinfo')).data; } catch (error) { identityError = error; }
     const candidates = [info?.user, info];
     const currentUser = (${tiebaCurrentUser.toString()});
     for (const user of candidates) {
       const identity = currentUser(user);
       if (identity) return identity;
     }
+    if ([false, 0, '0'].includes(info?.is_login)) return null;
+    let login;
+    try { login = await read('/dc/common/tbs'); } catch (error) { throw identityError ?? error; }
+    if ([false, 0, '0'].includes(login.is_login)) return null;
+    if (![true, 1, '1'].includes(login.is_login))
+      throw Error('贴吧登录状态响应已变化，请稍后重试');
     throw Error('未能读取贴吧当前账号的 UID，请在官方窗口完成登录或验证后重试');
   })()`;
 }

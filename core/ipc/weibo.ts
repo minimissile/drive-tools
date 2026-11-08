@@ -33,7 +33,7 @@ export function createWeiboHandlers({ weibo }: Pick<HandlerServices, "weibo">) {
         .parse(raw);
       return weibo.configure(input.id, input.options);
     },
-    "weibo.prepare": async (raw) => weibo.prepare(identifier.parse(raw).id),
+    "weibo.prepare": async (raw) => {const v=identifier.extend({export:z.boolean().optional()}).parse(raw);return weibo.prepare(v.id,v.export??true);},
     "weibo.handoff": async (raw) => weibo.handoff(identifier.parse(raw).id),
     "weibo.fill": async (raw) => weibo.fill(identifier.parse(raw).id),
     "weibo.submit": async (raw) =>

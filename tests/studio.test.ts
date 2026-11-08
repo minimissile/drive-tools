@@ -8,7 +8,7 @@ import { Database } from "../core/database";
 import { AiService } from "../core/ai";
 import { StudioService } from "../core/studio";
 import { inspectBackup, stageRestore, fileHash } from "../core/backups";
-import { AppError } from "../core/errors";
+import { AppError, ServiceHttpError } from "../core/errors";
 import type { Draft } from "../shared/types";
 import type { StudioJob, CreativePackage } from "../shared/studio";
 
@@ -600,12 +600,109 @@ test("v8 migration takes a consistent v9 snapshot and preserves old drafts on re
       1,
     );
     const db = new Database(path);
-    assert.equal(db.get<any>("PRAGMA user_version").user_version, currentSchemaVersion);
+    assert.equal(
+      db.get<any>("PRAGMA user_version").user_version,
+      currentSchemaVersion,
+    );
     assert.equal(
       db.get<any>("SELECT id FROM drafts WHERE id=?", legacy.id).id,
       legacy.id,
     );
     db.close();
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("公众号参考图复用图片模型、预算拦截与实费记账", async () => {
+  const f = await setup();
+  try {
+    f.app.db.setSetting("aiModels", { image: "qa/image" });
+    const bytes = Buffer.from(png, "base64");
+    f.app.db.setSetting("dailyAiBudgetMicros", 50_000);
+    await assert.rejects(
+      f.app.studio.generateReferenceImage(bytes, "根据参考图重新构图"),
+      { code: "AI_BUDGET_EXCEEDED" },
+    );
+    assert.equal(f.qa.posts, 0);
+    f.app.db.setSetting("dailyAiBudgetMicros", 20_000_000);
+    const image = await f.app.studio.generateReferenceImage(
+      bytes,
+      "根据参考图重新构图",
+    );
+    assert.deepEqual(image, bytes);
+    const payload = f.qa.payloads.at(-1);
+    assert.equal(payload.model, "qa/image");
+    assert.equal(payload.n, 1);
+    assert.equal(payload.aspect_ratio, "3:4");
+    assert.equal(
+      payload.input_references[0].image_url.url,
+      `data:image/png;base64,${png}`,
+    );
+    assert.deepEqual(
+      {
+        ...f.app.db.get<{ status: string; confirmed_micros: number }>(
+          "SELECT status,confirmed_micros FROM api_calls WHERE phase='wechat_image'",
+        ),
+      },
+      {
+        status: "success",
+        confirmed_micros: 20_000,
+      },
+    );
+    f.qa.timeout = true;
+    await assert.rejects(
+      f.app.studio.generateReferenceImage(bytes, "根据参考图重新构图"),
+      { code: "MEDIA_UNCERTAIN" },
+    );
+    assert.equal(f.qa.posts, 2);
+    assert.equal(
+      f.app.db.get<{ status: string }>(
+        "SELECT status FROM api_calls WHERE phase='wechat_image' AND status='uncertain'",
+      )?.status,
+      "uncertain",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("公众号图片 403 保留拒绝原因，主题生成沿用全局模型且不上传参考图", async () => {
+  const f = await setup();
+  try {
+    f.app.db.setSetting("aiModels", { image: "qa/image" });
+    const bytes = Buffer.from(png, "base64");
+    const payloads: Record<string, unknown>[] = [];
+    Object.assign(f.app.studio, {
+      request: async (_url: string, init: RequestInit) => {
+        const payload = JSON.parse(String(init.body));
+        payloads.push(payload);
+        if (payload.input_references)
+          throw new ServiceHttpError(
+            403,
+            "The request is prohibited due to a violation of provider Terms Of Service.",
+            "MEDIA_REJECTED",
+          );
+        return { data: [{ b64_json: png }], usage: { cost: 0.02 } };
+      },
+    });
+    await assert.rejects(f.app.studio.generateReferenceImage(bytes, "参考图"), {
+      code: "MEDIA_POLICY_REJECTED",
+    });
+    assert.equal(payloads.length, 1);
+    assert.deepEqual(
+      await f.app.studio.generateThemeImage("原创书籍插画"),
+      bytes,
+    );
+    assert.equal(payloads.length, 2);
+    assert.equal(payloads[1].model, "qa/image");
+    assert.ok(!("input_references" in payloads[1]));
+    assert.match(
+      f.app.db.get<{ message: string }>(
+        "SELECT message FROM api_calls WHERE phase='wechat_image' AND status='failed'",
+      )?.message ?? "",
+      /Terms Of Service/,
+    );
   } finally {
     await f.cleanup();
   }

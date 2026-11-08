@@ -20,6 +20,8 @@ export interface WorkerContext {
   fetcher: SourceFetch;
   pace: number;
   readonly closed: boolean;
+  claimAnswerQuestion?(owner: string, qid: string, question: string): boolean;
+  releaseAnswerQuestion?(owner: string): void;
   progress(run: OperationRun, message: string, done?: number): void;
   settings(): { pansouUrl: string };
   identity(

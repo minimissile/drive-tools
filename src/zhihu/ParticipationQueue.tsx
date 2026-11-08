@@ -13,7 +13,7 @@ export function ParticipationQueue({
     <section className="participation-form-section" aria-label="自主参与排期">
       <h3>自主参与排期</h3>
       <Notice>
-        已保存AI决策，尚未执行或取得官方回执。到时仍须当前授权、计划版本、账号状态、上下文及额度有效；条件变化时不会强行提交。
+        已保存互动决定，尚未执行或取得官方回执。到时仍须当前授权、计划版本、账号状态、上下文及额度有效；条件变化时不会强行提交。
       </Notice>
       <dl className="participation-evidence">
         <div>
@@ -32,7 +32,11 @@ export function ParticipationQueue({
       <div className="participation-decision">
         <strong>
           {decision.relevance === null
-            ? "本人确认的互动依据"
+            ? decision.source === "rule"
+              ? decision.rule === "autocare_random_comment"
+                ? "随机评论规则"
+                : "随机点赞规则"
+              : "本人确认的互动依据"
             : `AI相关性判断 · ${Math.round(decision.relevance * 100)}%`}
         </strong>
         <p>{decision.basis}</p>

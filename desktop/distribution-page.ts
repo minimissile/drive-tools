@@ -7,7 +7,11 @@ import type {
 function readForm() {
   const visible = (element: Element) => {
     const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      getComputedStyle(element).visibility !== "hidden"
+    );
   };
   const text = document.body?.innerText ?? "";
   if (
@@ -21,14 +25,15 @@ function readForm() {
   if (
     Array.from(
       document.querySelectorAll(
-        'iframe[src*="captcha"],iframe[src*="challenge"],[role="dialog"]',
+        'iframe[src*="captcha"],iframe[src*="challenge"],[role="dialog"],[class*="captchaWrap_"]',
       ),
     ).some(
       (element) =>
         visible(element) &&
-        /验证码|人机验证|安全验证|captcha/i.test(
-          element.textContent ?? element.getAttribute("src") ?? "",
-        ),
+        (element.className.toString().includes("captchaWrap_") ||
+          /验证码|人机验证|安全验证|captcha/i.test(
+            element.textContent ?? element.getAttribute("src") ?? "",
+          )),
     )
   )
     return {

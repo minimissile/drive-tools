@@ -211,7 +211,7 @@ export class StudioService {
     )
       throw new AppError("DRAFT_MISMATCH", "原草稿与当前资源或平台不一致。");
     const pool = input.poolId
-      ? this.repo.pools().find((p) => p.id === input.poolId)
+      ? this.repo.getPool(input.poolId)
       : null;
     if (
       input.poolId &&
@@ -557,29 +557,10 @@ export class StudioService {
       audio: input.audio,
     };
     this.repo.db.transaction(() => {
-      const used = this.repo.db.get<{ n: number }>(
-          "SELECT coalesce(sum(coalesce(reserved_micros,estimated_micros,0)),0) n FROM api_calls WHERE endpoint='openrouter' AND created_at>=? AND status IN ('reserved','success','uncertain')",
-          budgetDayStart(),
-        )!.n,
-        budget = this.repo.db.setting<number | null>(
-          "dailyAiBudgetMicros",
-          null,
-        );
-      if (budget != null && used + input.reserveMicros > budget)
-        throw new AppError(
-          "AI_BUDGET_EXCEEDED",
-          "今日AI美元预算不足，尚未提交素材生成。",
-        );
-      this.repo.db.run(
-        "INSERT INTO api_calls(id,endpoint,phase,units,estimated_micros,reserved_micros,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
+      this.reserveMediaCall(
         job.callId,
-        "openrouter",
         `studio_${job.kind}`,
-        1,
         input.reserveMicros,
-        input.reserveMicros,
-        "reserved",
-        now(),
       );
       this.invalidate(draft.id);
       if (input.regenerate && existing?.status === "uncertain")
@@ -614,17 +595,7 @@ export class StudioService {
             },
           ];
       }
-      const response = await this.request(
-        `${base}/${input.kind === "image" ? "images" : "videos"}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        },
-      );
+      const response = await this.requestMedia(input.kind, key, payload);
       if (!response.error) {
         const issues = this.repo.db.setting<Record<string, string>>(
           "ai:modelIssues",
@@ -666,35 +637,7 @@ export class StudioService {
           String(response.error?.message ?? response.error).slice(0, 300),
         );
       if (input.kind === "image") {
-        const raw = response.data?.[0]?.b64_json;
-        if (
-          typeof raw !== "string" ||
-          !raw ||
-          raw.length > 48_000_000 ||
-          !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)
-        )
-          throw new AppError(
-            "MEDIA_OUTPUT_INVALID",
-            "模型没有返回有效图片，费用事实已保留。",
-          );
-        let bytes: Buffer;
-        try {
-          bytes = await this.normalize(Buffer.from(raw, "base64"));
-        } catch {
-          throw new AppError(
-            "MEDIA_OUTPUT_INVALID",
-            "模型返回的图片无法解码，费用事实已保留。",
-          );
-        }
-        if (
-          !bytes
-            .subarray(0, 8)
-            .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        )
-          throw new AppError(
-            "MEDIA_OUTPUT_INVALID",
-            "图片无法解码，未保存为成功素材。",
-          );
+        const bytes = await this.decodeImage(response);
         await this.storeAsset(job, bytes, "png");
       } else {
         if (
@@ -767,9 +710,85 @@ export class StudioService {
     this.invalidate(draft.id);
     return this.save(job);
   }
+  private reserveMediaCall(
+    callId: string,
+    phase: string,
+    reserveMicros: number,
+  ) {
+    const used = this.repo.db.get<{ n: number }>(
+        "SELECT coalesce(sum(coalesce(reserved_micros,estimated_micros,0)),0) n FROM api_calls WHERE endpoint='openrouter' AND created_at>=? AND status IN ('reserved','success','uncertain')",
+        budgetDayStart(),
+      )!.n,
+      budget = this.repo.db.setting<number | null>("dailyAiBudgetMicros", null);
+    if (budget != null && used + reserveMicros > budget)
+      throw new AppError(
+        "AI_BUDGET_EXCEEDED",
+        "今日AI美元预算不足，尚未提交素材生成。",
+      );
+    this.repo.db.run(
+      "INSERT INTO api_calls(id,endpoint,phase,units,estimated_micros,reserved_micros,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
+      callId,
+      "openrouter",
+      phase,
+      1,
+      reserveMicros,
+      reserveMicros,
+      "reserved",
+      now(),
+    );
+  }
+  private requestMedia(
+    kind: "image" | "video",
+    key: string,
+    payload: Record<string, unknown>,
+  ) {
+    return this.request(`${base}/${kind === "image" ? "images" : "videos"}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  }
+  private async decodeImage(response: Record<string, any>) {
+    const raw = response.data?.[0]?.b64_json;
+    if (
+      typeof raw !== "string" ||
+      !raw ||
+      raw.length > 48_000_000 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)
+    )
+      throw new AppError(
+        "MEDIA_OUTPUT_INVALID",
+        "模型没有返回有效图片，费用事实已保留。",
+      );
+    let bytes: Buffer;
+    try {
+      bytes = await this.normalize(Buffer.from(raw, "base64"));
+    } catch {
+      throw new AppError(
+        "MEDIA_OUTPUT_INVALID",
+        "模型返回的图片无法解码，费用事实已保留。",
+      );
+    }
+    if (
+      !bytes
+        .subarray(0, 8)
+        .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    )
+      throw new AppError(
+        "MEDIA_OUTPUT_INVALID",
+        "图片无法解码，未保存为成功素材。",
+      );
+    return bytes;
+  }
   private billing(job: StudioJob, response: Record<string, any>) {
-    const value = cost(response.usage?.cost);
+    const value = this.recordMediaBilling(job.callId, response);
     if (value != null) job.costMicros = value;
+  }
+  private recordMediaBilling(callId: string, response: Record<string, any>) {
+    const value = cost(response.usage?.cost);
     if (
       value != null ||
       response.status === "completed" ||
@@ -782,8 +801,129 @@ export class StudioService {
         value == null
           ? "素材接口未返回实际费用，保留美元预留。"
           : "素材接口返回usage.cost，美元实费已记录。",
-        job.callId,
+        callId,
       );
+    return value;
+  }
+  generateReferenceImage(bytes: Buffer, prompt: string) {
+    return this.generateArticleImage(prompt, bytes);
+  }
+  generateThemeImage(prompt: string) {
+    return this.generateArticleImage(prompt);
+  }
+  private async generateArticleImage(prompt: string, bytes?: Buffer) {
+    const model = this.repo.db
+      .setting<MediaModel[]>("studio:modelCatalog", [])
+      .find(
+        (item) =>
+          item.kind === "image" && item.id === this.ai.modelFor("image"),
+      );
+    if (!model)
+      throw new AppError(
+        "MEDIA_MODEL_REQUIRED",
+        "请在连接与设置中配置默认图片模型，并刷新模型列表。",
+      );
+    if (bytes && !model.reference)
+      throw new AppError(
+        "MEDIA_REFERENCE_MODEL",
+        "请在连接与设置中选择支持参考图的默认图片模型。",
+      );
+    const key = await this.secrets.get("openrouter");
+    if (!key)
+      throw new AppError("API_KEY_REQUIRED", "请先配置 OpenRouter Key。");
+    const reference = bytes ? await this.normalize(bytes) : null;
+    const width = reference?.readUInt32BE(16) ?? 4,
+      height = reference?.readUInt32BE(20) ?? 3;
+    const ratios = (
+      model.ratios.length ? model.ratios : ["1:1", "4:3", "3:4", "16:9", "9:16"]
+    ).flatMap((label) => {
+      const [w, h] = label.split(":").map(Number);
+      return w > 0 && h > 0
+        ? [{ label, distance: Math.abs(Math.log((w * height) / (h * width))) }]
+        : [];
+    });
+    const ratio = ratios.sort((a, b) => a.distance - b.distance)[0]?.label;
+    const lines = model.priceLines ?? [];
+    const billables = reference
+      ? ["output_image", "input_image", "input_reference"]
+      : ["output_image"];
+    const pricedReserve = billables.reduce(
+      (sum, billable) =>
+        sum +
+        Math.max(
+          0,
+          ...lines
+            .filter(
+              (line) => line.billable === billable && line.unit === "image",
+            )
+            .map((line) => line.usd),
+        ),
+      0,
+    );
+    const callId = id("ai");
+    this.repo.db.transaction(() =>
+      this.reserveMediaCall(
+        callId,
+        "wechat_image",
+        Math.max(100_000, Math.ceil(pricedReserve * 1_000_000)),
+      ),
+    );
+    try {
+      const response = await this.requestMedia("image", key, {
+        model: model.id,
+        prompt: clean(prompt),
+        n: 1,
+        ...(ratio ? { aspect_ratio: ratio } : {}),
+        ...(reference
+          ? {
+              input_references: [
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:image/png;base64,${reference.toString("base64")}`,
+                  },
+                },
+              ],
+            }
+          : {}),
+      });
+      this.recordMediaBilling(callId, response);
+      if (response.error)
+        throw new AppError(
+          "MEDIA_REMOTE_ERROR",
+          String(response.error?.message ?? response.error).slice(0, 300),
+        );
+      return await this.decodeImage(response);
+    } catch (error) {
+      const message = safeMessage(error).replaceAll(key, "[凭据省略]");
+      const rejected =
+        error instanceof AppError && error.code === "MEDIA_REJECTED";
+      this.repo.db.run(
+        "UPDATE api_calls SET status=?,message=? WHERE id=? AND status='reserved'",
+        rejected ? "failed" : "uncertain",
+        message,
+        callId,
+      );
+      if (error instanceof ServiceHttpError && error.status === 403) {
+        if (/terms of service|content policy|moderation/i.test(message))
+          throw new AppError(
+            "MEDIA_POLICY_REJECTED",
+            reference
+              ? "图片服务商拒绝了这次参考图请求。可以改用文章主题生成新图，或上传自己的图片。"
+              : "图片服务商拒绝了这次主题生成请求。请调整画面描述或上传自己的图片。",
+          );
+        throw new AppError(
+          "MEDIA_ACCESS_DENIED",
+          "当前连接无法使用此图片模型。请在连接与设置中检查模型权限。",
+        );
+      }
+      throw new AppError(
+        error instanceof AppError ? error.code : "MEDIA_UNCERTAIN",
+        message,
+      );
+    } finally {
+      this.changed();
+    }
   }
   async poll(jobId: string): Promise<StudioJob> {
     const job = this.job(jobId);

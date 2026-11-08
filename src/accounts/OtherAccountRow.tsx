@@ -1,3 +1,4 @@
+import { AiIcon } from "../ui/AiIcon";
 import {
   ChartNoAxesCombined,
   FileText,
@@ -10,7 +11,6 @@ import {
   ShieldCheck,
   SquareArrowOutUpRight,
   Trash2,
-  WandSparkles,
 } from "lucide-react";
 import { isDocumentProvider } from "../../shared/document-platforms";
 import { formatTime } from "../lib/format";
@@ -25,6 +25,7 @@ export type OtherAccountAction =
   | "check"
   | "document"
   | "smzdm-workflow"
+  | "wechat-workflow"
   | "smzdm-editor"
   | "zhihu-operations"
   | "weibo-statistics"
@@ -68,6 +69,12 @@ export function OtherAccountRow({
   }[] = [];
   if (document && connected)
     menu.push({ action: "document", label: "文档工作台", icon: <FileText /> });
+  if (account.provider === "wechat")
+    menu.push({
+      action: "wechat-workflow",
+      label: "公众号草稿箱",
+      icon: <Send />,
+    });
   if (account.provider === "smzdm") {
     menu.push({ action: "smzdm-workflow", label: "文章分发", icon: <Send /> });
     if (connected)
@@ -111,7 +118,7 @@ export function OtherAccountRow({
     menu.push({
       action: "zhidao-answer",
       label: "自动答题",
-      icon: <WandSparkles />,
+      icon: <AiIcon />,
     });
     if (account.bulkPermission === false)
       menu.push({
@@ -126,7 +133,11 @@ export function OtherAccountRow({
       label: account.windowOpen ? "返回登录窗口" : "重新登录",
       icon: <LogIn />,
     });
-  if (account.provider !== "smzdm" && !document)
+  if (
+    account.provider !== "smzdm" &&
+    account.provider !== "wechat" &&
+    !document
+  )
     menu.push({
       action: "environment",
       label: "关联浏览器环境",

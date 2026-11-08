@@ -8,6 +8,10 @@ export const weiboMarketingInput = z.object({
   copyId: z.string().min(1).max(100),
   audience: z.string().trim().max(100).default(""),
   evidence: z.string().trim().min(10).max(5000),
+  accountId: z.string().max(150).default(""),
+  initialText: z.string().max(2000).default(""),
+  aiAssisted: z.boolean().default(false),
+  originId: z.string().max(150).default(""),
 });
 export const weiboDeliveryOptions = z.object({
   accountId: z.string().max(100).default(""),
@@ -61,11 +65,13 @@ export interface WeiboPrepared {
   uid: string;
 }
 export interface WeiboMarketingRun {
+  editorial?: import("./weibo-workspace").WeiboEditorialStyle;
   id: string;
   input: WeiboMarketingInput;
   source: ContentKeyword;
   topicId: string;
   draftId: string;
+  draftIds?: string[];
   options: WeiboDeliveryOptions | null;
   stage: WeiboStage;
   message: string;
@@ -89,11 +95,12 @@ export interface WeiboMarketingDetail {
 export function weiboPostText(
   draft: Pick<Draft, "title" | "body" | "tags">,
   body = draft.body,
+  leadLink = "",
 ) {
   const topics = [
     ...new Set(draft.tags.map((tag) => tag.trim().replace(/^#+|#+$/g, ""))),
   ];
-  const text = [draft.title.trim(), body.trim()].filter(Boolean).join("\n\n");
+  const text = [draft.title.trim(), leadLink.trim(), body.trim()].filter(Boolean).join("\n\n");
   return [
     text,
     topics
@@ -146,7 +153,7 @@ export interface WeiboMarketingContract {
   "weibo.matches": Contract<{ keyword: string }, ContentResourceMatch[]>;
   "weibo.history": Contract<undefined, WeiboMarketingRun[]>;
   "weibo.get": Contract<{ id: string }, WeiboMarketingDetail>;
-  "weibo.create": Contract<WeiboMarketingInput, WeiboMarketingDetail>;
+  "weibo.create": Contract<z.input<typeof weiboMarketingInput>, WeiboMarketingDetail>;
   "weibo.generate": Contract<
     { id: string; artwork: "cover" | "creative" },
     WeiboMarketingDetail
@@ -159,7 +166,7 @@ export interface WeiboMarketingContract {
     { id: string; options: WeiboDeliveryOptions },
     WeiboMarketingDetail
   >;
-  "weibo.prepare": Contract<{ id: string }, WeiboMarketingDetail>;
+  "weibo.prepare": Contract<{ id: string; export?: boolean }, WeiboMarketingDetail>;
   "weibo.handoff": Contract<{ id: string }, WeiboMarketingDetail>;
   "weibo.fill": Contract<{ id: string }, WeiboMarketingDetail>;
   "weibo.submit": Contract<

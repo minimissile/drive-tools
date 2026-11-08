@@ -1,20 +1,26 @@
 # Plan and asset review
 
-Use this checkpoint on comp-led builds once every raster region has its plate and the plates gate has scored them, before any page code exists. The approved comp is the reference. The user reviews two things: the plates that will ship, and the production plan for everything else, meaning which regions code draws. A painted region planned as code is the most expensive mistake a comp-led build makes, and this is where the user catches it. Text, controls and chrome are judged later, in the assembled first viewport.
+Use this check on comp-led builds once every raster region has its plate and the plates gate has scored them, before page assembly. The selected comp is the reference. The agent normally reviews the shipping plates and the production plan for code-drawn regions against the task brief, spec, and real assets, fixes defects, then continues. A design or build request delegates this routine review; it does not require another user approval. Enter a human review only when the user explicitly asks to review or choose the plan, assets, or assembled viewport.
 
-## Plan, capture, serve
+## Default: inspect and continue
 
-Run `.agents/skills/impeccable/scripts/impeccable component-review plan`. It writes `.impeccable/review/components.json` from the measured spec, the comp and the plate files, and refuses, naming each one, while any raster region lacks its plate. Never write or edit that file for this stage: the packet is derived from the spec, so every change belongs in the regions file.
+Run `.agents/skills/impeccable/scripts/impeccable component-review plan`. It writes `.impeccable/review/components.json` from the measured spec, the comp and the plate files, and refuses, naming each one, while any raster region lacks its plate. The packet is derived from the spec; corrections belong in the regions file, not in a fabricated review packet.
 
-If the harness exposes `component_review`, call it with `manifest_path` set to `.impeccable/review/components.json`. The host captures, presents the review and returns the user's decisions. A suspended request is waiting for the user; it is not a failed build or an approval.
+Capture the plan and inspect each raster plate, code region, dependency, and layout against the selected reference. Record the reference, findings, fixes, and `selectionSource: "agent"` in the surface brief or review notes, then continue to assembly and the normal quality gates. Do not call `component_review`, start `component-review serve`, wait for a user receipt, or run a human-approval verification step on this default path.
 
-Otherwise run `.agents/skills/impeccable/scripts/impeccable component-review capture --manifest .impeccable/review/components.json`, then start `.agents/skills/impeccable/scripts/impeccable component-review serve --session <returned session>` in the background. Open the URL it prints in the available browser and wait for the user; `serve` exits 0 once they submit. Read the decisions with `.agents/skills/impeccable/scripts/impeccable component-review status --session <id>`; `.agents/skills/impeccable/scripts/impeccable component-review verify --manifest .impeccable/review/components.json` confirms approval and refuses pending, needs-work and stale input. Never submit the page or write a receipt on the user's behalf.
+A legacy field named `approved` may identify an accepted build reference; it is not evidence that a human approved it. Pair that compatibility field with `selectionSource: "agent"` and a short rationale when the agent selected the reference. Never fabricate a human receipt. If a legacy CLI exposes only a mandatory human-receipt path, leave that optional path unused and continue direct implementation and visual verification. Record the CLI limitation rather than claiming its approval gate passed.
 
-`serve` exits 2 when this session has no browser (the same signal as the decision page) and 4 when it closes after 30 idle minutes without a decision. Either way no one is reviewing: stop waiting, do not approve anything yourself, and do not build past this checkpoint. End the run and report the plan and asset review as pending with its session ID, so the user can resume it. A waiting review is pending work, not a completed build.
+## Optional human review: only when requested
 
-## Act on the receipt
+If the user explicitly requests this review and the harness exposes `component_review`, call it with `manifest_path` set to `.impeccable/review/components.json`. The host captures, presents the review and returns the user's decisions. A suspended request in this requested flow is waiting for the user; it is not an approval.
 
-Apply the user's decisions as given, never your own favorable verdict in their place.
+Otherwise run `.agents/skills/impeccable/scripts/impeccable component-review capture --manifest .impeccable/review/components.json`, then start `.agents/skills/impeccable/scripts/impeccable component-review serve --session <returned session>` in the background. Open its URL and wait for the requested decision. Read it with `component-review status --session <id>`; `component-review verify --manifest .impeccable/review/components.json` verifies this human review and may refuse pending, needs-work or stale input. Never submit the page or write a receipt on the user's behalf.
+
+When an explicitly requested review cannot be presented or times out, report its pending state and session ID. Do not count silence as approval. If the user delegates the remaining choice, return to agent review and record that decision source honestly.
+
+### Act on a requested human receipt
+
+In this optional flow, apply the user's decisions as given; do not replace them with an agent verdict.
 
 - **approve**: once every item is approved and the inventory is confirmed, advance to the hero.
 - **revise** (a plate): regenerate that plate at the same path with the user's feedback.
@@ -23,13 +29,13 @@ Apply the user's decisions as given, never your own favorable verdict in their p
 - **reclassify** (a code region): in the regions file, change that region's `kind` to the one the user chose and rewrite its `note` to describe the material. Rerun `.agents/skills/impeccable/scripts/impeccable comp-spec --comp <comp.png> --regions <regions.json>`, then produce the new plates, with the asset producer when subagents are available.
 - **missing**: add the region to the regions file, rerun `.agents/skills/impeccable/scripts/impeccable comp-spec --comp <comp.png> --regions <regions.json>`, and produce its plate if it is raster.
 
-Then run `plan`, `capture` and `serve` again. Unchanged decisions carry over, so the user sees only what changed. Any spec change, or a plate replaced after acceptance, needs a new round; the build-phase gate stays closed until the review of the current spec is accepted.
+Regenerate the plan and captures after changes. Reopen a requested human review only for unresolved items within the scope the user asked to review; unchanged decisions carry over. Ordinary implementation corrections receive agent verification and do not create another approval request.
 
 ## Assemble and review
 
-Build the first viewport from the approved plates and plan, and run the hero gate. Human review does not waive its integrity checks. After three failed hero attempts, or three failed responsive attempts before any first viewport is accepted, stop iterating and present the first-viewport review with the current build; the user's eye settles what the readings could not.
+Build the first viewport from the selected plates and plan, and run the hero gate. Neither agent review nor human review waives its evidence and material-integrity checks. After repeated failed hero or responsive attempts, diagnose the actual fidelity or implementation defect, correct it, and verify again. Ask only when a missing asset or unresolved business fact prevents progress; do not turn a failed quality check into a mandatory user approval.
 
-Present a second manifest at `.impeccable/review/hero.json`. You write this one, and its shape is fixed:
+Only when the user requested an assembled-viewport review, present a manifest at `.impeccable/review/hero.json`. You write this one, and its shape is fixed:
 
 ```json
 {
@@ -56,8 +62,8 @@ Present a second manifest at `.impeccable/review/hero.json`. You write this one,
 - `preview.path` is the page entry the build gates (`artifact` in `.impeccable/build/state.json`).
 - `dependencies` lists every other file the page loads (stylesheets, scripts, plates, images, fonts) as bare strings. Every path, here and above, is project-relative and plain: no leading `./` or `/`, no `..`, no URL, no `?`, `#`, `%`, `:` or backslash. A request to a file missing from this list, or to another host, fails the capture.
 
-The reference stays the approved comp. Call the same host review tool, or run `capture`, `serve` and `verify` with this manifest. Needs-work feedback starts another assembly round.
+The reference stays the selected comp. In the explicitly requested human flow, call the host review tool or run `capture`, `serve` and `verify` with this manifest. Resolve needs-work feedback within that requested review; it does not make all later work subject to another approval.
 
-Acceptance closes human review for this build: never request plan, asset or assembly approval again. While the page renders what the user accepted, the hero score, the palette check and every numeric reading are advisories; material vetoes still hold (a missing or unreferenced plate, an SVG illustration, an organic clip, a clipped plate, invented ink, failed rendered presence). A text, control or chrome region the accepted screenshot also lacks is settled by the acceptance; a plate it lacks is a question for the user that the gate's reason spells out: do not move off what they accepted on your own, but carry out their answer, including placing the plate. When the capture no longer matches the accepted screenshot, restore what the user accepted; until then the readings apply. Complete the rest of the page, responsive behavior, finish checks and documentation with the accepted first viewport as the visual direction. This is first-viewport calibration, not a claim that the user reviewed the rest of the page. Shared stylesheet edits do not reopen approval. Preserve the accepted direction; a later explicit user change is a new task.
+A completed agent review records `selectionSource: "agent"`; a real user decision records `selectionSource: "user"` and its actual scope. Preserve the selected first viewport while completing the remaining page, responsive behavior, finish checks and documentation. Do not claim the user reviewed the rest of the page. Shared stylesheet edits and ordinary implementation fixes do not reopen design approval. Continue to enforce missing or unreferenced plates, false media substitutions, clipping, invented ink, failed rendered presence, and other actual quality defects. A later explicit user design change is a new task.
 
 Assembled-page capture executes inline and declared local scripts from the pinned inputs. Network APIs, frames and workers are unavailable; the initial viewport must settle before capture. Keep the real page and declare its scripts rather than removing behavior to pass review.

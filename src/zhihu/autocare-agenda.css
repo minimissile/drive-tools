@@ -1,0 +1,144 @@
+.autocare-agenda-intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.autocare-day-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 12px;
+}
+.autocare-day-table th:first-child {
+  width: 100px;
+}
+.autocare-day-table th:nth-child(2) {
+  width: 150px;
+}
+.autocare-day-table th:nth-child(3) {
+  width: 34%;
+}
+.autocare-day-table th:last-child {
+  width: 150px;
+}
+.autocare-day-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.autocare-day-action-names {
+  margin: 0 0 4px;
+  font-weight: 500;
+}
+.autocare-day-progress {
+  margin: 0;
+}
+.autocare-day-cutoff,
+.autocare-day-remaining {
+  display: block;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.autocare-day-limit {
+  margin: 0 0 4px;
+}
+.autocare-agenda-compatibility {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.autocare-day-table time,
+.autocare-day-next-operation {
+  display: block;
+}
+.autocare-day-table time {
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.autocare-day-next-operation {
+  margin-top: 4px;
+}
+.autocare-day-usage-detail {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.autocare-day-usage-detail summary,
+.autocare-agenda-specific > summary {
+  cursor: pointer;
+}
+.autocare-day-usage-detail p {
+  margin: 6px 0 0;
+}
+.autocare-agenda-specific {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.autocare-agenda-specific > summary {
+  font-size: 12px;
+  font-weight: 600;
+}
+.autocare-agenda-specific > .table-wrap {
+  margin-top: 8px;
+}
+.autocare-agenda-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.autocare-agenda-table th:first-child {
+  width: 110px;
+}
+.autocare-agenda-table th:nth-child(2) {
+  width: 112px;
+}
+.autocare-agenda-table th:nth-child(4) {
+  width: 104px;
+}
+.autocare-agenda-table th:last-child {
+  width: 100px;
+}
+.autocare-agenda-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.autocare-agenda-table tr[data-state="attention"] td {
+  background: var(--amber-bg);
+}
+.autocare-agenda-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.autocare-agenda-time small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.autocare-agenda-account,
+.autocare-agenda-operation {
+  font-weight: 600;
+}
+.autocare-agenda-operation {
+  display: block;
+}
+.autocare-agenda-detail,
+.autocare-agenda-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.autocare-agenda-reason {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.autocare-agenda-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.autocare-agenda .pagination {
+  margin-top: 12px;
+}

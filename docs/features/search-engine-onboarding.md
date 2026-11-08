@@ -45,3 +45,20 @@ IndexNow 已采用服务端直接推送。当前页面不缓存，不能仅依�
 排查同时发现正式域名的 robots 和 XML 站点地图错误继承了管理响应的 `X-Robots-Tag: noindex, nofollow, noarchive`。现已移除这些抓取入口上的限制，保留文本副本、管理接口与别名的既有索引边界。修复后重新提交了 `https://panxu.site/sitemap.xml`，提交成功，并核对列表状态。已发现数量不代表全部网址已收录。
 
 本轮执行源码类型检查、线上 HTTP 手动核对与 Search Console 手动操作；主站点地图、两个子站点地图及 robots 均返回200。未运行新的自动化测试、制作安装包或修改域名/DNS配置。
+
+## 2026-11-04 搜索展示与品牌识别
+
+用户已能搜到站内页面。本次为正式站点补齐品牌识别和搜索展示配置：
+
+- 提供稳定的 `/favicon.png`（256×256）、`/favicon.ico`（32×32）及网页品牌标志，复用盘序已有的折页 P 图形。图标独立于数据库响应，公开可抓取，有缓存与 ETag，不继承管理接口的 noindex 响应头。
+- 首页输出唯一的 `WebSite` 节点，首选站名“盘序资源”，备选“盘序”“Panxu”；所有页面的可见名称、`og:site_name` 与发布主体保持一致。`Organization` 补充同域名图标，不添加虚构的认证、评价、公司资料或人物身份。
+- 调整首页及关于页的标题与摘要；资源页保留已审核的具体标题和介绍。面包屑使用简洁的资源名称，首页目录提供与可见条目一致的列表数据。关于页声明为 `AboutPage`，仅资源内容页使用 `og:type=article`。
+- 下载操作区、提取码、编辑元信息及重复页脚用 `data-nosnippet` 控制摘要范围，说明仍完整可见，正文和真实日期继续保留。新发布页面自动使用同一套展示配置，无需逐页设置图标和站名。
+
+当前部署版本：`e064f8f1-eecf-46c1-b010-fa9b9a695890`。本轮通过 Worker TypeScript 源码检查，手动核对线上首页、关于页、现有资源页的元信息和结构化数据；首页、资源页、PNG 图标均返回200，PNG实际为256×256且未携带noindex。浏览器中已查看更新后的品牌图标及名称对齐。未运行自动化测试、修改已发布正文、生成安装包或改动域名/DNS。
+
+这些配置是向搜索引擎提供展示依据，不能直接定制 Google 的搜索结果界面，也不保证采用首选图标、站名或摘要。需等待重新抓取与处理；本轮未声称搜索结果已即时更新，也未反复提交收录请求。
+
+维护图标：修改品牌主稿并更新现有 `build/icon.ico` 导出后，运行 `node scripts/generate-resource-site-brand.mjs`，由同一品牌资源生成服务内嵌文件，无需新建存储服务或增加图片依赖。
+
+依据：[Google 网站图标规范](https://developers.google.com/search/docs/appearance/favicon-in-search)、[站点名称](https://developers.google.com/search/docs/appearance/site-names)、[标题链接](https://developers.google.com/search/docs/appearance/title-link)、[摘要控制](https://developers.google.com/search/docs/appearance/snippet)。

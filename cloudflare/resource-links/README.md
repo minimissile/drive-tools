@@ -1,5 +1,21 @@
 # 盘序资源固定入口 · Cloudflare Pages + Workers + D1
 
+## 资源清单站点（2026-11-04）
+
+当前部署 `c7078c39-0ea7-422e-840d-3642a439a716`，启动23ms，远端已应用`0005_resource_catalogs.sql`。沿用原Pages服务绑定及固定入口管理令牌，没有变更DNS或网盘权限。
+
+鉴权`GET/PUT/DELETE /api/catalogs/:catalogId`提供显式发布、读取和软撤下；公共协议为`shared/catalog-landing.ts`。PUT包含operationId、expectedVersion、sourceRevision与公开快照，单条写入及触发器原子保存版本、操作回执及IndexNow通知；1MiB上限，超出明确拒绝。首次生成固定短码，更新与恢复不换网址。
+
+公开`/catalogs`与`/c/<短码>`使用SSR、规范网址和清单结构化数据。资源支持分类、关键词和50项分页；已有合格资源页可关联。非空清单进入首页与XML站点地图，空清单和筛选页noindex，撤下返回410。初次接入证据及限制见[验收记录](../../docs/reviews/resource-catalog-site-2026-11-04.md)。
+
+用户后续已应用桌面更新并要求发布实际清单：[求职与个人成长资源清单](https://panxu.site/c/dbedf7b723e3468e)含18项资源。本次页面优化改为紧凑目录行、分类计数和多分享折叠，未重新发布或修改清单数据；类型检查、本地源码与正式页面人工复核见[样式调整记录](../../docs/reviews/resource-catalog-style-2026-11-04.md)。
+
+## SEO/GEO与匿名统计（2026-11-04）
+
+该轮部署 `4a461a92-1c91-45bb-9bac-3f310ac2b701`，已应用 `0004_landing_traffic.sql` 并配置 `LANDING_EVENTS_LIMITER`。公开页匿名来源与访问/获取事件在 `/events` 按天汇总，管理读取为鉴权GET `/api/traffic/:id`；隐私说明为 `/privacy`。保留90天，不存访客ID、IP或原始来源网址，浏览器隐私信号会停止统计。
+
+新发布需当前搜索编辑规则复核，既有公开页保持可读。桌面源码补丁按当前手动应用约定待用户加载；不自动重启客户端。实际核验、IndexNow限流与待验证项见 [SEO/GEO实施标准](../../docs/features/seo-geo-operating-standard.md) 及 [基线记录](../../docs/reviews/seo-geo-baseline-2026-11-04.md)。
+
 独立于桌面应用运行的 TypeScript 服务，使用打包后的 Zod 校验内容契约。Pages 提供公开域名，使用内部服务绑定调用现有 Worker；D1 保存入口映射、页面内容、版本和幂等操作回执。电脑关机不影响已部署入口。
 
 ## SEO 内容扩展（2026-11-02）

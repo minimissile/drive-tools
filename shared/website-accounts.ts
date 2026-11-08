@@ -4,8 +4,10 @@ export const websiteProviderSchema = z.enum([
   "baidu-marketing",
   "tieba",
   "weibo",
+  "bilibili",
   "zhihu",
   "smzdm",
+  "wechat",
   "feishu",
   "tencent-docs",
   "shimo",
@@ -26,8 +28,10 @@ export const websiteProviderSpecs: Record<
   },
   shimo: { name: "石墨文档", description: "资源清单文档与网页登录会话" },
   smzdm: { name: "什么值得买", description: "公众号文章整理与单账号发布" },
+  wechat: { name: "微信公众号", description: "官方扫码登录与微信草稿箱" },
   zhihu: { name: "知乎", description: "比特多账号养号与文章、回答发布" },
   weibo: { name: "微博", description: "资源推荐图文与微博发布" },
+  bilibili: { name: "哔哩哔哩", description: "官方扫码登录、视频投稿与图文创作" },
   "baidu-marketing": {
     name: "百度营销",
     description: "关键词规划师与百度搜索需求",
@@ -35,6 +39,8 @@ export const websiteProviderSpecs: Record<
 };
 export const websiteAccountIdSchema = z.string().regex(/^web_[\w-]{1,80}$/);
 export interface WebsiteAccount {
+  /** The persisted status is last known; this process still needs identity verification. */
+  unverified?: boolean;
   environmentId?: string;
   id: string;
   provider: WebsiteProvider;
@@ -47,6 +53,8 @@ export interface WebsiteAccount {
   updatedAt: string;
 }
 export interface WebsiteSessionState {
+  /** No current observation (for example a cold process cache), not evidence of logout. */
+  unverified?: boolean;
   /** A local browser session was observed; no external account UID was verified. */
   sessionOnly?: boolean;
   hasSession: boolean;

@@ -98,10 +98,6 @@
   font-size: 12px;
   line-height: 1.8;
 }
-.generation-owned-list {
-  max-height: 240px;
-  overflow-y: auto;
-}
 .generation-rule-section {
   padding-top: 18px;
   margin-top: 18px;

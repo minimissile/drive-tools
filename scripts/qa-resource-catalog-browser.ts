@@ -14,8 +14,12 @@ import type {
   CatalogSaveInput,
   CatalogSnapshot,
   CatalogSummary,
+  CatalogAiJob,
 } from "../shared/resource-catalog";
-import { catalogSaveSchema } from "../shared/resource-catalog";
+import {
+  catalogSaveSchema,
+  catalogRemoveItemsSchema,
+} from "../shared/resource-catalog";
 import {
   documentPlatformSpecs,
   documentPlatformUrl,
@@ -187,8 +191,9 @@ const baseItems: CatalogItem[] = Array.from({ length: 26 }, (_, i) => ({
 }));
 const details = new Map<string, CatalogDetail>();
 const frozenSnapshots = new Map<string, CatalogSnapshot>();
+const aiJobs = new Map<string, CatalogAiJob>();
 const makeSnapshot = (catalog: CatalogDetail["catalog"]): CatalogSnapshot => {
-  const items =
+  let items =
     scenario === "no-resources"
       ? []
       : baseItems
@@ -200,12 +205,39 @@ const makeSnapshot = (catalog: CatalogDetail["catalog"]): CatalogSnapshot => {
           )
           .map((item) => ({
             ...clone(item),
-            category: catalog.category,
+            category:
+              catalog.selectionMode === "manual"
+                ? item.category
+                : catalog.category,
             summary: catalog.includeSummary ? item.summary : "",
             tags: catalog.includeTags ? item.tags : [],
           }));
+  if (catalog.selectionMode === "manual") {
+    const source = new Map(items.map((item) => [item.resourceId, item]));
+    items = (catalog.entries ?? []).flatMap((entry) => {
+      const item = source.get(entry.resourceId);
+      return item
+        ? [
+            {
+              ...item,
+              ...entry,
+              summary: catalog.includeSummary
+                ? (entry.summary ?? item.summary)
+                : "",
+              tags: catalog.includeTags ? (entry.tags ?? item.tags) : [],
+            },
+          ]
+        : [];
+    });
+  }
   if (catalog.sort === "title")
     items.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+  const removed = new Set(
+    catalog.selectionMode === "manual"
+      ? []
+      : (catalog.excludedResourceIds ?? []),
+  );
+  items = items.filter((item) => !removed.has(item.resourceId));
   return {
     id: `snapshot_${catalog.id}_${catalog.revision}`,
     hash: JSON.stringify([
@@ -232,7 +264,11 @@ const makeSnapshot = (catalog: CatalogDetail["catalog"]): CatalogSnapshot => {
         title: "尚未核验归属的课件",
         reason: "尚未核实本人分享，不纳入公开清单。",
       },
-    ],
+    ].filter((item) =>
+      catalog.selectionMode === "manual"
+        ? catalog.entries?.some((entry) => entry.resourceId === item.resourceId)
+        : !removed.has(item.resourceId),
+    ),
   };
 };
 const seed = (
@@ -262,6 +298,15 @@ const seed = (
     publications: [],
     preparations: [],
     history: [],
+    site: {
+      baseUrl: "",
+      publication: null,
+      needsUpdate: false,
+      diff: null,
+      pending: null,
+      error: null,
+      checkedAt: null,
+    },
   });
 };
 if (scenario !== "empty") {
@@ -273,6 +318,14 @@ if (scenario !== "empty") {
   seed("catalog_preview_office", "效率办公工具与模板", "效率办公");
   seed("catalog_preview_design", "设计素材与灵感参考", "设计素材");
   seed("catalog_preview_archived", "2025 年电子书整理归档", "电子书", true);
+  if (scenario === "many-catalogs") {
+    for (let index = 1; index <= 36; index++)
+      seed(
+        `catalog_preview_more_${index}`,
+        `主题资源整理 ${index}：学习资料与长期参考目录`,
+        "学习资料",
+      );
+  }
   const detail = details.get("catalog_preview_english")!;
   const initialProviders: CatalogProvider[] = ["feishu", "tencent-docs"];
   detail.publications = initialProviders.map(
@@ -347,6 +400,88 @@ const preparation = (id: string, preparationId: string) => {
 async function invoke(method: string, raw: unknown): Promise<unknown> {
   const input = (raw ?? {}) as Record<string, unknown>;
   if (method === "snapshot") return snapshot;
+  if (method === "resourceCatalog.aiStart") {
+    const id = String(input.requestId);
+    if (!aiJobs.has(id))
+      aiJobs.set(id, {
+        id,
+        prompt: String(input.prompt),
+        category: String(input.category),
+        maxItems: Number(input.maxItems),
+        model: "内存演示 · 未调用AI",
+        total: baseItems.length,
+        scanned: 0,
+        matched: 0,
+        stage: "matching",
+        busy: false,
+        uncertain: false,
+        error: null,
+        draft: null,
+        createdAt: date,
+        updatedAt: date,
+      });
+    log("内存模拟AI检索；未调用模型或计费");
+    return aiJobs.get(id);
+  }
+  if (
+    method === "resourceCatalog.aiGet" ||
+    method === "resourceCatalog.aiStep"
+  ) {
+    const job = aiJobs.get(String(input.id));
+    if (!job) throw Error("内存演示记录不存在");
+    if (method.endsWith("aiStep")) {
+      if (job.stage === "matching") {
+        job.scanned = job.total;
+        job.matched = Math.min(5, job.maxItems);
+        job.stage = "writing";
+      } else if (job.stage === "writing") {
+        job.stage = "completed";
+        job.draft = {
+          title: "英语学习资源清单（内存演示）",
+          category: "all",
+          introduction:
+            "此内容用于查看AI生成后编辑清单的源码界面，未进行真实AI调用。",
+          selectionMode: "manual",
+          entries: baseItems
+            .slice(0, job.matched)
+            .map((item) => ({ resourceId: item.resourceId })),
+          sort: "manual",
+          includeSummary: true,
+          includeTags: true,
+        };
+      }
+    }
+    return job;
+  }
+  if (method === "tasks.active" || method === "jobs.active") return [];
+  if (
+    method === "resourceCatalog.resources" ||
+    method === "resourceCatalog.resourceDetails"
+  ) {
+    const options = baseItems.map(
+      ({ resourceId, title, category, summary, tags }) => ({
+        resourceId,
+        title,
+        category,
+        summary,
+        tags,
+      }),
+    );
+    if (method.endsWith("resourceDetails"))
+      return options.filter((item) =>
+        (input.ids as string[]).includes(item.resourceId),
+      );
+    const query = String(input.query ?? "").toLowerCase();
+    const matches = options.filter(
+      (item) =>
+        (input.category === "all" || item.category === input.category) &&
+        `${item.title} ${item.summary} ${item.tags.join(" ")}`
+          .toLowerCase()
+          .includes(query),
+    );
+    const offset = (Number(input.page ?? 1) - 1) * 30;
+    return { total: matches.length, items: matches.slice(offset, offset + 30) };
+  }
   if (method === "updater.state") return null;
   if (
     ["zhidao.activeRuns", "environments.list", "zhidao.accounts"].includes(
@@ -366,7 +501,10 @@ async function invoke(method: string, raw: unknown): Promise<unknown> {
     refreshCurrent(detail);
     return detail;
   }
-  if (method === "resourceCatalog.save") {
+  if (
+    method === "resourceCatalog.save" ||
+    method === "resourceCatalog.saveManual"
+  ) {
     const parsed: CatalogSaveInput = catalogSaveSchema.parse(input);
     let detail: CatalogDetail;
     if (parsed.id) {
@@ -396,6 +534,25 @@ async function invoke(method: string, raw: unknown): Promise<unknown> {
     detail.catalog.revision += 1;
     refreshCurrent(detail);
     log(`内存清单${input.archived ? "归档" : "恢复"}`);
+    return detail;
+  }
+  if (method === "resourceCatalog.removeItems") {
+    const parsed = catalogRemoveItemsSchema.parse(input);
+    const detail = get(parsed.id);
+    revision(detail, parsed.expectedRevision);
+    if (detail.catalog.archived) throw Error("请先恢复维护。");
+    const ids = new Set(parsed.resourceIds);
+    if (detail.catalog.selectionMode === "manual")
+      detail.catalog.entries = detail.catalog.entries?.filter(
+        (entry) => !ids.has(entry.resourceId),
+      );
+    else
+      detail.catalog.excludedResourceIds = [
+        ...new Set([...(detail.catalog.excludedResourceIds ?? []), ...ids]),
+      ];
+    detail.catalog.revision += 1;
+    refreshCurrent(detail);
+    log(`已从内存清单删除 ${ids.size} 项，原始模拟资源保留`);
     return detail;
   }
   if (method === "resourceCatalog.remove") {

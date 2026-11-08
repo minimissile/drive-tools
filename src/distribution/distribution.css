@@ -1,34 +1,37 @@
-.distribution-library-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: var(--space-5);
+.main-content[data-page="distribution"] {
+  padding-bottom: var(--space-4);
 }
-.distribution-library-summary strong {
-  color: var(--text);
-  font-weight: 500;
-}
-.distribution-workspace {
+.distribution-workspace.workspace-frame {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
-  gap: var(--space-5);
-  align-items: start;
+  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--space-4);
 }
 .distribution-platforms {
-  padding: var(--space-2) 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding-right: var(--space-4);
+  border-right: 1px solid var(--line);
 }
 .distribution-platforms h2 {
-  font-size: 13px;
-  color: var(--muted);
+  flex: none;
+  font-size: 14px;
   margin: 0 0 var(--space-3) var(--space-3);
 }
 .distribution-platforms nav {
-  display: grid;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
+  padding: 2px;
 }
 .distribution-platforms nav button {
+  flex: none;
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
@@ -36,7 +39,7 @@
   border-radius: var(--control-radius);
   color: var(--text);
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
   width: 100%;
 }
 .distribution-platforms nav button:hover {
@@ -49,7 +52,7 @@
 .distribution-platform-name {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-2);
   font-weight: 600;
 }
@@ -58,125 +61,65 @@
   font-weight: 400;
   color: var(--muted);
 }
-.distribution-platform-host,
-.distribution-platform-counts {
+.distribution-platform-counts,
+.distribution-library-summary {
   color: var(--muted);
   font-size: 12px;
-  overflow-wrap: anywhere;
 }
 .distribution-platform-counts {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
   font-variant-numeric: tabular-nums;
 }
-.distribution-platforms > p {
-  font-size: 12px;
-  color: var(--muted);
-  padding: 0 var(--space-3);
-  margin-top: var(--space-5);
+.distribution-library-summary {
+  display: grid;
+  gap: var(--space-1);
+  flex: none;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.distribution-library-summary:empty {
+  display: none;
 }
 .distribution-main {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 2px var(--space-1)
+    calc(var(--space-4) + var(--floating-control-clearance, 0px)) 2px;
 }
-.distribution-platform-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-4);
-  align-items: start;
+.distribution-main > * {
+  flex: none;
 }
-.distribution-platform-heading h2,
-.distribution-progress-panel h2 {
-  margin: 0;
-  font-size: 16px;
-}
-.distribution-platform-heading p {
-  margin: var(--space-1) 0 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.distribution-facts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin: var(--space-4) 0;
-}
-.distribution-facts dt,
-.distribution-counts dt {
-  color: var(--muted);
-  font-size: 12px;
-}
-.distribution-facts dd,
-.distribution-counts dd {
-  margin: var(--space-1) 0 0;
-  font-size: 13px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.distribution-rules details {
-  border-top: 1px solid var(--line);
-  padding-top: var(--space-3);
-  font-size: 13px;
-}
-.distribution-rules summary {
-  cursor: pointer;
-}
-.distribution-rules summary span {
-  color: var(--muted);
-  font-size: 12px;
-  margin-left: var(--space-3);
-}
-.distribution-rules ul {
-  padding-left: var(--space-5);
-  margin: var(--space-3) 0;
-}
-.distribution-rules li + li {
-  margin-top: var(--space-1);
-}
-.distribution-unknown {
-  background: var(--amber-bg);
-  color: var(--amber);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--control-radius);
-}
-.distribution-unknown ul {
-  margin-bottom: 0;
-}
-.distribution-session {
-  border-top: 1px solid var(--line);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-.distribution-session > div:first-child {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  font-size: 12px;
-}
-.distribution-session small {
-  color: var(--muted);
-}
-.distribution-settings {
-  display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-}
-.distribution-rule-note {
-  white-space: pre-wrap;
-  color: var(--muted);
-  font-size: 12px;
-  margin: var(--space-3) 0 0;
+.distribution-progress-panel,
+.distribution-main .panel {
+  padding: var(--space-4);
 }
 .distribution-progress-panel {
   display: grid;
   gap: var(--space-3);
 }
-.distribution-progress-panel > p {
+.distribution-progress-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.distribution-progress-heading .row {
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.distribution-progress-heading h1,
+.distribution-rules h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.distribution-progress-panel > p,
+.distribution-rules > p {
   margin: 0;
   font-size: 12px;
 }
@@ -188,7 +131,7 @@
   font-variant-numeric: tabular-nums;
 }
 .distribution-progress-caption strong {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 .distribution-progress-caption span {
@@ -215,51 +158,93 @@
 }
 .distribution-platforms progress {
   height: 4px;
-  margin-top: var(--space-1);
 }
 .distribution-counts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
   margin: 0;
 }
+.distribution-counts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.distribution-counts dd {
+  margin: var(--space-1) 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 .distribution-run-message {
   font-size: 12px;
-  background: var(--bg);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--control-radius);
+  color: var(--muted);
   overflow-wrap: anywhere;
+}
+.distribution-progress-panel .notice {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .distribution-actions {
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.distribution-view-tabs {
-  display: flex;
-  gap: var(--space-2);
+.distribution-detail-tabs > .tabs {
+  padding-bottom: 0;
+  margin-bottom: var(--space-3);
 }
-.distribution-view-tabs button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--control-radius);
+.distribution-rules {
+  display: grid;
+  gap: var(--space-3);
+}
+.distribution-rules ul {
+  padding-left: var(--space-5);
+  margin: 0;
   font-size: 13px;
 }
-.distribution-view-tabs button[aria-pressed="true"] {
-  background: var(--blue-bg);
-  color: var(--blue);
+.distribution-rules li + li {
+  margin-top: var(--space-2);
+}
+.distribution-session {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.distribution-session > div {
+  flex: 1;
+  min-width: 0;
+}
+.distribution-rule-note {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  margin: var(--space-2) 0 0;
+}
+.distribution-settings,
+.distribution-resolve {
+  display: grid;
+  gap: var(--space-3);
 }
 .distribution-filter {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
+  grid-template-columns: minmax(0, 1fr) 150px;
   gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
 .distribution-record,
 .distribution-batches article {
-  padding: var(--space-4) 0;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--line);
+}
+.distribution-record:last-child,
+.distribution-batches article:last-child {
+  border-bottom: 0;
 }
 .distribution-record-top {
   display: flex;
@@ -279,8 +264,7 @@
 .distribution-record-top p {
   font-size: 12px;
   color: var(--muted);
-  margin: var(--space-1) 0 0;
-  overflow-wrap: anywhere;
+  margin: var(--space-1) 0;
 }
 .distribution-record-top .status {
   flex-shrink: 0;
@@ -290,20 +274,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: var(--space-2) 0;
-}
-.distribution-record-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  color: var(--muted);
-  font-size: 11px;
-  margin-bottom: var(--space-2);
-}
-.distribution-record-meta span {
-  max-width: 46%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .distribution-history {
   font-size: 12px;
@@ -315,38 +285,22 @@
   cursor: pointer;
   width: fit-content;
 }
-.distribution-history dl {
-  display: grid;
-  gap: var(--space-2);
-  margin: var(--space-3) 0;
-}
-.distribution-history dl > div {
-  display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
-  gap: var(--space-2);
-}
-.distribution-history dd {
-  margin: 0;
-  color: var(--text);
+.distribution-history p,
+.distribution-share-url {
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .distribution-history ol {
   padding-left: var(--space-4);
 }
 .distribution-history li {
   margin-top: var(--space-3);
-  overflow-wrap: anywhere;
 }
 .distribution-history li time {
   margin-left: var(--space-3);
 }
 .distribution-history li p {
   margin: var(--space-1) 0;
-  white-space: pre-wrap;
-}
-.distribution-resolve {
-  display: grid;
-  gap: var(--space-3);
 }
 .distribution-resolve > p {
   margin: 0;
@@ -357,23 +311,15 @@
 }
 .distribution-batches small {
   color: var(--muted);
-  font-size: 11px;
-  overflow-wrap: anywhere;
+  font-size: 12px;
 }
 .distribution-batches p {
-  margin: var(--space-2) 0 0;
+  margin: var(--space-2) 0;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 @media (max-width: 1220px) {
-  .distribution-workspace {
+  .distribution-workspace.workspace-frame {
     grid-template-columns: 180px minmax(0, 1fr);
-    gap: var(--space-4);
-  }
-  .distribution-platform-heading {
-    flex-wrap: wrap;
-  }
-  .distribution-facts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Copy, MessageSquareText, Pause, Play, RefreshCw } from "lucide-react";
-import type { OperationItem, OperationRun } from "../../shared/zhidao";
-import { answerInput } from "../../shared/zhidao";
+import type {
+  OperationItem,
+  OperationRun,
+  ZhidaoAccount,
+} from "../../shared/zhidao";
+import { answerInput, zhidaoAccountName } from "../../shared/zhidao";
 import {
   Button,
   Empty,
@@ -27,7 +31,15 @@ const statusLabels = {
   failed: "执行失败",
 };
 
-export function AnswerActivity({ model }: { model: OperationModel }) {
+export function AnswerActivity({
+  model,
+  accounts = [],
+  accountOverview,
+}: {
+  model: OperationModel;
+  accounts?: ZhidaoAccount[];
+  accountOverview?: ReactNode;
+}) {
   const action = useOperationAction();
   const [resume, setResume] = useState<OperationRun | null>(null);
   const [editing, setEditing] = useState<OperationItem | null>(null);
@@ -71,17 +83,22 @@ export function AnswerActivity({ model }: { model: OperationModel }) {
           ? [
               {
                 value: run.id,
-                label: `${run.title} · ${formatTime(run.createdAt)}`,
+                label: recordLabel(run),
               },
             ]
           : []),
         ...history.items.map((entry) => ({
           value: entry.id,
-          label: `${entry.title} · ${formatTime(entry.createdAt)}`,
+          label: recordLabel(entry),
         })),
       ]}
     />
   ) : null;
+  function recordLabel(entry: OperationRun) {
+    const account = accounts.find((a) => a.id === entry.config.accountId);
+    const name = account ? zhidaoAccountName(account) : "";
+    return `${entry.title}${name && !entry.title.includes(name) ? ` · ${name}` : ""} · ${formatTime(entry.createdAt)}`;
+  }
   return (
     <div
       className="answer-monitor"
@@ -108,6 +125,7 @@ export function AnswerActivity({ model }: { model: OperationModel }) {
           </div>
         }
       >
+        {accountOverview}
         <QueryError
           title="无法读取回答记录"
           error={model.history.error}

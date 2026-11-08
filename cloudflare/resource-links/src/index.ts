@@ -1,6 +1,21 @@
 import { pageHeaders, renderPage } from "./page";
 import { flushIndexNow, indexNowKeyResponse } from "./indexnow";
 import { searchVerification } from "./search-verification";
+import { brandAsset } from "./site-brand";
+import {
+  catalogLandingIdSchema,
+  catalogLandingMaxBodyBytes,
+} from "../../../shared/catalog-landing";
+import {
+  findCatalog,
+  findCatalogSlug,
+  publicCatalogCount,
+  publicCatalogs,
+  remoteCatalog,
+  writeCatalog,
+} from "./catalog-store";
+import { renderCatalog, renderCatalogIndex } from "./catalog-page";
+import { recordTraffic, readTraffic, pruneTraffic } from "./landing-traffic";
 import {
   checkConnection,
   findById,
@@ -23,6 +38,7 @@ import {
   renderAbout,
   renderDirectory,
   renderLanding,
+  renderPrivacy,
 } from "./landing-page";
 
 const identity = { service: "panxu-resource-links", version: 1 } as const;
@@ -162,6 +178,48 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === "/api/health" && request.method === "GET")
     return json(identity);
   await authorize(request, env, url.origin);
+  const catalogId = /^\/api\/catalogs\/([A-Za-z0-9_-]+)$/.exec(
+    url.pathname,
+  )?.[1];
+  if (catalogId) {
+    if (!catalogLandingIdSchema.safeParse(catalogId).success)
+      throw new HttpError(400, "INVALID_ID", "清单标识不正确。");
+    if (request.method === "GET") {
+      const catalog = await findCatalog(env, catalogId);
+      return json(
+        catalog ? remoteCatalog(catalog, canonicalOrigin(env)) : null,
+        catalog ? 200 : 404,
+      );
+    }
+    if (request.method === "PUT" || request.method === "DELETE")
+      return json(
+        await writeCatalog(
+          env,
+          catalogId,
+          await requestJson(
+            request,
+            request.method === "DELETE" ? 4096 : catalogLandingMaxBodyBytes,
+          ),
+          canonicalOrigin(env),
+          request.method === "DELETE",
+        ),
+      );
+    throw new HttpError(
+      405,
+      "METHOD_NOT_ALLOWED",
+      "清单接口仅支持 GET、PUT 和 DELETE。",
+    );
+  }
+  const trafficId = /^\/api\/traffic\/([A-Za-z0-9_-]+)$/.exec(
+    url.pathname,
+  )?.[1];
+  if (trafficId) {
+    if (!validId(trafficId))
+      throw new HttpError(400, "INVALID_ID", "管理 ID 格式不正确。");
+    if (request.method !== "GET")
+      throw new HttpError(405, "METHOD_NOT_ALLOWED", "此接口仅支持 GET。");
+    return json(await readTraffic(env, trafficId));
+  }
   if (url.pathname === "/api/connection") {
     if (request.method !== "GET")
       throw new HttpError(405, "METHOD_NOT_ALLOWED", "此接口仅支持 GET。");
@@ -230,23 +288,52 @@ async function publicPage(
       `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /go/\n\nSitemap: ${origin}/sitemap.xml\n`,
     );
   if (url.pathname === "/llms.txt") {
-    const pages = await publicPages(env, { limit: 100 });
+    const [pages, catalogs] = await Promise.all([
+      publicPages(env, { limit: 100 }),
+      publicCatalogs(env, 100),
+    ]);
     return plain(
-      `# 盘序资源\n\n> 基于资源资料与文件记录的中文说明和使用指南，部分内容使用 AI 辅助整理。使用建议不表示文件原文。\n\n## 网站\n- [资源目录](${origin}/)\n- [整理方式](${origin}/about)\n\n## 已发布资源\n${pages.map((p) => `- [${p.title.replace(/[\[\]\\\r\n]/g, "")}](${origin}/r/${p.slug})：${(JSON.parse(p.document_json!) as { article: { description: string } }).article.description}`).join("\n")}\n\n资源页的 .md 地址提供同一内容的 Markdown 表达，不另行生成内容。网盘入口以页面提供的 /go/ 地址为准。\n`,
+      `# 盘序资源\n\n> 基于资源资料与文件记录的中文说明和使用指南，部分内容使用 AI 辅助整理。使用建议不表示文件原文。\n\n## 网站\n- [资源目录](${origin}/)\n- [资源清单](${origin}/catalogs)\n- [整理方式](${origin}/about)\n\n## 已发布资源\n${pages.map((p) => `- [${p.title.replace(/[\[\]\\\r\n]/g, "")}](${origin}/r/${p.slug})：${(JSON.parse(p.document_json!) as { article: { description: string } }).article.description}`).join("\n")}\n\n## 已发布清单\n${catalogs.map((c) => `- [${c.title.replace(/[\[\]\\\r\n]/g, "")}](${origin}/c/${c.slug})：${c.item_count}份资源，内容范围以清单说明为准。`).join("\n")}\n\n资源页的 .md 地址提供同一内容的 Markdown 表达，不另行生成内容。网盘入口以页面提供的 /go/ 地址为准。\n`,
     );
   }
   if (url.pathname === "/sitemap.xml") {
-    const total = await publicPageCount(env),
-      chunks = Math.ceil(total / 1000);
+    const [total, catalogCount] = await Promise.all([
+        publicPageCount(env),
+        publicCatalogCount(env),
+      ]),
+      chunks = Math.ceil(total / 1000),
+      catalogChunks = Math.ceil(catalogCount / 1000);
     return plain(
-      `<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemaps/site.xml</loc></sitemap>${Array.from({ length: chunks }, (_, i) => `<sitemap><loc>${origin}/sitemaps/resources-${i + 1}.xml</loc></sitemap>`).join("")}</sitemapindex>`,
+      `<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemaps/site.xml</loc></sitemap>${Array.from({ length: chunks }, (_, i) => `<sitemap><loc>${origin}/sitemaps/resources-${i + 1}.xml</loc></sitemap>`).join("")}${Array.from({ length: catalogChunks }, (_, i) => `<sitemap><loc>${origin}/sitemaps/catalogs-${i + 1}.xml</loc></sitemap>`).join("")}</sitemapindex>`,
       "application/xml; charset=utf-8",
     );
   }
   if (url.pathname === "/sitemaps/site.xml") {
-    const total = await publicPageCount(env);
+    const [total, catalogCount] = await Promise.all([
+      publicPageCount(env),
+      publicCatalogCount(env),
+    ]);
     return plain(
-      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${(total ? ["/", "/about"] : ["/about"]).map((path) => `<url><loc>${origin}${path}</loc></url>`).join("")}</urlset>`,
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${[...(total || catalogCount ? ["/"] : []), "/about", ...(catalogCount ? ["/catalogs"] : [])].map((path) => `<url><loc>${origin}${path}</loc></url>`).join("")}</urlset>`,
+      "application/xml; charset=utf-8",
+    );
+  }
+  const catalogSitemap = /^\/sitemaps\/catalogs-([1-9]\d{0,5})\.xml$/.exec(
+    url.pathname,
+  );
+  if (catalogSitemap) {
+    const catalogs = await publicCatalogs(
+      env,
+      1000,
+      (Number(catalogSitemap[1]) - 1) * 1000,
+    );
+    if (!catalogs.length)
+      return new Response("Sitemap not found", {
+        status: 404,
+        headers: securityHeaders(),
+      });
+    return plain(
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${catalogs.map((c) => `<url><loc>${origin}/c/${c.slug}</loc><lastmod>${c.updated_at}</lastmod></url>`).join("")}</urlset>`,
       "application/xml; charset=utf-8",
     );
   }
@@ -273,6 +360,60 @@ async function publicPage(
       (nonce) => renderAbout(nonce, origin, canonical),
       canonical,
     );
+  if (url.pathname === "/privacy")
+    return siteHtml((nonce) => renderPrivacy(nonce, origin), false);
+  if (url.pathname === "/catalogs") {
+    const page = Math.min(
+      10000,
+      Math.max(
+        1,
+        Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+      ),
+    );
+    const [catalogs, total] = await Promise.all([
+      publicCatalogs(env, 20, (page - 1) * 20),
+      publicCatalogCount(env),
+    ]);
+    const indexable = canonical && total > 0 && !url.search;
+    return siteHtml(
+      (nonce) =>
+        renderCatalogIndex(nonce, origin, indexable, catalogs, page, total),
+      indexable,
+    );
+  }
+  const catalogMatch = /^\/c\/([A-Za-z0-9_-]{8,32})$/.exec(url.pathname);
+  if (catalogMatch) {
+    const catalog = await findCatalogSlug(env, catalogMatch[1]);
+    if (!catalog)
+      return html(
+        { title: "清单不存在", message: "请检查清单网址是否完整。" },
+        404,
+      );
+    if (!catalog.active)
+      return html(
+        { title: "清单已撤下", message: "维护者已暂停展示这份清单。" },
+        410,
+      );
+    const query = (url.searchParams.get("q") ?? "").trim().slice(0, 100),
+      category = (url.searchParams.get("category") ?? "").trim().slice(0, 60);
+    const page = Math.min(
+      10000,
+      Math.max(
+        1,
+        Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+      ),
+    );
+    const indexable = canonical && catalog.item_count > 0 && !url.search;
+    return siteHtml(
+      (nonce) =>
+        renderCatalog(nonce, env, catalog, origin, indexable, {
+          query,
+          category,
+          page,
+        }),
+      indexable,
+    );
+  }
   if (url.pathname === "/") {
     const query = (url.searchParams.get("q") ?? "").trim().slice(0, 100),
       category = (url.searchParams.get("category") ?? "").trim().slice(0, 80);
@@ -283,12 +424,21 @@ async function publicPage(
         Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
       ),
     );
-    const [pages, categories, count] = await Promise.all([
-      publicPages(env, { limit: 21, offset: (page - 1) * 20, query, category }),
-      publicCategories(env),
-      publicPageCount(env),
-    ]);
-    const indexable = canonical && !url.search && count > 0;
+    const [pages, categories, count, catalogs, catalogCount] =
+      await Promise.all([
+        publicPages(env, {
+          limit: 21,
+          offset: (page - 1) * 20,
+          query,
+          category,
+        }),
+        publicCategories(env),
+        publicPageCount(env),
+        publicCatalogs(env, 3),
+        publicCatalogCount(env),
+      ]);
+    const indexable =
+      canonical && !url.search && (count > 0 || catalogCount > 0);
     return siteHtml(
       (nonce) =>
         renderDirectory(
@@ -298,6 +448,7 @@ async function publicPage(
           pages.slice(0, 20),
           categories,
           { query, category, page, hasNext: pages.length > 20 },
+          !query && !category && page === 1 ? catalogs : [],
         ),
       indexable,
     );
@@ -387,9 +538,12 @@ function canonicalOrigin(env: Env): string {
     throw new HttpError(503, "PUBLIC_ORIGIN_REQUIRED", "公开域名配置不正确。");
   return url.origin;
 }
-function siteHtml(render: (nonce: string) => string, indexable: boolean) {
+async function siteHtml(
+  render: (nonce: string) => string | Promise<string>,
+  indexable: boolean,
+) {
   const nonce = crypto.randomUUID().replace(/-/g, "");
-  return new Response(render(nonce), {
+  return new Response(await render(nonce), {
     headers: {
       ...securityHeaders(),
       ...pageHeaders(nonce),
@@ -401,20 +555,32 @@ function siteHtml(render: (nonce: string) => string, indexable: boolean) {
 }
 
 export default {
-  async scheduled(_controller, env, ctx) {
+  async scheduled(controller, env, ctx) {
     ctx.waitUntil(flushIndexNow(env));
+    const at = new Date(controller.scheduledTime);
+    if (at.getUTCHours() === 0 && at.getUTCMinutes() === 0)
+      ctx.waitUntil(pruneTraffic(env));
   },
   async fetch(request: Request, env: Env, ctx): Promise<Response> {
     const url = new URL(request.url);
+    const asset = brandAsset(request);
+    if (asset) return asset;
     const key = indexNowKeyResponse(request, env);
     if (key) return key;
-    const isApi = url.pathname === "/api" || url.pathname.startsWith("/api/");
+    const isApi =
+      url.pathname === "/api" ||
+      url.pathname.startsWith("/api/") ||
+      url.pathname === "/events";
     try {
+      if (url.pathname === "/events")
+        return await recordTraffic(request, env, () =>
+          requestJson(request, 512),
+        );
       const content = isApi
         ? await api(request, env, url)
         : await publicPage(request, env, url);
       const response = searchVerification(request, content, env);
-      if (isApi && request.method === "PUT" && response.ok)
+      if (isApi && ["PUT", "DELETE"].includes(request.method) && response.ok)
         ctx.waitUntil(flushIndexNow(env).catch(() => {}));
       return request.method === "HEAD"
         ? new Response(null, {

@@ -1,3 +1,4 @@
+import { stopTiebaPublishingForBackup } from "./tieba-publishing/store";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
@@ -24,7 +25,16 @@ import {
   readSupplyAcquireRuns,
   restoreSupplyAcquireRun,
 } from "./content-supply/acquisition";
-import { readAutocareState, restoreAutocareState } from "./zhihu-autocare/state";
+import {
+  readAutocareState,
+  restoreAutocareState,
+} from "./zhihu-autocare/state";
+import { stopTiebaAutocareForBackup } from "./tieba-autocare/store";
+import { stopTiebaParticipationForBackup } from "./tieba-participation/store";
+import { stopTiebaAutomationForBackup } from "./tieba-automation/store";
+import { stopTiebaTopicsForBackup } from "./tieba-topics/store";
+import { stopTiebaInsightsForBackup } from "./tieba-insights/service";
+import { stopMusicForBackup } from "./music/service";
 import { pipixPolicyKey, readPipixPolicy } from "./pipix/request-budget";
 import {
   readParticipationState,
@@ -36,13 +46,63 @@ export async function fileHash(path: string) {
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest("hex");
 }
-async function regularFile(path: string, max: number) {
+/** Allow multi-GiB local databases with a finite import/export cap; assets keep smaller limits. */
+export const backupDatabaseLimitBytes = 8 * 1024 ** 3;
+
+async function regularFile(
+  path: string,
+  max: number,
+  message = "备份包含异常文件或文件超过大小限制。",
+) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size > max)
-    throw new AppError(
-      "INVALID_BACKUP",
-      "备份包含异常文件或文件超过大小限制。",
-    );
+    throw new AppError("INVALID_BACKUP", message);
+}
+export async function assertBackupDatabaseFile(path: string) {
+  await regularFile(
+    path,
+    backupDatabaseLimitBytes,
+    "备份数据库必须是普通文件，大小不能超过8GiB。",
+  );
+}
+const musicFilePattern = /^[a-f0-9]{64}\.(mp3|wav|ogg|m4a|aac)$/;
+const musicSettingPattern =
+  /^music:(?:state:v1|raw:chart:v1|raw:detail:\d{1,30}:v1|audio:\d{1,30}:v1)$/;
+const musicBackupAsset = z.object({
+  file: z.string().regex(musicFilePattern),
+  mime: z.enum(["audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/aac"]),
+});
+function readMusicBackupSettings(db: DatabaseSync) {
+  const settings: { key: string; value: Record<string, unknown> }[] = [];
+  const required: string[] = [];
+  for (const row of db
+    .prepare("SELECT key,value FROM settings WHERE key LIKE 'music:%'")
+    .all()) {
+    const key = String(row.key);
+    if (!musicSettingPattern.test(key)) continue;
+    let value: Record<string, unknown>;
+    try {
+      value = z.record(z.string(), z.unknown()).parse(JSON.parse(String(row.value)));
+      if (key === "music:state:v1") {
+        z.object({ enabled: z.boolean(), tracks: z.array(z.unknown()) }).parse(value);
+      } else if (key.startsWith("music:raw:")) {
+        z.object({ at: z.string(), body: z.string(), status: z.number().int() }).parse(value);
+      } else {
+        const musicId = key.slice("music:audio:".length, -":v1".length);
+        const audio = z.object({
+          track: z.object({ id: z.literal(musicId) }),
+          asset: musicBackupAsset.optional(),
+          lastAttemptAt: z.string(),
+          error: z.string().nullable(),
+        }).parse(value);
+        if (audio.asset) required.push(audio.asset.file);
+      }
+    } catch {
+      throw new AppError("INVALID_BACKUP", "备份中的音乐缓存记录不完整。");
+    }
+    settings.push({ key, value });
+  }
+  return { settings, required };
 }
 export async function inspectBackup(folder: string) {
   const root = await lstat(folder);
@@ -74,7 +134,7 @@ export async function inspectBackup(folder: string) {
     })
     .parse(JSON.parse(await readFile(join(folder, "manifest.json"), "utf8")));
   const file = join(folder, "panxu.db");
-  await regularFile(file, 512 * 1024 * 1024);
+  await assertBackupDatabaseFile(file);
   if ((await fileHash(file)) !== manifest.databaseSha256)
     throw new AppError("BACKUP_HASH_MISMATCH", "备份数据库校验失败，未恢复。");
   // Immutable reads never create SQLite sidecars in the source backup.
@@ -87,7 +147,8 @@ export async function inspectBackup(folder: string) {
     required: string[],
     requiredMedia: string[] = [],
     requiredZhihu: string[] = [],
-    requiredContent: string[] = [];
+    requiredContent: string[] = [],
+    requiredMusic: string[] = [];
   try {
     db.exec("PRAGMA trusted_schema=OFF;");
     if (
@@ -104,6 +165,7 @@ export async function inspectBackup(folder: string) {
     resources = Number(db.prepare("SELECT COUNT(*) n FROM resources").get()!.n);
     accounts = Number(db.prepare("SELECT COUNT(*) n FROM accounts").get()!.n);
     drafts = Number(db.prepare("SELECT COUNT(*) n FROM drafts").get()!.n);
+    requiredMusic = readMusicBackupSettings(db).required;
     required = db
       .prepare(
         "SELECT DISTINCT cover_id FROM resources WHERE cover_id IS NOT NULL",
@@ -118,6 +180,14 @@ export async function inspectBackup(folder: string) {
         .all()
         .map((r) => String(r.name));
     if (manifest.schemaVersion >= 19) {
+      for (const row of db.prepare("SELECT value FROM settings WHERE key LIKE 'local-video:job:%'").all()) {
+        const job = JSON.parse(String(row.value));
+        if (job.status === "completed") {
+          if (!/^[a-f0-9]{64}\.mp4$/.test(job.videoAsset) || !/^[a-f0-9]{64}\.png$/.test(job.coverAsset))
+            throw new AppError("INVALID_BACKUP", "本地视频任务的素材记录不正确。");
+          requiredMedia.push(job.videoAsset, job.coverAsset);
+        }
+      }
       for (const row of db
         .prepare(
           "SELECT json_extract(image.value,'$.file') name,json_extract(image.value,'$.storage') storage FROM zhihu_contents content, json_each(content.data,'$.images') image",
@@ -221,6 +291,9 @@ export async function inspectBackup(folder: string) {
     throw new AppError("INVALID_BACKUP", "备份缺少知乎内容引用的配图。");
   if (requiredContent.some((name) => !contentAssets.includes(name)))
     throw new AppError("INVALID_BACKUP", "备份缺少公共内容引用的配图。");
+  const music = await inspectMusicDirectory(folder);
+  if (requiredMusic.some((name) => !music.includes(name)))
+    throw new AppError("INVALID_BACKUP", "备份缺少音乐缓存引用的音频。");
   return {
     createdAt: manifest.createdAt,
     databaseSha256: manifest.databaseSha256,
@@ -231,6 +304,7 @@ export async function inspectBackup(folder: string) {
     media,
     zhihuAssets,
     contentAssets,
+    music,
   };
 }
 
@@ -299,6 +373,15 @@ export async function stageRestore(
       )
         throw new AppError("BACKUP_CHANGED", "复制期间公共配图发生变化。");
     }
+    await mkdir(join(destination, "music"), { mode: 0o700 });
+    for (const name of source.music) {
+      const target = join(destination, "music", name);
+      await regularFile(join(folder, "music", name), 20 * 1024 * 1024);
+      await copyFile(join(folder, "music", name), target);
+      await regularFile(target, 20 * 1024 * 1024);
+      if ((await fileHash(target)) !== name.slice(0, 64))
+        throw new AppError("BACKUP_CHANGED", "复制期间音乐缓存发生变化。");
+    }
     const db = new Database(file);
     try {
       db.transaction(() => {
@@ -307,6 +390,7 @@ export async function stageRestore(
         const workingCopies = db.all<{ key: string; value: string }>(
           "SELECT key,value FROM settings WHERE key LIKE 'studio:working:%'",
         );
+        const musicSettings = readMusicBackupSettings(db.db).settings;
         const sourcePosts = db
           .all<{ data: string }>(
             "SELECT data FROM content_source_exports WHERE channel='weibo'",
@@ -386,7 +470,15 @@ export async function stageRestore(
             );
           restoredPosts.set(postId, parsed.data);
         }
+        stopTiebaAutocareForBackup(db);
+        stopTiebaParticipationForBackup(db);
+        stopTiebaAutomationForBackup(db);
+        stopTiebaTopicsForBackup(db);
+        stopTiebaPublishingForBackup(db);
+        stopTiebaInsightsForBackup(db);
         db.run("DELETE FROM settings");
+        for (const row of musicSettings) db.setSetting(row.key, row.value);
+        stopMusicForBackup(db);
         restoreAutocareState(db, autocareState);
         db.setSetting(pipixPolicyKey, pipixPolicy);
         db.setSetting(zhihuParticipationStateKey, {
@@ -528,6 +620,31 @@ export async function stageRestore(
     await rm(destination, { recursive: true, force: true });
     throw error;
   }
+}
+
+async function inspectMusicDirectory(folder: string) {
+  const directory = join(folder, "music");
+  let info;
+  try {
+    info = await lstat(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw new AppError("INVALID_BACKUP", "音乐缓存目录不正确。");
+  const entries = await readdir(directory);
+  if (entries.length > 10000)
+    throw new AppError("INVALID_BACKUP", "音乐缓存数量超过恢复上限。");
+  for (const name of entries) {
+    if (!musicFilePattern.test(name))
+      throw new AppError("INVALID_BACKUP", "音乐缓存文件名不正确。");
+    const path = join(directory, name);
+    await regularFile(path, 20 * 1024 * 1024);
+    if ((await fileHash(path)) !== name.slice(0, 64))
+      throw new AppError("BACKUP_HASH_MISMATCH", "音乐缓存校验失败，未恢复。");
+  }
+  return entries;
 }
 
 async function inspectImageDirectory(folder: string, name: string) {

@@ -8,6 +8,7 @@ import {
   discoverySourceLabels,
   type DiscoveryInput,
   type DiscoveryRun,
+  type DiscoverySource,
   type DiscoverySummary,
 } from "../shared/baidu-discovery";
 import type { Database } from "./database";
@@ -15,6 +16,7 @@ import { id, now } from "./database";
 import type { AppPorts } from "./ports";
 import { AppError, safeMessage } from "./errors";
 import { csv } from "./csv";
+import { TrafficKnowledge } from "./traffic-knowledge";
 
 const prefix = "baidu-discovery:";
 const wireWords = z.array(z.string().max(200)).max(100);
@@ -29,22 +31,28 @@ export class BaiduDiscovery {
   };
   private closed = false;
   private generatingMaterials = false;
+  private knowledge: TrafficKnowledge;
   constructor(
     private db: Database,
     private ports: Pick<AppPorts, "baiduDiscovery">,
     private changed: () => void,
   ) {
+    this.knowledge = new TrafficKnowledge(db);
     // A restart never resumes external searches on its own.
     for (const row of this.db.all<{ value: string }>(
-      "SELECT value FROM api_cache WHERE key LIKE ? AND json_valid(value) AND json_extract(value,'$.status')='running'",
+      "SELECT value FROM api_cache WHERE key LIKE ? AND json_valid(value)",
       `${prefix}%`,
     )) {
       const parsed = discoveryRunSchema.safeParse(JSON.parse(row.value));
       if (!parsed.success) continue;
       const run = parsed.data;
-      run.status = "paused";
-      run.message = "上次采集已中断，已保留结果与断点，请手动继续。";
-      this.save(run, false);
+      const warning = run.knowledgeWarning;
+      this.archive(run);
+      if (run.status === "running") {
+        run.status = "paused";
+        run.message = "上次采集已中断，已保留结果与断点，请手动继续。";
+        this.save(run, false);
+      } else if (warning !== run.knowledgeWarning) this.save(run, false);
     }
   }
   get isBusy() {
@@ -106,6 +114,21 @@ export class BaiduDiscovery {
       "9999-12-31T00:00:00.000Z",
     );
     if (notify) this.changed();
+  }
+  private archive(
+    run: DiscoveryRun,
+    query?: DiscoveryRun["queries"][number],
+    source?: DiscoverySource,
+  ) {
+    try {
+      if (query && source && !run.knowledgeWarning)
+        this.knowledge.ingestDiscovery(run, query, source);
+      else this.knowledge.archiveDiscovery(run);
+      delete run.knowledgeWarning;
+    } catch {
+      run.knowledgeWarning =
+        "采集结果已保存，但流量词库入库失败；下次启动会从本地任务重试，无需重复采集。";
+    }
   }
   private assertIdle() {
     if (this.active)
@@ -243,6 +266,8 @@ export class BaiduDiscovery {
           }
           query.completedSources.push(source);
           this.save(run); // Preserve the first source even if the second source needs verification.
+          this.archive(run, query, source);
+          if (run.knowledgeWarning) this.save(run);
         }
         if (!this.queryRemoved(query)) {
           query.status = "completed";

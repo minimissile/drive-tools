@@ -1,17 +1,17 @@
 # Shape
 
-Discover what should be made and how it should work, then return a confirmed design brief without code.
+Discover what should be made and how it should work, then return a resolved design brief without code.
 
-## Phase 1: Discovery interview
+## Phase 1: Resolve the task
 
 Do not write code or choose visual direction yet.
 
 ### Cadence
 
-- Use the structured question tool when available; otherwise ask and stop.
-- Ask two or three related questions per round, then wait. One round is the default; add a second only when the answers expose a material gap.
-- Do not dump a questionnaire, repeat settled facts, or turn obvious facts into menus. Assert the likely reading and invite correction.
-- A sparse prompt requires at least one answer round. A precise prompt may need only a compact confirmation.
+- Read the request and existing project evidence first. When purpose, boundaries, and expected outcome are clear, write the brief directly.
+- Ask only for material unresolved facts; group related questions and continue work that does not depend on the answer.
+- Do not turn known facts into a questionnaire or require an answer round for its own sake. State a reasonable assumption when appropriate.
+- A precise prompt does not need a compact confirmation or design approval round.
 
 ### Round 1: purpose, people, and outcome
 
@@ -52,8 +52,6 @@ Write the smallest useful brief:
 
 Use three to five bullets when the task is settled; use the full structure only for ambiguous, multi-screen, or standalone planning. Do not restate the conversation.
 
-## Confirm and stop
+## Return the brief
 
-Present the brief for explicit confirmation or one correction round, then stop: shape never writes code or a direction contract.
-
-When no human or structured answer mechanism exists, mark assumptions plainly, return the brief, and stop.
+Return the resolved brief. An explicit shape request ends with this planning deliverable, without requiring the user to confirm it. If shape was invoked as part of an implementation task, continue that task using the brief. Mark unresolved facts and ask only when one is necessary to proceed; do not require approval of settled decisions.

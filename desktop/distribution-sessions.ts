@@ -44,50 +44,82 @@ export function createDistributionSessions(
     () => profile("pikasoo"),
     (url) => allowedNavigation("pikasoo", url),
   );
+  const retain = (
+    platformId: DistributionPlatformId,
+    window: BrowserWindow,
+  ) => {
+    if (window.isDestroyed()) return;
+    const key = profile(platformId).key;
+    if (windows.get(key) === window) return;
+    windows.set(key, window);
+    window.setTitle(`${distributionPlatform(platformId).name} · 内容分发`);
+    window.on("closed", () => {
+      if (windows.get(key) === window) windows.delete(key);
+    });
+  };
   const withWorker = async <T>(
     platformId: DistributionPlatformId,
-    action: (window: BrowserWindow, assertActive: () => void) => Promise<T>,
+    action: (
+      window: BrowserWindow,
+      assertActive: () => void,
+      waitForUser: () => void,
+    ) => Promise<T>,
   ): Promise<T> => {
-    if (platformId === "yiso") {
-      const existing = windows.get(profile(platformId).key);
-      if (yisoWorker || (existing && !existing.isDestroyed()))
-        throw new AppError(
-          "DISTRIBUTION_PAGE_BUSY",
-          "易搜只允许一个投稿页，请关闭已打开的易搜官网窗口后重新准备。",
-        );
-    }
-    const reader = new BrowserWindow({
-      show: false,
-      width: 1120,
-      height: 800,
-      webPreferences: {
-        session: profile(platformId).profile,
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        backgroundThrottling: false,
-      },
-    });
+    const existing = windows.get(profile(platformId).key);
+    const reusable = existing && !existing.isDestroyed() ? existing : undefined;
+    if (
+      (platformId === "yiso" && yisoWorker) ||
+      (reusable && workers.has(reusable))
+    )
+      throw new AppError(
+        "DISTRIBUTION_PAGE_BUSY",
+        "该平台正在处理，请等待当前操作完成。",
+      );
+    const reader =
+      reusable ??
+      new BrowserWindow({
+        show: false,
+        width: 1120,
+        height: 800,
+        webPreferences: {
+          session: profile(platformId).profile,
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          backgroundThrottling: false,
+        },
+      });
     workers.add(reader);
     if (platformId === "yiso") yisoWorker = reader;
-    reader.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    reader.webContents.on("will-navigate", (event, url) => {
-      if (!allowedNavigation(platformId, url)) event.preventDefault();
-    });
-    reader.webContents.on("will-redirect", (event, url) => {
-      if (!allowedNavigation(platformId, url)) event.preventDefault();
-    });
+    if (!reusable) {
+      reader.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      reader.webContents.on("will-navigate", (event, url) => {
+        if (!allowedNavigation(platformId, url)) event.preventDefault();
+      });
+      reader.webContents.on("will-redirect", (event, url) => {
+        if (!allowedNavigation(platformId, url)) event.preventDefault();
+      });
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     let active = true;
     try {
       return await Promise.race([
-        action(reader, () => {
-          if (!active)
-            throw new AppError(
-              "DISTRIBUTION_TIMEOUT",
-              "平台处理窗口已超时，未继续发送。",
-            );
-        }),
+        action(
+          reader,
+          () => {
+            if (!active)
+              throw new AppError(
+                "DISTRIBUTION_TIMEOUT",
+                "平台处理窗口已超时，未继续发送。",
+              );
+          },
+          () => {
+            // Human verification has no machine deadline. Receipt observation
+            // starts its own deadline once the official request is seen.
+            if (timer) clearTimeout(timer);
+            timer = undefined;
+          },
+        ),
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(
             () =>
@@ -137,7 +169,16 @@ export function createDistributionSessions(
     window: BrowserWindow,
     platformId: DistributionPlatformId,
   ): Promise<DistributionFormState> => {
-    await window.loadURL(distributionPlatform(platformId).submitUrl);
+    const target = distributionPlatform(platformId).submitUrl;
+    const current = window.webContents.getURL();
+    if (!current || current === "about:blank") await window.loadURL(target);
+    else if (current !== target)
+      return {
+        status: /\/login(?:[/?#]|$)/.test(current)
+          ? "login_required"
+          : "unavailable",
+        message: "请在已打开的官网完成登录或验证，并回到投稿页后更新链接。",
+      };
     let state: DistributionFormState = {
       status: "unavailable",
       message: "平台表单未加载。",
@@ -156,13 +197,7 @@ export function createDistributionSessions(
     return state;
   };
   const retainYiso = (window: BrowserWindow) => {
-    if (window.isDestroyed()) return;
-    const key = profile("yiso").key;
-    if (windows.get(key) === window) return;
-    windows.set(key, window);
-    window.on("closed", () => {
-      if (windows.get(key) === window) windows.delete(key);
-    });
+    retain("yiso", window);
   };
   return {
     isOpen: () =>
@@ -177,9 +212,15 @@ export function createDistributionSessions(
           message: "投稿规则待登录核实，自动分发暂不可用。",
           checkedAt: new Date().toISOString(),
         };
-      const state = await withWorker(platformId, (window) =>
-        loadForm(window, platformId),
-      );
+      const state = await withWorker(platformId, async (window) => {
+        const state = await loadForm(window, platformId);
+        if (state.status !== "ready") {
+          retain(platformId, window);
+          window.show();
+          window.focus();
+        }
+        return state;
+      });
       return {
         ...state,
         checkedAt: new Date().toISOString(),
@@ -201,164 +242,234 @@ export function createDistributionSessions(
           signal,
           onWaiting ?? (() => {}),
         );
-      return withWorker(platformId, async (window, assertActive) => {
-        const state = await loadForm(window, platformId);
-        assertActive();
-        signal.throwIfAborted();
-        if (state.status !== "ready")
-          return {
-            status:
-              state.status === "login_required"
-                ? "login_required"
-                : state.status === "verification_required"
-                  ? "verification_required"
-                  : "rejected",
-            message: state.message,
-            receipt: "",
-          } as DistributionSubmitResult;
-        if (platformId === "yiso") {
-          await window.webContents.executeJavaScript(
-            yisoPageScript("fill", text),
-          );
-          await wait(100);
+      return withWorker(
+        platformId,
+        async (window, assertActive, waitForUser) => {
+          const state = await loadForm(window, platformId);
           assertActive();
           signal.throwIfAborted();
-          await beforeSubmit();
-          retainYiso(window);
-          try {
+          if (state.status !== "ready") {
+            retain(platformId, window);
+            window.show();
+            window.focus();
+            return {
+              status:
+                state.status === "login_required"
+                  ? "login_required"
+                  : state.status === "verification_required"
+                    ? "verification_required"
+                    : "rejected",
+              message: state.message,
+              receipt: "",
+            } as DistributionSubmitResult;
+          }
+          if (platformId === "yiso") {
             await window.webContents.executeJavaScript(
-              yisoPageScript("submit", text),
+              yisoPageScript("fill", text),
             );
-            // The official page performs the request. No debugger, API reconstruction or token reads.
-            for (let attempt = 0; attempt < 140; attempt++) {
-              const result = (await window.webContents.executeJavaScript(
-                yisoPageScript("result", text),
-              )) as YisoPageResult;
-              if (
-                result?.status === "accepted" ||
-                result?.status === "rejected"
-              ) {
-                // A timed-out outer worker already returned an unknown result to the ledger.
-                // Keep its page available even if this late observer subsequently sees success.
-                if (workers.has(window)) windows.delete(profile("yiso").key);
-                return result;
-              }
-              if (result && result.status !== "ready") {
-                retainYiso(window);
-                return {
-                  status: "uncertain",
-                  message: `${result.message} 已保留官网页面，请打开投稿页核对，禁止自动重投。`,
-                  receipt: "",
-                };
-              }
-              // Once clicked, pause waits for this link's outcome instead of cancelling its request.
-              await wait(250);
-            }
-          } catch (error) {
+            await wait(100);
+            assertActive();
+            signal.throwIfAborted();
+            await beforeSubmit();
             retainYiso(window);
-            throw error;
-          }
-          retainYiso(window);
-          return {
-            status: "uncertain",
-            message:
-              "易搜未返回此链接的最终处理结果。官网页面已保留，请打开投稿页核对后关闭，禁止自动重投。",
-            receipt: "",
-          };
-        }
-        await window.webContents.executeJavaScript(
-          distributionFillScript(text),
-        );
-        await wait(100);
-        signal.throwIfAborted();
-        // Observe the official form's request; never reconstruct its tokens or call private APIs.
-        const debug = window.webContents.debugger;
-        debug.attach("1.3");
-        await debug.sendCommand("Network.enable");
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let requestId: string | undefined,
-          httpStatus = 0;
-        let finish!: (result: DistributionSubmitResult) => void;
-        const receipt = new Promise<DistributionSubmitResult>((resolve) => {
-          finish = resolve;
-          timer = setTimeout(
-            () =>
-              resolve({
-                status: "uncertain",
-                message: "未取得本批明确回执，请核对官网状态，禁止自动重投。",
-                receipt: "",
-              }),
-            35000,
-          );
-        });
-        const listener = (
-          _event: Electron.Event,
-          method: string,
-          params: Record<string, any>,
-        ) => {
-          if (
-            method === "Network.requestWillBeSent" &&
-            params.request?.method === "POST" &&
-            allowedNavigation(platformId, params.request.url)
-          ) {
-            let content = params.request.postData;
             try {
-              const parsed = JSON.parse(content);
-              content = parsed.text;
-            } catch {
-              try {
-                content = new URLSearchParams(content).get("text");
-              } catch {}
-            }
-            if (content === text) requestId = params.requestId;
-          }
-          if (
-            requestId &&
-            params.requestId === requestId &&
-            method === "Network.responseReceived"
-          )
-            httpStatus = params.response.status;
-          if (
-            requestId &&
-            params.requestId === requestId &&
-            method === "Network.loadingFinished"
-          )
-            void debug
-              .sendCommand("Network.getResponseBody", { requestId })
-              .then((result) => {
-                const body = result.base64Encoded
-                  ? Buffer.from(result.body, "base64").toString("utf8")
-                  : String(result.body);
-                if (body.length <= 256000)
-                  finish(distributionReceipt(httpStatus, body));
-                else
-                  finish({
-                    status: "uncertain",
-                    message: "平台回执过大，已停止自动判断，请核对官网结果。",
-                    receipt: "",
-                  });
-              })
-              .catch(() =>
-                finish({
-                  status: "uncertain",
-                  message: "平台回执未能读取，请核对官网结果。",
-                  receipt: "",
-                }),
+              await window.webContents.executeJavaScript(
+                yisoPageScript("submit", text),
               );
-        };
-        debug.on("message", listener);
-        try {
-          await beforeSubmit();
+              // The official page performs the request. No debugger, API reconstruction or token reads.
+              for (let attempt = 0; attempt < 140; attempt++) {
+                const result = (await window.webContents.executeJavaScript(
+                  yisoPageScript("result", text),
+                )) as YisoPageResult;
+                if (
+                  result?.status === "accepted" ||
+                  result?.status === "rejected"
+                ) {
+                  // A timed-out outer worker already returned an unknown result to the ledger.
+                  // Keep its page available even if this late observer subsequently sees success.
+                  if (workers.has(window)) windows.delete(profile("yiso").key);
+                  return result;
+                }
+                if (result && result.status !== "ready") {
+                  retainYiso(window);
+                  return {
+                    status: "uncertain",
+                    message: `${result.message} 已保留官网页面，请打开投稿页核对，禁止自动重投。`,
+                    receipt: "",
+                  };
+                }
+                // Once clicked, pause waits for this link's outcome instead of cancelling its request.
+                await wait(250);
+              }
+            } catch (error) {
+              retainYiso(window);
+              throw error;
+            }
+            retainYiso(window);
+            return {
+              status: "uncertain",
+              message:
+                "易搜未返回此链接的最终处理结果。官网页面已保留，请打开投稿页核对后关闭，禁止自动重投。",
+              receipt: "",
+            };
+          }
           await window.webContents.executeJavaScript(
-            distributionClickScript(text),
+            distributionFillScript(text),
           );
-          return await receipt;
-        } finally {
-          if (timer) clearTimeout(timer);
-          debug.removeListener("message", listener);
-          if (debug.isAttached()) debug.detach();
-        }
-      });
+          await wait(100);
+          signal.throwIfAborted();
+          // Observe the official form's request. CAPTCHA contents and tokens remain on the website.
+          const debug = window.webContents.debugger;
+          debug.attach("1.3");
+          await debug.sendCommand("Network.enable");
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let requestId: string | undefined,
+            httpStatus = 0;
+          let settled = false,
+            verificationShown = false;
+          let resolveReceipt!: (result: DistributionSubmitResult) => void;
+          const receipt = new Promise<DistributionSubmitResult>((resolve) => {
+            resolveReceipt = resolve;
+          });
+          const uncertain = (
+            message = "未取得本批明确回执，官网页面已保留，请核对结果，禁止自动重投。",
+          ): DistributionSubmitResult => ({
+            status: "uncertain",
+            message,
+            receipt: "",
+          });
+          const finish = (result: DistributionSubmitResult) => {
+            if (settled) return;
+            settled = true;
+            resolveReceipt(result);
+          };
+          const armDeadline = () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => finish(uncertain()), 35000);
+          };
+          const closed = () =>
+            finish(uncertain("官网窗口已关闭，提交结果待核对，禁止自动重投。"));
+          const pause = () => {
+            // Once the real request has been observed, pause waits for its receipt.
+            if (requestId || settled) return;
+            if (!window.isDestroyed()) window.destroy();
+            finish(
+              uncertain(
+                "已停止官网验证流程；本批已进入提交检查点，请核对结果后继续。",
+              ),
+            );
+          };
+          const listener = (
+            _event: Electron.Event,
+            method: string,
+            params: Record<string, any>,
+          ) => {
+            if (
+              method === "Network.requestWillBeSent" &&
+              params.request?.method === "POST" &&
+              allowedNavigation(platformId, params.request.url)
+            ) {
+              const path = new URL(params.request.url).pathname;
+              let content = params.request.postData;
+              try {
+                content = JSON.parse(content).text;
+              } catch {
+                content = new URLSearchParams(content ?? "").get("text");
+              }
+              if (
+                content === text &&
+                (platformId !== "esoua" || path === "/v1/task/import_disk")
+              ) {
+                requestId = params.requestId;
+                armDeadline();
+              }
+            }
+            if (!requestId || params.requestId !== requestId) return;
+            if (method === "Network.responseReceived")
+              httpStatus = params.response.status;
+            if (method === "Network.loadingFailed")
+              finish(
+                uncertain(
+                  "平台提交请求连接失败，已保留官网页面，请先核对结果。",
+                ),
+              );
+            if (method === "Network.loadingFinished")
+              void debug
+                .sendCommand("Network.getResponseBody", { requestId })
+                .then((result) => {
+                  const body = result.base64Encoded
+                    ? Buffer.from(result.body, "base64").toString("utf8")
+                    : String(result.body);
+                  finish(
+                    body.length <= 256000
+                      ? distributionReceipt(httpStatus, body)
+                      : uncertain("平台回执过大，请在官网核对结果。"),
+                  );
+                })
+                .catch(() =>
+                  finish(uncertain("平台回执未能读取，请在官网核对结果。")),
+                );
+          };
+          const watchVerification = async () => {
+            try {
+              while (!settled && !window.isDestroyed()) {
+                const state = (await window.webContents.executeJavaScript(
+                  distributionFormScript(),
+                )) as DistributionFormState;
+                if (settled) return;
+                if (
+                  state.status === "verification_required" &&
+                  !requestId &&
+                  !verificationShown
+                ) {
+                  verificationShown = true;
+                  if (timer) clearTimeout(timer);
+                  timer = undefined;
+                  waitForUser();
+                  retain(platformId, window);
+                  window.show();
+                  window.focus();
+                  onWaiting?.();
+                } else if (
+                  verificationShown &&
+                  state.status !== "verification_required" &&
+                  !requestId &&
+                  !timer
+                ) {
+                  // A cancelled website verification must not leave an endless hidden task.
+                  armDeadline();
+                }
+                await wait(250);
+              }
+            } catch {
+              if (!settled) finish(uncertain());
+            }
+          };
+          debug.on("message", listener);
+          window.once("closed", closed);
+          signal.addEventListener("abort", pause);
+          try {
+            assertActive();
+            signal.throwIfAborted();
+            await beforeSubmit();
+            armDeadline();
+            await window.webContents.executeJavaScript(
+              distributionClickScript(text),
+            );
+            void watchVerification();
+            const result = await receipt;
+            if (result.status === "uncertain") retain(platformId, window);
+            return result;
+          } finally {
+            settled = true;
+            if (timer) clearTimeout(timer);
+            signal.removeEventListener("abort", pause);
+            window.removeListener("closed", closed);
+            debug.removeListener("message", listener);
+            if (!window.isDestroyed() && debug.isAttached()) debug.detach();
+          }
+        },
+      );
     },
     async open(platformId, page) {
       if (platformId === "pikasoo") return pikasoo.open();

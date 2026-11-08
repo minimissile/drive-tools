@@ -47,7 +47,17 @@ export function useIpcQuery<M extends IpcQueryMethod>(
     error: string;
   }>({ key, loading: enabled, error: "" });
   const [retry, setRetry] = useState(0);
+  const sequence = useRef(0);
   const reload = useCallback(() => setRetry((n) => n + 1), []);
+  /** Accept an authoritative mutation result without an older read replacing it. */
+  const setData = useCallback(
+    (value: IpcValue<M>) => {
+      sequence.current++;
+      setResult({ key, value });
+      setStatus({ key, loading: false, error: "" });
+    },
+    [key],
+  );
   useEffect(() => {
     if (!enabled || method.startsWith("dev.")) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -72,16 +82,17 @@ export function useIpcQuery<M extends IpcQueryMethod>(
     setStatus({ key, loading: true, error: "" });
     let timer: ReturnType<typeof setTimeout>;
     const read = () => {
+      const request = ++sequence.current;
       setStatus({ key, loading: true, error: "" });
       void ipc(method, ...([parameters] as IpcArguments<M>))
         .then((value) => {
-          if (active) {
+          if (active && request === sequence.current) {
             setResult({ key, value });
             setStatus({ key, loading: false, error: "" });
           }
         })
         .catch((cause: unknown) => {
-          if (!active) return;
+          if (!active || request !== sequence.current) return;
           const error =
             cause instanceof Error ? cause : new Error("读取失败，请重试。");
           setResult((old) => (keepPrevious && old?.key === key ? old : null));
@@ -117,5 +128,6 @@ export function useIpcQuery<M extends IpcQueryMethod>(
     loading: enabled && (status.key !== key || status.loading),
     error: status.key === key ? status.error : "",
     reload,
+    setData,
   };
 }

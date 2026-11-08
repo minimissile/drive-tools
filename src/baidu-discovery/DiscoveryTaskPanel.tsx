@@ -112,6 +112,9 @@ export function DiscoveryTaskPanel({ model }: { model: DiscoveryModel }) {
                 />
               ) : null}
               <p className="baidu-discovery-message">{run.message}</p>
+              {run.knowledgeWarning ? (
+                <Notice warning>{run.knowledgeWarning}</Notice>
+              ) : null}
               {run.queries.some((query) => query.status === "skipped") ? (
                 <small>
                   已跳过：

@@ -12,6 +12,10 @@
 .workspace-breadcrumb > svg {
   color: var(--muted);
 }
+.workspace-breadcrumb > .navigation-back {
+  padding-inline: var(--space-2);
+  margin-right: var(--space-1);
+}
 .workbench-tool-select {
   width: 210px;
 }
@@ -22,5 +26,11 @@
   gap: var(--space-2);
   min-width: 0;
 }
-.active-task-select { width: 220px; }
-.topbar > .topbar-task-actions { flex-shrink: 0; margin-left: auto; max-width: 100%; }
+.active-task-select {
+  width: 220px;
+}
+.topbar > .topbar-task-actions {
+  flex-shrink: 0;
+  margin-left: auto;
+  max-width: 100%;
+}

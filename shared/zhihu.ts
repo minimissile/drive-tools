@@ -94,7 +94,12 @@ export interface ZhihuProgress {
   score?: number | null;
   nextLevelScore?: number | null;
   scoreUpdatedOn?: string | null;
-  dimensions?: {name: string; cadence: string; description: string; score: number | null}[];
+  dimensions?: {
+    name: string;
+    cadence: string;
+    description: string;
+    score: number | null;
+  }[];
   checkedAt: string;
   source: "official" | "manual";
   note: string;
@@ -125,10 +130,23 @@ export interface ZhihuTask {
   scheduledAt: string;
   attemptedAt?: string;
   submittedAt?: string;
+  /** Durable diagnosis; absence stays conservative for legacy unknown failures. */
+  failure?: {
+    phase: "before_submit" | "after_submit";
+    code: string;
+    at: string;
+  };
   url?: string;
   message: string;
   networkKey?: string;
   createdAt: string;
+}
+/** Only a proven pre-submission failure may leave the rest of this account runnable. */
+export function zhihuTaskNeedsReconciliation(task: ZhihuTask) {
+  return (
+    task.status === "attention" &&
+    (!!task.submittedAt || task.failure?.phase !== "before_submit")
+  );
 }
 export interface ZhihuSnapshot {
   accounts: (WebsiteAccount & {

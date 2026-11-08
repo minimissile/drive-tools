@@ -11,6 +11,11 @@ import {
 } from "./state/feedback";
 import { useSnapshot } from "./state/useSnapshot";
 import {
+  navigationHistory,
+  parseNavigationHistory,
+  type NavigationHistory,
+} from "./state/navigation-history";
+import {
   shouldRefreshSnapshot,
   type Command,
   type CommandArguments,
@@ -20,6 +25,8 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -51,6 +58,9 @@ export type Page =
   | "website-accounts"
   | "smzdm-accounts"
   | "smzdm-workflow"
+  | "wechat-workflow"
+  | "wechat-discovery"
+  | "wechat-accounts"
   | "browser-environments"
   | "intake"
   | "tasks"
@@ -62,8 +72,12 @@ export type Page =
   | "csdn-publish"
   | "csdn-workflow"
   | "weibo-marketing"
+  | "bilibili-content"
+  | "bilibili-accounts"
   | "pipix-sources"
   | "zhihu-operations"
+  | "tieba-autocare"
+  | "tieba-publishing"
   | "settings"
   | "bulk"
   | "batch"
@@ -85,6 +99,8 @@ interface Store {
   data: AppSnapshot | null;
   page: Page;
   navigate(page: Page): void;
+  goBack(): void;
+  previousPage: Page | null;
   selectedResourceId: string;
   selectedCopyId: string;
   select(resourceId: string, copyId?: string): void;
@@ -118,6 +134,8 @@ type NavigationStore = Pick<
   | "openSettings"
   | "page"
   | "navigate"
+  | "goBack"
+  | "previousPage"
   | "searchFocus"
   | "openSearch"
   | "openDraft"
@@ -179,6 +197,9 @@ const pages: Page[] = [
   "website-accounts",
   "smzdm-accounts",
   "smzdm-workflow",
+  "wechat-workflow",
+  "wechat-discovery",
+  "wechat-accounts",
   "browser-environments",
   "intake",
   "tasks",
@@ -190,7 +211,11 @@ const pages: Page[] = [
   "csdn-publish",
   "csdn-workflow",
   "weibo-marketing",
+  "bilibili-content",
+  "bilibili-accounts",
   "zhihu-operations",
+  "tieba-autocare",
+  "tieba-publishing",
   "settings",
   "bulk",
   "batch",
@@ -202,6 +227,7 @@ export type SettingsSection =
   | "resource-links"
   | "ai"
   | "traffic"
+  | "costs"
   | "notes"
   | "browser"
   | "bindings"
@@ -218,6 +244,7 @@ function savedUi(): {
   resourceId?: string;
   copyId?: string;
   activeAccounts?: Record<string, string>;
+  navigation?: NavigationHistory;
 } {
   try {
     const raw = windowStorage.getItem("panxu-ui-v1");
@@ -234,6 +261,7 @@ function savedUi(): {
         data.activeAccounts && typeof data.activeAccounts === "object"
           ? data.activeAccounts
           : {},
+      navigation: parseNavigationHistory(data.navigation, pages),
     };
   } catch {
     return {};
@@ -253,27 +281,50 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
     const saved = savedUi();
     const initial = window.panxu?.initialPage;
     return !saved.page && initial && pages.includes(initial as Page)
-      ? { ...saved, page: initial as Page } : saved;
+      ? { ...saved, page: initial as Page }
+      : saved;
   });
   const { notify, clearToast, begin, end } = useFeedbackActions();
-  const [searchFocus, setSearchFocus] = useState<SearchFocus | null>(null);
+  const [navigation, dispatchNavigation] = useReducer(
+    navigationHistory,
+    saved.navigation ?? {
+      current: {
+        page: saved.page ?? "workbench",
+        resourceId: saved.resourceId ?? "",
+        copyId: saved.copyId ?? "",
+        editResourceId: saved.editResourceId ?? null,
+        editCopyId: saved.editCopyId ?? null,
+        settingsSection: "ai",
+        searchFocus: null,
+      },
+      past: [],
+      workspace: null,
+    },
+  );
+  const {
+    page,
+    resourceId: selectedResourceId,
+    copyId: selectedCopyId,
+    editResourceId,
+    editCopyId,
+    settingsSection,
+    searchFocus,
+  } = navigation.current;
+  const navigationRequest = useRef(0);
+  const navigate = useCallback((page: Page) => {
+    navigationRequest.current++;
+    dispatchNavigation({ type: "navigate", patch: { page } });
+  }, []);
   const [extraResource, setExtraResource] = useState<Resource | null>(null),
-    [page, setPage] = useState<Page>(saved.page ?? "workbench"),
-    [selectedResourceId, setResourceId] = useState(saved.resourceId ?? ""),
-    [selectedCopyId, setCopyId] = useState(saved.copyId ?? ""),
     [activeAccounts, setActiveAccounts] = useState<Record<string, string>>(
       saved.activeAccounts ?? {},
-    ),
-    [editResourceId, setEditResourceId] = useState<string | null>(
-      saved.editResourceId ?? null,
-    ),
-    [editCopyId, setEditCopyId] = useState<string | null>(
-      saved.editCopyId ?? null,
     );
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("ai");
   const openSettings = useCallback((section: SettingsSection) => {
-    setSettingsSection(section);
-    setPage("settings");
+    navigationRequest.current++;
+    dispatchNavigation({
+      type: "navigate",
+      patch: { page: "settings", settingsSection: section },
+    });
   }, []);
   const {
     data,
@@ -281,7 +332,23 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
     error: snapshotError,
     loading: snapshotLoading,
   } = useSnapshot(selectedResourceId);
+  const workspacePath = data?.dataPath;
+  const previousPage =
+    navigation.workspace === workspacePath
+      ? (navigation.past.at(-1)?.page ?? null)
+      : null;
+  const goBack = useCallback(() => {
+    if (!workspacePath || navigation.workspace !== workspacePath) return;
+    navigationRequest.current++;
+    dispatchNavigation({ type: "back" });
+  }, [workspacePath, navigation.workspace]);
   useEffect(() => {
+    if (!workspacePath) return;
+    navigationRequest.current++;
+    dispatchNavigation({ type: "workspace", path: workspacePath });
+  }, [workspacePath]);
+  useEffect(() => {
+    if (!workspacePath || navigation.workspace !== workspacePath) return;
     try {
       windowStorage.setItem(
         "panxu-ui-v1",
@@ -292,6 +359,7 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
           activeAccounts,
           editResourceId,
           editCopyId,
+          navigation,
         }),
       );
     } catch {
@@ -304,6 +372,8 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
     activeAccounts,
     editResourceId,
     editCopyId,
+    workspacePath,
+    navigation,
   ]);
   const command = useCallback(
     async <M extends IpcMethod>(
@@ -357,7 +427,10 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
       .catch((error) => {
         if (active) {
           notify(error.message, "error");
-          setResourceId(data.resources[0]?.id ?? "");
+          dispatchNavigation({
+            type: "update",
+            patch: { resourceId: data.resources[0]?.id ?? "", copyId: "" },
+          });
           setExtraResource(null);
         }
       });
@@ -373,35 +446,48 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
     resource?.copies.find((c) => c.id === selectedCopyId) ??
     resource?.copies[0];
   const select = useCallback((resourceId: string, copyId?: string) => {
-    setResourceId(resourceId);
-    setCopyId(copyId ?? "");
+    navigationRequest.current++;
+    dispatchNavigation({
+      type: "update",
+      patch: { resourceId, copyId: copyId ?? "" },
+    });
   }, []);
   const edit = useCallback(
     (resourceId: string | null, copyId?: string) => {
-      setEditResourceId(resourceId);
-      setEditCopyId(copyId ?? null);
-      if (resourceId) {
-        setResourceId(resourceId);
-        setCopyId(copyId === "new" ? "" : (copyId ?? ""));
-      }
+      const request = ++navigationRequest.current;
+      const patch = {
+        page: "intake" as const,
+        editResourceId: resourceId,
+        editCopyId: copyId ?? null,
+        ...(resourceId
+          ? { resourceId, copyId: copyId === "new" ? "" : (copyId ?? "") }
+          : {}),
+      };
       if (resourceId && !data?.resources.some((r) => r.id === resourceId)) {
         void ipc("resource.get", { id: resourceId })
           .then((r) => {
+            if (request !== navigationRequest.current) return;
             setExtraResource(r);
-            setPage("intake");
+            dispatchNavigation({ type: "navigate", patch });
           })
-          .catch((error) => notify(error.message, "error"));
-      } else setPage("intake");
+          .catch((error) => {
+            if (request === navigationRequest.current)
+              notify(error.message, "error");
+          });
+      } else dispatchNavigation({ type: "navigate", patch });
     },
     [data?.resources, notify],
   );
   const openSearch = useCallback((focus: SearchFocus = {}) => {
-    setSearchFocus(focus);
-    setPage("search");
+    navigationRequest.current++;
+    dispatchNavigation({
+      type: "navigate",
+      patch: { page: "search", searchFocus: focus },
+    });
   }, []);
   const openDraft = useCallback(
     (draft: Draft, destination: "studio" | "publish" = "studio") => {
-      select(draft.resourceId, draft.copyId);
+      navigationRequest.current++;
       windowStorage.setItem(
         "panxu-studio-selection-v1",
         JSON.stringify({
@@ -412,9 +498,16 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
         }),
       );
       windowStorage.setItem("panxu-publish-draft", draft.id);
-      setPage(destination);
+      dispatchNavigation({
+        type: "navigate",
+        patch: {
+          page: destination,
+          resourceId: draft.resourceId,
+          copyId: draft.copyId,
+        },
+      });
     },
-    [select],
+    [],
   );
   const setActiveAccount = useCallback(
     (provider: string, id: string) =>
@@ -446,7 +539,9 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
       page,
       settingsSection,
       openSettings,
-      navigate: setPage,
+      navigate,
+      goBack,
+      previousPage,
       searchFocus,
       openSearch,
       openDraft,
@@ -456,6 +551,9 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
     }),
     [
       page,
+      navigate,
+      goBack,
+      previousPage,
       settingsSection,
       openSettings,
       searchFocus,

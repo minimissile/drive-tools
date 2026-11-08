@@ -1,7 +1,11 @@
 import type { PhotoPostContract } from "./photo-posts";
+import type { VideoContract } from "./video-jobs";
+import type { MusicContract } from "./music";
+import type { BilibiliContract } from "./bilibili";
 import type { ResourceCatalogContract } from "./resource-catalog";
 import type { BaiduDiscoveryContract } from "./baidu-discovery";
 import type { DevSessionContract } from "./dev-sessions";
+import type { DevUpdateContract } from "./dev-updates";
 import type { ResourceAnswerContract } from "./resource-answers";
 import type { ResourceDeletionContract } from "./resource-deletion";
 import type { ShareCreationContract } from "./share-creation";
@@ -9,11 +13,20 @@ import type { ResourceLinksContract } from "./resource-links";
 import type { ResourceLandingContract } from "./resource-landing";
 import type { AccountDeletionContract } from "./account-deletion";
 import type { SmzdmContract } from "./smzdm";
+import type { WechatContract } from "./wechat";
 import type { DistributionContract } from "./distribution";
 import type { PipixContract } from "./pipix";
 import type { PipixAcquisitionContract } from "./pipix-acquisition";
 import type { ContentSupplyContract } from "./content-supply";
 import type { AutocareContract } from "./zhihu-autocare";
+import type { TiebaAutocareContract } from "./tieba-autocare";
+import type { TiebaForumDiscoveryContract } from "./tieba-forum-discovery";
+import type { TiebaParticipationContract } from "./tieba-participation";
+import type { TiebaAutomationContract } from "./tieba-automation";
+import type { TiebaTopicsContract } from "./tieba-topics";
+import type { TiebaInsightsContract } from "./tieba-insights";
+import type { TiebaPublishingContract } from "./tieba-publishing";
+import type { TiebaPostStatsContract } from "./tieba-post-stats";
 import type { ZhihuContract } from "./zhihu";
 import type { ZhihuParticipationContract } from "./zhihu-participation";
 import type { IntelligentOperationsContract } from "./intelligent-operations";
@@ -31,6 +44,7 @@ import type { CsdnWorkflowContract } from "./csdn-workflow";
 import type { WeiboMarketingContract } from "./weibo-marketing";
 import type { WeiboPostsContract } from "./weibo-posts";
 import type { WeiboStatisticsContract } from "./weibo-statistics";
+import type { WeiboWorkspaceContract } from "./weibo-workspace";
 import type {
   AppSnapshot,
   BrowserBinding,
@@ -59,7 +73,11 @@ import type {
   StudioJob,
   StudioWorkingCopy,
 } from "./studio";
-import type { KnowledgeFilter, KnowledgePage } from "./traffic-knowledge";
+import type {
+  KnowledgeFilter,
+  KnowledgePage,
+  KnowledgeContract,
+} from "./traffic-knowledge";
 import type { PublicationDeliveryCheck } from "./publication-checks";
 import type { UpdateState } from "./updates";
 
@@ -89,15 +107,28 @@ export type SplitSummary = {
 export interface IpcContract
   extends
     PhotoPostContract,
+    VideoContract,
+    MusicContract,
+    BilibiliContract,
     BaiduDiscoveryContract,
     DevSessionContract,
+    DevUpdateContract,
     ResourceCatalogContract,
     SmzdmContract,
+    WechatContract,
     DriveFilesContract,
     DriveBrowserContract,
     DistributionContract,
     ZhihuContract,
     AutocareContract,
+    TiebaAutocareContract,
+    TiebaForumDiscoveryContract,
+    TiebaParticipationContract,
+    TiebaAutomationContract,
+    TiebaTopicsContract,
+    TiebaInsightsContract,
+    TiebaPublishingContract,
+    TiebaPostStatsContract,
     ZhihuParticipationContract,
     IntelligentOperationsContract,
     PipixContract,
@@ -120,7 +151,8 @@ export interface IpcContract
     CsdnWorkflowContract,
     WeiboMarketingContract,
     WeiboPostsContract,
-    WeiboStatisticsContract {
+    WeiboStatisticsContract,
+    WeiboWorkspaceContract {
   "binding.list": Contract<undefined, BrowserBinding[]>;
   snapshot: Contract<{ resourceId?: string } | undefined, AppSnapshot>;
   "resource.get": Contract<{ id: string }, Resource>;
@@ -206,6 +238,11 @@ export interface IpcContract
     PublicationDeliveryCheck[]
   >;
   "traffic.knowledge.list": Contract<KnowledgeFilter, KnowledgePage>;
+  "pool.get": Contract<{ id: string }, import("./types").Pool>;
+  "pool.list": Contract<undefined, import("./types").PoolSummary[]>;
+  "traffic.knowledge.history": KnowledgeContract["traffic.knowledge.history"];
+  "traffic.knowledge.overview": KnowledgeContract["traffic.knowledge.overview"];
+  "traffic.knowledge.resolve": KnowledgeContract["traffic.knowledge.resolve"];
   "updater.state": Contract<undefined, UpdateState>;
   "dev.tools": Contract<undefined, boolean>;
 }
@@ -223,17 +260,26 @@ export const queryMethods = [
   "photoPosts.get",
   "baiduDiscovery.list",
   "baiduDiscovery.get",
+  "baiduDiscovery.questionImport",
   "account.deletePreview",
   "dev.session",
   "dev.sessions",
+  "dev.updates",
   "resourceLinks.settings",
   "resourceLinks.get",
   "resourceLanding.get",
+  "resourceLanding.traffic",
   "resourceCatalog.list",
   "resourceCatalog.get",
+  "resourceCatalog.resources",
+  "resourceCatalog.resourceDetails",
+  "resourceCatalog.aiGet",
   "secret.preview",
   "smzdm.list",
   "smzdm.get",
+  "wechat.list",
+  "wechat.get",
+  "wechat.discoveryConfig",
   "distribution.overview",
   "distribution.list",
   "distribution.history",
@@ -251,6 +297,16 @@ export const queryMethods = [
   "pipix.image",
   "zhihu.snapshot",
   "zhihu.autocare.snapshot",
+  "tieba.autocare.snapshot",
+  "tieba.participation.snapshot",
+  "tieba.automation.snapshot",
+  "tieba.topics.snapshot",
+  "tieba.topics.image",
+  "tieba.insights.snapshot",
+  "tieba.publishing.snapshot",
+  "tieba.publishing.words",
+  "tieba.publishing.resources",
+  "tieba.postStats.snapshot",
   "zhihu.autocare.logs",
   "zhihu.logs",
   "intelligentOps.snapshot",
@@ -271,6 +327,9 @@ export const queryMethods = [
   "weibo.get",
   "weiboPosts.list",
   "weiboStats.list",
+  "weiboWorkspace.list",
+  "weiboWorkspace.get",
+  "weiboWorkspace.style",
   "weiboStats.get",
   "csdn.words",
   "csdn.matches",
@@ -287,6 +346,7 @@ export const queryMethods = [
   "zhidao.runs",
   "zhidao.run",
   "zhidao.answer.logs",
+  "zhidao.answer.sessions",
   "zhidao.targets",
   "zhidao.templates",
   "zhidao.publish.preview",
@@ -325,8 +385,20 @@ export const queryMethods = [
   "studio.modelCatalog",
   "studio.jobs",
   "studio.workingCopy",
+  "video.runtime",
+  "video.source",
+  "video.jobs",
+  "music.library",
+  "bilibili.list",
+  "bilibili.get",
+  "bilibili.preview",
   "publication.deliveryChecks",
   "traffic.knowledge.list",
+  "traffic.knowledge.overview",
+  "traffic.knowledge.resolve",
+  "pool.get",
+  "pool.list",
+  "traffic.knowledge.history",
   "traffic.knowledge.detail",
   "updater.state",
 ] as const satisfies readonly IpcMethod[];

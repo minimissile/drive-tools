@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { ExternalLink, LockKeyhole } from "lucide-react";
 import type { DistributionOverview } from "../../shared/distribution";
 import { ipc } from "../api/client";
 import { useLocalDraft } from "../hooks/useLocalDraft";
-import { Button, Field, Notice, Panel, Status } from "../ui/primitives";
+import { Button, Field, Notice, Panel } from "../ui/primitives";
 import type { DistributionModel } from "./useDistribution";
 
 export function PlatformRules({
@@ -36,134 +35,35 @@ export function PlatformRules({
   );
   return (
     <Panel className="distribution-rules">
-      <div className="distribution-platform-heading">
-        <div>
-          <h2>{platform.name}</h2>
-          <p>{platform.summary}</p>
-        </div>
-        <div className="row">
-          <Status
-            kind={platform.format === "unverified" ? "warning" : "normal"}
-          >
-            {platform.format === "unverified" ? "规则待核实" : "规则已查阅"}
-          </Status>
-          <Button onClick={() => void model.open()} disabled={model.busy}>
-            <ExternalLink size={14} />
-            打开投稿页
-          </Button>
-        </div>
-      </div>
-      <dl className="distribution-facts">
-        <div>
-          <dt>登录要求</dt>
-          <dd>
-            {platform.login === "required"
-              ? "必须登录"
-              : platform.login === "not_required"
-                ? "无需账号"
-                : "未见登录门槛"}
-          </dd>
-        </div>
-        <div>
-          <dt>单批建议上限</dt>
-          <dd>
-            {platform.batchLimit
-              ? `${platform.batchLimit.toLocaleString()} 条`
-              : platform.format === "unverified"
-                ? "待登录核实"
-                : "未公开"}
-          </dd>
-        </div>
-        <div>
-          <dt>每日平台限额</dt>
-          <dd>
-            {platform.dailyLimit
-              ? `${platform.dailyLimit.toLocaleString()} 条 / 用户`
-              : platform.format === "unverified"
-                ? "待登录核实"
-                : "未公开"}
-          </dd>
-        </div>
-        <div>
-          <dt>本地近 24h 提交</dt>
-          <dd>{item.submittedToday.toLocaleString()} 条</dd>
-        </div>
-      </dl>
-      <details>
-        <summary>
-          查看投稿规则与待确认事项 <span>查阅于 {platform.checkedAt}</span>
-        </summary>
-        <ul>
-          {platform.rules.map((rule) => (
-            <li key={rule}>{rule}</li>
-          ))}
-        </ul>
-        <div className="distribution-unknown">
-          <strong>待确认</strong>
-          <ul>
-            {platform.unknowns.map((rule) => (
-              <li key={rule}>{rule}</li>
-            ))}
-          </ul>
-        </div>
-        <p className="muted">
-          来源：
-          <a
-            href={platform.submitUrl}
-            onClick={(event) => {
-              event.preventDefault();
-              void model.open();
-            }}
-          >
-            {platform.submitUrl}
-          </a>
-        </p>
-        <p className="muted">
-          点击自动分发后按批提交并保存回执。平台后台处理与收录结果仍以官网查询为准，可在逐条记录中核对。
-        </p>
-      </details>
+      <h2>投稿须知</h2>
+      <p className="muted">{platform.summary}</p>
+      <ul>
+        {platform.rules.map((rule) => (
+          <li key={rule}>{rule}</li>
+        ))}
+      </ul>
+      <p className="muted">
+        提交成功后，平台仍需处理或审核，收录结果以官网为准。
+      </p>
       <div className="distribution-session row spread">
         <div>
-          <LockKeyhole size={14} />
-          <span>
-            {item.alias ||
-              (platform.login === "not_required"
-                ? "独立投稿会话"
-                : "单平台常用会话")}
-          </span>
-          <small>
-            {platform.login === "not_required"
-              ? "无需账号 · 安全验证在官网完成"
-              : "独立保存登录 · 登录状态以官网为准"}
-          </small>
-        </div>
-        <div className="row">
-          {platform.loginUrl ? (
-            <Button
-              quiet
-              size="compact"
-              disabled={model.busy}
-              onClick={() => void model.open("login")}
-            >
-              打开登录页
-            </Button>
+          <strong>{item.alias || "平台备注"}</strong>
+          {item.note && !editing ? (
+            <p className="distribution-rule-note">{item.note}</p>
           ) : null}
-          <Button
-            quiet
-            size="compact"
-            onClick={() => setEditing((value) => !value)}
-          >
-            {editing
-              ? "收起备注"
-              : platform.login === "not_required"
-                ? "会话与规则备注"
-                : "账号与规则备注"}
-          </Button>
         </div>
+        <Button
+          quiet
+          size="compact"
+          onClick={() => setEditing((value) => !value)}
+        >
+          {editing
+            ? "收起编辑"
+            : item.alias || item.note
+              ? "编辑备注"
+              : "添加备注"}
+        </Button>
       </div>
-      {item.note && !editing ? (
-        <p className="distribution-rule-note">{item.note}</p>
-      ) : null}
       {editing ? (
         <form
           className="distribution-settings"
@@ -186,12 +86,7 @@ export function PlatformRules({
               });
           }}
         >
-          <Field
-            label={
-              platform.login === "not_required" ? "会话备注" : "常用账号备注"
-            }
-            hint="只记昵称或用途，请勿填写密码和 Cookie"
-          >
+          <Field label="备注名称" hint="可填写常用账号昵称或平台用途">
             <input
               value={draft.value.alias}
               maxLength={100}
@@ -199,12 +94,12 @@ export function PlatformRules({
               placeholder="例如：资源分享主账号"
             />
           </Field>
-          <Field label="补充规则与注意事项">
+          <Field label="补充说明">
             <textarea
               value={draft.value.note}
               maxLength={2000}
               onChange={(event) => draft.update({ note: event.target.value })}
-              placeholder="记录登录后看到的规则、类别要求或处理经验…"
+              placeholder="记录投稿注意事项，请勿填写密码…"
             />
           </Field>
           {draft.error ? <Notice warning>{draft.error}</Notice> : null}

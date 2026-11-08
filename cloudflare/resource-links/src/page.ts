@@ -62,7 +62,7 @@ const openIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 export function pageHeaders(nonce: string): Record<string, string> {
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; connect-src 'none'`,
+    "Content-Security-Policy": `default-src 'none'; img-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; connect-src 'self'`,
   };
 }
 

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const discoverySources = ["suggest", "related"] as const;
+export const discoveryDefaultMonthlySearches = 10;
+export const discoveryKnowledgeSource = "百度批量扩词";
 export type DiscoverySource = (typeof discoverySources)[number];
 export const discoverySourceLabels: Record<DiscoverySource, string> = {
   suggest: "下拉联想词",
@@ -82,6 +84,7 @@ export const discoveryRunSchema = z.object({
   message: z.string(),
   currentWord: z.string(),
   limited: z.boolean(),
+  knowledgeWarning: z.string().optional(),
 });
 export type DiscoveryRun = z.infer<typeof discoveryRunSchema>;
 export type DiscoverySummary = Omit<
@@ -103,6 +106,23 @@ export interface BaiduDiscoveryPort {
   close(): void;
 }
 type Contract<A, V> = { args: A; value: V };
+export interface DiscoveryQuestionImport {
+  runId: string | null;
+  running: boolean;
+  total: number;
+  ready: number;
+  pending: number;
+  failed: number;
+  uncertain: number;
+  message: string;
+  issues: {
+    question: string;
+    message: string;
+    operationId: string;
+    uncertain: boolean;
+    hasReturnedShare: boolean;
+  }[];
+}
 export interface BaiduDiscoveryContract {
   "baiduDiscovery.list": Contract<undefined, DiscoverySummary[]>;
   "baiduDiscovery.get": Contract<{ id: string }, DiscoveryRun>;
@@ -120,9 +140,14 @@ export interface BaiduDiscoveryContract {
     DiscoveryRun
   >;
   "baiduDiscovery.insertZhidao": Contract<
-    { id: string; keys?: string[]; links: string; materials: string[] },
+    { id: string; keys?: string[]; copyIds: string[]; materials: string[] },
     import("./zhidao-publishing").QuestionDraftInsertResult
   >;
+  "baiduDiscovery.questionImport": Contract<
+    { id: string },
+    DiscoveryQuestionImport
+  >;
+  "baiduDiscovery.pauseQuestionImport": Contract<{ id: string }, void>;
   "baiduDiscovery.generateMaterials": Contract<
     {
       id: string;

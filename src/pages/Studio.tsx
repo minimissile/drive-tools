@@ -1,3 +1,4 @@
+import { AiIcon } from "../ui/AiIcon";
 import { windowStorage } from "../storage/window-storage";
 import { Select } from "../ui/Select";
 import { SearchSelect } from "../ui/SearchSelect";
@@ -10,7 +11,7 @@ import {
   type ContentFormat,
 } from "../../shared/channels";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Pencil, Sparkles } from "lucide-react";
+import { ArrowRight, Pencil } from "lucide-react";
 import {
   useAppActions,
   useAppActivity,
@@ -29,10 +30,12 @@ import {
 } from "../ui/primitives";
 import { ResourcePicker, ResourceRequired } from "../resources/components";
 import { formatTime } from "../lib/format";
+import { poolSummary } from "../traffic/pools";
 import { platformSpecs } from "../../shared/platforms";
 import type { Draft, Platform } from "../../shared/types";
 import CreativeSetup, { type CreativeConfig } from "../studio/CreativeSetup";
 import DraftEditor from "../studio/DraftEditor";
+import LocalVideoPanel from "../video/LocalVideoPanel";
 import "../studio/studio.css";
 
 interface StudioContext {
@@ -89,7 +92,7 @@ export default function Studio({
         description={
           initialPlatform === "csdn"
             ? "选择本人资料，补充教程依据，编辑并审阅技术文章。"
-            : "选择模板，组织文案与画面，生成图片、图文组图和真实AI动态视频。"
+            : "选择模板制作文案、图片与图文，也可用真实素材在本机合成视频。"
         }
       />
       <ResourceRequired>
@@ -139,6 +142,7 @@ function StudioResource({
   const shown = visiblePlatforms;
   return (
     <div className="studio-workspace">
+      {!initialPlatform ? <LocalVideoPanel copyId={copyId} /> : null}
       <div className="studio-channel-bar">
         <span>创作渠道</span>
         {initialPlatform ? (
@@ -414,7 +418,7 @@ function StudioPlatform({
                   value: p.id,
                   label: (
                     <>
-                      {p.name} · {p.keywords.length}词
+                      {p.name} · {poolSummary(p).keywordCount}词
                     </>
                   ),
                 })),
@@ -425,7 +429,7 @@ function StudioPlatform({
             disabled={busy > 0 || !data!.settings.openrouterConfigured}
             onClick={() => void create("ai")}
           >
-            <Sparkles size={15} />
+            <AiIcon size={15} />
             生成AI草稿
           </Button>
           <Button disabled={busy > 0} onClick={() => void create("blank")}>

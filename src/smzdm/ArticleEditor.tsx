@@ -1,12 +1,7 @@
+import { AiIcon } from "../ui/AiIcon";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import {
-  ExternalLink,
-  FileCheck,
-  RefreshCw,
-  Send,
-  WandSparkles,
-} from "lucide-react";
+import { ExternalLink, FileCheck, RefreshCw, Send } from "lucide-react";
 import type { SmzdmDetail } from "../../shared/smzdm";
 import { articleHtml } from "../../shared/article-markup";
 import { ipc } from "../api/client";
@@ -230,7 +225,7 @@ export function ArticleEditor({
               void run("排版", () => mutate("smzdm.format"), "排版已整理。")
             }
           >
-            <WandSparkles size={14} />
+            <AiIcon size={14} />
             整理排版
           </Button>
           <Button

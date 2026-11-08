@@ -48,6 +48,8 @@ export interface ZhidaoContract {
     OperationDetail
   >;
   "zhidao.answer.logs": Contract<{ id: string; page?: number }, AnswerLogPage>;
+  "zhidao.answer.startMany": Contract<import("./zhidao").AutoAnswersStart, OperationRun[]>;
+  "zhidao.answer.sessions": Contract<undefined, OperationRun[]>;
   "zhidao.start": Contract<RunStartInput, OperationRun>;
   "zhidao.pause": Contract<{ id: string }, OperationRun>;
   "zhidao.resume": Contract<{ id: string; authorized: true }, OperationRun>;

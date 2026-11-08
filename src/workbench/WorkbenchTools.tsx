@@ -3,11 +3,14 @@ import type { Page } from "../state";
 import { Button } from "../ui/primitives";
 import {
   contentOperations,
+  bilibiliOperations,
   csdnOperations,
   resourceOperations,
   smzdmOperations,
+  wechatOperations,
   weiboOperations,
   zhihuOperations,
+  tiebaOperations,
   type WorkbenchEntry,
 } from "../navigation";
 import { discoveryEntries } from "../resources/navigation";
@@ -43,7 +46,25 @@ const groups: readonly ToolGroup[] = [
     layout: "compact",
     shortcut: { label: "管理微博账号", page: "website-accounts" },
   },
+  {
+    title: "哔哩哔哩内容操作",
+    entries: bilibiliOperations,
+    layout: "compact",
+    shortcut: { label: "管理哔哩哔哩账号", page: "bilibili-accounts" },
+  },
+  {
+    title: "微信公众号",
+    entries: wechatOperations,
+    layout: "compact",
+    shortcut: { label: "管理公众号账号", page: "wechat-accounts" },
+  },
   { title: "知乎内容操作", entries: zhihuOperations, layout: "compact" },
+  {
+    title: "百度贴吧",
+    entries: tiebaOperations,
+    layout: "compact",
+    shortcut: { label: "管理贴吧账号", page: "website-accounts" },
+  },
   {
     title: "什么值得买",
     entries: smzdmOperations,

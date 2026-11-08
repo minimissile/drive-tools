@@ -1,0 +1,435 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "logicalCpus": 8,
+    "ramGiB": 16,
+    "node": "v24.3.0"
+  },
+  "scope": "Current source, real temporary SQLite WAL files, real ingest triggers, 20k compressed query archives per scenario; no shared app data. First read after reopen has a cold SQLite connection and uncached overview, not a flushed OS page cache. Timings include DTO JSON serialization, exclude Electron IPC/DOM rendering and file-save dialogs.",
+  "scenarios": [
+    {
+      "name": "500k-history-50k-entries",
+      "entries": 50000,
+      "observations": 500000,
+      "queries": 20000,
+      "fileMiB": 283,
+      "seedMs": 87405,
+      "timings": [
+        {
+          "name": "first_50_reopened_connection_uncached_overview",
+          "samplesMs": [
+            269.3
+          ],
+          "maxMs": 269.3,
+          "rows": 50,
+          "total": 50000,
+          "wireBytes": 21189,
+          "under5s": true
+        },
+        {
+          "name": "page_2_cached_overview",
+          "samplesMs": [
+            17.9,
+            18.7,
+            18.6
+          ],
+          "maxMs": 18.7,
+          "rows": 50,
+          "total": 50000,
+          "wireBytes": 21232,
+          "under5s": true
+        },
+        {
+          "name": "chinese_search_common",
+          "samplesMs": [
+            12.7,
+            11.5
+          ],
+          "maxMs": 12.7,
+          "rows": 50,
+          "total": 6250,
+          "wireBytes": 21247,
+          "under5s": true
+        },
+        {
+          "name": "search_no_matches",
+          "samplesMs": [
+            25.5,
+            28.8
+          ],
+          "maxMs": 28.8,
+          "rows": 0,
+          "total": 0,
+          "wireBytes": 568,
+          "under5s": true
+        },
+        {
+          "name": "source_baidu_discovery",
+          "samplesMs": [
+            196.9,
+            183.6
+          ],
+          "maxMs": 196.9,
+          "rows": 50,
+          "total": 25000,
+          "wireBytes": 21552,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool",
+          "samplesMs": [
+            466.9,
+            448.5
+          ],
+          "maxMs": 466.9,
+          "rows": 50,
+          "total": 35000,
+          "wireBytes": 21289,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool_chinese_search",
+          "samplesMs": [
+            97.1,
+            95.1
+          ],
+          "maxMs": 97.1,
+          "rows": 50,
+          "total": 4375,
+          "wireBytes": 21267,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool_monthly_sort",
+          "samplesMs": [
+            453.8,
+            428.2
+          ],
+          "maxMs": 453.8,
+          "rows": 50,
+          "total": 35000,
+          "wireBytes": 21577,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool_measured_volume",
+          "samplesMs": [
+            427.4
+          ],
+          "maxMs": 427.4,
+          "rows": 0,
+          "total": 0,
+          "wireBytes": 568,
+          "under5s": true
+        },
+        {
+          "name": "monthly_sort",
+          "samplesMs": [
+            14.8,
+            15.3
+          ],
+          "maxMs": 15.3,
+          "rows": 50,
+          "total": 50000,
+          "wireBytes": 21141,
+          "under5s": true
+        },
+        {
+          "name": "last_page",
+          "samplesMs": [
+            37.2,
+            37
+          ],
+          "maxMs": 37.2,
+          "rows": 50,
+          "total": 50000,
+          "wireBytes": 20963,
+          "under5s": true
+        },
+        {
+          "name": "last_page_longtail",
+          "samplesMs": [
+            929.1
+          ],
+          "maxMs": 929.1,
+          "rows": 50,
+          "total": 35000,
+          "wireBytes": 21062,
+          "under5s": true
+        },
+        {
+          "name": "query_archives_page_1",
+          "samplesMs": [
+            17
+          ],
+          "maxMs": 17,
+          "rows": 20,
+          "total": 20000,
+          "wireBytes": 6831,
+          "under5s": true
+        },
+        {
+          "name": "longtail_query_archives_search",
+          "samplesMs": [
+            234.4
+          ],
+          "maxMs": 234.4,
+          "rows": 20,
+          "total": 10000,
+          "wireBytes": 6841,
+          "under5s": true
+        },
+        {
+          "name": "one_term_history",
+          "samplesMs": [
+            0.7
+          ],
+          "maxMs": 0.7,
+          "rows": 10,
+          "total": 10,
+          "wireBytes": 4267,
+          "under5s": true
+        },
+        {
+          "name": "first_50_after_unrelated_write",
+          "samplesMs": [
+            268.6
+          ],
+          "maxMs": 268.6,
+          "rows": 50,
+          "total": 50000,
+          "wireBytes": 21189,
+          "under5s": true
+        },
+        {
+          "name": "longtail_monthly_sort_after_unrelated_write",
+          "samplesMs": [
+            773.2
+          ],
+          "maxMs": 773.2,
+          "rows": 50,
+          "total": 35000,
+          "wireBytes": 21577,
+          "under5s": true
+        }
+      ]
+    },
+    {
+      "name": "500k-distinct-entries",
+      "entries": 500000,
+      "observations": 500000,
+      "queries": 20000,
+      "fileMiB": 780,
+      "seedMs": 73583,
+      "timings": [
+        {
+          "name": "first_50_reopened_connection_uncached_overview",
+          "samplesMs": [
+            2237.4
+          ],
+          "maxMs": 2237.4,
+          "rows": 50,
+          "total": 500000,
+          "wireBytes": 21206,
+          "under5s": true
+        },
+        {
+          "name": "page_2_cached_overview",
+          "samplesMs": [
+            202,
+            177.2,
+            169.4
+          ],
+          "maxMs": 202,
+          "rows": 50,
+          "total": 500000,
+          "wireBytes": 21250,
+          "under5s": true
+        },
+        {
+          "name": "chinese_search_common",
+          "samplesMs": [
+            104.4,
+            94.2
+          ],
+          "maxMs": 104.4,
+          "rows": 50,
+          "total": 62500,
+          "wireBytes": 21265,
+          "under5s": true
+        },
+        {
+          "name": "search_no_matches",
+          "samplesMs": [
+            227.9,
+            223.4
+          ],
+          "maxMs": 227.9,
+          "rows": 0,
+          "total": 0,
+          "wireBytes": 570,
+          "under5s": true
+        },
+        {
+          "name": "source_baidu_discovery",
+          "samplesMs": [
+            941,
+            952.6
+          ],
+          "maxMs": 952.6,
+          "rows": 50,
+          "total": 250000,
+          "wireBytes": 21555,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool",
+          "samplesMs": [
+            5220.1,
+            4336.1
+          ],
+          "maxMs": 5220.1,
+          "rows": 50,
+          "total": 350000,
+          "wireBytes": 21307,
+          "under5s": false
+        },
+        {
+          "name": "longtail_pool_chinese_search",
+          "samplesMs": [
+            499.5,
+            560
+          ],
+          "maxMs": 560,
+          "rows": 50,
+          "total": 43750,
+          "wireBytes": 21285,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool_monthly_sort",
+          "samplesMs": [
+            2984,
+            3091.9
+          ],
+          "maxMs": 3091.9,
+          "rows": 50,
+          "total": 350000,
+          "wireBytes": 21200,
+          "under5s": true
+        },
+        {
+          "name": "longtail_pool_measured_volume",
+          "samplesMs": [
+            2609.3
+          ],
+          "maxMs": 2609.3,
+          "rows": 0,
+          "total": 0,
+          "wireBytes": 570,
+          "under5s": true
+        },
+        {
+          "name": "monthly_sort",
+          "samplesMs": [
+            239.2,
+            185.4
+          ],
+          "maxMs": 239.2,
+          "rows": 50,
+          "total": 500000,
+          "wireBytes": 20950,
+          "under5s": true
+        },
+        {
+          "name": "last_page",
+          "samplesMs": [
+            622.9,
+            465.3
+          ],
+          "maxMs": 622.9,
+          "rows": 50,
+          "total": 500000,
+          "wireBytes": 20457,
+          "under5s": true
+        },
+        {
+          "name": "last_page_longtail",
+          "samplesMs": [
+            6232.7
+          ],
+          "maxMs": 6232.7,
+          "rows": 50,
+          "total": 350000,
+          "wireBytes": 20559,
+          "under5s": false
+        },
+        {
+          "name": "query_archives_page_1",
+          "samplesMs": [
+            203.1
+          ],
+          "maxMs": 203.1,
+          "rows": 20,
+          "total": 20000,
+          "wireBytes": 6833,
+          "under5s": true
+        },
+        {
+          "name": "longtail_query_archives_search",
+          "samplesMs": [
+            382
+          ],
+          "maxMs": 382,
+          "rows": 20,
+          "total": 10000,
+          "wireBytes": 6843,
+          "under5s": true
+        },
+        {
+          "name": "one_term_history",
+          "samplesMs": [
+            0.3
+          ],
+          "maxMs": 0.3,
+          "rows": 1,
+          "total": 1,
+          "wireBytes": 626,
+          "under5s": true
+        },
+        {
+          "name": "first_50_after_unrelated_write",
+          "samplesMs": [
+            2129.7
+          ],
+          "maxMs": 2129.7,
+          "rows": 50,
+          "total": 500000,
+          "wireBytes": 21206,
+          "under5s": true
+        },
+        {
+          "name": "longtail_monthly_sort_after_unrelated_write",
+          "samplesMs": [
+            5075
+          ],
+          "maxMs": 5075,
+          "rows": 50,
+          "total": 350000,
+          "wireBytes": 21200,
+          "under5s": false
+        }
+      ],
+      "fullExport": {
+        "name": "full_500k_observations_csv_in_memory",
+        "elapsedMs": 4332,
+        "bytes": 122130077,
+        "under5s": true,
+        "includesFileSave": false,
+        "processRssMiB": 1532
+      }
+    }
+  ]
+}

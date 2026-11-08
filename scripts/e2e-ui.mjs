@@ -100,21 +100,23 @@ try {
   checks.push(
     "统一弹窗：初始焦点、Tab/Shift+Tab 边界、Esc、关闭后焦点恢复、长标题",
   );
-  await nav("流量发现").click();
-  const words = page.getByRole("tab", { name: "找词与词池", exact: true });
-  await words.focus();
+  await nav("流量词库").click();
+  const library = page.getByRole("tab", { name: "关键词库", exact: true });
+  await library.focus();
   await page.keyboard.press("ArrowRight");
-  await page.getByRole("tab", { name: "找热点", selected: true }).waitFor();
+  await page.getByRole("tab", { name: "我的词池", selected: true }).waitFor();
   await page.keyboard.press("End");
-  await page.getByRole("tab", { name: "本地知识库", selected: true }).waitFor();
+  await page.getByRole("tab", { name: "找热点", selected: true }).waitFor();
   await page.keyboard.press("Home");
-  await page.getByRole("tab", { name: "找词与词池", selected: true }).waitFor();
+  await page.getByRole("tab", { name: "关键词库", selected: true }).waitFor();
   assert.equal(
     await page
       .getByRole("tab")
       .evaluateAll((els) => els.filter((e) => e.tabIndex === 0).length),
     1,
   );
+  await page.getByRole("tab", { name: "我的词池", exact: true }).click();
+  await page.locator(".knowledge-manual-pool > summary").click();
   await page.getByRole("textbox", { name: "手工词池名称" }).fill("UI回归词池");
   await page
     .getByRole("textbox", { name: "手工词池关键词" })

@@ -9,6 +9,14 @@ import type { ZhihuOperations } from "../zhihu/service";
 import type { ZhihuContent } from "../../shared/zhihu";
 import { zhihuWarmingHasPromotion } from "../../shared/zhihu";
 import {
+  autocareParticipationScope,
+  autocareRandomLikeScope,
+  autocareRandomCommentScope,
+  autocareRandomFollowScope,
+} from "../../shared/zhihu-autocare";
+import { readAutocareState } from "../zhihu-autocare/state";
+import { withinAutocareRun } from "../zhihu-autocare/run-window";
+import {
   zhihuParticipationDiscoverInput,
   zhihuParticipationInspectInput,
   zhihuParticipationPlanInput,
@@ -27,6 +35,7 @@ import {
   zhihuParticipationStateSchema,
 } from "./state";
 import {
+  assertParticipationInteractionAvailable,
   executeParticipationInteraction,
   queueParticipationInteraction,
   continueParticipationInteraction,
@@ -34,6 +43,7 @@ import {
   recoverParticipationInteractions,
   type ParticipationInteractionHost,
   type ZhihuInteractionExecutionContext,
+  type ZhihuInteractionRuleAuthorization,
 } from "./interaction";
 export type { ZhihuInteractionExecutionContext } from "./interaction";
 
@@ -93,6 +103,19 @@ export class ZhihuParticipation {
       this.interactionHost(),
       raw,
       context,
+    );
+  }
+  assertInteractionAvailable(
+    accountId: string,
+    limits: Pick<ZhihuInteractionExecutionContext, "dailyLimit" | "gapMinutes">,
+    authorization?: ZhihuInteractionRuleAuthorization,
+  ) {
+    this.guard();
+    assertParticipationInteractionAvailable(
+      this.interactionHost(),
+      accountId,
+      limits,
+      authorization,
     );
   }
   queueInteraction(raw: unknown, context: ZhihuInteractionExecutionContext) {
@@ -456,9 +479,17 @@ export class ZhihuParticipation {
     }
   }
   plan(raw: unknown, canContinue?: Guard) {
+    return this.planActivity(raw, canContinue, false);
+  }
+  /** Server-only rule entry. The renderer's plan IPC cannot adopt legacy tasks. */
+  planAutocareRule(raw: unknown, canContinue: () => void) {
+    if (typeof canContinue !== "function") fail("规则任务缺少当前授权门禁");
+    return this.planActivity(raw, canContinue, true);
+  }
+  private planActivity(raw: unknown, canContinue: Guard, ruleOwned: boolean) {
     const input = zhihuParticipationPlanInput.parse(raw);
     this.guard(canContinue);
-    this.account(input.accountId);
+    const actor = this.account(input.accountId);
     const state = readParticipationState(this.d.db),
       candidate = this.candidate(
         state,
@@ -466,6 +497,36 @@ export class ZhihuParticipation {
         input.candidateId,
         input.version,
       );
+    const autocare = ruleOwned ? readAutocareState(this.d.db) : null;
+    if (autocare) {
+      const scope =
+        input.kind === "like"
+          ? autocareRandomLikeScope
+          : input.kind === "comment"
+            ? autocareRandomCommentScope
+            : input.kind === "follow"
+              ? autocareRandomFollowScope
+              : null;
+      const allowed =
+        input.kind === "like"
+          ? autocare.config.randomLikes || autocare.config.likeCandidates
+          : input.kind === "comment"
+            ? autocare.config.randomComments
+            : input.kind === "follow" && autocare.config.followCandidates;
+      if (
+        !scope ||
+        input.planId !== scope ||
+        !allowed ||
+        !autocare.enabled ||
+        !autocare.config.accountIds.includes(input.accountId) ||
+        autocare.identities[input.accountId] !== actor.uid ||
+        !withinAutocareRun(autocare) ||
+        !candidate.document ||
+        candidate.document.truncated ||
+        candidate.document.text.length < 8
+      )
+        fail("当前账号、准确规则范围、批次或完整上下文不满足自动互动授权");
+    }
     if (input.kind !== "read" && !candidate.document)
       fail("先保存完整上下文，再安排回答、评论、点赞或关注候选");
     if (input.kind === "answer" && candidate.kind !== "question")
@@ -487,6 +548,7 @@ export class ZhihuParticipation {
         (input.kind === "answer" ||
           input.kind === "follow" ||
           input.kind === "like" ||
+          (ruleOwned && item.planId === autocareParticipationScope) ||
           (item.planId === input.planId &&
             item.scheduledAt === input.scheduledAt &&
             item.status !== "skipped")),
@@ -494,6 +556,63 @@ export class ZhihuParticipation {
     if (existing) {
       if (existing.attempts?.length)
         fail("原任务已有真实互动尝试，请核对原记录，不能改写上下文或建立重试");
+      if (existing.planId !== input.planId && autocare) {
+        if (
+          existing.planId !== autocareParticipationScope ||
+          existing.resolution ||
+          existing.automation ||
+          existing.contentId ||
+          !["planned", "needs_review", "prepared"].includes(existing.status)
+        )
+          fail("只能接管原普通待办中从未执行、未处理、未排期的准确目标");
+        const priorRead = autocare.research
+          .filter(
+            (read) =>
+              read.accountId === input.accountId &&
+              read.candidateId === candidate.id &&
+              read.status === "saved" &&
+              Date.parse(read.at) <= Date.parse(existing.createdAt),
+          )
+          .sort((a, b) => b.at.localeCompare(a.at))[0];
+        if (priorRead?.uid && priorRead.uid !== actor.uid)
+          fail("旧待办保存的读取身份与当前账号不同，原记录保留，未接管");
+        const previous = {
+          planId: existing.planId,
+          version: existing.version,
+          candidateVersion: existing.candidateVersion,
+          contextObservedAt: existing.context?.observedAt ?? null,
+        };
+        existing.planId = input.planId;
+        existing.candidateVersion = candidate.version;
+        existing.context = structuredClone(candidate.document!);
+        existing.reason = input.reason;
+        existing.draft = input.draft;
+        existing.scheduledAt = input.scheduledAt
+          ? new Date(input.scheduledAt).toISOString()
+          : null;
+        existing.status = "needs_review";
+        existing.version++;
+        this.guard(canContinue);
+        this.persist(state);
+        this.event(
+          "interaction.rule_adopted",
+          "原未执行待办已按当前绑定身份的新规则授权接管，完整正文将重新核对；尚未提交",
+          input.accountId,
+          {
+            activityId: existing.id,
+            previousPlanId: previous.planId,
+            planId: existing.planId,
+            previousVersion: previous.version,
+            previousCandidateVersion: previous.candidateVersion,
+            previousContextObservedAt: previous.contextObservedAt,
+            previousActorUid: priorRead?.uid || null,
+            actorUid: actor.uid,
+            authorization: "current_binding_new_rule",
+          },
+        );
+        this.d.changed();
+        return existing;
+      }
       if (existing.planId !== input.planId)
         fail("此账号的候选已有其他计划任务，请使用原计划，不能跨计划认领");
       if (

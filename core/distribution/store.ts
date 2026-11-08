@@ -85,7 +85,7 @@ export class DistributionStore {
         at,
       );
       this.db.run(
-        "UPDATE distribution_tasks SET status='ready',batch_id=NULL,updated_at=? WHERE status IN ('verifying','waiting_verification')",
+        "UPDATE distribution_tasks SET status='ready',batch_id=NULL,updated_at=? WHERE status IN ('preparing','verifying','waiting_verification')",
         at,
       );
       this.db.run(
@@ -176,6 +176,7 @@ export class DistributionStore {
           (counts.waiting_rules ?? 0),
         skipped: (counts.skipped ?? 0) + (counts.superseded ?? 0),
         active:
+          (counts.preparing ?? 0) +
           (counts.verifying ?? 0) +
           (counts.submitting ?? 0) +
           (counts.waiting_verification ?? 0),
@@ -283,7 +284,15 @@ export class DistributionStore {
     if (binding) {
       const task = this.get(binding.task_id);
       if (task.shareUrl !== share.url) {
-        if (["uncertain", "submitting", "verifying"].includes(task.status))
+        if (
+          [
+            "uncertain",
+            "submitting",
+            "preparing",
+            "verifying",
+            "waiting_verification",
+          ].includes(task.status)
+        )
           return;
         // Preserve the historical association while moving the current source to its new URL.
         this.db.run(
@@ -507,7 +516,11 @@ export class DistributionStore {
           batchId,
           task.id,
         );
-        this.event(task.id, "verifying", "正在核验本人分享，尚未向平台提交。");
+        this.event(
+          task.id,
+          "preparing",
+          "正在准备已入库链接，尚未向平台提交。",
+        );
       }
     });
     return batchId;

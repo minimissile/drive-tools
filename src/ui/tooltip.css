@@ -1,0 +1,25 @@
+.tooltip-positioner {
+  z-index: 50;
+}
+.tooltip-popup {
+  max-width: min(340px, calc(100vw - 32px));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 5px 20px #182a421f;
+  font-size: 13px;
+  line-height: 1.7;
+  transform-origin: var(--transform-origin);
+  transition: opacity var(--control-focus-duration) var(--control-focus-ease);
+}
+.tooltip-popup[data-starting-style],
+.tooltip-popup[data-ending-style] {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tooltip-popup {
+    transition: none;
+  }
+}

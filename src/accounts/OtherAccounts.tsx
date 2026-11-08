@@ -5,9 +5,8 @@ import { useAppActions, useAppData, useAppNavigation } from "../state";
 import { prepareAutoAnswer } from "../zhidao/answer-draft";
 import { ZhidaoRightsDialog } from "./ZhidaoRightsDialog";
 import { WeiboPublishingDialog } from "./WeiboPublishingDialog";
-import { WeiboComposer } from "./WeiboComposer";
+import { prepareWeiboWorkspace } from "../weibo/navigation";
 import { PublishingAccounts } from "./PublishingAccounts";
-import { WeiboAccountStatistics } from "../weibo/Statistics";
 import { Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { PlatformIcon } from "../platforms/PlatformIcon";
 import { Tabs, TabList, TabPanel } from "../ui/Tabs";
@@ -69,14 +68,10 @@ export default function OtherAccounts({
   const [rightsAccount, setRightsAccount] = useState<OtherAccount | null>(null);
   const [publishingAccount, setPublishingAccount] =
     useState<OtherAccount | null>(null);
-  const [composerAccount, setComposerAccount] = useState<OtherAccount | null>(
-    null,
-  );
-  const [statisticsAccountId, setStatisticsAccountId] = useState("");
   const [provider, setProvider] = useState<OtherProvider>(initialProvider);
   const singleSmzdm = provider === "smzdm";
   const documentProvider = isDocumentProvider(provider);
-  const nativeOnly = singleSmzdm || documentProvider;
+  const nativeOnly = singleSmzdm || provider === "wechat" || documentProvider;
   const hasSmzdm = accounts.data.some(
     (account) => account.provider === "smzdm",
   );
@@ -178,6 +173,9 @@ export default function OtherAccounts({
           );
         }
         break;
+      case "wechat-workflow":
+        navigate("wechat-workflow");
+        break;
       case "smzdm-workflow":
         navigate("smzdm-workflow");
         break;
@@ -188,14 +186,15 @@ export default function OtherAccounts({
         navigate("zhihu-operations");
         break;
       case "weibo-statistics":
-        setStatisticsAccountId((current) =>
-          current === account.id ? "" : account.id,
-        );
+        prepareWeiboWorkspace(data!.dataPath,{accountId:account.id,tab:"statistics"});
+        navigate("weibo-marketing");
         break;
       case "weibo-compose":
-        setComposerAccount(account);
+        prepareWeiboWorkspace(data!.dataPath,{accountId:account.id,create:true});
+        navigate("weibo-marketing");
         break;
       case "weibo-marketing":
+        prepareWeiboWorkspace(data!.dataPath,{accountId:account.id});
         navigate("weibo-marketing");
         break;
       case "weibo-publishing":
@@ -436,14 +435,9 @@ export default function OtherAccounts({
                   failure={
                     failure?.id === account.key ? failure.text : undefined
                   }
-                  statisticsOpen={statisticsAccountId === account.id}
                   onAction={(action) => handleAction(account, action)}
-                >
-                  {account.provider === "weibo" &&
-                  statisticsAccountId === account.id ? (
-                    <WeiboAccountStatistics accountId={account.id} />
-                  ) : null}
-                </OtherAccountRow>
+                  statisticsOpen={false}
+                />
               ))}
             </div>
           ) : accounts.ready && !accounts.error ? (
@@ -554,12 +548,6 @@ export default function OtherAccounts({
             </Button>
           </div>
         </Dialog>
-      ) : null}
-      {composerAccount ? (
-        <WeiboComposer
-          account={composerAccount}
-          onClose={() => setComposerAccount(null)}
-        />
       ) : null}
       {publishingAccount ? (
         <WeiboPublishingDialog

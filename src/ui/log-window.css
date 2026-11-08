@@ -93,3 +93,22 @@
   padding: var(--space-2);
   font-size: 11px;
 }
+
+.log-window-simple .log-window-columns,
+.log-window-simple .log-window-line {
+  grid-template-columns: 112px 40px minmax(0, 1fr);
+}
+.log-window-simple .log-window-viewport {
+  height: 240px;
+}
+.log-window-simple .log-window-content {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.log-window-simple .log-window-context {
+  flex-shrink: 0;
+}
+.log-window-simple .log-window-content p {
+  margin: 0;
+}

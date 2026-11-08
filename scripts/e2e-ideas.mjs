@@ -175,7 +175,8 @@ try {
     page
       .getByRole("navigation", { name: "主导航" })
       .getByRole("button", { name, exact: true });
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "5118找词", exact: true }).click();
   await page.getByLabel("当前资源", { exact: true }).fill("Obsidian 入门资料");
   await page
     .getByRole("option", { name: "Obsidian 入门资料", exact: true })

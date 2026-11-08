@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import { Database, id, now, parseJson } from "./database";
-import { AppError } from "./errors";
-import { csv } from "./csv";
 import { cleanKnowledge } from "./knowledge-response";
+import {
+  packTrafficArchive,
+  unpackTrafficArchive,
+  normalizeTrafficWord as normalize,
+} from "./traffic-knowledge-store";
 export { cleanKnowledge } from "./knowledge-response";
 import {
   baiduKeywordResultSchema,
@@ -10,12 +13,14 @@ import {
 } from "../shared/baidu-keywords";
 import type { Endpoint } from "../shared/types";
 import {
-  knowledgeFilter,
-  type KnowledgeFilter,
-  type KnowledgeItem,
-  type KnowledgeQuery,
-  type KnowledgePage,
-} from "../shared/traffic-knowledge";
+  discoveryDefaultMonthlySearches,
+  discoveryKnowledgeSource,
+  discoverySourceLabels,
+  discoveryWordKey,
+  type DiscoveryRun,
+  type DiscoverySource,
+} from "../shared/baidu-discovery";
+import { TrafficKnowledgeReader } from "./traffic-knowledge-read";
 
 const sources = {
   longtail: "5118 长尾词 v2",
@@ -25,24 +30,11 @@ const sources = {
 };
 const scalarText = (v: unknown) =>
   typeof v === "string" || typeof v === "number" ? String(v) : null;
-const normalize = (s: string) => s.normalize("NFKC").trim().toLowerCase();
-const decode = (row: any): KnowledgeQuery => ({
-  id: row.id,
-  endpoint: row.endpoint,
-  phase: row.phase,
-  request: parseJson(row.request, {}),
-  seeds: parseJson(row.seeds, []),
-  platform: row.platform,
-  status: row.status,
-  startedAt: row.started_at,
-  receivedAt: row.received_at,
-  httpStatus: row.http_status,
-  message: row.message,
-  legacy: Boolean(row.legacy),
-  count: Number(row.count ?? 0),
-});
 export class TrafficKnowledge {
-  constructor(private db: Database) {}
+  private readonly reader: TrafficKnowledgeReader;
+  constructor(private db: Database) {
+    this.reader = new TrafficKnowledgeReader(db);
+  }
   ingestBaidu(raw: unknown) {
     const result = baiduKeywordResultSchema.parse(raw);
     const origin = `baidu-keywords:${result.id}`;
@@ -54,7 +46,7 @@ export class TrafficKnowledge {
       const archived = parseJson<{
         indexed: number;
         refreshedBelowThreshold?: number;
-      }>(prior.response, { indexed: 0 });
+      }>(unpackTrafficArchive(prior.response), { indexed: 0 });
       return {
         indexed: archived.indexed,
         refreshedBelowThreshold: archived.refreshedBelowThreshold ?? 0,
@@ -64,8 +56,8 @@ export class TrafficKnowledge {
     const existing = new Set(
       this.db
         .all<{ normalized_word: string }>(
-          "SELECT DISTINCT normalized_word FROM traffic_items WHERE kind='word' AND source=?",
-          baiduKeywordSource,
+          "SELECT normalized_word FROM traffic_entries WHERE kind='word' AND source_key=?",
+          "baidu-keywords",
         )
         .map((row) => row.normalized_word),
     );
@@ -83,9 +75,10 @@ export class TrafficKnowledge {
           : typeof value === "string" && value.trim()
             ? Number(value.replace(/,/g, ""))
             : NaN;
-      const boundedLow=typeof value==="string"&&/^<\s*[1-9]$/.test(value.trim());
-      if (!Number.isFinite(monthly)&&!boundedLow) return false;
-      if (monthly > 10) {
+      const boundedLow =
+        typeof value === "string" && /^<\s*(?:[1-9]|10)$/.test(value.trim());
+      if (!Number.isFinite(monthly) && !boundedLow) return false;
+      if (monthly >= 10) {
         indexed++;
         return true;
       }
@@ -115,18 +108,20 @@ export class TrafficKnowledge {
         result.fetchedAt,
         result.fetchedAt,
         200,
-        JSON.stringify({
-          keywords,
-          fetchedAt: result.fetchedAt,
-          received: result.keywords.length,
-          ...summary,
-          rule: "新词 averageMonthPv > 10；已有词更新有效指标",
-        }),
-        `月均搜索量大于10：收录或更新${indexed}词，另更新${refreshedBelowThreshold}个已收录的低搜索量词；同来源同词展示最新指标，历史采集保留。`,
+        packTrafficArchive(
+          JSON.stringify({
+            keywords,
+            fetchedAt: result.fetchedAt,
+            received: result.keywords.length,
+            ...summary,
+            rule: "新词 averageMonthPv >= 10；已有词更新有效指标",
+          }),
+        ),
+        `月均搜索量至少10：收录或更新${indexed}词，另更新${refreshedBelowThreshold}个已收录的低搜索量词；同来源同词展示最新指标，历史采集保留。`,
       );
       for (const keyword of keywords) {
         this.db.run(
-          "INSERT INTO traffic_items(id,query_id,kind,word,normalized_word,platform,source,metrics,data,observed_at,source_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO traffic_items(id,query_id,kind,word,normalized_word,platform,source,source_key,metrics,observed_at,source_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           id("observation"),
           queryId,
           "word",
@@ -134,14 +129,94 @@ export class TrafficKnowledge {
           normalize(keyword.word),
           "baidu",
           baiduKeywordSource,
+          "baidu-keywords",
           JSON.stringify(cleanKnowledge(keyword.metrics)),
-          JSON.stringify(cleanKnowledge(keyword)),
           result.fetchedAt,
           keyword.sourceUpdatedAt,
         );
       }
     });
     return summary;
+  }
+  ingestDiscovery(
+    run: DiscoveryRun,
+    query: DiscoveryRun["queries"][number],
+    source: DiscoverySource,
+  ) {
+    const origin = `baidu-discovery:${run.id}:${discoveryWordKey(query.word)}:${source}`;
+    if (this.db.get("SELECT id FROM traffic_queries WHERE origin=?", origin))
+      return;
+    const removed = new Set(run.removedKeys);
+    const words = run.words.flatMap((word) => {
+      if (removed.has(word.key)) return [];
+      const origins = word.origins.filter(
+        (entry) =>
+          entry.source === source &&
+          discoveryWordKey(entry.query) === discoveryWordKey(query.word),
+      );
+      if (!origins.length) return [];
+      return [{ ...word, origins }];
+    });
+    const receivedAt =
+      words
+        .flatMap((word) => word.origins.map((entry) => entry.at))
+        .sort()
+        .at(-1) ?? run.updatedAt;
+    const metrics = {
+      averageMonthPv: discoveryDefaultMonthlySearches,
+      averageMonthPvSource: "默认值（非实测）",
+    };
+    this.db.transaction(() => {
+      const queryId = id("traffic");
+      this.db.run(
+        "INSERT INTO traffic_queries(id,origin,endpoint,phase,request,seeds,platform,status,started_at,received_at,response,message) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        queryId,
+        origin,
+        "baidu-discovery",
+        "query",
+        JSON.stringify({
+          runId: run.id,
+          query: query.word,
+          seed: query.seed,
+          depth: query.depth,
+          source,
+          sourceLabel: discoverySourceLabels[source],
+        }),
+        JSON.stringify([query.seed]),
+        "baidu",
+        "success",
+        receivedAt,
+        receivedAt,
+        packTrafficArchive(
+          JSON.stringify({ words, metrics, indexed: words.length }),
+        ),
+        `${discoverySourceLabels[source]}：收录${words.length}词；月均搜索量默认${discoveryDefaultMonthlySearches}，不是百度实测数据。`,
+      );
+      for (const word of words) {
+        this.db.run(
+          "INSERT INTO traffic_items(id,query_id,kind,word,normalized_word,platform,source,source_key,metrics,observed_at,source_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+          id("observation"),
+          queryId,
+          "word",
+          word.word,
+          normalize(word.word),
+          "baidu",
+          discoveryKnowledgeSource,
+          "baidu-discovery",
+          JSON.stringify(metrics),
+          word.origins
+            .map((entry) => entry.at)
+            .sort()
+            .at(-1) ?? receivedAt,
+          null,
+        );
+      }
+    });
+  }
+  archiveDiscovery(run: DiscoveryRun) {
+    for (const query of run.queries)
+      for (const source of query.completedSources)
+        this.ingestDiscovery(run, query, source);
   }
   recoverBaidu() {
     for (const row of this.db.all<{ value: string }>(
@@ -210,7 +285,9 @@ export class TrafficKnowledge {
     const received = now();
     this.db.run(
       "UPDATE traffic_queries SET response=?,received_at=?,http_status=?,status='received' WHERE id=?",
-      typeof clean === "string" ? clean : JSON.stringify(clean),
+      packTrafficArchive(
+        typeof clean === "string" ? clean : JSON.stringify(clean),
+      ),
       received,
       httpStatus,
       queryId,
@@ -293,7 +370,7 @@ export class TrafficKnowledge {
                 ),
               );
         this.db.run(
-          "INSERT INTO traffic_items(id,query_id,kind,word,normalized_word,platform,source,metrics,data,observed_at,source_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO traffic_items(id,query_id,kind,word,normalized_word,platform,source,source_key,metrics,observed_at,source_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           id("observation"),
           queryId,
           kind,
@@ -301,8 +378,8 @@ export class TrafficKnowledge {
           normalize(word),
           typeof r.platform === "string" ? r.platform : platform,
           normalized && typeof r.source === "string" ? r.source : sourceName,
+          normalized ? null : endpoint,
           JSON.stringify(metrics),
-          JSON.stringify(r),
           normalized && typeof r.fetchedAt === "string"
             ? r.fetchedAt
             : observedAt,
@@ -347,7 +424,7 @@ export class TrafficKnowledge {
           platform,
           "recovered",
           acquired,
-          JSON.stringify(cleanKnowledge(value)),
+          packTrafficArchive(JSON.stringify(cleanKnowledge(value))),
           "旧记录恢复，仅包含仍存缓存或整理结果；可能缺少原始响应字段、查询参数和采集时间，同一结果可能来自多个旧缓存。",
         );
         this.extract(
@@ -411,154 +488,22 @@ export class TrafficKnowledge {
       now(),
     );
   }
-  private conditions(f: KnowledgeFilter, items: boolean) {
-    const args: string[] = [],
-      clauses = [];
-    if (f.endpoint) {
-      clauses.push("q.endpoint=?");
-      args.push(f.endpoint);
-    }
-    if (f.platform) {
-      clauses.push(
-        items ? "coalesce(i.platform,'')=?" : "coalesce(q.platform,'')=?",
-      );
-      args.push(f.platform);
-    }
-    if (f.search) {
-      clauses.push(
-        items
-          ? "instr(lower(i.word),lower(?))>0"
-          : "(instr(lower(q.seeds),lower(?))>0 OR EXISTS(SELECT 1 FROM traffic_items x WHERE x.query_id=q.id AND instr(lower(x.word),lower(?))>0))",
-      );
-      args.push(f.search);
-      if (!items) args.push(f.search);
-    }
-    return {
-      where: clauses.length ? "WHERE " + clauses.join(" AND ") : "",
-      args,
-    };
+  list(raw: unknown) {
+    return this.reader.list(raw);
   }
-  list(raw: unknown): KnowledgePage {
-    const f = knowledgeFilter.parse(raw),
-      { where, args } = this.conditions(f, f.view === "items"),
-      pageSize = f.view === "items" ? 50 : 20;
-    const partition =
-      "i.kind,i.normalized_word,coalesce(i.platform,''),i.source";
-    const cte = `WITH ranked AS (SELECT i.*,q.endpoint,COUNT(*) OVER(PARTITION BY ${partition}) observations,MIN(i.observed_at) OVER(PARTITION BY ${partition}) first_observed_at,ROW_NUMBER() OVER(PARTITION BY ${partition} ORDER BY coalesce(i.observed_at,'') DESC,i.rowid DESC) rn FROM traffic_items i JOIN traffic_queries q ON q.id=i.query_id ${where})`;
-    const total = Number(
-      this.db.get<any>(
-        f.view === "items"
-          ? cte + " SELECT COUNT(*) n FROM ranked WHERE rn=1"
-          : `SELECT COUNT(*) n FROM traffic_queries q ${where}`,
-        ...args,
-      )?.n ?? 0,
-    );
-    const items =
-      f.view === "items"
-        ? this.db
-            .all<any>(
-              cte +
-                " SELECT * FROM ranked WHERE rn=1 ORDER BY coalesce(observed_at,'') DESC,word LIMIT ? OFFSET ?",
-              ...args,
-              pageSize,
-              (f.page - 1) * pageSize,
-            )
-            .map((r): KnowledgeItem => ({
-              id: r.id,
-              queryId: r.query_id,
-              kind: r.kind,
-              word: r.word,
-              platform: r.platform,
-              source: r.source,
-              metrics: parseJson(r.metrics, {}),
-              observedAt: r.observed_at,
-              firstObservedAt: r.first_observed_at,
-              sourceUpdatedAt: r.source_updated_at,
-              observations: r.observations,
-            }))
-        : [];
-    const queries =
-      f.view === "queries"
-        ? this.db
-            .all<any>(
-              `SELECT q.*,(SELECT COUNT(*) FROM traffic_items i WHERE i.query_id=q.id) count FROM traffic_queries q ${where} ORDER BY coalesce(q.received_at,q.started_at,'') DESC,q.rowid DESC LIMIT ? OFFSET ?`,
-              ...args,
-              pageSize,
-              (f.page - 1) * pageSize,
-            )
-            .map(decode)
-        : [];
-    const summary = this.db.get<any>(
-      `SELECT (SELECT COUNT(*) FROM traffic_queries) queries,(SELECT COUNT(*) FROM traffic_queries WHERE response IS NOT NULL) responses,(SELECT COUNT(DISTINCT normalized_word) FROM traffic_items WHERE kind='word') words,(SELECT COUNT(DISTINCT normalized_word) FROM traffic_items WHERE kind='hotspot') hotspots,(SELECT COUNT(*) FROM traffic_items) observations,(SELECT COUNT(*) FROM traffic_queries WHERE legacy=1) legacy`,
-    )!;
-    const seeds = this.db.all<any>(
-      `SELECT j.value word,COUNT(DISTINCT CASE WHEN q.phase IN ('query','submit') THEN q.id END) queries,COUNT(DISTINCT i.id) results FROM traffic_queries q JOIN json_each(q.seeds) j LEFT JOIN traffic_items i ON i.query_id=q.id WHERE q.legacy=0 AND q.response IS NOT NULL GROUP BY j.value HAVING queries>0 ORDER BY queries DESC,word LIMIT 10`,
-    );
-    const patterns = [
-      ["教程 / 操作步骤", ["教程", "怎么", "如何", "步骤"]],
-      ["问题 / 排错", ["失败", "错误", "无法", "怎么办"]],
-      ["选择 / 对比", ["区别", "对比", "哪个好", "推荐"]],
-      ["价格 / 获取", ["价格", "费用", "免费", "下载"]],
-    ] as [string, string[]][];
-    return {
-      total,
-      page: f.page,
-      pageSize,
-      items,
-      queries,
-      summary,
-      seeds,
-      patterns: patterns.map(([name, terms]) => ({
-        name,
-        count: Number(
-          this.db.get<any>(
-            `SELECT COUNT(DISTINCT normalized_word) n FROM traffic_items WHERE kind='word' AND (${terms.map(() => "instr(word,?)>0").join(" OR ")})`,
-            ...terms,
-          )?.n ?? 0,
-        ),
-      })),
-    };
+  overview() {
+    return this.reader.overview();
+  }
+  resolve(raw: unknown) {
+    return this.reader.resolve(raw);
+  }
+  history(raw: unknown) {
+    return this.reader.history(raw);
   }
   detail(queryId: string) {
-    const r = this.db.get<any>(
-      "SELECT q.*,(SELECT COUNT(*) FROM traffic_items i WHERE i.query_id=q.id) count FROM traffic_queries q WHERE q.id=?",
-      queryId,
-    );
-    if (!r) throw new AppError("NOT_FOUND", "查询档案不存在。");
-    return { query: decode(r), response: r.response as string | null };
+    return this.reader.detail(queryId);
   }
   export(raw: unknown) {
-    const f = knowledgeFilter.parse(raw),
-      { where, args } = this.conditions(f, f.view === "items");
-    const rows = this.db.all<any>(
-      `SELECT i.*,q.endpoint,q.seeds,q.legacy FROM traffic_items i JOIN traffic_queries q ON q.id=i.query_id ${where} ORDER BY i.rowid`,
-      ...args,
-    );
-    return csv([
-      [
-        "词语/热点",
-        "类别",
-        "平台",
-        "来源",
-        "种子词",
-        "采集时间",
-        "源更新时间",
-        "指标",
-        "查询档案ID",
-        "旧记录恢复",
-      ],
-      ...rows.map((r) => [
-        r.word,
-        r.kind,
-        r.platform,
-        r.source,
-        parseJson<string[]>(r.seeds, []).join(" | "),
-        r.observed_at,
-        r.source_updated_at,
-        r.metrics,
-        r.query_id,
-        r.legacy ? "是" : "否",
-      ]),
-    ]);
+    return this.reader.export(raw);
   }
 }

@@ -186,8 +186,11 @@ try {
     true,
   );
   checks.push("手工写稿、版本、审阅与未核验分享发布拦截");
-  await nav("流量发现").click();
-  await page.getByRole("tab", { name: "调用与费用" }).click();
+  await nav("连接与设置").click();
+  await page
+    .getByRole("navigation", { name: "设置分区", exact: true })
+    .getByRole("link", { name: "调用与费用", exact: true })
+    .click();
   await page.getByRole("heading", { name: "最近500笔调用记录" }).waitFor();
   await page.getByText("还没有调用记录", { exact: true }).waitFor();
   await navigateTo(page, "转存任务");
@@ -273,7 +276,8 @@ try {
       dailyAiBudgetMicros: 100000,
     });
   });
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "5118找词", exact: true }).click();
   await chooseOption(page.getByLabel("找词方法", { exact: true }), "suggest");
   await page.getByLabel("查询种子词").fill("办公");
   await page.getByRole("button", { name: "查询关键词", exact: true }).click();
@@ -341,7 +345,8 @@ try {
     2,
   );
   await nav("资源库").click();
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "5118找词", exact: true }).click();
   await chooseOption(page.getByLabel("找词方法", { exact: true }), "suggest");
   await page.getByRole("button", { name: "查看已存结果", exact: true }).click();
   await page
@@ -359,7 +364,11 @@ try {
     () =>
       document.querySelector('[aria-label="查询种子词"]')?.value === "AI办公",
   );
-  await page.getByRole("tab", { name: "调用与费用", exact: true }).click();
+  await nav("连接与设置").click();
+  await page
+    .getByRole("navigation", { name: "设置分区", exact: true })
+    .getByRole("link", { name: "调用与费用", exact: true })
+    .click();
   await page.getByText("$0.000037", { exact: true }).first().waitFor();
   const usage = (await page.evaluate(() => window.panxu.invoke("snapshot")))
     .apiUsage;
@@ -420,7 +429,9 @@ try {
     0,
   );
   checks.push("批量CSV预检、错行与重复拦截、仅落本地草稿");
-  await nav("流量发现").click();
+  await nav("流量词库").click();
+  await page.getByRole("tab", { name: "我的词池", exact: true }).click();
+  await page.locator(".knowledge-manual-pool > summary").click();
   await page.getByLabel("手工词池名称", { exact: true }).fill("本地整理词池");
   await page
     .getByLabel("手工词池关键词", { exact: true })

@@ -19,6 +19,7 @@ import type { SearchTopic } from "../../shared/search";
 import { platformSpecs } from "../../shared/platforms";
 import { Pagination } from "../ui/Pagination";
 import { updateSelection } from "../lib/selection";
+import { poolSummary } from "../traffic/pools";
 
 export function SearchDialog(props: Omit<DialogProps, "busy" | "className">) {
   const { busy } = useAppActivity();
@@ -377,8 +378,14 @@ export function PoolTopicDialog({
     [ids, setIds] = useState<string[]>([]),
     [query, setQuery] = useState(""),
     [platform, setPlatform] = useState<Platform>("csdn");
-  const pool = data!.pools.find((p) => p.id === poolId),
-    words = pool?.keywords.filter((k) => k.word.includes(query)) ?? [];
+  const pool = useIpcQuery(
+    "pool.get",
+    { id: poolId },
+    { enabled: !!poolId, keepPrevious: true },
+  );
+  const currentPool = pool.data?.id === poolId ? pool.data : null;
+  const words =
+    currentPool?.keywords.filter((k) => k.word.includes(query)) ?? [];
   return (
     <SearchDialog title="从词池创建搜索选题" onClose={onClose}>
       <div className="field-pair">
@@ -395,7 +402,7 @@ export function PoolTopicDialog({
                 value: p.id,
                 label: (
                   <>
-                    {p.name} · {p.keywords.length} 词
+                    {p.name} · {poolSummary(p).keywordCount} 词
                   </>
                 ),
               })),
@@ -419,13 +426,24 @@ export function PoolTopicDialog({
           onChange={(e) => setQuery(e.target.value)}
         />
       </Field>
+      <QueryError
+        title="词池内容读取失败"
+        error={pool.error}
+        loading={pool.loading}
+        onRetry={pool.reload}
+      />
+      {pool.loading && !currentPool ? (
+        <LoadingState label="正在读取所选词池…" compact />
+      ) : null}
       <div className="search-keyword-options">
         {words.slice(0, 100).map((k) => (
           <label key={k.id} className="checkbox">
             <input
               type="checkbox"
               checked={ids.includes(k.id)}
-              disabled={!ids.includes(k.id) && ids.length >= 100}
+              disabled={
+                pool.loading || (!ids.includes(k.id) && ids.length >= 100)
+              }
               onChange={(e) =>
                 setIds((old) =>
                   updateSelection(old, [k.id], e.target.checked, 100),
@@ -443,7 +461,13 @@ export function PoolTopicDialog({
       <div className="actions">
         <Button
           primary
-          disabled={!ids.length || busy > 0}
+          disabled={
+            !ids.length ||
+            !currentPool ||
+            pool.loading ||
+            !!pool.error ||
+            busy > 0
+          }
           onClick={async () => {
             const r = await command("search.importPool", {
               poolId,

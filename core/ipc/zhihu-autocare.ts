@@ -29,6 +29,10 @@ export function createZhihuAutocareHandlers({
         .parse(raw);
       return zhihuAutocare.toggle(v.enabled, v.revision);
     },
+    "zhihu.autocare.recheck": (raw) => {
+      const v = z.object({ revision: z.number().int().positive() }).parse(raw);
+      return zhihuAutocare.recheck(v.revision);
+    },
     "zhihu.autocare.interact": (raw) =>
       zhihuAutocare.interact(autocareInteractionInput.parse(raw)),
     "zhihu.autocare.refreshInteraction": (raw) =>

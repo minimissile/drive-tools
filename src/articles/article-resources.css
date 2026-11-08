@@ -1,0 +1,77 @@
+.article-resource-progress {
+  margin: 0 0 var(--space-3);
+  font-size: 12px;
+}
+
+.article-resource-row {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.article-resource-row > div:first-child {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.article-resource-title,
+.article-resource-controls,
+.article-resource-new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.article-resource-row strong {
+  font-size: 13px;
+}
+
+.article-resource-row code,
+.article-resource-link,
+.article-own-url {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.article-own-url {
+  color: var(--green);
+}
+
+.article-resource-source,
+.article-resource-alternative {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+:is(.article-resource-source, .article-resource-alternative) > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.article-resource-controls,
+.article-resource-new {
+  align-items: end;
+}
+
+.article-resource-controls .field {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+}
+
+.article-resource-target {
+  align-self: center;
+  overflow-wrap: anywhere;
+}
+
+.article-resource-alternative[open] {
+  flex-basis: 100%;
+}
+
+.article-resource-alternative > .article-resource-new {
+  margin-top: var(--space-2);
+}

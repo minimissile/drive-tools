@@ -8,6 +8,7 @@ import { Select } from "../ui/Select";
 import { TextSuggestions } from "../ui/TextSuggestions";
 import { CheckboxField } from "../ui/CheckboxField";
 import type { BrowserEnvironment } from "../../shared/browser-environments";
+import { maxEnvironmentsPerExitIp } from "../../shared/browser-environments";
 import type { BitBrowserProfile } from "../../shared/bitbrowser";
 
 const formSchema = z.object({
@@ -281,7 +282,7 @@ export function EnvironmentEditor({
         checked={requireProxy}
         onChange={(event) => setRequireProxy(event.target.checked)}
         label="要求独立代理出口"
-        hint="启用后，联网操作前检查实际出口；代理异常或与其他隔离环境出口重复时暂停任务。出口检查使用 ipify。"
+        hint={`启用后，联网操作前检查实际出口；同一出口 IP 最多供 ${maxEnvironmentsPerExitIp} 个环境使用，代理异常或超出上限时暂停任务。`}
       />
       {form.engine === "bitbrowser" ? (
         <Notice>

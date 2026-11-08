@@ -9,6 +9,16 @@ export const websiteLoginSpecs: Record<
   WebsiteProvider,
   { home: string; title: string; hosts: readonly string[] }
 > = {
+  bilibili: {
+    home: "https://passport.bilibili.com/login",
+    title: "哔哩哔哩 · 官方扫码登录",
+    hosts: ["www.bilibili.com", "passport.bilibili.com", "account.bilibili.com", "member.bilibili.com", "api.bilibili.com", "t.bilibili.com", "space.bilibili.com"],
+  },
+  wechat: {
+    home: "https://mp.weixin.qq.com/",
+    title: "微信公众号 · 官方扫码登录",
+    hosts: ["mp.weixin.qq.com", "open.weixin.qq.com"],
+  },
   tieba: {
     home: "https://tieba.baidu.com/",
     title: "百度贴吧 · 官方登录",

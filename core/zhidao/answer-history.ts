@@ -6,6 +6,24 @@ export const questionFingerprint = (question: string) =>
     .toLocaleLowerCase()
     .replace(/[\p{P}\s]/gu, "");
 
+/** Reserve both identity and normalized title across in-flight answers before paid generation. */
+export class AnswerReservations {
+  private owners = new Map<string, string>();
+  claim(owner: string, qid: string, question: string) {
+    const keys = [`id:${qid}`, `text:${questionFingerprint(question)}`];
+    if (
+      keys.some((key) => this.owners.has(key) && this.owners.get(key) !== owner)
+    )
+      return false;
+    keys.forEach((key) => this.owners.set(key, owner));
+    return true;
+  }
+  release(owner: string) {
+    for (const [key, value] of this.owners)
+      if (value === owner) this.owners.delete(key);
+  }
+}
+
 /** Workspace-wide history survives account removal and re-binding. Unknown sends also block. */
 export function answerHistory(db: Database) {
   const ids = new Set<string>(),

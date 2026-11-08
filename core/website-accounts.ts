@@ -44,6 +44,7 @@ const view = (row: Row): WebsiteAccount => ({
 });
 export class WebsiteAccounts {
   private active = new Set<string>();
+  private observations = new Map<string, boolean>();
   constructor(
     private db: Database,
     private ports: AppPorts,
@@ -65,12 +66,19 @@ export class WebsiteAccounts {
         "WEBSITE_ACCOUNT_NOT_FOUND",
         "网站账号不存在或已移除，请重新选择。",
       );
+    const ref = { kind: "website" as const, id: accountId };
+    const environment = this.environments?.forAccount(ref);
+    const observed = this.observations.get(accountId);
+    const unverified =
+      observed === false ||
+      (environment?.engine === "bitbrowser" && observed === undefined) ||
+      (row.status === "connected" &&
+        !!this.environments &&
+        !this.environments.identityCurrent(ref));
     return {
       ...view(row),
-      environmentId: this.environments?.forAccount({
-        kind: "website",
-        id: accountId,
-      }).id,
+      ...(unverified ? { unverified: true } : {}),
+      environmentId: environment?.id,
     };
   }
   private sessions() {
@@ -88,6 +96,15 @@ export class WebsiteAccounts {
     return Promise.all(ids.map((row) => this.check(row.id)));
   }
   add(provider: WebsiteProvider, alias?: string, environmentId?: string) {
+    if (
+      provider === "wechat" &&
+      environmentId &&
+      this.environments?.get(environmentId).engine !== "electron"
+    )
+      throw new AppError(
+        "WECHAT_NATIVE_SESSION",
+        "微信公众号使用内置浏览器扫码登录，请选择内置环境。",
+      );
     if (
       isDocumentProvider(provider) &&
       environmentId &&
@@ -169,10 +186,17 @@ export class WebsiteAccounts {
         message: "请在桌面开发窗口管理登录。",
       };
     const sessions = this.sessions();
-    const state =
-      fresh && sessions.verify
-        ? await sessions.verify(account)
-        : await sessions.status(account);
+    let observed: import("../shared/website-accounts").WebsiteSessionState;
+    try {
+      observed =
+        fresh && sessions.verify
+          ? await sessions.verify(account)
+          : await sessions.status(account);
+    } catch (error) {
+      this.observations.set(accountId, false);
+      throw error;
+    }
+    const state = { ...observed };
     const ref = { kind: "website" as const, id: accountId };
     if (
       !fresh &&
@@ -181,6 +205,7 @@ export class WebsiteAccounts {
     ) {
       if (state.hasSession || !state.error)
         state.error = "此环境的登录或配置已变化，请检查当前平台身份后再使用。";
+      if (state.hasSession) state.unverified = true;
       state.hasSession = false;
     }
     const mismatch = !!account.uid && !!state.uid && account.uid !== state.uid;
@@ -193,6 +218,14 @@ export class WebsiteAccounts {
         state.uid,
         accountId,
       );
+    const unverified =
+      state.unverified === true && !state.expired && !mismatch && !duplicate;
+    this.observations.set(accountId, !unverified);
+    if (fresh && unverified)
+      throw new AppError(
+        "WEBSITE_IDENTITY_UNVERIFIED",
+        state.error || "当前平台身份尚未核实，请稍后重新检查登录。",
+      );
     if (fresh && state.hasSession && state.uid && !mismatch && !duplicate)
       this.environments?.confirm(ref, state.uid);
     if (
@@ -203,19 +236,23 @@ export class WebsiteAccounts {
     )
       this.environments?.confirmSession(ref);
     const uid =
-      mismatch || duplicate || !state.hasSession
+      unverified || mismatch || duplicate || !state.hasSession
         ? account.uid
         : (state.uid ?? account.uid);
     const nickname =
-      !mismatch && !duplicate && state.hasSession
+      !unverified && !mismatch && !duplicate && state.hasSession
         ? (state.nickname ?? account.nickname ?? null)
         : (account.nickname ?? null);
-    const checkedAt = state.checkedAt ?? account.checkedAt ?? null;
-    const status =
-      state.hasSession &&
-      (uid || (state.sessionOnly && isDocumentProvider(account.provider))) &&
-      !mismatch &&
-      !duplicate
+    const checkedAt = unverified
+      ? (account.checkedAt ?? null)
+      : (state.checkedAt ?? account.checkedAt ?? null);
+    const status = unverified
+      ? account.status
+      : state.hasSession &&
+          (uid ||
+            (state.sessionOnly && isDocumentProvider(account.provider))) &&
+          !mismatch &&
+          !duplicate
         ? "connected"
         : state.expired || account.status === "expired"
           ? "expired"
@@ -250,6 +287,7 @@ export class WebsiteAccounts {
     );
     return {
       ...this.get(accountId),
+      ...(unverified ? { unverified: true } : {}),
       sessionOnly: state.sessionOnly,
       windowOpen: state.windowOpen,
       checking: state.checking,
@@ -452,9 +490,10 @@ export class WebsiteAccounts {
   }
   async openDocument(accountId: string, value: string) {
     const account = this.get(accountId);
-    const url = account.provider === "zhihu"
-      ? canonicalZhihuParticipationUrl(value)
-      : documentPlatformUrl(account.provider, value);
+    const url =
+      account.provider === "zhihu"
+        ? canonicalZhihuParticipationUrl(value)
+        : documentPlatformUrl(account.provider, value);
     if (!url)
       throw new AppError(
         "DOCUMENT_URL_BLOCKED",
@@ -553,7 +592,7 @@ export class WebsiteAccounts {
             "WEBSITE_PROVIDER_MISMATCH",
             "所选账号不支持此功能，请重新选择。",
           );
-        if (account.status !== "connected")
+        if (account.status !== "connected" || account.unverified)
           throw new AppError(
             "WEBSITE_LOGIN_REQUIRED",
             account.message || "请先在账号管理中完成此网站账号的登录。",

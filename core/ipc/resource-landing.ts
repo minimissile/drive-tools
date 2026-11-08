@@ -1,14 +1,20 @@
 import { z } from "zod";
-import { landingDraftSchema } from "../../shared/resource-landing";
+import {
+  landingDraftSchema,
+  landingEditableDraftSchema,
+} from "../../shared/resource-landing";
 import type { HandlerMap, HandlerServices } from "./types";
+import { landingTrafficSchema } from "../../shared/landing-traffic";
 export function createResourceLandingHandlers(
-  services: Pick<HandlerServices, "resourceLanding">,
+  services: Pick<HandlerServices, "resourceLanding" | "resourceLinks">,
 ) {
   const resource = z.object({ resourceId: z.string().min(1).max(100) });
   const version = resource.extend({
     expectedDraftVersion: z.number().int().nonnegative(),
   });
   return {
+    "resourceLanding.traffic": async (input) =>
+      landingTrafficSchema.parse(await services.resourceLinks.landingTraffic(resource.parse(input).resourceId)),
     "resourceLanding.readDocument": (input) => {
       const v = resource
         .extend({
@@ -32,6 +38,22 @@ export function createResourceLandingHandlers(
         v.resourceId,
         v.requestId,
         v.notes,
+      );
+    },
+    "resourceLanding.optimize": (input) => {
+      const v = version
+        .extend({
+          requestId: z.string().uuid(),
+          notes: z.string().max(8000),
+          draft: landingEditableDraftSchema,
+        })
+        .parse(input);
+      return services.resourceLanding.optimize(
+        v.resourceId,
+        v.requestId,
+        v.expectedDraftVersion,
+        v.notes,
+        v.draft,
       );
     },
     "resourceLanding.saveDraft": (input) => {

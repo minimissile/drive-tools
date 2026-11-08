@@ -57,14 +57,14 @@ test("real attempts archive immutable full responses; refresh/key change/cache e
     await service.query(q);
     await service.query(q);
     assert.equal(calls, 1);
-    assert.equal(service.knowledge.list({}).summary.queries, 1);
+    assert.equal(service.knowledge.overview().summary.queries, 1);
     await service.query({ ...q, useCache: false });
     f.app.db.setSetting("keyRevision:longtail", "new-key");
     await service.query(q);
     f.app.db.run("DELETE FROM api_cache");
     const result = service.knowledge.list({});
-    assert.equal(result.summary.queries, 3);
-    assert.equal(result.summary.observations, 3);
+    assert.equal(service.knowledge.overview().summary.queries, 3);
+    assert.equal(service.knowledge.overview().summary.observations, 3);
     assert.equal(result.items.length, 1);
     assert.equal(result.items[0].observations, 3);
     assert.equal(result.items[0].metrics.index, 3);
@@ -111,8 +111,8 @@ test("all pages retained before later timeout and budget failures; empty/schema-
     );
     await assert.rejects(service.query({ ...q, pages: 2 }), /timeout/);
     let list = service.knowledge.list({ view: "queries" });
-    assert.equal(list.summary.queries, 2);
-    assert.equal(list.summary.observations, 1);
+    assert.equal(service.knowledge.overview().summary.queries, 2);
+    assert.equal(service.knowledge.overview().summary.observations, 1);
     const failed = list.queries.find((r) => r.status === "uncertain")!;
     assert.equal(service.knowledge.detail(failed.id).response, null);
     for (const response of [
@@ -135,16 +135,16 @@ test("all pages retained before later timeout and budget failures; empty/schema-
       } catch {}
     }
     list = service.knowledge.list({ view: "queries" });
-    assert.equal(list.summary.queries, 5);
-    assert.equal(list.summary.responses, 4);
-    assert.equal(list.summary.observations, 1);
+    assert.equal(service.knowledge.overview().summary.queries, 5);
+    assert.equal(service.knowledge.overview().summary.responses, 4);
+    assert.equal(service.knowledge.overview().summary.observations, 1);
     f.app.db.run(
       "UPDATE api_plans SET daily_units=0 WHERE endpoint='longtail'",
     );
     await assert.rejects(service.query({ ...q, seeds: ["new"] }), {
       code: "API_BUDGET_EXCEEDED",
     });
-    assert.equal(service.knowledge.list({}).summary.queries, 5);
+    assert.equal(service.knowledge.overview().summary.queries, 5);
   } finally {
     await f.cleanup();
   }
@@ -201,8 +201,8 @@ test("suggestion pending/resume and metrics submit/pending/poll keep every excha
     f.app.db.run("UPDATE async_queries SET last_polled_at='2020-01-01'");
     await service.query({ ...q, endpoint: "metrics", taskId: m.taskId });
     const result = service.knowledge.list({ view: "queries" });
-    assert.equal(result.summary.queries, 5);
-    assert.equal(result.summary.observations, 2);
+    assert.equal(service.knowledge.overview().summary.queries, 5);
+    assert.equal(service.knowledge.overview().summary.observations, 2);
     assert.equal(
       result.queries.filter((r) => r.status === "pending").length,
       2,
@@ -213,8 +213,8 @@ test("suggestion pending/resume and metrics submit/pending/poll keep every excha
         .map((r) => r.seeds),
       [["Obsidian"], ["Obsidian"], ["Obsidian"]],
     );
-    assert.equal(result.seeds[0].queries, 3);
-    assert.equal(result.seeds[0].results, 2);
+    assert.equal(service.knowledge.overview().seeds[0].queries, 3);
+    assert.equal(service.knowledge.overview().seeds[0].results, 2);
     assert.equal(
       service.knowledge.list({ platform: "baidu" }).items[0].word,
       "Obsidian安装教程",
@@ -264,7 +264,7 @@ test("radar archives full event chains with historical metrics and offers local 
     });
     f.app.db.run("DELETE FROM api_cache");
     const r = service.knowledge.list({ endpoint: "radar", search: "热点" });
-    assert.equal(r.summary.hotspots, 1);
+    assert.equal(service.knowledge.overview().summary.hotspots, 1);
     assert.equal(r.items[0].observations, 2);
     assert.match(
       service.knowledge.detail(r.items[0].queryId).response!,
@@ -320,8 +320,8 @@ test("HTTP observer archives non-JSON and HTTP error responses before transport 
       code: "HTTP_ERROR",
     });
     const list = service.knowledge.list({ view: "queries" });
-    assert.equal(list.summary.responses, 2);
-    assert.equal(list.summary.observations, 0);
+    assert.equal(service.knowledge.overview().summary.responses, 2);
+    assert.equal(service.knowledge.overview().summary.observations, 0);
     for (const row of list.queries) {
       const d = service.knowledge.detail(row.id);
       assert.ok([502, 403].includes(d.query.httpStatus!));
@@ -372,16 +372,16 @@ test("legacy surviving raw pages and normalized async/suggestion results recover
     k.recoverLegacy();
     f.app.db.run("DELETE FROM traffic_knowledge_meta");
     k.recoverLegacy();
-    assert.equal(k.list({}).summary.queries, 2);
-    assert.equal(k.list({}).summary.observations, 2);
+    assert.equal(k.overview().summary.queries, 2);
+    assert.equal(k.overview().summary.observations, 2);
     assert.equal(k.list({ search: "异步" }).items[0].observedAt, null);
     assert.equal(
       k.list({ search: "旧词怎么" }).items[0].observedAt,
       "2020-01-01",
     );
-    assert.equal(k.list({}).seeds.length, 0);
+    assert.equal(k.overview().seeds.length, 0);
     f.app.db.run("DELETE FROM api_cache");
-    assert.equal(k.list({}).summary.words, 2);
+    assert.equal(k.overview().summary.words, 2);
   } finally {
     await f.cleanup();
   }
@@ -411,11 +411,17 @@ test("knowledge pagination scans complete library, keeps distinct platform snaps
     assert.equal(k.list({ page: 3 }).items.length, 21);
     assert.equal(k.list({ search: "怎么学120" }).items.length, 1);
     assert.match(k.export({}), /'=SUM/);
-    assert.equal(k.export({view:"queries",search:"教程"}).split("\r\n").length,123);
-    assert.equal(k.export({view:"items",search:"教程"}).split("\r\n").length,122);
+    assert.equal(
+      k.export({ view: "queries", search: "教程" }).split("\r\n").length,
+      123,
+    );
+    assert.equal(
+      k.export({ view: "items", search: "教程" }).split("\r\n").length,
+      122,
+    );
     assert.equal(k.export({}).split("\r\n").length, 123);
     assert.equal(
-      k.list({}).patterns.find((p) => p.name === "教程 / 操作步骤")?.count,
+      k.overview().patterns.find((p) => p.name === "教程 / 操作步骤")?.count,
       120,
     );
     await assert.rejects(f.app.invoke("traffic.knowledge.list", { page: -1 }));
@@ -470,8 +476,8 @@ test("v7 migration backs up once and durable knowledge survives backup/restore w
     try {
       const restored = new TrafficKnowledge(db);
       restored.recoverLegacy();
-      assert.equal(restored.list({}).summary.words, 1);
-      assert.equal(restored.list({}).summary.queries, 1);
+      assert.equal(restored.overview().summary.words, 1);
+      assert.equal(restored.overview().summary.queries, 1);
       assert.equal(restored.detail(aid).query.seeds[0], "备份");
       assert.equal(db.get<any>("SELECT COUNT(*) n FROM secrets")?.n, 0);
     } finally {
@@ -511,7 +517,7 @@ test("complete responses index beyond display limits and malformed business fiel
       200,
       "",
     );
-    assert.equal(k.list({}).summary.observations, 5006);
+    assert.equal(k.overview().summary.observations, 5006);
     assert.equal(k.list({ search: "批量资料5004" }).total, 1);
     assert.match(k.detail(aid).response!, /unexpected/);
     const after = f.app.ideas.preview({

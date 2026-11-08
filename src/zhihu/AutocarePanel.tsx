@@ -11,8 +11,6 @@ import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppActions, useAppData, useAppNavigation } from "../state";
 import {
   Button,
-  Empty,
-  Field,
   Header,
   LoadingState,
   Notice,
@@ -20,17 +18,20 @@ import {
   Status,
 } from "../ui/primitives";
 import { Switch } from "../ui/Switch";
-import { CheckboxField } from "../ui/CheckboxField";
 import { QueryError } from "../ui/QueryError";
 import { formatTime } from "../lib/format";
 import { ZhihuCreatorProgress } from "./CreatorProgress";
 import { AutocareParticipation } from "./AutocareParticipation";
 import { AutocareLogs } from "./AutocareLogs";
+import { AutocareSettings } from "./AutocareSettings";
+import { AutocareAgenda } from "./AutocareAgenda";
+import { getAutocareRunView } from "./autocare-agenda";
+import type { ZhihuAdvancedTab } from "./Workflow";
 import "./autocare.css";
 export default function AutocarePanel({
   openAdvanced,
 }: {
-  openAdvanced(): void;
+  openAdvanced(tab?: ZhihuAdvancedTab): void;
 }) {
   const q = useIpcQuery("zhihu.autocare.snapshot", undefined, {
     keepPrevious: true,
@@ -41,9 +42,9 @@ export default function AutocarePanel({
     <div className="autocare">
       <Header
         title="知乎自动养号"
-        description="规则安排任务，AI整理内容。选择账号后开启，运行结果直接看下方。"
+        description="启动后2小时内自动安排任务，在这里查看截止时间、下一步与运行结果。"
         action={
-          <Button size="compact" onClick={openAdvanced}>
+          <Button size="compact" onClick={() => openAdvanced()}>
             历史与高级功能
           </Button>
         }
@@ -58,6 +59,7 @@ export default function AutocarePanel({
           snapshot={q.data}
           workspace={data!.dataPath}
           reload={q.reload}
+          receiveSnapshot={q.setData}
           openAdvanced={openAdvanced}
         />
       ) : null}
@@ -68,12 +70,14 @@ function AutocareControl({
   snapshot: s,
   workspace,
   reload,
+  receiveSnapshot,
   openAdvanced,
 }: {
   snapshot: AutocareSnapshot;
   workspace: string;
   reload(): void;
-  openAdvanced(): void;
+  receiveSnapshot(snapshot: AutocareSnapshot): void;
+  openAdvanced(tab?: ZhihuAdvancedTab): void;
 }) {
   const { notify } = useAppActions(),
     { navigate, openSettings } = useAppNavigation();
@@ -89,13 +93,34 @@ function AutocareControl({
     [error, setError] = useState("");
   const lock = useRef(false);
   const cfg = draft.value.config,
-    stale = draft.value.revision !== s.revision,
-    changed = JSON.stringify(cfg) !== JSON.stringify(s.config);
+    stale = draft.value.revision !== s.revision;
+  const savedConfig = autocareConfigSchema.parse(s.config);
+  const run = getAutocareRunView(s);
+  const changed = Object.entries(savedConfig).some(
+    ([key, value]) =>
+      JSON.stringify(cfg[key as keyof AutocareConfig] ?? value) !==
+      JSON.stringify(value),
+  );
+  const requiresBackendUpdate =
+    !run.supported ||
+    (!s.todayPlan &&
+      JSON.stringify(cfg.accountTargets ?? {}) !==
+        JSON.stringify(s.config.accountTargets ?? {}));
+  const saveConfig = (revision: number) => {
+    if (requiresBackendUpdate)
+      return Promise.reject(
+        new Error(
+          "两小时方案尚未加载，请先点击顶部“应用更新并重启”，再保存草案。",
+        ),
+      );
+    return ipc("zhihu.autocare.save", { config: cfg, revision });
+  };
   const update = (patch: Partial<AutocareConfig>) =>
     draft.update({ config: { ...cfg, ...patch } });
   const action = async (
     fn: () => Promise<AutocareSnapshot>,
     message: string,
+    preserveDraft = false,
   ) => {
     if (lock.current) return;
     lock.current = true;
@@ -103,8 +128,12 @@ function AutocareControl({
     setError("");
     try {
       const result = await fn();
-      draft.clear();
-      draft.update({ config: result.config, revision: result.revision });
+      receiveSnapshot(result);
+      if (!preserveDraft) draft.clear();
+      draft.update({
+        config: preserveDraft ? cfg : result.config,
+        revision: result.revision,
+      });
       notify(message, "success");
       reload();
     } catch (e) {
@@ -117,12 +146,11 @@ function AutocareControl({
   const toggle = (enabled: boolean) =>
     void action(
       async () => {
+        if (enabled && !run.supported)
+          throw new Error("请先应用后端更新，再开启启动后2小时的养号方案。");
         let revision = s.revision;
         if (enabled && changed) {
-          const saved = await ipc("zhihu.autocare.save", {
-            config: cfg,
-            revision,
-          });
+          const saved = await saveConfig(revision);
           revision = saved.revision;
         }
         return ipc("zhihu.autocare.toggle", {
@@ -132,16 +160,82 @@ function AutocareControl({
         });
       },
       enabled
-        ? "计划已保存，到随机任务时间才开始无头执行"
+        ? "本轮已启动，任务将在启动后2小时内按排期执行"
         : "已停止新任务；已提交的任务继续核对结果",
+      !enabled,
     );
-  const latest = s.jobs.filter((j) =>
-    ["queued", "ready", "collecting", "generating"].includes(j.status),
+  const blockedAccountIds = new Set(
+    s.blockers
+      ? s.blockers
+          .filter((entry) => entry.blocking)
+          .map((entry) => entry.accountId)
+      : s.blockedAccountIds,
   );
-  const next = [
-    ...latest.filter((j) => j.scheduledAt).map((j) => j.scheduledAt!),
-    ...Object.values(s.cycles).map((c) => c.at),
-  ].sort()[0];
+  const latest = s.jobs.filter(
+    (j) =>
+      s.config.accountIds.includes(j.accountId) &&
+      (j.kind === "answer" ? s.config.answerRecommended : s.config.publish) &&
+      ["queued", "ready", "collecting", "generating"].includes(j.status),
+  );
+  const next =
+    s.enabled && run.supported && !run.ended && !!run.startedAt
+      ? [
+          ...latest
+            .filter((j) => j.scheduledAt && !blockedAccountIds.has(j.accountId))
+            .map((j) => j.scheduledAt!),
+          ...Object.entries(s.cycles)
+            .filter(
+              ([id]) =>
+                s.config.accountIds.includes(id) && !blockedAccountIds.has(id),
+            )
+            .map(([, c]) => c.at),
+        ]
+          .filter(
+            (at) =>
+              !run.deadlineAt || Date.parse(at) < Date.parse(run.deadlineAt),
+          )
+          .sort()[0]
+      : undefined;
+  const blockedCount = s.config.accountIds.filter((id) =>
+    blockedAccountIds.has(id),
+  ).length;
+  const needsAttention =
+    (!s.blockers && s.needsAttention) ||
+    (s.config.accountIds.length > 0 &&
+      blockedCount === s.config.accountIds.length);
+  const statusMessage = !run.supported
+    ? "当前为旧版安排，两小时方案待应用后端更新"
+    : run.ended && !s.busy
+      ? "本轮已结束，未完成项目不会延长到全天执行"
+      : s.busy
+        ? s.message
+        : !s.enabled
+          ? s.message
+          : needsAttention
+            ? "账号任务暂停，处理下方原因后重新检查安排"
+            : next
+              ? `下一项安排 ${formatTime(next)}`
+              : "暂无可执行安排，请检查下方原因";
+  const settings = (
+    <AutocareSettings
+      snapshot={s}
+      config={cfg}
+      update={update}
+      disabled={busy || s.busy || stale}
+      changed={changed}
+      onSave={() =>
+        void action(
+          () => saveConfig(s.revision),
+          s.enabled
+            ? "设置已应用于本轮未执行安排，截止时间不延长"
+            : "设置已保存，开启后按2小时窗口安排",
+        )
+      }
+      onReset={() => draft.update({ config: s.config, revision: s.revision })}
+      onManageAccounts={() => navigate("website-accounts")}
+      openSettings={openSettings}
+    />
+  );
   const published = s.jobs.filter((j) => j.status === "published" && j.url);
   const names = new Map(s.accounts.map((a) => [a.id, a.nickname || a.alias]));
   return (
@@ -150,55 +244,108 @@ function AutocareControl({
         <div>
           <Status
             kind={
-              s.enabled
-                ? s.needsAttention
-                  ? "warning"
-                  : "good"
-                : s.message.includes("待核") || s.message.includes("变化")
-                  ? "warning"
-                  : "normal"
+              !run.supported
+                ? "warning"
+                : s.enabled
+                  ? needsAttention
+                    ? "warning"
+                    : blockedCount
+                      ? "warning"
+                      : "good"
+                  : s.message.includes("待核") || s.message.includes("变化")
+                    ? "warning"
+                    : "normal"
             }
           >
-            {s.enabled
-              ? s.needsAttention
-                ? "需要处理"
-                : s.busy
-                  ? "正在处理"
-                  : "已开启"
-              : s.busy
-                ? "正在收尾"
-                : "已关闭"}
+            {!run.supported
+              ? "待应用更新"
+              : run.ended && !s.busy
+                ? "本轮已结束"
+                : s.enabled
+                  ? needsAttention
+                    ? "需要处理"
+                    : s.busy
+                      ? "正在处理"
+                      : blockedCount
+                        ? "部分需处理"
+                        : "等待执行"
+                  : s.busy
+                    ? "正在收尾"
+                    : "已关闭"}
           </Status>
-          <strong>{s.message}</strong>
+          <strong>{statusMessage}</strong>
+          {run.startedAt && run.deadlineAt ? (
+            <small>
+              开始 {formatTime(run.startedAt)} · 截止{" "}
+              {formatTime(run.deadlineAt)}
+            </small>
+          ) : null}
           {s.lastHeartbeatAt ? (
             <small>最近检查 {formatTime(s.lastHeartbeatAt)}</small>
           ) : null}
         </div>
-        <label className="autocare-power">
-          <span>自动养号</span>
-          <Switch
-            aria-label="自动养号总开关"
-            checked={s.enabled}
-            disabled={
-              busy ||
-              (!s.enabled &&
-                (s.busy ||
-                  stale ||
-                  !cfg.accountIds.length ||
-                  !(
-                    cfg.publish ||
-                    cfg.answerRecommended ||
-                    cfg.readRecommended ||
-                    cfg.likeCandidates ||
-                    cfg.followCandidates
-                  )))
-            }
-            onCheckedChange={toggle}
-          />
-        </label>
+        <div className="autocare-master-controls">
+          {s.enabled ? (
+            <Button
+              size="compact"
+              disabled={
+                busy ||
+                s.busy ||
+                stale ||
+                changed ||
+                !s.todayPlan ||
+                !run.supported ||
+                run.ended
+              }
+              title={
+                !s.todayPlan
+                  ? "应用后端更新后可用"
+                  : "检查本地状态并补齐未执行安排"
+              }
+              onClick={() =>
+                void action(
+                  () => ipc("zhihu.autocare.recheck", { revision: s.revision }),
+                  "已重新检查本地状态与未执行安排",
+                )
+              }
+            >
+              重新检查安排
+            </Button>
+          ) : null}
+          <label className="autocare-power">
+            <span>自动养号</span>
+            <Switch
+              aria-label="自动养号总开关"
+              checked={s.enabled}
+              disabled={
+                busy ||
+                (!s.enabled &&
+                  (s.busy ||
+                    !run.supported ||
+                    stale ||
+                    !cfg.accountIds.length ||
+                    !(
+                      cfg.publish ||
+                      cfg.answerRecommended ||
+                      cfg.readRecommended ||
+                      cfg.likeCandidates ||
+                      cfg.randomLikes ||
+                      cfg.randomComments ||
+                      cfg.followCandidates
+                    )))
+              }
+              onCheckedChange={toggle}
+            />
+          </label>
+        </div>
       </Panel>
       {error ? <Notice danger>{error}</Notice> : null}
       {draft.error ? <Notice warning>{draft.error}</Notice> : null}
+      {requiresBackendUpdate ? (
+        <Notice warning>
+          应用顶部更新后，数量自动调整为发布3、回答2、读取4、互动4，并采用启动后2小时方案；已消耗额度保留。
+        </Notice>
+      ) : null}
       {stale ? (
         <Notice warning>
           设置已在其他窗口更新。
@@ -212,368 +359,101 @@ function AutocareControl({
           </Button>
         </Notice>
       ) : null}
-      <Panel
-        title="本次设置"
-        extra={
-          <Button
-            primary
-            size="compact"
-            disabled={busy || s.busy || stale || !changed}
-            onClick={() =>
-              void action(
-                () =>
-                  ipc("zhihu.autocare.save", {
-                    config: cfg,
-                    revision: s.revision,
-                  }),
-                s.enabled ? "设置已应用，未执行任务将重新排期" : "设置已保存",
-              )
-            }
-          >
-            {s.enabled ? "保存并应用" : "保存设置"}
-          </Button>
-        }
-      >
-        <fieldset
-          disabled={busy || s.busy || stale}
-          className="autocare-settings"
-        >
-          <div className="autocare-accounts">
-            {s.accounts.map((a) => (
-              <CheckboxField
-                key={a.id}
-                label={
-                  <>
+      {!s.enabled ? settings : null}
+      <AutocareAgenda
+        snapshot={s}
+        onOpenTasks={() => openAdvanced("tasks")}
+        onOpenParticipation={() => openAdvanced("participation")}
+        onManageAccount={() => navigate("website-accounts")}
+      />
+      <AutocareLogs names={names} />
+      {s.enabled ? settings : null}
+      <details className="panel autocare-history">
+        <summary>
+          账号创作分与发布历史{" "}
+          <span className="muted">累计发布 {published.length} 篇</span>
+        </summary>
+        <div className="autocare-history-content">
+          <div className="autocare-overview">
+            <span>
+              本模式累计发布 <strong>{published.length}</strong> 篇
+            </span>
+            <span>
+              官方曝光 / 浏览 <strong>暂不可获取</strong>
+            </span>
+            <span>
+              随机点赞：{s.config.randomLikes ? "已启用" : "未启用"} ·
+              随机评论：
+              {s.config.randomComments ? "已启用" : "未启用"}
+            </span>
+            <Button quiet size="compact" onClick={() => openAdvanced("tasks")}>
+              文章与任务详情
+            </Button>
+          </div>
+          <div className="autocare-status-list">
+            {s.accounts
+              .filter((a) => s.config.accountIds.includes(a.id))
+              .map((a) => (
+                <div className="autocare-account-status" key={a.id}>
+                  <div>
                     <strong>{a.nickname || a.alias}</strong>
                     <small>
-                      {a.environmentName} ·{" "}
-                      {a.status === "connected" ? "已登录" : "需检查登录"}
+                      {s.accountMessages[a.id] ||
+                        "开启后先安排计划，到时再核对账号和素材"}
                     </small>
-                  </>
-                }
-                checked={cfg.accountIds.includes(a.id)}
-                disabled={s.enabled}
-                onChange={(e) =>
-                  update({
-                    accountIds: e.target.checked
-                      ? [...new Set([...cfg.accountIds, a.id])]
-                      : cfg.accountIds.filter((id) => id !== a.id),
-                  })
-                }
-              />
-            ))}
-            {!s.accounts.length ? (
-              <Empty
-                compact
-                title="还没有知乎账号"
-                action={
-                  <Button
-                    size="compact"
-                    onClick={() => navigate("website-accounts")}
-                  >
-                    连接账号
-                  </Button>
-                }
-              >
-                先关联已登录的比特窗口。
-              </Empty>
-            ) : null}
-          </div>
-          <div className="autocare-actions">
-            <CheckboxField
-              label="自动发文"
-              checked={cfg.publish}
-              onChange={(e) => update({ publish: e.target.checked })}
-            />
-            <CheckboxField
-              label="回答推荐问题"
-              checked={cfg.answerRecommended}
-              onChange={(e) => update({ answerRecommended: e.target.checked })}
-            />
-            <CheckboxField
-              label="读取推荐内容"
-              checked={cfg.readRecommended}
-              onChange={(e) => update({ readRecommended: e.target.checked })}
-            />
-            <CheckboxField
-              label="准备点赞"
-              checked={cfg.likeCandidates}
-              onChange={(e) => update({ likeCandidates: e.target.checked })}
-            />
-            <CheckboxField
-              label="发现作者与关注"
-              checked={cfg.followCandidates}
-              onChange={(e) => update({ followCandidates: e.target.checked })}
-            />
-          </div>
-          <p className="autocare-flow autocare-help">
-            文章由皮皮虾资料成稿；回答筛选官方推荐浏览量大于1万的问题，共用发布额度。点赞、关注准备具体待办，由本人在本页确认。
-          </p>
-          <div className="autocare-actions">
-            <Button
-              size="compact"
-              onClick={() =>
-                update({
-                  ...autocareConfigSchema.parse({}),
-                  accountIds: cfg.accountIds,
-                  answerRecommended: true,
-                  readRecommended: true,
-                  likeCandidates: true,
-                  followCandidates: true,
-                })
-              }
-            >
-              应用完整运营预设
-            </Button>
-          </div>
-          <div className="autocare-primary-fields">
-            <Field label="推荐预设">
-              <div className="autocare-preset">日常养号 · 不限领域</div>
-            </Field>
-            <Field label="每号每日发布总上限">
-              <input
-                aria-label="每号每日文章与回答总上限"
-                type="number"
-                min={1}
-                max={10}
-                value={cfg.dailyLimit}
-                onChange={(e) => update({ dailyLimit: Number(e.target.value) })}
-              />
-            </Field>
-            <Field label="开始时间">
-              <input
-                aria-label="养号开始时间"
-                type="time"
-                value={cfg.windowStart}
-                onChange={(e) => update({ windowStart: e.target.value })}
-              />
-            </Field>
-            <Field label="结束时间">
-              <input
-                aria-label="养号结束时间"
-                type="time"
-                value={cfg.windowEnd}
-                onChange={(e) => update({ windowEnd: e.target.value })}
-              />
-            </Field>
-          </div>
-          <details className="autocare-more">
-            <summary>更多设置与预算</summary>
-            <div className="autocare-primary-fields">
-              <Field label="目标等级">
-                <input
-                  type="number"
-                  min={4}
-                  max={10}
-                  value={cfg.targetLevel}
-                  onChange={(e) =>
-                    update({ targetLevel: Number(e.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="每号每周最多">
-                <input
-                  type="number"
-                  min={1}
-                  max={70}
-                  value={cfg.weeklyLimit}
-                  onChange={(e) =>
-                    update({ weeklyLimit: Number(e.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="最小间隔（分钟）">
-                <input
-                  type="number"
-                  min={60}
-                  max={1440}
-                  value={cfg.gapMinutes}
-                  onChange={(e) =>
-                    update({ gapMinutes: Number(e.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="每日生成尝试上限">
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={cfg.generationsPerDay}
-                  onChange={(e) =>
-                    update({ generationsPerDay: Number(e.target.value) })
-                  }
-                />
-              </Field>
-            </div>
-            <div className="autocare-primary-fields">
-              <Field label="其中回答每日最多">
-                <input
-                  type="number"
-                  min={1}
-                  max={2}
-                  value={cfg.answersPerDay}
-                  onChange={(e) =>
-                    update({ answersPerDay: Number(e.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="每日自动读取上限">
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={cfg.researchPerDay}
-                  onChange={(e) =>
-                    update({ researchPerDay: Number(e.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="每日点赞关注上限">
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={cfg.interactionDailyLimit}
-                  onChange={(e) =>
-                    update({ interactionDailyLimit: Number(e.target.value) })
-                  }
-                />
-              </Field>
-            </div>
-            <CheckboxField
-              label="补采原帖评论作为生成参考（使用额外采集请求）"
-              checked={cfg.includeComments}
-              onChange={(e) => update({ includeComments: e.target.checked })}
-            />
-            <p className="muted">
-              原图有已保存的使用依据时附图；其余采用有来源的文字稿。自动读取默认每日3次。开启只保存计划，账号任务随机延后并错峰，到时以无头模式执行；可见登录窗口不会被静默接管。
-            </p>
-            <Button
-              size="compact"
-              onClick={() =>
-                update({
-                  ...autocareConfigSchema.parse({}),
-                  accountIds: cfg.accountIds,
-                })
-              }
-            >
-              恢复推荐预设
-            </Button>
-          </details>
-        </fieldset>
-        <div className="autocare-budget">
-          <span>
-            模型：{s.modelName || "未设置"} · 今日生成 {s.generationCount}/
-            {cfg.generationsPerDay} 次 · 全局AI日预算
-            {s.globalAiBudgetMicros === null
-              ? "未设置金额上限"
-              : ` $${(s.globalAiBudgetMicros / 1e6).toFixed(2)}`}
-          </span>
-          <span>
-            采集今日剩余 {s.requestsRemaining}/{s.requestsLimit} 次 ·{" "}
-            {s.listPagesPerRun
-              ? "库存不足时自动补采"
-              : "新列表采集已关闭，仅用本地库存"}
-          </span>
-          <Button quiet size="compact" onClick={() => openSettings("sources")}>
-            数据源设置
-          </Button>
-          <Button quiet size="compact" onClick={() => openSettings("ai")}>
-            模型与预算
-          </Button>
-        </div>
-        <small className="muted">
-          开启只做本地检查和排期，所有自动浏览操作使用比特无头模式；到时核验身份再执行。手动登录和验证在账号管理处理。
-        </small>
-      </Panel>
-      <Panel
-        title="运行情况"
-        extra={
-          <span className="muted">
-            下次执行 {next ? formatTime(next) : "等待安排"}
-          </span>
-        }
-      >
-        <div className="autocare-overview">
-          <span>
-            本模式累计发布 <strong>{published.length}</strong> 篇
-          </span>
-          <span>
-            官方曝光 / 浏览 <strong>暂不可获取</strong>
-          </span>
-          <Button quiet size="compact" onClick={openAdvanced}>
-            文章与任务详情
-          </Button>
-        </div>
-        <div className="autocare-status-list">
-          {s.accounts
-            .filter((a) => cfg.accountIds.includes(a.id))
-            .map((a) => (
-              <div className="autocare-account-status" key={a.id}>
-                <div>
-                  <strong>{a.nickname || a.alias}</strong>
-                  <small>
-                    {s.accountMessages[a.id] ||
-                      "开启后先安排计划，到时再核对账号和素材"}
-                  </small>
-                  {s.cycles[a.id] ? (
                     <small>
-                      下次
-                      {s.cycles[a.id].kind === "research"
-                        ? "内容读取"
-                        : "任务准备"}{" "}
-                      · {formatTime(s.cycles[a.id].at)} · 无头
+                      今日已尝试 {a.today} / 有效上限{" "}
+                      {Math.min(a.plan.dailyLimit, s.config.dailyLimit)} · 本周{" "}
+                      {a.week} /{" "}
+                      {Math.min(a.plan.weeklyLimit, s.config.weeklyLimit)}
                     </small>
-                  ) : null}
-                  <small>
-                    今日已尝试 {a.today} / 有效上限{" "}
-                    {Math.min(a.plan.dailyLimit, cfg.dailyLimit)} · 本周{" "}
-                    {a.week} / {Math.min(a.plan.weeklyLimit, cfg.weeklyLimit)}
-                  </small>
+                  </div>
+                  <ZhihuCreatorProgress
+                    progress={a.plan.progress}
+                    targetLevel={s.config.targetLevel}
+                  />
                 </div>
-                <ZhihuCreatorProgress
-                  progress={a.plan.progress}
-                  targetLevel={cfg.targetLevel}
-                />
-              </div>
-            ))}
-        </div>
-        {published.length ? (
-          <div className="autocare-receipts">
-            {published
-              .slice(-3)
-              .reverse()
-              .map((j) => (
-                <Button
-                  key={j.id}
-                  size="compact"
-                  onClick={() => void ipc("system.external", { url: j.url! })}
-                >
-                  {names.get(j.accountId)} · 查看已发布
-                  {j.kind === "answer" ? "回答" : "文章"}
-                </Button>
               ))}
           </div>
-        ) : null}
-        {s.jobs.some(
-          (j) => j.status === "attention" || j.status === "skipped",
-        ) ? (
-          <details className="autocare-more">
-            <summary>跳过与需处理记录</summary>
-            {s.jobs
-              .filter((j) => ["attention", "skipped"].includes(j.status))
-              .slice(-10)
-              .reverse()
-              .map((j) => (
-                <p key={j.id} className="autocare-wrap">
-                  {names.get(j.accountId)} · {j.message} <small>{j.id}</small>
-                </p>
-              ))}
-          </details>
-        ) : null}
-      </Panel>
-      <AutocareParticipation snapshot={s} reload={reload} />
-      <AutocareLogs names={names} />
+          {published.length ? (
+            <div className="autocare-receipts">
+              {published
+                .slice(-3)
+                .reverse()
+                .map((j) => (
+                  <Button
+                    key={j.id}
+                    size="compact"
+                    onClick={() => void ipc("system.external", { url: j.url! })}
+                  >
+                    {names.get(j.accountId)} · 查看已发布
+                    {j.kind === "answer" ? "回答" : "文章"}
+                  </Button>
+                ))}
+            </div>
+          ) : null}
+          {s.jobs.some(
+            (j) => j.status === "attention" || j.status === "skipped",
+          ) ? (
+            <details className="autocare-more">
+              <summary>跳过与需处理记录</summary>
+              {s.jobs
+                .filter((j) => ["attention", "skipped"].includes(j.status))
+                .slice(-10)
+                .reverse()
+                .map((j) => (
+                  <p key={j.id} className="autocare-wrap">
+                    {names.get(j.accountId)} · {j.message} <small>{j.id}</small>
+                  </p>
+                ))}
+            </details>
+          ) : null}
+        </div>
+      </details>
+      <details className="autocare-records">
+        <summary>自动互动结果与历史记录</summary>
+        <AutocareParticipation snapshot={s} reload={reload} />
+      </details>
     </>
   );
 }

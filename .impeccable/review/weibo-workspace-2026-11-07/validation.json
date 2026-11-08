@@ -1,0 +1,42 @@
+{
+  "date": "2026-11-07",
+  "businessTests": {
+    "command": "node --import tsx --test tests/weibo-workspace.test.ts tests/weibo-marketing.test.ts tests/weibo-publishing.test.ts tests/weibo-publisher-page.test.ts",
+    "passed": 27,
+    "failed": 0,
+    "transport": "isolated fixtures; no official website or paid API"
+  },
+  "typescript": "npx tsc --noEmit passed",
+  "diffCheck": "git diff --check passed",
+  "ui": {
+    "report": "ui-test.json",
+    "windowId": "5137edfa-162b-48a6-84a7-1203a0bbab21",
+    "passedChecks": 16,
+    "pageErrors": 0,
+    "viewport": "1440x900",
+    "businessTransport": "this page only, temporary AppService and database"
+  },
+  "liveLocalReadOnly": {
+    "report": "live-readonly.json",
+    "windowId": "c09248a8-d3bd-4631-afc5-2a081e62560f",
+    "loadedRevision": 243,
+    "pendingAtVerification": false,
+    "accountStyleVerified": true,
+    "existingContentAndCachedStatisticsVerified": true,
+    "officialStatisticsRefresh": false,
+    "businessWrites": false,
+    "generation": false,
+    "upload": false,
+    "publish": false
+  },
+  "finishReview": {
+    "report": "finish-verdict.md",
+    "disposition": "ship",
+    "scope": "F1, F2 and F3 scored resolved; not a new whole-surface or official publishing review"
+  },
+  "cleanup": {
+    "ownTaskWindowsClosed": true,
+    "otherTaskWindowsPreserved": ["1fa57ad8-e6b5-4a09-8b68-c8c55113cc85"],
+    "focused": "main"
+  }
+}

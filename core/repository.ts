@@ -11,6 +11,7 @@ import type {
   Draft,
   Job,
   Pool,
+  PoolSummary,
   Publication,
   Resource,
   ResourcePage,
@@ -332,6 +333,43 @@ export class Repository {
         createdAt: r.created_at,
       }));
   }
+  getPool(id: string): Pool | undefined {
+    const row = this.db.get<Row>("SELECT * FROM pools WHERE id=?", id);
+    return row
+      ? {
+          id: row.id,
+          name: row.name,
+          resourceId: row.resource_id,
+          keywords: parseJson(row.keywords, []),
+          createdAt: row.created_at,
+        }
+      : undefined;
+  }
+  poolSummaries(): PoolSummary[] {
+    // Project only counts and at most five word/id pairs into the app snapshot.
+    // No metric payload or complete keyword array crosses the list boundary.
+    const keywords =
+      "CASE WHEN json_valid(p.keywords) THEN CASE WHEN json_type(p.keywords)='array' THEN p.keywords ELSE '[]' END ELSE '[]' END";
+    return this.db
+      .all<Row>(
+        `SELECT p.id,p.name,p.resource_id,p.created_at,
+      json_array_length(${keywords}) keyword_count,
+      (SELECT json_group_array(json_object('id',json_extract(CASE WHEN j.type='object' THEN j.value ELSE '{}' END,'$.id'),'word',json_extract(CASE WHEN j.type='object' THEN j.value ELSE '{}' END,'$.word')))
+        FROM (SELECT value,type FROM json_each(${keywords}) LIMIT 5) j) preview
+      FROM pools p ORDER BY p.created_at DESC,p.id`,
+      )
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        resourceId: row.resource_id,
+        keywordCount: Number(row.keyword_count),
+        preview: parseJson<PoolSummary["preview"]>(row.preview, []).filter(
+          (item) =>
+            typeof item?.id === "string" && typeof item.word === "string",
+        ),
+        createdAt: row.created_at,
+      }));
+  }
   bindings(): BrowserBinding[] {
     return this.db
       .all<Row>("SELECT * FROM browser_bindings ORDER BY platform,alias")
@@ -392,7 +430,7 @@ export class Repository {
         COALESCE(SUM(CASE WHEN status IN ('reserved','uncertain') THEN COALESCE(reserved_micros,estimated_micros,0) ELSE 0 END),0) pending_micros,
         COALESCE(SUM(CASE WHEN status IN ('reserved','uncertain') AND reserved_micros IS NULL AND estimated_micros IS NULL THEN 1 ELSE 0 END),0) pending_unknown,
         COALESCE(SUM(CASE WHEN status IN ('reserved','uncertain') THEN 1 ELSE 0 END),0) pending_count
-      FROM api_calls WHERE (endpoint='openrouter')=?`,
+      FROM api_calls WHERE (endpoint='openrouter')=? AND endpoint<>'tikhub:music'`,
       currency === "USD" ? 1 : 0,
     )!;
     return {
@@ -493,7 +531,7 @@ export class Repository {
           message: r.message,
         })),
       jobs: this.jobs(),
-      pools: this.pools(),
+      pools: this.poolSummaries(),
       drafts: this.drafts(resourceId),
       bindings: this.bindings(),
       publications,

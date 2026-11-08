@@ -52,4 +52,4 @@
 - `core/zhidao/workers/collect.ts`：沿用现有任务执行、结果保存及断点。
 - `src/resource-collection/`：渠道连接与采集结果界面。
 
-开发验证遵循项目 `AGENTS.md`：默认源码与 TypeScript 检查，复用现有 `npm run dev` 窗口；自动化测试、真实密钥调用、转存与发布需遵循用户明确授权范围。
+开发验证遵循项目 `AGENTS.md`：默认源码与 TypeScript 检查及相关脚本自动化测试，复用现有 `npm run dev` 后台，在本任务专属窗口连续验证，不操作主工作台；真实密钥调用、转存与发布仍按本次用户已授权范围执行。

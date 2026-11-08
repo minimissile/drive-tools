@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { readWeiboStyle } from "./editorial";
 import { id, now } from "../database";
 import { AppError, safeMessage } from "../errors";
 import { ContentSources, sameContentWord } from "../content-sources";
@@ -126,6 +127,7 @@ export class WeiboMarketing {
     const run = this.load(runId);
     const draft = this.deps.repo.draft(run.draftId);
     const resource = this.deps.repo.getResource(draft.resourceId);
+    const claimed = new Set(this.history().filter(item => item.id !== run.id).flatMap(item => item.draftIds ?? [item.draftId]));
     return {
       run,
       draft,
@@ -140,7 +142,7 @@ export class WeiboMarketing {
         "SELECT id,title,version FROM drafts WHERE topic_id=? AND copy_id=? AND platform='weibo' AND split_item_id IS NULL ORDER BY updated_at DESC,rowid DESC",
         run.topicId,
         run.input.copyId,
-      ),
+      ).filter(item => run.draftIds ? run.draftIds.includes(item.id) : !claimed.has(item.id)),
     };
   }
   private save(run: WeiboMarketingRun) {
@@ -169,6 +171,8 @@ export class WeiboMarketing {
   }
   create(raw: unknown) {
     const input = weiboMarketingInput.parse(raw);
+    const account=input.accountId?this.deps.websiteAccounts.get(input.accountId):null;
+    if(account && account.provider!=="weibo")throw new AppError("WEIBO_ACCOUNT_REQUIRED","请选择微博账号。");
     const source =
       input.sourceId === "manual"
         ? {
@@ -188,12 +192,11 @@ export class WeiboMarketing {
       );
     this.deps.search.assertTarget(input.copyId, null);
     const history = this.history();
-    const duplicate = history.find(
-      (run) =>
-        sameContentWord(run.input.keyword) === sameContentWord(input.keyword) &&
-        run.input.copyId === input.copyId,
-    );
-    if (duplicate) return this.get(duplicate.id);
+    const sameAccount = history.find(run =>
+      sameContentWord(run.input.keyword) === sameContentWord(input.keyword) && run.input.copyId === input.copyId &&
+      (!input.accountId || (run.options?.accountId || run.input.accountId || "") === input.accountId) &&
+      (run.input.originId || "") === input.originId);
+    if (sameAccount) return this.get(sameAccount.id);
     const existing = this.deps.repo.db
       .all<{
         id: string;
@@ -230,7 +233,7 @@ export class WeiboMarketing {
           },
           false,
         );
-    if (
+    if (!input.accountId &&
       this.deps.search
         .get(topic.id)
         .publications.some((item) => item.status !== "opened")
@@ -239,7 +242,7 @@ export class WeiboMarketing {
         "WEIBO_ALREADY_PUBLISHED",
         "该选题已有发布记录，请继续原选题的效果复盘。",
       );
-    if (topic.evidence !== input.evidence)
+    if (topic.evidence !== input.evidence && (!existing || !input.accountId))
       this.deps.search.facts({
         id: topic.id,
         intent: topic.intent,
@@ -247,7 +250,18 @@ export class WeiboMarketing {
         operatingSystem: topic.operatingSystem,
         evidence: input.evidence,
       });
-    const draft = this.deps.search.write(topic.id);
+    let draft = this.deps.search.write(topic.id);
+    if(input.accountId){
+      const draftId=id("draft"),time=now();
+      this.deps.repo.db.run("INSERT INTO drafts(id,resource_id,copy_id,platform,pool_id,title,body,tags,cover_text,version,resource_revision,share_version,model,reviewed,created_at,updated_at,topic_id,content_format) SELECT ?,resource_id,copy_id,platform,pool_id,title,body,tags,cover_text,version+1,resource_revision,share_version,model,0,?,?,topic_id,content_format FROM drafts WHERE id=?",draftId,time,time,draft.id);
+      draft=this.deps.repo.draft(draftId);
+    }
+    if(input.initialText){
+      const text=input.initialText.trim(), newline=text.indexOf("\n");
+      const hasTitle=newline>0&&newline<=200;
+      this.deps.repo.db.run("UPDATE drafts SET title=?,body=?,tags='[]',model=?,reviewed=0 WHERE id=?",hasTitle?text.slice(0,newline):input.keyword,hasTitle?text.slice(newline).trim():text,input.aiAssisted?"weibo-workspace-ai":"manual",draft.id);
+    }
+    const binding=account?this.deps.repo.bindings().find(b=>b.platform==="weibo"&&b.websiteAccountId===account.id):null;
     const time = now();
     const run: WeiboMarketingRun = {
       id: id("weibo"),
@@ -255,7 +269,9 @@ export class WeiboMarketing {
       source,
       topicId: topic.id,
       draftId: draft.id,
-      options: null,
+      draftIds: [draft.id],
+      options: account?.uid && binding ? {accountId:account.id,bindingId:binding.id,uid:account.uid,includeLink:false,artwork:this.deps.repo.getResource(draft.resourceId).coverId?"cover":"creative",visibility:"self"} : null,
+      editorial: readWeiboStyle(this.deps.repo.db,input.accountId),
       stage: "review",
       message:
         "已关联本人资料。可以直接编辑，或显式生成资源推荐文案与配图方案。",
@@ -329,16 +345,19 @@ export class WeiboMarketing {
               contentFormat: "shortpost",
               aspectRatio: "3:4",
               pageCount: 1,
-              brief: `资源推荐图文。目标人群：${run.input.audience || "以资料事实为准"}。正文建议 140–280 字，最多 3 个相关话题。配图为资料主题介绍，不伪造文件内页、实测或评价。`,
+              brief: `资源分享图文。${run.editorial?.instructions || readWeiboStyle(this.deps.repo.db,run.options?.accountId||run.input.accountId||"").instructions} 目标人群：${run.input.audience || "以资料事实为准"}。优先真实资源封面，不伪造文件内页、实测或评价。`,
             })
           : await this.deps.ai.draft(
               run.input.copyId,
               "weibo",
               null,
-              this.deps.search.context(run.topicId),
+              {...this.deps.search.context(run.topicId),topic:{...this.deps.search.context(run.topicId).topic,evidence:run.input.evidence,intent:run.input.audience}},
+              "shortpost",
+              run.editorial?.instructions || readWeiboStyle(this.deps.repo.db,run.options?.accountId||run.input.accountId||"").instructions,
             );
       if (this.closed) return;
       run.draftId = draft.id;
+      run.draftIds = [...new Set([...(run.draftIds ?? []), draft.id])];
       run.prepared = null;
       run.stage = "review";
       run.message =
@@ -352,6 +371,8 @@ export class WeiboMarketing {
     const run = this.load(runId);
     this.editable(run);
     const draft = this.deps.repo.draft(draftId);
+    if (this.history().some(other => other.id !== run.id && (other.draftIds ?? [other.draftId]).includes(draftId)))
+      throw new AppError("DRAFT_ACCOUNT_MISMATCH", "这是另一账号内容版本的稿件，请使用“另存版本”创建独立内容。");
     if (
       draft.platform !== "weibo" ||
       draft.contentFormat !== "shortpost" ||
@@ -364,6 +385,7 @@ export class WeiboMarketing {
         "稿件与当前微博选题或本人资料不一致。",
       );
     run.draftId = draftId;
+    run.draftIds = [...new Set([...(run.draftIds ?? []), draftId])];
     run.prepared = null;
     run.stage = "review";
     run.message = "已保存当前文案版本，请重新审阅并准备图文包。";
@@ -399,6 +421,7 @@ export class WeiboMarketing {
         "请选择其他账号中已连接的微博账号。",
       );
     run.options = options;
+    if (run.editorial || run.input.accountId) run.editorial = readWeiboStyle(this.deps.repo.db, account.id);
     run.prepared = null;
     run.stage = "review";
     run.message = "发布设置已保存，准备时会实时核验本人分享。";
@@ -441,7 +464,8 @@ export class WeiboMarketing {
       run.options.includeLink &&
         !includesOwnShareLink(draft.body, copy.shareUrl),
     );
-    const text = weiboPostText(draft, pack.body),
+    const link = run.editorial?.linkFirst && pack.delivery?.position === "body" ? `链接：${pack.delivery.url}${pack.delivery.code ? `\n提取码：${pack.delivery.code}` : ""}` : "";
+    const text = weiboPostText(draft, link ? draft.body : pack.body, link),
       issue = weiboContentIssue(draft, text);
     if (issue) throw new AppError("WEIBO_CONTENT_REQUIRED", issue);
     const files: { name: string; path: string; bytes?: Buffer }[] = [];
@@ -541,18 +565,18 @@ export class WeiboMarketing {
       .digest("hex");
     return { draft, binding, text, files, fingerprint };
   }
-  prepare(runId: string) {
+  prepare(runId: string, exportPackage = true) {
     return this.work(runId, "preparing", async (run) => {
       run.prepared = null;
       this.save(run);
       const delivery = await this.delivery(run);
-      const selected = await this.deps.ports.chooseDirectory(
+      const selected = exportPackage ? await this.deps.ports.chooseDirectory(
         "content",
         this.deps.repo.db.setting<string | undefined>(
           "lastContentExportDirectory",
           undefined,
         ),
-      );
+      ) : join(this.deps.dataPath,"weibo-packages");
       if (this.closed) return;
       if (!selected) {
         run.stage = "review";
@@ -561,7 +585,7 @@ export class WeiboMarketing {
         return;
       }
       const folder = join(selected, `盘序微博-${id("package")}`);
-      await mkdir(folder, { mode: 0o700 });
+      await mkdir(folder, { recursive:true, mode: 0o700 });
       try {
         for (const file of delivery.files) {
           if (file.bytes)
@@ -623,9 +647,8 @@ export class WeiboMarketing {
           uid: run.options!.uid,
         };
         run.stage = "ready";
-        run.message =
-          "文案、图片和发布清单已导出。下一步复制文案并打开指定微博窗口，上传图片后由本人发布。";
-        this.deps.repo.db.setSetting("lastContentExportDirectory", selected);
+        run.message = exportPackage ? "文案与图片已导出，可继续填写官方发布器并核对发布。" : "发布附件已在应用内保存，可以填写官方发布器；尚未上传或发布。";
+        if(exportPackage)this.deps.repo.db.setSetting("lastContentExportDirectory", selected);
         this.save(run);
       } catch (error) {
         await rm(folder, { recursive: true, force: true });

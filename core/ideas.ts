@@ -114,7 +114,8 @@ export class KeywordIdeas {
       }>(
         `
         WITH archived AS (
-          SELECT *,ROW_NUMBER() OVER(PARTITION BY kind,normalized_word,coalesce(platform,''),source ORDER BY coalesce(observed_at,'') DESC,rowid DESC) recent FROM traffic_items WHERE kind IN ('word','hotspot')
+          SELECT i.id,i.word,e.source,nullif(e.platform,'') platform,i.observed_at,1 recent
+          FROM traffic_entries e JOIN traffic_observations i ON i.seq=e.latest_observation_seq WHERE e.kind IN ('word','hotspot')
         ), docs AS (
           SELECT 'archive:'||i.id prefix,NULL pool_name,NULL resource_id,json_object('word',i.word,'source',i.source,'platform',i.platform,'fetchedAt',i.observed_at) item,'object' item_type FROM archived i WHERE i.recent=1
           UNION ALL
@@ -286,6 +287,6 @@ export class KeywordIdeas {
       time,
     );
     this.changed();
-    return this.repo.pools().find((p) => p.id === poolId)!;
+    return this.repo.getPool(poolId)!;
   }
 }

@@ -1,0 +1,334 @@
+.tieba-autocare {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.tieba-autocare .page-heading,
+.tieba-autocare .panel {
+  margin-bottom: 0;
+}
+.tieba-autocare .panel {
+  padding: var(--space-4);
+}
+.tieba-autocare .panel-heading {
+  margin-bottom: var(--space-3);
+}
+.tieba-autocare .panel-heading small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-master {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.tieba-master-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 13px;
+}
+.tieba-master-status > span:not(.status) {
+  overflow-wrap: anywhere;
+}
+.tieba-master-status small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-power {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.tieba-target-tools {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.tieba-target-tools > .field {
+  width: 240px;
+  max-width: 100%;
+}
+.tieba-target-search {
+  flex: 1;
+  min-width: 240px;
+}
+.tieba-target-refresh-scope {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tieba-selection-tools,
+.tieba-target-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-size: 12px;
+}
+.tieba-selection-tools {
+  margin-block: var(--space-3) var(--space-2);
+}
+.tieba-selection-tools > span {
+  color: var(--muted);
+}
+.tieba-target-footer {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+}
+.tieba-target-footer > .row {
+  margin-left: auto;
+}
+.tieba-target-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+.tieba-target-source {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tieba-target-actions {
+  display: grid;
+  gap: var(--space-1);
+}
+.modal.tieba-add-dialog {
+  width: 900px;
+  max-width: 90vw;
+}
+.tieba-add-dialog .dialog-body {
+  gap: var(--space-3);
+}
+.tieba-add-legacy {
+  font-size: 12px;
+  color: var(--muted);
+}
+.tieba-add-legacy summary {
+  cursor: pointer;
+}
+.tieba-add-intro,
+.tieba-add-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.tieba-add-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: var(--space-4);
+}
+.tieba-add-top > .field + .field,
+.tieba-add-filters > .field + .field {
+  margin-top: 0;
+}
+.tieba-add-selection,
+.tieba-add-preset-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+.tieba-add-selected-forums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.tieba-add-search {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+}
+.tieba-add-search > .field {
+  flex: 1;
+  min-width: 0;
+}
+.tieba-add-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(220px, 1.2fr);
+  align-items: end;
+  gap: var(--space-3);
+}
+.tieba-add-results {
+  display: grid;
+  gap: var(--space-3);
+}
+.tieba-add-result {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.tieba-add-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0 0 26px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tieba-add-presets {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.tieba-add-presets legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+.tieba-add-presets legend small {
+  margin-left: var(--space-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.tieba-add-preset-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+.tieba-add-scope {
+  flex: 1;
+  min-width: 280px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tieba-add-scope > small {
+  display: block;
+  margin-top: var(--space-1);
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.tieba-add-failures {
+  padding-left: var(--space-5);
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.tieba-add-failures li + li {
+  margin-top: var(--space-1);
+}
+.tieba-add-failures strong {
+  font-weight: 500;
+}
+.tieba-target-table,
+.tieba-task-table {
+  table-layout: fixed;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.tieba-target-table th:first-child {
+  width: 52px;
+}
+.tieba-target-table th:nth-child(2) {
+  width: 23%;
+}
+.tieba-target-table th:nth-child(3) {
+  width: 72px;
+}
+.tieba-target-table th:nth-child(4) {
+  width: 84px;
+}
+.tieba-target-table th:nth-child(5) {
+  width: 142px;
+}
+.tieba-target-table th:last-child {
+  width: 124px;
+}
+.tieba-task-table th:first-child {
+  width: 23%;
+}
+.tieba-task-table th:nth-child(2) {
+  width: 160px;
+}
+.tieba-task-table th:nth-child(3) {
+  width: 120px;
+}
+.tieba-task-table th:last-child {
+  width: 108px;
+}
+.tieba-target-table td,
+.tieba-task-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  padding: var(--space-2) 10px;
+}
+.tieba-target-table strong,
+.tieba-task-table strong {
+  font-weight: 500;
+}
+.tieba-target-table td small,
+.tieba-task-table td small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-target-table tr[data-selected] {
+  background: var(--blue-bg);
+}
+.tieba-target-table .checkbox-field {
+  min-height: var(--control-compact-height);
+}
+.tieba-task-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin-bottom: var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-task-summary strong {
+  margin-left: var(--space-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.tieba-log-body {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 0;
+}
+.tieba-logs .panel-heading {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.tieba-log-dialog .dialog-body {
+  overflow: hidden;
+}
+.tieba-log-dialog .tieba-log-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.tieba-log-dialog .log-window {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 160px;
+}
+.tieba-log-dialog .log-window-viewport {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
