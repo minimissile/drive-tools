@@ -41,12 +41,14 @@ export function createWechatHandlers({
         .extend({
           sentRevision: z.number().int().positive(),
           published: z.boolean(),
+          accountId: identifier.optional(),
         })
         .parse(raw);
       return wechat.markPublished(
         input.id,
         input.sentRevision,
         input.published,
+        input.accountId,
       );
     },
     "wechat.discoveryConfig": () => wechat.discovery.config(),
@@ -97,6 +99,12 @@ export function createWechatHandlers({
       return wechat.rewrite(i.id, i.instruction, i.styleId);
     },
     "wechat.pickImage": (raw) => wechat.pickImage(article.parse(raw).id),
+    "wechat.generateTitles": (raw) => {
+      const input = version
+        .extend({ text: wechatTextInput.optional() })
+        .parse(raw);
+      return wechat.generateTitles(input.id, input.revision, input.text);
+    },
     "wechat.regenerateImages": (raw) =>
       wechat.regenerateImages(wechatRegenerateImagesInput.parse(raw)),
     "wechat.generateThemeImages": (raw) =>
@@ -110,6 +118,7 @@ export function createWechatHandlers({
         .parse(raw);
       return wechat.send(i.id, i.revision, i.accountId);
     },
+    "wechat.recheck": (raw) => wechat.recheck(article.parse(raw).id),
     "wechat.resolve": (raw) => {
       const i = article
         .extend({

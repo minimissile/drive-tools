@@ -5,9 +5,18 @@ import type {
   WebsiteAccount,
   WebsiteSessionState,
 } from "../shared/website-accounts";
-import type { WechatPort } from "../shared/wechat";
+import type { WechatPort, WechatDraftVerification } from "../shared/wechat";
 import { AppError, safeMessage } from "../core/errors";
+import {
+  initialWechatIdentity,
+  staleWechatIdentity,
+} from "./wechat-login-state";
 import { readContentImage } from "../core/content-assets";
+import { WechatImageUploads } from "./wechat-image-uploads";
+import {
+  assertWechatImagePixels,
+  wechatComparisonImageBytes,
+} from "./wechat-image-content";
 import {
   normalizeWechatRemoteImageUrl,
   isPublicWechatImageAddress,
@@ -88,7 +97,9 @@ async function downloadImage(value: string): Promise<Buffer> {
               response.destroy();
               reject(
                 new AppError(
-                  "WECHAT_IMAGE_DOWNLOAD",
+                  [404, 410].includes(response.statusCode ?? 0)
+                    ? "WECHAT_IMAGE_MISSING"
+                    : "WECHAT_IMAGE_DOWNLOAD",
                   `图片读取失败（HTTP ${response.statusCode ?? "未知"}），请上传本地图片后重试。`,
                 ),
               );
@@ -143,18 +154,14 @@ export function createWechatSession(
         /(^|\.)weixin\.qq\.com$/.test(cookie.domain ?? "") &&
         /^(slave_sid|slave_user|bizuin)$/.test(cookie.name)
       )
-        states.delete(ctx);
+        states.set(ctx, staleWechatIdentity(states.get(ctx)));
     });
   };
   const status = (account: WebsiteAccount): WebsiteSessionState => {
     const ctx = context(account);
     ensureObserved(ctx);
     return {
-      ...(states.get(ctx) ?? {
-        hasSession: false,
-        uid: null,
-        error: "请扫码登录微信公众号，再点击检查登录。",
-      }),
+      ...(states.get(ctx) ?? initialWechatIdentity(account)),
       windowOpen: !!ctx.window && !ctx.window.isDestroyed(),
       checking: pending.has(ctx),
     };
@@ -209,8 +216,7 @@ export function createWechatSession(
     let failure: unknown;
     for (let attempt = 0; attempt < 20; attempt++) {
       try {
-        await evaluate(win, fn, ...args);
-        return;
+        return await evaluate(win, fn, ...args);
       } catch (error) {
         failure = error;
       }
@@ -219,7 +225,10 @@ export function createWechatSession(
     }
     throw failure;
   };
-  const identify = async (win: BrowserWindow): Promise<Identity> => {
+  const identify = async (
+    win: BrowserWindow,
+    ctx: Context,
+  ): Promise<Identity> => {
     await win.loadURL("https://mp.weixin.qq.com/");
     const current = new URL(win.webContents.getURL());
     const token = current.searchParams.get("token");
@@ -233,6 +242,15 @@ export function createWechatSession(
         "WECHAT_LOGIN_REQUIRED",
         "未能核实公众号原始 ID，请在官方窗口扫码登录或完成安全验证后检查登录。",
       );
+    states.set(ctx, {
+      hasSession: true,
+      uid: identity.uid,
+      nickname: identity.nickname,
+      checkedAt: new Date().toISOString(),
+      windowOpen: false,
+      error: null,
+    });
+    await ctx.profile.cookies.flushStore().catch(() => {});
     return identity;
   };
   const verify = async (account: WebsiteAccount) => {
@@ -244,31 +262,43 @@ export function createWechatSession(
         timeout = setTimeout(() => {
           if (!win.isDestroyed()) win.destroy();
         }, 35000);
+      let verified: WebsiteSessionState | undefined;
       try {
-        const identity = await identify(win);
-        states.set(ctx, {
+        const identity = await identify(win, ctx);
+        verified = {
           hasSession: true,
           uid: identity.uid,
           nickname: identity.nickname,
           checkedAt: new Date().toISOString(),
           windowOpen: false,
           error: null,
-        });
+        };
+        states.set(ctx, verified);
       } catch (error) {
         states.set(ctx, {
           hasSession: false,
           uid: null,
           windowOpen: false,
+          ...(error instanceof AppError &&
+          error.code === "WECHAT_LOGIN_REQUIRED"
+            ? { expired: !!account.uid }
+            : { unverified: !!account.uid }),
           error:
             error instanceof AppError
               ? error.message
-              : "公众号身份检查未完成，请在官方窗口处理登录或安全验证后重试。",
+              : "公众号身份检查暂未完成，请检查网络后重试；已保存的登录会话会继续保留。",
         });
       } finally {
         clearTimeout(timeout);
         if (!win.isDestroyed()) win.destroy();
       }
-      return { ...status(account), checking: false };
+      // A normal cookie refresh can invalidate the cache while this reader
+      // closes. Return the identity just read; writes still verify it again.
+      return {
+        ...(verified ?? status(account)),
+        windowOpen: status(account).windowOpen,
+        checking: false,
+      };
     })();
     pending.set(ctx, task);
     try {
@@ -297,6 +327,39 @@ export function createWechatSession(
     }
     return downloadImage(raw);
   };
+  const samePixels = async (expected: string, actual: string) => {
+    if (expected === actual) return;
+    const first = nativeImage.createFromBuffer(
+      wechatComparisonImageBytes(await imageBytes(expected)),
+    );
+    const second = nativeImage.createFromBuffer(
+      wechatComparisonImageBytes(await imageBytes(actual)),
+    );
+    assertWechatImagePixels(first, second);
+  };
+  const imageUploads = new WechatImageUploads(
+    workspace,
+    async (bytes, saved) => {
+      const actual = await imageBytes(saved.url);
+      assertWechatImagePixels(
+        nativeImage.createFromBuffer(wechatComparisonImageBytes(bytes)),
+        nativeImage.createFromBuffer(wechatComparisonImageBytes(actual)),
+      );
+    },
+  );
+  const verifySavedContent = async (
+    win: BrowserWindow,
+    proof: WechatDraftVerification,
+  ) => {
+    const result = (await waitForRead(win, assertWechatDraftContent, {
+      ...proof,
+      allowImageMigration: true,
+    })) as ReturnType<typeof assertWechatDraftContent>;
+    for (const actual of result.coverUrls)
+      await samePixels(proof.coverUrl, actual);
+    for (const pair of result.images)
+      await samePixels(pair.expected, pair.actual);
+  };
   const port: WechatPort = {
     readArticle,
     async open(account, raw) {
@@ -306,7 +369,7 @@ export function createWechatSession(
           ? ctx.window
           : reader(ctx, true);
       ctx.window = win;
-      const identity = await identify(win);
+      const identity = await identify(win, ctx);
       if (identity.uid !== account.uid)
         throw new AppError(
           "WECHAT_ACCOUNT_MISMATCH",
@@ -352,14 +415,40 @@ export function createWechatSession(
       win.show();
       win.focus();
     },
-    async saveDraft(account, payload, beforeSubmit) {
+    async verifyDraft(account, proof) {
+      const ctx = context(account),
+        win = reader(ctx);
+      const timeout = setTimeout(() => {
+        if (!win.isDestroyed()) win.destroy();
+      }, 180000);
+      try {
+        const identity = await identify(win, ctx);
+        if (identity.uid !== account.uid)
+          throw new AppError(
+            "WECHAT_ACCOUNT_MISMATCH",
+            "当前公众号与本次保存账号不一致。",
+          );
+        if (!/^\d{1,30}$/.test(proof.draftId))
+          throw new AppError("WECHAT_DRAFT_ID", "微信草稿编号无效。");
+        await win.loadURL(
+          `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${proof.draftId}&token=${identity.token}&lang=zh_CN`,
+        );
+        await waitForRead(win, assertWechatSingleDraft);
+        await verifySavedContent(win, proof);
+      } finally {
+        clearTimeout(timeout);
+        await ctx.profile.cookies.flushStore().catch(() => {});
+        if (!win.isDestroyed()) win.destroy();
+      }
+    },
+    async saveDraft(account, payload, beforeSubmit, onReceipt) {
       const ctx = context(account),
         win = reader(ctx);
       const timeout = setTimeout(() => {
         if (!win.isDestroyed()) win.destroy();
       }, 5 * 60000);
       try {
-        const identity = await identify(win);
+        const identity = await identify(win, ctx);
         if (identity.uid !== payload.uid || identity.uid !== account.uid)
           throw new AppError(
             "WECHAT_ACCOUNT_MISMATCH",
@@ -405,36 +494,43 @@ export function createWechatSession(
               "WECHAT_IMAGE",
               "图片转换后超过 10MB，请压缩后上传。",
             );
-          const response = await evaluate<Record<string, unknown>>(
-            win,
-            wechatExchange,
-            {
-              path: "/cgi-bin/filetransfer",
-              token: identity.token,
-              file: {
-                name: gif ? "article.gif" : "article.png",
-                type: gif ? "image/gif" : "image/png",
-                base64: bytes.toString("base64"),
-              },
+          const saved = await imageUploads.use(
+            identity.uid,
+            bytes,
+            async () => {
+              const response = await evaluate<Record<string, unknown>>(
+                win,
+                wechatExchange,
+                {
+                  path: "/cgi-bin/filetransfer",
+                  token: identity.token,
+                  file: {
+                    name: gif ? "article.gif" : "article.png",
+                    type: gif ? "image/gif" : "image/png",
+                    base64: bytes.toString("base64"),
+                  },
+                },
+              );
+              let saved: { url: string; id?: string };
+              try {
+                saved = decodeWechatImageReceipt(response);
+              } catch (error) {
+                if (error instanceof WechatImageReceiptError)
+                  console.error(
+                    "[wechat:image-upload] receipt rejected",
+                    JSON.stringify(error.diagnostic),
+                  );
+                throw error;
+              }
+              if (!saved.id)
+                console.info(
+                  "[wechat:image-upload] URL receipt",
+                  asCover ? "cover" : "body",
+                  JSON.stringify(describeWechatImageReceipt(response)),
+                );
+              return saved;
             },
           );
-          let saved: { url: string; id?: string };
-          try {
-            saved = decodeWechatImageReceipt(response);
-          } catch (error) {
-            if (error instanceof WechatImageReceiptError)
-              console.error(
-                "[wechat:image-upload] receipt rejected",
-                JSON.stringify(error.diagnostic),
-              );
-            throw error;
-          }
-          if (!saved.id)
-            console.info(
-              "[wechat:image-upload] URL receipt",
-              asCover ? "cover" : "body",
-              JSON.stringify(describeWechatImageReceipt(response)),
-            );
           uploaded.set(cacheKey, saved);
           return saved;
         };
@@ -490,7 +586,7 @@ export function createWechatSession(
           need_open_comment0: "1",
           only_fans_can_comment0: "0",
           copyright_type0: "0",
-          sourceurl0: "",
+          sourceurl0: payload.sourceUrl || "",
           article_type0: "0",
         };
         if (payload.draftId) fields.appmsgid = payload.draftId;
@@ -519,15 +615,20 @@ export function createWechatSession(
             "WECHAT_DRAFT_UNCERTAIN",
             `未取得可核实的微信草稿保存回执（${result?.ret ?? "无回执"}），请到微信草稿箱核对后再处理，避免重复创建。`,
           );
+        const proof: WechatDraftVerification = {
+          draftId,
+          url: `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${draftId}&lang=zh_CN`,
+          title: payload.title,
+          html,
+          coverUrl: cover.url,
+          sourceUrl: payload.sourceUrl || "",
+        };
+        await onReceipt?.(proof);
         try {
           await win.loadURL(
             `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${draftId}&token=${identity.token}&lang=zh_CN`,
           );
-          await waitForRead(win, assertWechatDraftContent, {
-            title: payload.title,
-            html,
-            coverUrl: cover.url,
-          });
+          await verifySavedContent(win, proof);
         } catch (error) {
           const reason = safeMessage(error).replace(
             /([?&](?:token|key|tempkey)=)[^&\s]+/gi,
@@ -539,12 +640,10 @@ export function createWechatSession(
             true,
           );
         }
-        return {
-          draftId,
-          url: `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${draftId}&lang=zh_CN`,
-        };
+        return { draftId: proof.draftId, url: proof.url };
       } finally {
         clearTimeout(timeout);
+        await ctx.profile.cookies.flushStore().catch(() => {});
         if (!win.isDestroyed()) win.destroy();
       }
     },

@@ -94,7 +94,8 @@ export function TrafficWordsDialog({
       }
     >
       <p className="wechat-editor-dialog-copy" id={hintId}>
-        每行一个词，自动去掉空行和重复词。保存后用于这篇文章的 AI 改写。
+        每行一个词，自动去除首尾空格、空行和重复词。保存后用于这篇文章的 AI
+        改写。
       </p>
       {conflict ? (
         <Notice warning>
@@ -119,49 +120,58 @@ export function TrafficWordsDialog({
         </Notice>
       ) : null}
       {draft.error ? <Notice warning>{draft.error}</Notice> : null}
-      <Field label="搜索流量词" hint={`${words.length} 个`}>
-        <textarea
-          className="wechat-traffic-input"
-          aria-describedby={hintId}
-          disabled={pending}
-          maxLength={12000}
-          value={draft.value.text}
-          onChange={(event) => {
-            draft.update({ text: event.target.value });
-            setError("");
-          }}
-          placeholder={"例如：\n电子版\n学习资料\n资料整理"}
-        />
-      </Field>
-      {words.length ? (
-        <div className="wechat-traffic-usage">
-          <span className="muted">
-            当前标题与正文已含 {usage.used.length}/{words.length} 个词
-          </span>
-          {usage.used.length ? (
-            <details>
-              <summary>已使用（{usage.used.length}）</summary>
-              <p>{usage.used.join("、")}</p>
-            </details>
+      <div className="wechat-traffic-layout">
+        <Field label="搜索流量词" hint={`${words.length} 个`}>
+          <textarea
+            className="wechat-traffic-input"
+            aria-describedby={hintId}
+            disabled={pending}
+            maxLength={12000}
+            value={draft.value.text}
+            onBlur={() =>
+              draft.update({
+                text: normalizeWechatTrafficWords(draft.value.text).join("\n"),
+              })
+            }
+            onChange={(event) => {
+              draft.update({ text: event.target.value });
+              setError("");
+            }}
+            placeholder={"例如：\n电子版\n学习资料\n资料整理"}
+          />
+        </Field>
+        <aside className="wechat-traffic-summary" aria-label="流量词使用情况">
+          {words.length ? (
+            <div className="wechat-traffic-usage">
+              <span className="muted">
+                当前标题与正文已含 {usage.used.length}/{words.length} 个词
+              </span>
+              {usage.used.length ? (
+                <details>
+                  <summary>已使用（{usage.used.length}）</summary>
+                  <p>{usage.used.join("、")}</p>
+                </details>
+              ) : null}
+              {usage.unused.length ? (
+                <details>
+                  <summary>未使用（{usage.unused.length}）</summary>
+                  <p>{usage.unused.join("、")}</p>
+                </details>
+              ) : null}
+            </div>
           ) : null}
-          {usage.unused.length ? (
-            <details>
-              <summary>未使用（{usage.unused.length}）</summary>
-              <p>{usage.unused.join("、")}</p>
-            </details>
-          ) : null}
-        </div>
-      ) : null}
-      {dirty ? (
-        <p className="wechat-editor-dialog-help muted">
-          保存词表后，会按同一原文的历史改写记录更新优先词。
-        </p>
-      ) : (
-        <TrafficWordPriority plan={plan} wordCount={saved.words.length} />
-      )}
-      <p className="wechat-editor-dialog-help muted">
-        标题优先选择最相关的 1–2 个词，正文自然融入其余相关词，不强行堆砌。
-      </p>
+          {dirty ? (
+            <p className="wechat-editor-dialog-help muted">
+              保存词表后，会按同一原文的历史改写记录更新优先词。
+            </p>
+          ) : (
+            <TrafficWordPriority plan={plan} wordCount={saved.words.length} />
+          )}
+          <p className="wechat-editor-dialog-help muted">
+            标题优先选择最相关的 1–2 个词，正文自然融入其余相关词，不强行堆砌。
+          </p>
+        </aside>
+      </div>
     </Dialog>
   );
 }

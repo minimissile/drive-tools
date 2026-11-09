@@ -81,6 +81,8 @@ export interface WechatArticle extends WechatText {
   links: SmzdmResourceLink[];
   revision: number;
   aiAssisted: boolean;
+  /** Last explicitly formatted or delivered template, separate from body edits. */
+  typesettingVersion?: number;
   /** Last successful article rewrite, separate from the editor's next selected style. */
   rewriteStyleId?: WechatRewriteStyleId;
   /** Editorial input only; never included in the remote draft payload. */
@@ -92,11 +94,14 @@ export interface WechatArticle extends WechatText {
   remote: WechatRemote | null;
   /** Account intended for a write whose result still needs to be resolved. */
   pendingAccount: { id: string; uid: string } | null;
+  /** Persisted immediately after WeChat returns an ID, before readback. No tokens. */
+  pendingDraft?: WechatDraftVerification | null;
   createdAt: string;
   updatedAt: string;
 }
 export interface WechatDetail {
   article: WechatArticle;
+  automaticVerification?: boolean;
   trafficWordPlan?: WechatTrafficWordPlan;
   editions?: WechatEditionSummary[];
   issues: SmzdmIssue[];
@@ -111,17 +116,41 @@ export type WechatSummary = Pick<
   | "revision"
   | "rewriteStyleId"
   | "edition"
-> & { sentRevision: number | null };
+> & {
+  sentRevision: number | null;
+  sourceTitle?: string;
+  materialId?: string;
+  editionNumber?: number;
+};
 export interface WechatDraftPayload extends WechatText {
   key: string;
   uid: string;
   html: string;
   aiAssisted: boolean;
   draftId?: string;
+  /** Native “阅读原文” entry; a body anchor is subject to account permissions. */
+  sourceUrl?: string;
 }
 export interface WechatDraftReceipt {
   draftId: string;
   url: string;
+}
+export interface WechatDraftVerification extends WechatDraftReceipt {
+  title: string;
+  html: string;
+  coverUrl: string;
+  /** Undefined preserves compatibility with previously saved proofs. */
+  sourceUrl?: string;
+}
+export function wechatTargetReceipt(
+  article: WechatArticle,
+  accountId: string,
+): WechatRemote | undefined {
+  const value =
+    article.remote?.accountId === accountId ? article.remote : undefined;
+  if (!value) return undefined;
+  const { draftId, url, uid, revision, sentAt } = value;
+  return { accountId, draftId, url, uid, revision, sentAt };
 }
 export interface WechatPort {
   readArticle(url: string): Promise<SmzdmSource>;
@@ -129,7 +158,12 @@ export interface WechatPort {
     account: WebsiteAccount,
     payload: WechatDraftPayload,
     beforeSubmit: () => Promise<void>,
+    onReceipt?: (proof: WechatDraftVerification) => Promise<void>,
   ): Promise<WechatDraftReceipt>;
+  verifyDraft?(
+    account: WebsiteAccount,
+    proof: WechatDraftVerification,
+  ): Promise<void>;
   open(account: WebsiteAccount, url?: string): Promise<void>;
 }
 export const wechatImageBatchLimit = 20;
@@ -173,7 +207,12 @@ export interface WechatContract {
     WechatDetail
   >;
   "wechat.markPublished": Contract<
-    { id: string; sentRevision: number; published: boolean },
+    {
+      id: string;
+      sentRevision: number;
+      published: boolean;
+      accountId?: string;
+    },
     WechatDetail
   >;
   "wechat.discoveryConfig": Contract<undefined, { configured: boolean }>;
@@ -208,6 +247,10 @@ export interface WechatContract {
     { id: string; wordsRevision: number; words: string[] },
     WechatDetail
   >;
+  "wechat.generateTitles": Contract<
+    { id: string; revision: number; text?: WechatText },
+    string[]
+  >;
   "wechat.pickImage": Contract<
     { id: string },
     { url: string; name: string } | null
@@ -224,6 +267,7 @@ export interface WechatContract {
     { id: string; revision: number; accountId: string; confirmed: true },
     WechatDetail
   >;
+  "wechat.recheck": Contract<{ id: string }, WechatDetail>;
   "wechat.resolve": Contract<
     {
       id: string;

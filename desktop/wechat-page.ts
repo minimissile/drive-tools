@@ -164,6 +164,9 @@ export function assertWechatDraftContent(expected: {
   title: string;
   html: string;
   coverUrl: string;
+  sourceUrl?: string;
+  /** The caller must compare every returned pair by decoded pixels. */
+  allowImageMigration?: boolean;
 }) {
   if (
     location.origin !== "https://mp.weixin.qq.com" ||
@@ -228,6 +231,50 @@ export function assertWechatDraftContent(expected: {
   }
   if (!html || title !== expected.title)
     throw Error("尚未读取到与本地标题一致的微信草稿。");
+  if (expected.sourceUrl !== undefined) {
+    const normalize = (value: string) => {
+      if (!value.trim()) return "";
+      try {
+        const url = new URL(value.replace(/&amp;/g, "&"));
+        return ["https:", "http:"].includes(url.protocol) &&
+          !url.username &&
+          !url.password &&
+          !url.port
+          ? url.href
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const sources = new Set<string | null>();
+    for (const parent of metadata) {
+      if (
+        !record(parent) ||
+        String(parent.app_id ?? "") !==
+          new URL(location.href).searchParams.get("appmsgid") ||
+        !Array.isArray(parent.multi_item) ||
+        parent.multi_item.length !== 1
+      )
+        continue;
+      const item = parent.multi_item[0];
+      if (record(item) && typeof item.source_url === "string")
+        sources.add(normalize(item.source_url));
+    }
+    if (!sources.size)
+      for (const input of document.querySelectorAll<HTMLInputElement>(
+        'input[name="source_url"], input[name="sourceurl0"]',
+      ))
+        sources.add(normalize(input.value));
+    const expectedSource = normalize(expected.sourceUrl);
+    if (
+      expectedSource === null ||
+      sources.size !== 1 ||
+      !sources.has(expectedSource)
+    )
+      throw Error(
+        "未能核实微信草稿的“阅读原文”资源入口，请稍后重新检查保存结果。",
+      );
+  }
   const normalizeCover = (value: unknown) => {
     if (typeof value !== "string" || !value.trim()) return null;
     try {
@@ -285,8 +332,9 @@ export function assertWechatDraftContent(expected: {
   if (
     !expectedCover ||
     invalidCover ||
-    covers.size !== 1 ||
-    !covers.has(expectedCover)
+    covers.size === 0 ||
+    (!expected.allowImageMigration && covers.size !== 1) ||
+    (!covers.has(expectedCover) && !expected.allowImageMigration)
   )
     throw Error("未能核实微信草稿封面与本地设置一致。");
   const parser = new DOMParser(),
@@ -315,6 +363,25 @@ export function assertWechatDraftContent(expected: {
       link.getAttribute("href"),
     ),
   );
+  const actualImages = imageUrls(actual),
+    expectedImages = imageUrls(target);
+  if (
+    expected.allowImageMigration &&
+    actualImages.some((raw) => {
+      try {
+        const url = new URL(raw);
+        return (
+          !["mmbiz.qpic.cn", "mmbiz.qlogo.cn"].includes(url.hostname) ||
+          !!url.username ||
+          !!url.password ||
+          !!url.port
+        );
+      } catch {
+        return true;
+      }
+    })
+  )
+    throw Error("微信草稿包含无法核实的图片地址。");
   const modifiedLink = [...actualLinks].some(
     (href) => !expectedLinks.has(href),
   );
@@ -330,7 +397,17 @@ export function assertWechatDraftContent(expected: {
     actualText !== targetText ||
     modifiedLink ||
     missingLink ||
-    JSON.stringify(imageUrls(actual)) !== JSON.stringify(imageUrls(target))
+    actualImages.length !== expectedImages.length ||
+    (!expected.allowImageMigration &&
+      JSON.stringify(actualImages) !== JSON.stringify(expectedImages))
   )
     throw Error("微信草稿回读的正文、链接或插图与本地稿件不一致。");
+  return {
+    coverUrl: [...covers][0],
+    coverUrls: [...covers],
+    images: actualImages.map((actual, index) => ({
+      actual,
+      expected: expectedImages[index],
+    })),
+  };
 }

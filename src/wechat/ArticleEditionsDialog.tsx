@@ -15,7 +15,7 @@ import { stageLabel } from "./labels";
 const actionLabel: Record<WechatDeliveryRecord["action"], string> = {
   created: "新建微信草稿",
   updated: "更新微信草稿",
-  verified: "核对确认已保存",
+  verified: "核验通过，已保存",
   saved: "已保存微信草稿",
 };
 
@@ -126,6 +126,7 @@ export function ArticleEditionsDialog({
                               await ipc("wechat.markPublished", {
                                 id: edition.id,
                                 sentRevision: record.revision,
+                                accountId: record.accountId,
                                 published: !record.publicationMarkedAt,
                               }),
                             );

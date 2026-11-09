@@ -26,13 +26,17 @@ import {
   type WechatText,
   type WechatEditionSummary,
   type WechatDeliveryRecord,
+  type WechatRemote,
+  wechatTargetReceipt,
 } from "../../shared/wechat";
 import {
   isWechatImageUrl,
   wechatArticleImages,
   wechatHtml,
+  wechatReadMoreUrl,
   linkifyWechatMarkdown,
 } from "../../shared/wechat-markup";
+import { wechatTypesettingVersion } from "../../shared/wechat-typesetting";
 import {
   articleLinks,
   articleLinkOccurrences,
@@ -45,11 +49,20 @@ import {
   type WechatRewriteStyleId,
 } from "../../shared/wechat-rewrite";
 import { wechatRewriteInstruction } from "./rewrite-styles";
+import {
+  wechatTitleIdentity,
+  wechatTitleInstruction,
+  wechatTitleResponse,
+} from "./title-candidates";
 import { RuntimeLog } from "../runtime-log";
+import { wechatArticleFamilies, wechatSourceIdentity } from "./article-family";
 import type { AppPorts } from "../ports";
 import { WechatDiscovery } from "./discovery";
 import { wechatImagePrompt } from "./image-prompts";
-import { wechatTrafficWordsInput } from "../../shared/wechat-traffic-words";
+import {
+  wechatTrafficWordsInput,
+  wechatTrafficWordUsage,
+} from "../../shared/wechat-traffic-words";
 import {
   recordWechatTrafficWords,
   wechatTrafficWordPlan,
@@ -121,7 +134,19 @@ export class WechatArticles {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
   list() {
-    return this.articles().map(
+    const articles = this.articles();
+    const metadata = new Map<
+      string,
+      { materialId: string; editionNumber: number }
+    >();
+    for (const family of wechatArticleFamilies(articles).values())
+      family.forEach((article, index) =>
+        metadata.set(article.id, {
+          materialId: family[0].id,
+          editionNumber: index + 1,
+        }),
+      );
+    return articles.map(
       ({
         id,
         title,
@@ -131,6 +156,7 @@ export class WechatArticles {
         remote,
         rewriteStyleId,
         edition,
+        source,
       }) => ({
         id,
         title,
@@ -139,6 +165,8 @@ export class WechatArticles {
         revision,
         rewriteStyleId,
         edition,
+        sourceTitle: source.title,
+        ...metadata.get(id)!,
         sentRevision: remote?.revision ?? null,
       }),
     );
@@ -183,12 +211,13 @@ export class WechatArticles {
       : "本地稿已保存，可继续编辑后发送到微信草稿箱。";
   }
   private editionHistory(article: WechatArticle): WechatEditionSummary[] {
-    const rootId = article.edition?.rootId ?? article.id;
-    return this.articles()
-      .filter((item) => (item.edition?.rootId ?? item.id) === rootId)
-      .map((item) => ({
+    const family = wechatArticleFamilies(this.articles()).get(
+      wechatSourceIdentity(article.source.url),
+    )!;
+    return family
+      .map((item, index) => ({
         id: item.id,
-        number: item.edition?.number ?? 1,
+        number: index + 1,
         title: item.title,
         stage: item.stage,
         rewriteStyleId: item.rewriteStyleId,
@@ -233,19 +262,34 @@ export class WechatArticles {
       },
     ];
   }
-  markPublished(id: string, sentRevision: number, published: boolean) {
+  markPublished(
+    id: string,
+    sentRevision: number,
+    published: boolean,
+    accountId?: string,
+  ) {
     const article = this.load(id);
     this.editable(article);
     const history = this.editionHistory(article).find(
       (item) => item.id === id,
     )!.deliveries;
-    if (!history.some((record) => record.revision === sentRevision))
+    if (
+      !history.some(
+        (record) =>
+          record.revision === sentRevision &&
+          (!accountId || record.accountId === accountId),
+      )
+    )
       throw new AppError(
         "WECHAT_DELIVERY_NOT_FOUND",
         "没有找到这次送稿记录，请刷新后重试。",
       );
     article.deliveryHistory = history.map((record) => {
-      if (record.revision !== sentRevision) return record;
+      if (
+        record.revision !== sentRevision ||
+        (accountId && record.accountId !== accountId)
+      )
+        return record;
       const next = { ...record };
       if (published) next.publicationMarkedAt ??= now();
       else delete next.publicationMarkedAt;
@@ -262,7 +306,9 @@ export class WechatArticles {
   ) {
     const parent = this.load(parentId);
     this.editable(parent);
-    const rootId = parent.edition?.rootId ?? parent.id;
+    const rootId = wechatArticleFamilies(this.articles()).get(
+      wechatSourceIdentity(parent.source.url),
+    )![0].id;
     const existing = this.articles().find(
       (item) => item.edition?.requestId === requestId,
     );
@@ -292,6 +338,7 @@ export class WechatArticles {
       stage: "editing",
       remote: null,
       pendingAccount: null,
+      pendingDraft: null,
       deliveryHistory: [],
       message: `第 ${number} 稿已创建。可直接存为新微信草稿，也可先改写或换图。`,
       createdAt: now(),
@@ -359,6 +406,7 @@ export class WechatArticles {
     const article = this.load(id);
     return {
       article,
+      automaticVerification: !!this.d.port?.verifyDraft,
       editions: this.editionHistory(article),
       trafficWordPlan: wechatTrafficWordPlan(
         this.d.repo.db,
@@ -840,8 +888,12 @@ export class WechatArticles {
     const article = this.load(id);
     this.editable(article);
     const formatted = linkifyWechatMarkdown(formatArticle(article.body));
-    if (formatted !== article.body) {
+    if (
+      formatted !== article.body ||
+      article.typesettingVersion !== wechatTypesettingVersion
+    ) {
       article.body = formatted;
+      article.typesettingVersion = wechatTypesettingVersion;
       this.revised(article);
       this.persist(article);
     }
@@ -876,65 +928,85 @@ export class WechatArticles {
       const { sections, entries, expectedIds } = wechatRewriteBody(
         article.body,
       );
+      if (!expectedIds.length)
+        throw new AppError(
+          "WECHAT_REWRITE",
+          "没有可独立改写的正文段落，原稿已保留。请补充正文，或将正文与图片、链接分行后重试。",
+        );
       const trafficWords = article.trafficWords?.words ?? [];
       const wordPlan = wechatTrafficWordPlan(
         this.d.repo.db,
         article.source.url,
         trafficWords,
       );
-      const result = await this.d.ai.resourceExport(
-        "wechat_article_copy",
-        wechatRewriteResponse,
-        rewriteInstruction,
-        {
-          title: article.title,
-          sections,
-          sourceAuthor: article.source.author,
-          instruction,
-          trafficWords,
-          priorityTrafficWords: wordPlan.priorityWords,
-          trafficWordUsage: wordPlan.usage,
-          trafficWordPriorityMode: wordPlan.mode,
-          previousTitles: [
-            ...new Set(
-              this.editionHistory(article).flatMap((item) => [
-                ...(item.id !== article.id ? [item.title] : []),
-                ...item.deliveries
-                  .map((delivery) => delivery.title)
-                  .filter(Boolean),
-              ]),
-            ),
-          ].slice(0, 30),
-        },
-        [],
-        {
-          retainResponse: true,
-          jsonMode: this.d.ai.modelFor("copy").startsWith("qwen/"),
-        },
-      );
-      const actualIds = result.sections.map(({ id }) => id);
-      const ids = new Set(actualIds);
-      if (
-        actualIds.length !== expectedIds.length ||
-        expectedIds.some((id) => !ids.has(id))
-      ) {
+      let result!: z.infer<typeof wechatRewriteResponse>;
+      let retryFeedback = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        result = await this.d.ai.resourceExport(
+          "wechat_article_copy",
+          wechatRewriteResponse,
+          rewriteInstruction,
+          {
+            title: article.title,
+            sections,
+            sourceAuthor: article.source.author,
+            instruction,
+            trafficWords,
+            priorityTrafficWords: wordPlan.priorityWords,
+            trafficWordUsage: wordPlan.usage,
+            trafficWordPriorityMode: wordPlan.mode,
+            retryFeedback,
+            previousTitles: [
+              ...new Set(
+                this.editionHistory(article).flatMap((item) => [
+                  ...(item.id !== article.id ? [item.title] : []),
+                  ...item.deliveries
+                    .map((delivery) => delivery.title)
+                    .filter(Boolean),
+                ]),
+              ),
+            ].slice(0, 30),
+          },
+          [],
+          {
+            retainResponse: true,
+            jsonMode: this.d.ai.modelFor("copy").startsWith("qwen/"),
+          },
+        );
+        const actualIds = result.sections.map(({ id }) => id);
+        const ids = new Set(actualIds);
+        const mismatch =
+          actualIds.length !== expectedIds.length ||
+          expectedIds.some((id) => !ids.has(id));
+        const emptyIds = result.sections
+          .filter(
+            ({ text }) => !formatArticle(text.replace(/<br\s*\/?>/gi, "\n")),
+          )
+          .map(({ id }) => id);
+        if (!mismatch && !emptyIds.length) break;
         this.logs.record({
           level: "warning",
-          event: "rewrite.section_mismatch",
-          message: "模型返回的正文分段不完整，原稿已保留。",
+          event: mismatch
+            ? "rewrite.section_mismatch"
+            : "rewrite.empty_sections",
+          message: "模型返回的正文不完整，原稿已保留。",
           taskId: article.id,
           details: {
             styleId,
+            attempt: attempt + 1,
             expectedIds: expectedIds.slice(0, 200),
             actualIds: actualIds.slice(0, 200),
+            emptyIds: emptyIds.slice(0, 200),
             expectedCount: expectedIds.length,
             actualCount: actualIds.length,
           },
         });
-        throw new AppError(
-          "WECHAT_REWRITE",
-          "改写结果缺少正文分段，原稿已保留，请重试。",
-        );
+        if (attempt === 1)
+          throw new AppError(
+            "WECHAT_REWRITE",
+            "模型连续返回不完整正文，已自动重试一次，原稿已保留。请换个风格或模型后重试。",
+          );
+        retryFeedback = `上一轮正文不完整。请重新输出全部结果，必须包含且只包含可编辑段落编号 ${expectedIds.join("、")}，每个 text 必须有实质正文，不得为空或只有换行。不要为追求风格删空已有段落；素材不支持故事时保留平实叙述。`;
       }
       checkRewriteText(result.title);
       checkRewriteText(result.digest);
@@ -944,6 +1016,7 @@ export class WechatArticles {
       article.body = linkifyWechatMarkdown(restored);
       article.digest = result.digest;
       article.aiAssisted = true;
+      article.typesettingVersion = wechatTypesettingVersion;
       article.rewriteStyleId = styleId;
       this.revised(article);
       article.message =
@@ -959,6 +1032,100 @@ export class WechatArticles {
         );
       });
       return this.get(id);
+    } finally {
+      this.active.delete(id);
+    }
+  }
+  async generateTitles(id: string, revision: number, raw?: WechatText) {
+    const article = this.load(id);
+    this.editable(article);
+    this.assertRevision(article, revision);
+    const text = wechatTextInput.parse(raw ?? article);
+    this.active.add(id);
+    try {
+      let retryFeedback = "";
+      const claims = ["免费", "微信版", "小程序"];
+      const stated = wechatTrafficWordUsage(claims, "", text.body).used;
+      const unsupportedClaims = claims.filter(
+        (claim) => !stated.includes(claim),
+      );
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const result = await this.d.ai.resourceExport(
+            "wechat_article_titles",
+            wechatTitleResponse,
+            wechatTitleInstruction(
+              article.rewriteStyleId ?? defaultWechatRewriteStyle,
+            ),
+            {
+              currentTitle: text.title,
+              sections: wechatRewriteBody(text.body).sections,
+              sourceAuthor: article.source.author,
+              trafficWords: article.trafficWords?.words ?? [],
+              priorityTrafficWords: wechatTrafficWordPlan(
+                this.d.repo.db,
+                article.source.url,
+                article.trafficWords?.words ?? [],
+              ).priorityWords,
+              previousTitles: this.editionHistory(article)
+                .map((item) => item.title)
+                .slice(0, 30),
+              retryFeedback,
+              unsupportedClaims,
+            },
+            [],
+            {
+              retainResponse: true,
+              jsonMode: this.d.ai.modelFor("copy").startsWith("qwen/"),
+            },
+          );
+          result.titles.forEach(checkRewriteText);
+          if (
+            result.titles.some((title) =>
+              unsupportedClaims.some((claim) => title.includes(claim)),
+            )
+          )
+            throw new AppError(
+              "WECHAT_TITLES",
+              "标题加入了正文未说明的信息，请重试。",
+            );
+          const keys = result.titles.map(wechatTitleIdentity);
+          if (
+            keys.some(
+              (key) => !key || key === wechatTitleIdentity(text.title),
+            ) ||
+            new Set(keys).size !== 5
+          )
+            throw new AppError(
+              "WECHAT_TITLES",
+              "模型返回的标题存在重复，请重试。",
+            );
+          this.assertRevision(this.load(id), revision);
+          if (this.closed)
+            throw new AppError(
+              "WECHAT_CHANGED",
+              "工作空间已切换，请重新生成标题。",
+            );
+          return result.titles;
+        } catch (error) {
+          const retryable =
+            error instanceof z.ZodError ||
+            (error instanceof AppError &&
+              [
+                "WECHAT_TITLES",
+                "WECHAT_REWRITE",
+                "INVALID_AI_RESPONSE",
+              ].includes(error.code));
+          if (!retryable) throw error;
+          if (attempt)
+            throw new AppError(
+              "WECHAT_TITLES",
+              "未取得五条符合正文且不同的有效标题，原有标题已保留，请重试。",
+            );
+          retryFeedback = `上一轮标题校验未通过。重新生成恰好五条不同的纯文本标题，每条不超过64字，不重复当前标题，不添加链接。当前正文未说明 ${unsupportedClaims.join("、") || "额外条件"}，即使词池或旧标题出现，也不得在候选标题中加入。`;
+        }
+      }
+      throw new AppError("WECHAT_TITLES", "标题未生成，请重试。");
     } finally {
       this.active.delete(id);
     }
@@ -1003,6 +1170,7 @@ export class WechatArticles {
   private async payload(
     article: WechatArticle,
     uid: string,
+    target?: WechatRemote,
   ): Promise<WechatDraftPayload> {
     const error = this.issues(article).find(
       (issue) => issue.severity === "error",
@@ -1033,8 +1201,9 @@ export class WechatArticles {
       key: `panxu:${article.id}:${article.revision}`,
       uid,
       html: wechatHtml(article.body),
+      sourceUrl: wechatReadMoreUrl(article.body),
       aiAssisted: article.aiAssisted,
-      ...(article.remote ? { draftId: article.remote.draftId } : {}),
+      ...(target ? { draftId: target.draftId } : {}),
     };
   }
   async send(id: string, revision: number, accountId: string) {
@@ -1044,9 +1213,10 @@ export class WechatArticles {
     if (article.remote && article.remote.accountId !== accountId)
       throw new AppError(
         "WECHAT_ACCOUNT",
-        "此稿已绑定原公众号，请使用原账号更新同一微信草稿。",
+        "此稿已绑定原公众号。需要选择其他公众号时，请先点“再发一篇”创建新稿。",
       );
-    if (article.remote?.revision === revision) return this.get(id);
+    const target = wechatTargetReceipt(article, accountId);
+    if (target?.revision === revision) return this.get(id);
     if (!this.d.port)
       throw new AppError(
         "WECHAT_DESKTOP",
@@ -1058,16 +1228,13 @@ export class WechatArticles {
         accountId,
         "wechat",
         async (verified) => {
-          if (
-            !verified.uid ||
-            (article.remote && article.remote.uid !== verified.uid)
-          )
+          if (!verified.uid || (target && target.uid !== verified.uid))
             throw new AppError(
               "WECHAT_ACCOUNT",
               "当前公众号身份与原草稿不一致，请重新检查登录。",
             );
           const stamp = JSON.stringify(this.d.environmentStamp(accountId));
-          const payload = await this.payload(article, verified.uid),
+          const payload = await this.payload(article, verified.uid, target),
             fingerprint = createHash("sha256")
               .update(JSON.stringify(payload))
               .digest("hex");
@@ -1094,7 +1261,9 @@ export class WechatArticles {
                 fingerprint !==
                 createHash("sha256")
                   .update(
-                    JSON.stringify(await this.payload(article, verified.uid!)),
+                    JSON.stringify(
+                      await this.payload(article, verified.uid!, target),
+                    ),
                   )
                   .digest("hex")
               )
@@ -1103,10 +1272,33 @@ export class WechatArticles {
                   "发送内容已变化，请重新核对。",
                 );
               article.stage = "sending";
+              article.typesettingVersion = wechatTypesettingVersion;
               article.pendingAccount = { id: verified.id, uid: verified.uid! };
+              article.pendingDraft = null;
               article.message = "正在保存到微信草稿箱，等待官方保存回执。";
               this.persist(article);
               started = true;
+            },
+            async (proof) => {
+              if (!started || article.stage !== "sending")
+                throw new AppError(
+                  "WECHAT_RECEIPT",
+                  "未记录对应微信保存操作。",
+                );
+              const receipt = this.receipt(proof.draftId, proof.url);
+              if (target && target.draftId !== receipt.draftId)
+                throw new AppError(
+                  "WECHAT_RECEIPT",
+                  "微信草稿编号与当前目标公众号记录不一致。",
+                );
+              article.pendingDraft = {
+                ...receipt,
+                title: proof.title,
+                html: proof.html,
+                coverUrl: proof.coverUrl,
+                sourceUrl: proof.sourceUrl,
+              };
+              this.persist(article);
             },
           );
           if (!started)
@@ -1115,12 +1307,12 @@ export class WechatArticles {
               "未记录微信保存操作，未将本次结果标记为成功。",
             );
           const confirmed = this.receipt(receipt.draftId, receipt.url);
-          if (article.remote && article.remote.draftId !== confirmed.draftId)
+          if (target && target.draftId !== confirmed.draftId)
             throw new AppError(
               "WECHAT_RECEIPT",
               "微信返回了不同的草稿标识，请先在后台核对结果。",
             );
-          const wasUpdate = !!article.remote;
+          const wasUpdate = !!target;
           article.remote = {
             ...confirmed,
             accountId: verified.id,
@@ -1130,6 +1322,7 @@ export class WechatArticles {
           };
           this.recordDelivery(article, wasUpdate ? "updated" : "created");
           article.pendingAccount = null;
+          article.pendingDraft = null;
           article.stage = "synced";
           article.message = "已保存到微信草稿箱。请到微信后台预览并自行发文。";
           this.persist(article);
@@ -1166,6 +1359,88 @@ export class WechatArticles {
     }
     return this.get(id);
   }
+  async recheck(id: string) {
+    const article = this.load(id);
+    if (this.closed || this.active.has(id))
+      throw new AppError("WECHAT_BUSY", "草稿正在处理，请稍后重试。");
+    if (article.stage !== "uncertain" || !article.pendingAccount)
+      return this.get(id);
+    if (!this.d.port?.verifyDraft)
+      throw new AppError(
+        "WECHAT_DESKTOP",
+        "请加载最新源码后检查微信保存结果。",
+      );
+    if (!article.pendingDraft) {
+      const draftId =
+        article.message.match(/微信已返回草稿编号\s+(\d{1,30})(?!\d)/)?.[1] ??
+        wechatTargetReceipt(article, article.pendingAccount.id)?.draftId;
+      if (!draftId)
+        throw new AppError(
+          "WECHAT_RECEIPT",
+          "微信未返回可核实的草稿编号，请先打开微信草稿箱查看，暂不重复发送。",
+        );
+      article.pendingDraft = {
+        draftId,
+        url: `https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit&type=77&appmsgid=${draftId}`,
+        title: article.title,
+        html: wechatHtml(article.body, article.typesettingVersion ?? 0),
+        coverUrl: article.coverUrl,
+        ...(article.typesettingVersion && article.typesettingVersion >= 2
+          ? { sourceUrl: wechatReadMoreUrl(article.body) }
+          : {}),
+      };
+      this.persist(article);
+    }
+    const pending = article.pendingAccount,
+      proof = article.pendingDraft;
+    this.active.add(id);
+    try {
+      await this.d.accounts.use(
+        pending.id,
+        "wechat",
+        async (account) => {
+          if (account.uid !== pending.uid)
+            throw new AppError(
+              "WECHAT_ACCOUNT",
+              "当前公众号与本次保存账号不一致。",
+            );
+          await this.d.port!.verifyDraft!(account, proof);
+          article.remote = {
+            ...this.receipt(proof.draftId, proof.url),
+            accountId: pending.id,
+            uid: pending.uid,
+            revision: article.revision,
+            sentAt: now(),
+          };
+          this.recordDelivery(article, "verified");
+          article.stage = "synced";
+          article.pendingAccount = null;
+          article.pendingDraft = null;
+          article.message =
+            "已自动核实微信草稿保存成功，可到微信后台预览和发文。";
+          this.persist(article);
+        },
+        "检查微信草稿保存结果",
+      );
+    } catch (error) {
+      article.message = `微信草稿保存核验未完成：${safeMessage(error).replace(/([?&](?:token|key|tempkey)=)[^&\s]+/gi, "$1[已隐藏]")}`;
+      this.logs.record({
+        level: "warning",
+        event: "draft.verification_failed",
+        taskId: id,
+        accountId: pending.id,
+        message: article.message,
+        details: {
+          draftId: proof.draftId,
+          code: error instanceof AppError ? error.code : "UNKNOWN",
+        },
+      });
+      this.persist(article);
+    } finally {
+      this.active.delete(id);
+    }
+    return this.get(id);
+  }
   resolve(
     id: string,
     result: "saved" | "not_saved",
@@ -1181,11 +1456,12 @@ export class WechatArticles {
     )
       throw new AppError("WECHAT_RESOLVE", "当前草稿无需核对保存结果。");
     if (result === "saved") {
+      const previous = wechatTargetReceipt(article, article.pendingAccount.id);
       const remote = this.receipt(
-        draftId ?? article.remote?.draftId ?? "",
-        url ?? article.remote?.url ?? "",
+        draftId ?? article.pendingDraft?.draftId ?? previous?.draftId ?? "",
+        url ?? article.pendingDraft?.url ?? previous?.url ?? "",
       );
-      if (article.remote && remote.draftId !== article.remote.draftId)
+      if (previous && remote.draftId !== previous.draftId)
         throw new AppError(
           "WECHAT_RESOLVE",
           "请核对原微信草稿，不能将更新任务关联到其他草稿。",
@@ -1207,6 +1483,7 @@ export class WechatArticles {
         "已记录此次未保存。可以继续编辑，再次发送时会更新原微信草稿（如有）。";
     }
     article.pendingAccount = null;
+    article.pendingDraft = null;
     this.persist(article);
     return this.get(id);
   }
@@ -1218,7 +1495,10 @@ export class WechatArticles {
       );
     const article = id ? this.load(id) : null;
     if (article?.remote && article.remote.accountId !== accountId)
-      throw new AppError("WECHAT_ACCOUNT", "请选择此稿绑定的公众号账号。");
+      throw new AppError("WECHAT_ACCOUNT", "请选择此稿已绑定的公众号。");
+    const target = article
+      ? wechatTargetReceipt(article, accountId)
+      : undefined;
     if (article?.pendingAccount && article.pendingAccount.id !== accountId)
       throw new AppError(
         "WECHAT_ACCOUNT",
@@ -1228,12 +1508,18 @@ export class WechatArticles {
       accountId,
       "wechat",
       (verified) => {
-        if (article?.remote && article.remote.uid !== verified.uid)
+        if (target && target.uid !== verified.uid)
           throw new AppError(
             "WECHAT_ACCOUNT",
             "当前公众号身份与原草稿不一致。",
           );
-        return this.d.port!.open(verified, article?.remote?.url);
+        return this.d.port!.open(
+          verified,
+          target?.url ??
+            (article?.pendingAccount?.id === accountId
+              ? article.pendingDraft?.url
+              : undefined),
+        );
       },
       "打开公众号微信草稿箱",
     );

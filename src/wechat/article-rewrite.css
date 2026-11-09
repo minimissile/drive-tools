@@ -8,9 +8,36 @@
   font-size: 12px;
 }
 
+.modal.wechat-traffic-dialog {
+  width: 960px;
+  max-width: calc(100vw - 50px);
+}
+
+.wechat-traffic-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.wechat-traffic-layout > .field {
+  margin: 0;
+  min-width: 0;
+}
+
+.wechat-traffic-summary {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
 .wechat-traffic-input {
-  min-height: 220px;
-  max-height: 340px;
+  height: 420px;
+  min-height: 300px;
+  max-height: calc(100vh - 260px);
   line-height: 1.8;
   resize: vertical;
 }

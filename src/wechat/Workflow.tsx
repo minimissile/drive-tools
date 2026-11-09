@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import {
   ArrowLeft,
@@ -21,15 +21,17 @@ import {
   Notice,
   Panel,
   SearchField,
-  Status,
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
 import { Pagination } from "../ui/Pagination";
 import { formatTime } from "../lib/format";
 import { ArticleEditor } from "./ArticleEditor";
 import { WechatDiscovery } from "./Discovery";
-import { stageLabel } from "./labels";
-import { RewriteStyleBadge } from "./RewriteStyleBadge";
+import {
+  groupWechatArticles,
+  matchesWechatArticle,
+  preferredWechatEdition,
+} from "./article-groups";
 import "../ui/workspace.css";
 import "./wechat.css";
 
@@ -38,6 +40,7 @@ const selectionSchema = z.object({
   selected: z.string().max(100),
   query: z.string().max(200),
   page: z.number().int().positive().default(1),
+  lastEditions: z.record(z.string().max(100), z.string().max(100)).default({}),
 });
 const pageSize = 8;
 
@@ -47,10 +50,27 @@ export default function WechatWorkflow() {
   const discover = page === "wechat-discovery";
   const selection = useLocalDraft(
     `panxu:wechat:${data!.dataPath}:selection`,
-    { url: "", selected: "", query: "", page: 1 },
+    {
+      url: "",
+      selected: "",
+      query: "",
+      page: 1,
+      lastEditions: {} as Record<string, string>,
+    },
     (v) => selectionSchema.parse(v),
   );
   const history = useIpcQuery("wechat.list", undefined, { keepPrevious: true });
+  const groups = useMemo(
+    () => (history.data ? groupWechatArticles(history.data) : undefined),
+    [history.data],
+  );
+  const items = useMemo(
+    () =>
+      groups?.filter((group) =>
+        matchesWechatArticle(group, selection.value.query),
+      ),
+    [groups, selection.value.query],
+  );
   const [pending, setPending] = useState(false),
     [error, setError] = useState(""),
     [importOpen, setImportOpen] = useState(() => !!selection.value.url),
@@ -61,13 +81,24 @@ export default function WechatWorkflow() {
     importButton = useRef<HTMLButtonElement>(null),
     editorRegion = useRef<HTMLElement>(null);
   const [locate, setLocate] = useState("");
+  const [focusVersion, setFocusVersion] = useState("");
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
     };
   }, []);
-  const selected = selection.value.selected || history.data?.[0]?.id || "";
+  const selected =
+    selection.value.selected ||
+    (groups?.[0]
+      ? preferredWechatEdition(
+          groups[0],
+          selection.value.lastEditions[groups[0].id],
+        )
+      : "");
+  const activeGroup = groups?.find((group) =>
+    group.editions.some((item) => item.id === selected),
+  );
   const showImport = importOpen || history.data?.length === 0;
   const detail = useIpcQuery(
     "wechat.get",
@@ -79,12 +110,40 @@ export default function WechatWorkflow() {
     if (!selection.value.selected && selected) selection.update({ selected });
   }, [selected, selection.value.selected, selection.update]);
   useEffect(() => {
+    if (
+      activeGroup &&
+      selection.value.lastEditions[activeGroup.id] !== selected
+    )
+      selection.update({
+        lastEditions: {
+          ...selection.value.lastEditions,
+          [activeGroup.id]: selected,
+        },
+      });
+  }, [activeGroup, selected, selection.value.lastEditions, selection.update]);
+  useEffect(() => {
     if (!locate) return;
-    const index = history.data?.findIndex((item) => item.id === locate) ?? -1;
+    const index =
+      items?.findIndex((group) =>
+        group.editions.some((item) => item.id === locate),
+      ) ?? -1;
     if (index < 0) return;
     selection.update({ page: Math.floor(index / pageSize) + 1 });
     setLocate("");
-  }, [history.data, locate, selection.update]);
+  }, [items, locate, selection.update]);
+  const selectEdition = (id: string) => {
+    const group = groups?.find((group) =>
+      group.editions.some((item) => item.id === id),
+    );
+    selection.update({
+      selected: id,
+      ...(group
+        ? { lastEditions: { ...selection.value.lastEditions, [group.id]: id } }
+        : {}),
+    });
+    setFocusVersion(id);
+    setLocate(id);
+  };
   const toggleImport = () => {
     if (!showImport) {
       setImportOpen(true);
@@ -142,9 +201,6 @@ export default function WechatWorkflow() {
       if (alive.current) setPending(false);
     }
   };
-  const items = history.data?.filter((v) =>
-    v.title.toLowerCase().includes(selection.value.query.trim().toLowerCase()),
-  );
   const currentPage = Math.min(
     selection.value.page,
     Math.max(1, Math.ceil((items?.length ?? 0) / pageSize)),
@@ -250,9 +306,9 @@ export default function WechatWorkflow() {
           ) : null}
           {selection.error ? <Notice warning>{selection.error}</Notice> : null}
           <div className="wechat-layout">
-            <aside className="wechat-history" aria-label="本地草稿箱">
+            <aside className="wechat-history" aria-label="公众号文章列表">
               <div className="wechat-section-heading">
-                <h2>本地草稿</h2>
+                <h2>文章</h2>
                 <Button
                   quiet
                   size="compact"
@@ -264,8 +320,8 @@ export default function WechatWorkflow() {
                 </Button>
               </div>
               <SearchField
-                label="搜索公众号草稿"
-                placeholder="搜索标题"
+                label="搜索公众号文章"
+                placeholder="搜索文章或稿件标题"
                 value={selection.value.query}
                 onChange={(query) => {
                   selection.update({ query, page: 1 });
@@ -278,7 +334,7 @@ export default function WechatWorkflow() {
                 onRetry={history.reload}
               />
               {!history.data && !history.error ? (
-                <LoadingState label="正在读取草稿…" compact />
+                <LoadingState label="正在读取文章…" compact />
               ) : items?.length ? (
                 <>
                   <div className="wechat-history-list">
@@ -293,30 +349,29 @@ export default function WechatWorkflow() {
                           className="wechat-history-entry"
                           disabled={editorBusy || pending}
                           aria-current={
-                            selected === item.id ? "page" : undefined
+                            activeGroup?.id === item.id ? "page" : undefined
                           }
                           onClick={() => {
-                            selection.update({ selected: item.id });
+                            const id = preferredWechatEdition(
+                              item,
+                              selection.value.lastEditions[item.id],
+                            );
+                            selection.update({
+                              selected: id,
+                              lastEditions: {
+                                ...selection.value.lastEditions,
+                                [item.id]: id,
+                              },
+                            });
+                            setFocusVersion("");
                             setLocate("");
                           }}
                           title={item.title}
                         >
                           <strong>{item.title}</strong>
                           <span>
-                            <small>第 {item.edition?.number ?? 1} 稿</small>
-                            <RewriteStyleBadge styleId={item.rewriteStyleId} />
-                            <Status
-                              kind={
-                                item.stage === "uncertain"
-                                  ? "warning"
-                                  : item.stage === "synced"
-                                    ? "good"
-                                    : "normal"
-                              }
-                            >
-                              {stageLabel[item.stage]}
-                            </Status>
-                            <small>{formatTime(item.updatedAt)}</small>
+                            <small>{item.editions.length} 稿</small>
+                            <small>更新 {formatTime(item.updatedAt)}</small>
                           </span>
                         </button>
                       ))}
@@ -329,18 +384,18 @@ export default function WechatWorkflow() {
                       selection.update({ page });
                       setLocate("");
                     }}
-                    label="公众号草稿分页"
+                    label="公众号文章分页"
                   />
                 </>
               ) : history.data ? (
                 <Empty
                   compact
                   title={
-                    selection.value.query ? "没有匹配的草稿" : "还没有草稿"
+                    selection.value.query ? "没有匹配的文章" : "还没有文章"
                   }
                 >
                   {selection.value.query
-                    ? "换个标题关键词试试。"
+                    ? "换个原文或稿件标题关键词试试。"
                     : "从上方粘贴文章链接开始。"}
                 </Empty>
               ) : null}
@@ -367,10 +422,8 @@ export default function WechatWorkflow() {
                       initial={current}
                       onChanged={history.reload}
                       onBusy={setEditorBusy}
-                      onSelect={(id) => {
-                        selection.update({ selected: id, query: "", page: 1 });
-                        setLocate(id);
-                      }}
+                      onSelect={selectEdition}
+                      focusEdition={focusVersion === selected}
                     />
                   ) : null}
                 </>

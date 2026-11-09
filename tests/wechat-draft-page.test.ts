@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { chromium, type Browser, type Page } from "playwright-core";
 import type { readWechatIdentity } from "../desktop/wechat-page";
+import { wechatHtml } from "../shared/wechat-markup";
 
 // Use the same browser transformation as the desktop bundle; tsx function-name
 // helpers must not become dependencies of the functions running inside the DOM.
@@ -51,6 +52,7 @@ interface Fixture {
   iframe?: boolean;
   /** An explicit null disables the readback helper's independent cover proof. */
   coverProof?: string | null;
+  sourceUrl?: string;
 }
 
 /** Isolated offline DOM only: never uses Electron, a workspace or real cookies. */
@@ -80,6 +82,7 @@ async function withFixture<T>(
       document.body.innerHTML = ${JSON.stringify(fixture.dom || "")};
       window.wx = ${JSON.stringify(fixture.wx ?? null)};
       window.appmsgData = ${JSON.stringify(fixture.appmsgData ?? null)};
+      ${fixture.sourceUrl === undefined ? "" : `const sourceInput = document.createElement('input'); sourceInput.name = 'source_url'; sourceInput.value = ${JSON.stringify(fixture.sourceUrl)}; document.body.append(sourceInput);`}
       ${
         typeof fixture.coverProof !== "string"
           ? ""
@@ -133,7 +136,13 @@ const singleDraft = (fixture: Fixture) =>
   );
 const readback = (
   fixture: Fixture,
-  expected: { title: string; html: string; coverUrl: string },
+  expected: {
+    title: string;
+    html: string;
+    coverUrl: string;
+    sourceUrl?: string;
+    allowImageMigration?: boolean;
+  },
 ) =>
   withFixture({ coverProof: coverUrl, ...fixture }, (page) =>
     page.evaluate(
@@ -356,6 +365,51 @@ test("current editor still checks body, images, links and the independent saved 
 
 test("readback confirms the title, body, ordered image URLs and resource link", async () => {
   await readback({ title, editorHtml: articleHtml }, expected);
+});
+
+test("CDN迁移返回逐图像素核验清单，不把不同地址直接当成相同图片", async () => {
+  const migratedCover = "https://mmbiz.qlogo.cn/migrated-cover.png";
+  const migratedImage = "https://mmbiz.qlogo.cn/migrated-body.png";
+  const actual = articleHtml.replace(imageOne, migratedImage);
+  await assert.rejects(
+    readback(
+      { title, editorHtml: actual, coverProof: migratedCover },
+      expected,
+    ),
+  );
+  const proof = await readback(
+    { title, editorHtml: actual, coverProof: migratedCover },
+    { ...expected, allowImageMigration: true },
+  );
+  assert.deepEqual(proof, {
+    coverUrl: migratedCover,
+    coverUrls: [migratedCover],
+    images: [
+      { actual: migratedImage, expected: imageOne },
+      { actual: imageTwo, expected: imageTwo },
+    ],
+  });
+  for (const html of [
+    actual.replace("条件与步骤", "不同内容"),
+    actual + `<img src="${migratedImage}">`,
+    actual.replace(migratedImage, "https://example.com/untrusted.png"),
+  ])
+    await assert.rejects(
+      readback(
+        { title, editorHtml: html, coverProof: migratedCover },
+        { ...expected, allowImageMigration: true },
+      ),
+    );
+  await assert.rejects(
+    readback(
+      {
+        title,
+        editorHtml: actual,
+        coverProof: "https://example.com/untrusted-cover.png",
+      },
+      { ...expected, allowImageMigration: true },
+    ),
+  );
 });
 
 test("readback accepts formatting whitespace and WeChat data-src images", async () => {
@@ -628,4 +682,145 @@ test("untrusted cover URLs are rejected despite another correct cover source", a
       ),
       /未能核实微信草稿封面/,
     );
+});
+
+test("微信资源区块在外链被移除后仍保留完整地址与提取码，可通过保存核验", async () => {
+  const html = wechatHtml(
+    "## 阅读要点\n\n保留**适用条件**。\n\n链接：[查看资源](https://pan.quark.cn/s/own123?pwd=abcd) 提取码：abcd",
+  );
+  const expected = {
+    title: "阅读说明",
+    html,
+    coverUrl: "https://mmbiz.qpic.cn/cover.png",
+  };
+  await readback(
+    {
+      title: expected.title,
+      editorHtml: html.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/g, "$1"),
+      coverProof: expected.coverUrl,
+    },
+    expected,
+  );
+});
+
+test("微信排版在窄正文区域保持左对齐、段间距及长链接换行", async () => {
+  const url = `https://pan.quark.cn/s/${"a".repeat(80)}?pwd=abcd`;
+  const html = wechatHtml(
+    `## 阅读要点\n\n第一段正文说明。\n\n第二段正文说明。\n\n链接：[查看资源](${url}) 提取码：abcd`,
+  );
+  await withFixture({}, async (page) => {
+    const result = await page.evaluate(
+      ({ html }) => {
+        const inherited = document.createElement("style");
+        inherited.textContent =
+          "p { margin:0; text-align:justify; letter-spacing:5px; }";
+        document.head.append(inherited);
+        const container = document.createElement("article");
+        container.style.width = "350px";
+        container.innerHTML = html;
+        document.body.append(container);
+        const paragraph = [...container.querySelectorAll("p")].find(
+          (p) => p.textContent === "第一段正文说明。",
+        )!;
+        const link = container.querySelector("a")!;
+        return {
+          margin: getComputedStyle(paragraph).marginBottom,
+          size: getComputedStyle(paragraph).fontSize,
+          align: getComputedStyle(link.parentElement!).textAlign,
+          spacing: getComputedStyle(link.parentElement!).letterSpacing,
+          text: link.textContent,
+          width: container.clientWidth,
+          scrollWidth: container.scrollWidth,
+          height: link.parentElement!.getBoundingClientRect().height,
+        };
+      },
+      { html },
+    );
+    assert.equal(result.margin, "18px");
+    assert.equal(result.size, "16px");
+    assert.equal(result.align, "left");
+    assert.equal(result.spacing, "normal");
+    assert.equal(result.text, url);
+    assert(result.scrollWidth <= result.width);
+    assert(result.height > 30);
+  });
+});
+
+test("正文外链被移除时，阅读原文入口仍需独立核实", async () => {
+  const html = wechatHtml(
+    `- 第一项\n\n- 第二项\n\n链接：[查看资源](${resourceUrl})`,
+  );
+  const stripped = html.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/g, "$1");
+  const proof = { title, html, coverUrl, sourceUrl: resourceUrl };
+  await readback(
+    { title, editorHtml: stripped, sourceUrl: resourceUrl },
+    proof,
+  );
+  for (const sourceUrl of [
+    "",
+    "https://pan.quark.cn/s/wrong",
+    "javascript:alert(1)",
+  ])
+    await assert.rejects(
+      readback({ title, editorHtml: stripped, sourceUrl }, proof),
+      /阅读原文/,
+    );
+  await assert.rejects(
+    readback({ title, editorHtml: stripped }, proof),
+    /阅读原文/,
+  );
+  await readback(
+    { title, editorHtml: stripped },
+    { ...proof, sourceUrl: undefined },
+  );
+});
+
+test("阅读原文以当前已保存元数据为准，不以未保存输入或其他草稿冒充", async () => {
+  const proof = { ...expected, sourceUrl: resourceUrl };
+  const metadata = (sourceUrl: string, appId = 123456) => ({
+    app_id: appId,
+    multi_item: [
+      { title, content: articleHtml, cdn_url: coverUrl, source_url: sourceUrl },
+    ],
+  });
+  await readback({ appmsgData: metadata(resourceUrl) }, proof);
+  await assert.rejects(
+    readback({ appmsgData: metadata(""), sourceUrl: resourceUrl }, proof),
+    /阅读原文/,
+  );
+  await assert.rejects(
+    readback(
+      {
+        title,
+        editorHtml: articleHtml,
+        appmsgData: metadata(resourceUrl, 999999),
+      },
+      proof,
+    ),
+    /阅读原文/,
+  );
+});
+
+test("交付列表只包含实际条目，没有会被微信转换为空圆点的换行节点", async () => {
+  const html = wechatHtml(
+    "- 你在亲密关系中的真实表现\n\n- 分手后你会进入什么样的状态\n\n-    \n\n普通正文。",
+  );
+  await withFixture({}, async (page) => {
+    const result = await page.evaluate(
+      ({ html }) => {
+        const doc = new DOMParser().parseFromString(html, "text/html"),
+          list = doc.querySelector("ul")!;
+        return {
+          childNodes: [...list.childNodes].map((node) => node.nodeName),
+          items: [...list.children].map((node) => node.textContent),
+        };
+      },
+      { html },
+    );
+    assert.deepEqual(result.childNodes, ["LI", "LI"]);
+    assert.deepEqual(result.items, [
+      "你在亲密关系中的真实表现",
+      "分手后你会进入什么样的状态",
+    ]);
+  });
 });

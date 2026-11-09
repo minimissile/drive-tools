@@ -34,8 +34,12 @@ export async function run({ page, windowId }) {
     links: [],
     remote: null,
     pendingAccount: null,
+    pendingDraft: null,
+    edition: undefined,
     revision: 1,
   };
+  detail.editions = undefined;
+  detail.automaticVerification = true;
   detail.issues = [];
   detail.resources = [];
   const calls = [];
@@ -59,6 +63,10 @@ export async function run({ page, windowId }) {
         revision: revision + 1,
         stage: "editing",
       });
+      return detail;
+    }
+    if (method === "wechat.recheck") {
+      calls.push({ method, args });
       return detail;
     }
     if (method === "wechat.send") {
@@ -197,10 +205,18 @@ export async function run({ page, windowId }) {
   release();
   release = undefined;
   const recovery = page.getByRole("dialog", {
-    name: "核对微信保存结果",
+    name: "微信保存状态",
     exact: true,
   });
   await recovery.waitFor();
+  assert.equal(await recovery.getByRole("textbox").count(), 0);
+  assert.equal(await recovery.getByRole("checkbox").count(), 0);
+  assert.equal(
+    await recovery
+      .getByRole("button", { name: "确认已保存", exact: true })
+      .count(),
+    0,
+  );
   assert.equal(
     await recovery.getByText(detail.article.message, { exact: true }).count(),
     1,
@@ -292,7 +308,7 @@ export async function run({ page, windowId }) {
       "发送中防重复",
       "更新同稿不再确认",
       "失败保留正文并可重试",
-      "未知结果只进入核对",
+      "未知结果自动检查且无人工确认",
       "缺封面不提交",
       "多账号在顶栏选择",
       "缓存登录状态由发送时重新核验",

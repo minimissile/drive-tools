@@ -14,6 +14,7 @@ import type {
   WechatDetail,
   WechatDraftPayload,
   WechatDraftReceipt,
+  WechatDraftVerification,
   WechatText,
 } from "../shared/wechat";
 import type { WebsiteAccount } from "../shared/website-accounts";
@@ -91,9 +92,33 @@ async function fixture(
       digest: "依据原文整理的摘要。",
     }),
     aiError: null as Error | null,
+    titleCalls: [] as {
+      input: {
+        currentTitle: string;
+        sections: RewriteInput["sections"];
+        trafficWords: string[];
+      };
+      system: string;
+    }[],
+    titleReply: (_input: unknown) => ({
+      titles: [
+        "阅读资料前先了解适用范围",
+        "如何理解这份资料中的条件",
+        "资料阅读要点与必要提醒",
+        "从原文事实出发理解内容",
+        "查阅资料时需要保留的前提",
+      ],
+    }),
+    beforeTitle: undefined as (() => Promise<void>) | undefined,
     beforeWrite: undefined as (() => Promise<void>) | undefined,
     afterWrite: undefined as (() => Promise<void>) | undefined,
     receipt: { draftId: "900001", url: draftUrl() } as WechatDraftReceipt,
+    checkpoint: false,
+    verifications: [] as {
+      accountId: string;
+      proof: WechatDraftVerification;
+    }[],
+    verificationError: null as Error | null,
     image: { name: "本地配图.png", bytes: png } as {
       name: string;
       bytes: Buffer;
@@ -135,13 +160,28 @@ async function fixture(
         control.reads++;
         return { ...control.source, url };
       },
-      saveDraft: async (_account, payload, beforeSubmit) => {
+      saveDraft: async (_account, payload, beforeSubmit, onReceipt) => {
         await control.beforeWrite?.();
         await beforeSubmit();
         control.writes++;
         control.payloads.push(structuredClone(payload));
+        if (control.checkpoint)
+          await onReceipt?.({
+            ...control.receipt,
+            title: payload.title,
+            html: payload.html,
+            coverUrl: payload.coverUrl,
+            sourceUrl: payload.sourceUrl,
+          });
         await control.afterWrite?.();
         return { ...control.receipt };
+      },
+      verifyDraft: async (account, proof) => {
+        control.verifications.push({
+          accountId: account.id,
+          proof: structuredClone(proof),
+        });
+        if (control.verificationError) throw control.verificationError;
       },
       open: async (account, url) => {
         control.opened.push({ accountId: account.id, url });
@@ -180,6 +220,15 @@ async function fixture(
     _images: string[] = [],
     options: { retainResponse?: boolean; jsonMode?: boolean } = {},
   ) => {
+    if (_name === "wechat_article_titles") {
+      const input = structuredClone(
+        raw,
+      ) as (typeof control.titleCalls)[number]["input"];
+      control.titleCalls.push({ input, system });
+      await control.beforeTitle?.();
+      if (control.aiError) throw control.aiError;
+      return schema.parse(control.titleReply(input));
+    }
     const input = structuredClone(raw) as RewriteInput;
     control.aiCalls.push({
       system,
@@ -305,6 +354,52 @@ test("公众号导入：正文、来源、提取码和插图入本地，重复�
       }),
     );
     assert.equal(f.control.reads, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("同一原文的历史导入归组，不改动各稿内容；不同原文独立", async () => {
+  const f = await fixture();
+  try {
+    const root = await f.save(await f.imported(), { title: "改写后的第一稿" });
+    const legacy = await f.invoke("wechat.import", {
+      url: `${sourceUrl}?scene=1`,
+    });
+    const other = await f.invoke("wechat.import", {
+      url: `${sourceUrl}-other`,
+    });
+    const saved = [root, legacy, other].map((detail) =>
+      structuredClone(detail.article),
+    );
+    const list = await f.invoke("wechat.list");
+    const group = list.filter((item) => item.materialId === root.article.id);
+    assert.equal(group.length, 2);
+    assert.deepEqual(group.map((item) => item.editionNumber).sort(), [1, 2]);
+    assert(group.every((item) => item.sourceTitle === "公众号来源文章"));
+    assert.equal(
+      list.find((item) => item.id === other.article.id)?.materialId,
+      other.article.id,
+    );
+    const history = (await f.invoke("wechat.get", { id: legacy.article.id }))
+      .editions!;
+    assert.deepEqual(
+      history.map((item) => item.number),
+      [2, 1],
+    );
+    const child = await f.invoke("wechat.newEdition", {
+      id: legacy.article.id,
+      revision: legacy.article.revision,
+      requestId: randomUUID(),
+    });
+    assert.equal(child.article.edition?.rootId, root.article.id);
+    assert.equal(child.article.edition?.number, 3);
+    assert.equal(child.editions?.length, 3);
+    for (const article of saved)
+      assert.deepEqual(
+        (await f.invoke("wechat.get", { id: article.id })).article,
+        article,
+      );
   } finally {
     await f.cleanup();
   }
@@ -574,6 +669,65 @@ test("公众号编辑：旧版本保存不覆盖新稿；删除链接同步更�
   }
 });
 
+test("已发送的旧稿可显式升级排版并更新原微信草稿，重复整理不制造版本", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.send(await f.ready());
+    const legacy = structuredClone(current.article);
+    delete legacy.typesettingVersion;
+    f.app.db.setSetting(`wechat:article:v1:${legacy.id}`, legacy);
+    current = await f.invoke("wechat.format", { id: legacy.id });
+    assert.equal(current.article.revision, legacy.revision + 1);
+    assert.equal(current.article.body, legacy.body);
+    assert.equal(current.article.stage, "editing");
+    assert.deepEqual(
+      (await f.invoke("wechat.format", { id: legacy.id })).article,
+      current.article,
+    );
+    await f.send(current);
+    assert.equal(f.control.writes, 2);
+    assert.equal(f.control.payloads.at(-1)?.draftId, legacy.remote?.draftId);
+    assert.match(f.control.payloads.at(-1)!.html, /点击文末“阅读原文”打开资源/);
+    assert.match(f.control.payloads.at(-1)!.html, /margin:0 0 18px/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("旧未知保存缺少快照时沿用旧排版核对，不因新增资源提示误判保存失败", async () => {
+  const f = await fixture();
+  try {
+    const current = await f.ready();
+    const legacy = {
+      ...current.article,
+      stage: "uncertain" as const,
+      pendingAccount: { id: f.publisher.id, uid: f.publisher.uid! },
+      message: "微信已返回草稿编号 900001，但回读暂未完成。",
+    };
+    f.app.db.setSetting(`wechat:article:v1:${legacy.id}`, legacy);
+    const recovered = await f.invoke("wechat.recheck", { id: legacy.id });
+    assert.equal(recovered.article.stage, "synced");
+    assert.equal(f.control.writes, 0);
+    assert.equal(f.control.verifications.length, 1);
+    assert.doesNotMatch(
+      f.control.verifications[0].proof.html,
+      /复制链接到浏览器打开/,
+    );
+    assert.match(f.control.verifications[0].proof.html, /配套资料（https:/);
+    f.app.db.setSetting(`wechat:article:v1:${legacy.id}`, {
+      ...legacy,
+      typesettingVersion: 1,
+    });
+    const firstTemplate = await f.invoke("wechat.recheck", { id: legacy.id });
+    assert.equal(firstTemplate.article.stage, "synced");
+    assert.equal(f.control.verifications[1].proof.sourceUrl, undefined);
+    assert.match(f.control.verifications[1].proof.html, /复制链接到浏览器打开/);
+    assert.doesNotMatch(f.control.verifications[1].proof.html, /点击文末/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("公众号改写：六种风格使用受控规则，原文及补充要求只作为数据", async () => {
   const f = await fixture();
   try {
@@ -755,7 +909,10 @@ test("公众号 Markdown 改写：排版保存与交付保留层次，原图与�
       ),
     );
     assert.deepEqual(result.article.links, current.article.links);
-    const html = wechatHtml(result.article.body);
+    const html = wechatHtml(result.article.body).replace(
+      /\sstyle="[^"]*"/g,
+      "",
+    );
     assert.match(html, /<h3>阅读前先核对<\/h3>/);
     assert.match(html, /<strong>适用条件<\/strong>/);
     assert.match(html, /<ul><li>核对前提<\/li>/);
@@ -1135,6 +1292,63 @@ test("公众号改写：br以外HTML和只有换行的结果均拒绝，原稿�
   }
 });
 
+test("公众号改写自动修复模型空段，完整结果才保存且词覆盖只计一次", async () => {
+  const f = await fixture(
+    "第一段已有内容。\n\n第二段已有内容。\n\n![原图](" + sourceImage + ")",
+  );
+  try {
+    let current = await f.imported();
+    current = await f.invoke("wechat.saveTrafficWords", {
+      id: current.article.id,
+      wordsRevision: 0,
+      words: ["已有内容"],
+    });
+    let calls = 0;
+    f.control.aiReply = (input) => ({
+      title: input.title,
+      digest: "原文内容",
+      sections: rewrittenSections(input, (text) => (++calls === 1 ? "" : text)),
+    });
+    const rewritten = await f.invoke("wechat.rewrite", {
+      id: current.article.id,
+      styleId: "story",
+    });
+    assert.equal(f.control.aiCalls.length, 2);
+    assert.equal(rewritten.article.revision, current.article.revision + 1);
+    assert.equal(rewritten.article.body, current.article.body);
+    assert.equal(rewritten.article.rewriteStyleId, "story");
+    assert.equal(rewritten.trafficWordPlan?.usage[0].uses, 1);
+    const log = f.app.db.get<{ details: string }>(
+      "SELECT details FROM runtime_logs WHERE event='rewrite.empty_sections' ORDER BY id DESC LIMIT 1",
+    )!;
+    assert.deepEqual(JSON.parse(log.details).emptyIds, [0]);
+    f.control.aiReply = (input) => ({
+      title: input.title,
+      digest: "不应保存",
+      sections: rewrittenSections(input, () => " \n<br>\n "),
+    });
+    const before = f.control.aiCalls.length;
+    await assert.rejects(
+      f.invoke("wechat.rewrite", {
+        id: current.article.id,
+        styleId: "natural",
+      }),
+      /自动重试一次/,
+    );
+    assert.equal(f.control.aiCalls.length - before, 2);
+    assert.deepEqual(
+      f.app.wechat.get(current.article.id).article,
+      rewritten.article,
+    );
+    assert.equal(
+      f.app.wechat.get(current.article.id).trafficWordPlan?.usage[0].uses,
+      1,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("公众号改写诊断：缺少可编辑段落时保留原稿与编号日志", async () => {
   const f = await fixture();
   try {
@@ -1392,6 +1606,7 @@ test("公众号发送：显式确认、本人分享实时核验、同版本幂�
     assert.ok(!current.article.remote?.url.includes("token="));
     assert.equal(f.control.payloads[0].draftId, undefined);
     assert.equal(f.control.payloads[0].uid, f.publisher.uid);
+    assert.equal(f.control.payloads[0].sourceUrl, `${f.drive.ownUrl}?pwd=test`);
     assert.ok(
       f.control.payloads[0].html.includes(`${f.drive.ownUrl}?pwd=test`),
     );
@@ -1552,6 +1767,106 @@ test("微信回读失败保留具体原因和诊断，不叠加同一恢复提�
   }
 });
 
+test("微信已返回编号时先保留核验快照，回读失败后自动检查而不再次提交", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.ready();
+    const original = current.article;
+    f.control.checkpoint = true;
+    f.control.afterWrite = async () => {
+      const during = f.app.wechat.get(current.article.id).article;
+      assert.equal(during.stage, "sending");
+      assert.equal(during.pendingDraft?.draftId, "900001");
+      assert.equal(
+        during.pendingDraft?.sourceUrl,
+        `${f.drive.ownUrl}?pwd=test`,
+      );
+      assert(!during.pendingDraft?.url.includes("token="));
+      throw new AppError("WECHAT_DRAFT_UNCERTAIN", "微信回读暂未完成", true);
+    };
+    current = await f.send(current);
+    assert.equal(current.article.stage, "uncertain");
+    assert(current.article.pendingDraft);
+    f.control.verificationError = new AppError(
+      "WECHAT_IMAGE_MISMATCH",
+      "封面内容不同",
+    );
+    current = await f.invoke("wechat.recheck", { id: current.article.id });
+    assert.equal(current.article.stage, "uncertain");
+    assert(current.article.pendingDraft);
+    assert.equal(f.control.writes, 1);
+    f.control.verificationError = null;
+    current = await f.invoke("wechat.recheck", { id: current.article.id });
+    assert.equal(current.article.stage, "synced");
+    assert.equal(current.article.remote?.draftId, "900001");
+    assert.equal(current.article.pendingAccount, null);
+    assert.equal(current.article.pendingDraft, null);
+    assert.equal(current.article.body, original.body);
+    assert.equal(f.control.writes, 1);
+    assert.equal(f.control.verifications.length, 2);
+    assert.equal(
+      f.control.verifications[0].proof.sourceUrl,
+      `${f.drive.ownUrl}?pwd=test`,
+    );
+    assert.equal(current.article.deliveryHistory?.at(-1)?.action, "verified");
+    await f.invoke("wechat.recheck", { id: current.article.id });
+    assert.equal(f.control.verifications.length, 2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("旧失败稿件按可信编号只读回查；无回执时不猜测已保存或重复提交", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.ready();
+    f.control.afterWrite = async () => {
+      throw new AppError(
+        "WECHAT_DRAFT_UNCERTAIN",
+        "微信已返回草稿编号 900001，但封面回读未通过",
+        true,
+      );
+    };
+    current = await f.send(current);
+    assert.equal(current.article.pendingDraft, null);
+    current = await f.invoke("wechat.recheck", { id: current.article.id });
+    assert.equal(current.article.stage, "synced");
+    assert.equal(
+      f.control.verifications[0].proof.html,
+      wechatHtml(current.article.body),
+    );
+    assert.equal(f.control.writes, 1);
+    current = await f.save(current, { title: "新的本地修改" });
+    f.control.afterWrite = async () => {
+      throw Error("网络断开，未返回编号");
+    };
+    current = await f.send(current);
+    current = await f.invoke("wechat.recheck", { id: current.article.id });
+    assert.equal(
+      current.article.stage,
+      "synced",
+      "已有目标编号的更新可按原编号只读核实",
+    );
+    const child = await f.invoke("wechat.newEdition", {
+      id: current.article.id,
+      revision: current.article.revision,
+      requestId: randomUUID(),
+    });
+    current = await f.send(child);
+    await assert.rejects(
+      f.invoke("wechat.recheck", { id: current.article.id }),
+      { code: "WECHAT_RECEIPT" },
+    );
+    assert.equal(
+      f.app.wechat.get(current.article.id).article.stage,
+      "uncertain",
+    );
+    assert.equal(f.control.writes, 3);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("公众号未知恢复：确认未保存可重试；更新失败不能关联另一微信草稿", async () => {
   const f = await fixture();
   try {
@@ -1651,25 +1966,47 @@ test("公众号中断恢复：重开临时工作空间后保留未知意图，�
   }
 });
 
-test("公众号发送：错误平台、身份变化、改派账号均不写入其他公众号", async () => {
+test("首次发送可选择公众号，发送后绑定；新一稿可以选择其他公众号", async () => {
   const f = await fixture();
   try {
-    const current = await f.ready();
+    let current = await f.ready();
     const otherPlatform = await f.addWebsite("smzdm");
     await assert.rejects(f.send(current, otherPlatform), {
       code: "WEBSITE_PROVIDER_MISMATCH",
     });
-    const synced = await f.send(current),
-      edited = await f.save(synced, { title: "不能改派其他公众号" });
     const second = await f.addWebsite();
-    await assert.rejects(f.send(edited, second), { code: "WECHAT_ACCOUNT" });
+    f.control.receipt = { draftId: "900002", url: draftUrl("900002") };
+    current = await f.send(current, second);
+    assert.equal(current.article.remote?.accountId, second.id);
+    assert.equal(f.control.payloads.at(-1)?.draftId, undefined);
+    const edited = await f.save(current, { title: "一稿只对应一个公众号" });
+    await assert.rejects(f.send(edited), { code: "WECHAT_ACCOUNT" });
     await assert.rejects(
-      f.invoke("wechat.open", { accountId: second.id, id: edited.article.id }),
+      f.invoke("wechat.open", {
+        accountId: f.publisher.id,
+        id: edited.article.id,
+      }),
       { code: "WECHAT_ACCOUNT" },
     );
-    f.identities.set(f.publisher.id, "unexpected-publisher");
-    await assert.rejects(f.send(edited), { code: "WEBSITE_LOGIN_REQUIRED" });
     assert.equal(f.control.writes, 1);
+    let child = await f.invoke("wechat.newEdition", {
+      id: edited.article.id,
+      revision: edited.article.revision,
+      requestId: randomUUID(),
+    });
+    f.control.receipt = { draftId: "900001", url: draftUrl("900001") };
+    child = await f.send(child);
+    assert.equal(child.article.remote?.accountId, f.publisher.id);
+    assert.equal(child.article.remote?.draftId, "900001");
+    assert.equal(f.control.payloads.at(-1)?.draftId, undefined);
+    assert.equal(
+      f.app.wechat.get(current.article.id).article.remote?.draftId,
+      "900002",
+    );
+    child = await f.save(child, { title: "身份变化后不得写入" });
+    f.identities.set(f.publisher.id, "unexpected-publisher");
+    await assert.rejects(f.send(child), { code: "WEBSITE_LOGIN_REQUIRED" });
+    assert.equal(f.control.writes, 2);
   } finally {
     await f.cleanup();
   }
@@ -1754,8 +2091,10 @@ test("公众号可复制资源链接：命名链接显示完整提取码地址�
   const named = wechatHtml(`[下载资料](${url})`);
   assert.match(
     named,
-    /下载资料（https:\/\/pan.baidu.com\/s\/1own123\?pwd=abcd&amp;from=wechat）/,
+    /https:\/\/pan.baidu.com\/s\/1own123\?pwd=abcd&amp;from=wechat<\/a>/,
   );
+  assert.match(named, />下载资料<\/p>/);
+  assert.match(named, /点击文末“阅读原文”打开资源/);
   assert.equal(
     (wechatHtml(url).match(/>https:\/\/pan\.baidu\.com/g) ?? []).length,
     1,
@@ -1995,6 +2334,194 @@ test("公众号吸睛增强：单张与批量均传入参考图，未知风格�
     assert.equal(batch.replaced, 2);
     assert.deepEqual(batch.failed, []);
     assert.deepEqual(batch.detail.article.source, current.article.source);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("单换行混排正文与资源时开放正文改写，原位保护图链，不再仅更新标题", async () => {
+  const original = `第一行已有事实。\n第二行已有条件。\n测试🔗入口：[查看资源](${sourceShare})\n图片后的文字也有说明。\n![图片](${sourceImage})`;
+  const f = await fixture(original);
+  try {
+    const current = await f.imported();
+    f.control.aiReply = (input) => ({
+      title: "已有事实与适用条件",
+      digest: "依据原文整理。",
+      sections: rewrittenSections(input, (text) =>
+        text
+          .replace("第一行已有事实。", "## 阅读要点\n\n这部分说明已有事实。")
+          .replace("图片后的文字也有说明。", "图片之后仍保留必要说明。"),
+      ),
+    });
+    const result = await f.invoke("wechat.rewrite", {
+      id: current.article.id,
+      styleId: "explain",
+    });
+    assert.equal(f.control.aiCalls.length, 1);
+    assert(
+      f.control.aiCalls[0].input.sections.some((section) => !section.locked),
+    );
+    assert.notEqual(result.article.body, current.article.body);
+    assert.match(result.article.body, /^## 阅读要点/);
+    assert(
+      result.article.body.includes(
+        `\n测试🔗入口：[查看资源](${sourceShare})\n`,
+      ),
+    );
+    assert(result.article.body.endsWith(`\n![图片](${sourceImage})`));
+    assert.equal(result.article.source.body, original);
+    const before = result.article;
+    f.control.aiReply = (input) => ({
+      title: "不应只保存标题",
+      digest: "不应保存",
+      sections: [],
+    });
+    await assert.rejects(
+      f.invoke("wechat.rewrite", { id: current.article.id }),
+      { code: "WECHAT_REWRITE" },
+    );
+    assert.deepEqual(f.app.wechat.get(current.article.id).article, before);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("没有可编辑正文时不调用AI或只保存标题", async () => {
+  const f = await fixture(
+    `测试入口：${sourceShare}\n\n![图片](${sourceImage})`,
+  );
+  try {
+    const current = await f.imported();
+    await assert.rejects(
+      f.invoke("wechat.rewrite", { id: current.article.id }),
+      /可独立改写/,
+    );
+    assert.equal(f.control.aiCalls.length, 0);
+    assert.deepEqual(
+      f.app.wechat.get(current.article.id).article,
+      current.article,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("独立标题生成使用当前未保存正文与完整词池，返回五条且不修改稿件或覆盖计数", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.imported();
+    current = await f.invoke("wechat.saveTrafficWords", {
+      id: current.article.id,
+      wordsRevision: 0,
+      words: ["相关词", "另一个词"],
+    });
+    const before = structuredClone(current);
+    const result = await f.invoke("wechat.generateTitles", {
+      id: current.article.id,
+      revision: current.article.revision,
+      text: {
+        ...current.article,
+        title: "本窗口未保存标题",
+        body: "当前未保存的正文内容。",
+      },
+    });
+    assert.equal(result.length, 5);
+    assert.equal(new Set(result).size, 5);
+    assert.equal(
+      f.control.titleCalls[0].input.currentTitle,
+      "本窗口未保存标题",
+    );
+    assert.equal(
+      f.control.titleCalls[0].input.sections[0].text,
+      "当前未保存的正文内容。",
+    );
+    assert.deepEqual(f.control.titleCalls[0].input.trafficWords, [
+      "相关词",
+      "另一个词",
+    ]);
+    assert.match(
+      f.control.titleCalls[0].system,
+      /不得仅根据旧标题或流量词推断/,
+    );
+    assert.deepEqual(f.app.wechat.get(current.article.id), before);
+    await assert.rejects(
+      f.invoke("wechat.generateTitles", {
+        id: current.article.id,
+        revision: 999,
+      }),
+      { code: "WECHAT_VERSION_CHANGED" },
+    );
+    assert.equal(f.control.titleCalls.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("标题生成拒绝重复、缺项、超长和外链；失败或并发不改原稿，可重试", async () => {
+  const f = await fixture();
+  try {
+    const current = await f.imported();
+    const valid = f.control.titleReply;
+    for (const titles of [
+      [
+        "同一个标题",
+        "同一个标题！",
+        "同一个标题。",
+        "同一个标题？",
+        "同一个标题～",
+      ],
+      ["只有一条"],
+      ["长".repeat(65), "第二条", "第三条", "第四条", "第五条"],
+      ["https://example.com/x", "第二条", "第三条", "第四条", "第五条"],
+      ["免费领取资料", "第二条", "第三条", "第四条", "第五条"],
+    ]) {
+      f.control.titleReply = () => ({ titles });
+      const before = f.control.titleCalls.length;
+      await assert.rejects(
+        f.invoke("wechat.generateTitles", {
+          id: current.article.id,
+          revision: current.article.revision,
+        }),
+      );
+      assert.equal(f.control.titleCalls.length - before, 2);
+      assert.deepEqual(
+        f.app.wechat.get(current.article.id).article,
+        current.article,
+      );
+      assert.equal(f.app.wechat.isBusy, false);
+    }
+    let attempts = 0;
+    f.control.titleReply = (input) =>
+      ++attempts === 1 ? { titles: ["缺项"] } : valid(input);
+    assert.equal(
+      (
+        await f.invoke("wechat.generateTitles", {
+          id: current.article.id,
+          revision: current.article.revision,
+        })
+      ).length,
+      5,
+    );
+    let release!: () => void;
+    f.control.beforeTitle = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const pending = f.invoke("wechat.generateTitles", {
+      id: current.article.id,
+      revision: current.article.revision,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await assert.rejects(
+      f.invoke("wechat.rewrite", { id: current.article.id }),
+      { code: "WECHAT_BUSY" },
+    );
+    release();
+    await pending;
+    assert.deepEqual(
+      f.app.wechat.get(current.article.id).article,
+      current.article,
+    );
   } finally {
     await f.cleanup();
   }

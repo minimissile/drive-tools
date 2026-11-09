@@ -1,5 +1,9 @@
 import { articleHtml } from "./article-markup";
 import { providerSpecs } from "./providers";
+import {
+  typesetWechatHtml,
+  wechatTypesettingVersion,
+} from "./wechat-typesetting";
 
 const resourceHosts = new Set([
   ...Object.values(providerSpecs).map((spec) => spec.shareHost),
@@ -72,19 +76,57 @@ export function linkifyWechatMarkdown(body: string) {
   }
   return result + prose(body.slice(offset));
 }
-export function wechatHtml(body: string) {
+function visibleResourceLinks(html: string) {
   // WeChat may strip external anchor attributes. Keep resource URLs, including
   // extraction-code parameters, visible so the saved draft remains usable.
-  return articleHtml(body, isWechatImageUrl).replace(
-    /<a href="([^"]+)" rel="noopener noreferrer">([^<]*)<\/a>/g,
-    (anchor, href: string, label: string) => {
+  return html.replace(
+    /(<a href="([^"]+)" rel="noopener noreferrer"[^>]*>)([\s\S]*?)<\/a>/g,
+    (anchor, opening: string, href: string, label: string) => {
       try {
         const url = new URL(href.replace(/&amp;/g, "&"));
         if (!isWechatResourceUrl(url) || label.includes(href)) return anchor;
-        return `<a href="${href}" rel="noopener noreferrer">${label}（${href}）</a>`;
+        return `${opening}${label}（${href}）</a>`;
       } catch {
         return anchor;
       }
     },
+  );
+}
+
+/** Older uncertain saves without a proof must be checked against their original delivery. */
+export function wechatLegacyHtml(body: string) {
+  return visibleResourceLinks(articleHtml(body, isWechatImageUrl));
+}
+
+/** The native WeChat entry accepts one URL; select the first resource in reading order. */
+export function wechatReadMoreUrl(body: string) {
+  const prose = body.replace(
+    /```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))/g,
+    "",
+  );
+  const html = articleHtml(prose, isWechatImageUrl);
+  for (const match of html.matchAll(/<a href="([^"]+)"/g)) {
+    try {
+      const url = new URL(match[1].replace(/&amp;/g, "&"));
+      if (isWechatResourceUrl(url)) return url.href;
+    } catch {
+      /* Generated links are validated; ignore any unsupported address. */
+    }
+  }
+  return "";
+}
+
+export function wechatHtml(body: string, version = wechatTypesettingVersion) {
+  if (version < 1) return wechatLegacyHtml(body);
+  return visibleResourceLinks(
+    typesetWechatHtml(
+      articleHtml(body, isWechatImageUrl),
+      isWechatResourceUrl,
+      {
+        readMoreUrl: version >= 2 ? wechatReadMoreUrl(body) : "",
+        compactLists: version >= 2,
+        entryLabels: version >= 3,
+      },
+    ),
   );
 }

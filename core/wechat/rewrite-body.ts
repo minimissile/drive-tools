@@ -17,9 +17,37 @@ export const wechatRewriteResponse = z.object({
 
 export function wechatRewriteBody(body: string) {
   const blocks = body.split(/(\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*)/);
+  // A fetched paragraph can contain prose and a link separated by single
+  // newlines. Protect only those lines instead of locking the entire article.
+  const parts = blocks.flatMap((block) => {
+    if (
+      !protectedText.test(block) ||
+      !/\r?\n/.test(block) ||
+      /^(?:```|~~~)/m.test(block)
+    )
+      return [block];
+    const result: string[] = [];
+    let prose = "";
+    const flush = () => {
+      const separator = prose.match(/\r?\n$/)?.[0] ?? "";
+      const content = separator ? prose.slice(0, -separator.length) : prose;
+      if (content) result.push(content);
+      if (separator) result.push(separator);
+      prose = "";
+    };
+    for (const line of block.split(/(\r?\n)/)) {
+      if (protectedText.test(line)) {
+        flush();
+        result.push(line);
+      } else if (/^\r?\n$/.test(line) && !prose) result.push(line);
+      else prose += line;
+    }
+    flush();
+    return result;
+  });
   const sections: { id: number; text: string; locked: boolean }[] = [];
   const entries: { id: number | null; text: string }[] = [];
-  for (const block of blocks) {
+  for (const block of parts) {
     if (!block.trim()) {
       entries.push({ id: null, text: block });
       continue;
