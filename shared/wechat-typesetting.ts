@@ -1,5 +1,6 @@
 import { providerSpecs } from "./providers";
 import { getWechatTemplate, type WechatTemplateId } from "./wechat-templates";
+import { layoutWechatTemplate } from "./wechat-template-layout";
 import {
   wechatResourceCard,
   wechatResourceCards,
@@ -32,7 +33,9 @@ export function typesetWechatHtml(
     templateId?: WechatTemplateId;
   } = {},
 ) {
-  const { bodyStyle, styles, resource } = getWechatTemplate(options.templateId);
+  const { bodyStyle, styles, resource, sectionLayout } = getWechatTemplate(
+    options.templateId,
+  );
   if (options.compactLists !== false)
     html = html.replace(
       /<(ul|ol)([^>]*)>([\s\S]*?)<\/\1>/g,
@@ -102,5 +105,5 @@ export function typesetWechatHtml(
         ? tag
         : `<${name}${attributes} style="${styles[name]}">`,
   );
-  return `<section style="${bodyStyle}">${styled}</section>`;
+  return `<section style="${bodyStyle}">${sectionLayout ? layoutWechatTemplate(styled, sectionLayout) : styled}</section>`;
 }

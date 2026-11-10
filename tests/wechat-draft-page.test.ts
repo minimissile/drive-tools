@@ -841,6 +841,52 @@ test("正文外链被移除时，阅读原文入口仍需独立核实", async ()
   );
 });
 
+test("冰蓝图文长标题和多网盘资源在窄正文内换行，标题加粗仍保持白色", async () => {
+  const urls = [
+    `https://pan.quark.cn/s/${"a".repeat(80)}?pwd=abcd`,
+    `https://pan.baidu.com/s/1${"b".repeat(80)}?pwd=efgh`,
+  ];
+  const html = wechatHtml(
+    `导语说明。\n\n## **${"阅读与使用范围".repeat(6)}**\n\n- 第一项\n- 第二项\n\n链接：[资源一](${urls[0]})\n\n链接：[资源二](${urls[1]})`,
+    undefined,
+    undefined,
+    "ice-blue",
+  );
+  await withFixture({}, async (page) => {
+    const result = await page.evaluate(
+      ({ html }) => {
+        const container = document.createElement("article");
+        container.style.width = "350px";
+        container.innerHTML = html;
+        document.body.append(container);
+        const link = container.querySelector("a")!;
+        const heading = container.querySelector("h3 strong")!;
+        return {
+          width: container.clientWidth,
+          scrollWidth: container.scrollWidth,
+          headingColor: getComputedStyle(heading).color,
+          urlSpacing: getComputedStyle(link).letterSpacing,
+          urls: [...container.querySelectorAll("a")].map(
+            (node) => node.textContent,
+          ),
+          listNodes: [...container.querySelector("ul")!.childNodes].map(
+            (node) => node.nodeName,
+          ),
+          panelCount: container.querySelectorAll(":scope > section > section")
+            .length,
+        };
+      },
+      { html },
+    );
+    assert(result.scrollWidth <= result.width);
+    assert.equal(result.headingColor, "rgb(255, 255, 255)");
+    assert.equal(result.urlSpacing, "normal");
+    assert.deepEqual(result.urls, urls);
+    assert.deepEqual(result.listNodes, ["LI", "LI"]);
+    assert.equal(result.panelCount, 2);
+  });
+});
+
 test("所有排版模板在微信回读中保留正文列表与资源入口，不受外链属性清理影响", async () => {
   for (const templateId of wechatTemplateIds) {
     const html = wechatHtml(

@@ -8,7 +8,10 @@ import type {
 import type { WebsiteAccount } from "./website-accounts";
 import { isWechatImageUrl } from "./wechat-markup";
 import { wechatImageStyleSchema } from "./wechat-image-styles";
-import { wechatTemplateSchema } from "./wechat-templates";
+import {
+  wechatTemplateSchema,
+  type WechatTemplateId,
+} from "./wechat-templates";
 import {
   wechatReadMoreSchema,
   type WechatReadMoreEntry,
@@ -109,6 +112,7 @@ export interface WechatArticle extends WechatText {
 export interface WechatDetail {
   article: WechatArticle;
   templateSupport?: true;
+  supportedTemplates?: readonly WechatTemplateId[];
   readMoreEntries?: WechatReadMoreEntry[];
   automaticVerification?: boolean;
   trafficWordPlan?: WechatTrafficWordPlan;

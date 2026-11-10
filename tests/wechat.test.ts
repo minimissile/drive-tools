@@ -3222,3 +3222,27 @@ test("真人面孔拒绝按图片处理：封面正文复用失败回执，其�
     await f.cleanup();
   }
 });
+
+test("冰蓝模板通过能力列表、保存、新稿继承和微信交付全链路复用", async () => {
+  const f = await fixture();
+  try {
+    const current = await f.ready();
+    assert(current.supportedTemplates?.includes("ice-blue"));
+    const saved = await f.save(current, { templateId: "ice-blue" });
+    assert.equal(saved.article.body, current.article.body);
+    const sent = await f.send(saved);
+    assert.equal(sent.article.stage, "synced");
+    assert.match(f.control.payloads.at(-1)!.html, /background-color:#f6fcff/);
+    assert.match(f.control.payloads.at(-1)!.html, /border-radius:20px 0/);
+    const clone = await f.invoke("wechat.newEdition", {
+      id: sent.article.id,
+      revision: sent.article.revision,
+      requestId: randomUUID(),
+    });
+    assert.equal(clone.article.templateId, "ice-blue");
+    assert.equal(clone.article.body, sent.article.body);
+    assert.equal(f.control.aiCalls.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});

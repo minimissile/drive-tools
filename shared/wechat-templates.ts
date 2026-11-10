@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const wechatTemplateIds = ["classic", "minimal"] as const;
+export const wechatTemplateIds = ["classic", "minimal", "ice-blue"] as const;
 export const wechatTemplateSchema = z.enum(wechatTemplateIds);
 export type WechatTemplateId = z.infer<typeof wechatTemplateSchema>;
 export const defaultWechatTemplate: WechatTemplateId = "classic";
@@ -18,6 +18,13 @@ export interface WechatTemplate {
   bodyStyle: string;
   styles: Record<string, string>;
   resource: WechatResourceAppearance;
+  sectionLayout?: {
+    intro: string;
+    panel: string;
+    heading: string;
+    headingLabel: string;
+    chevrons: readonly string[];
+  };
 }
 
 const classicBodyStyle =
@@ -90,6 +97,53 @@ export const wechatTemplates: readonly WechatTemplate[] = [
       title:
         "margin:0 0 12px;font-size:17px;font-weight:600;line-height:1.6;color:#20242b;",
       help: "margin:0;font-size:13px;line-height:1.7;color:#59616d;",
+    },
+  },
+  {
+    id: "ice-blue",
+    name: "冰蓝图文",
+    description: "冰蓝底色、蓝色居中标题、细线内容框与对角圆角导语。",
+    bodyStyle:
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:2;color:#3e3e3e;background-color:#f6fcff;padding:20px 0 1px;text-align:left;text-align-last:left;letter-spacing:2px;word-break:normal;overflow-wrap:break-word;box-sizing:border-box;",
+    styles: {
+      ...classicStyles,
+      p: "margin:0 0 16px;padding:0;font-size:14px;line-height:2;text-align:left;text-align-last:left;letter-spacing:2px;",
+      h2: "margin:26px 0 18px;font-size:18px;line-height:1.6;color:#2d699c;",
+      h3: "margin:26px 0 18px;font-size:18px;line-height:1.6;color:#2d699c;",
+      h4: "margin:22px 0 12px;font-size:16px;font-weight:700;line-height:1.7;color:#2d699c;",
+      h5: "margin:20px 0 10px;font-size:15px;font-weight:700;line-height:1.7;color:#2d699c;",
+      h6: "margin:18px 0 10px;font-size:14px;font-weight:700;line-height:1.7;color:#2d699c;",
+      strong: "font-weight:700;color:inherit;",
+      blockquote:
+        "margin:16px 0;padding:12px 15px;background-color:#f6fcff;color:#2d699c;font-size:13px;line-height:1.9;text-align:left;letter-spacing:1px;",
+      ul: "margin:0 0 16px;padding-left:1.5em;list-style-type:disc;",
+      ol: "margin:0 0 16px;padding-left:1.5em;list-style-type:decimal;",
+      li: "margin:0 0 10px;padding:10px 12px;background-color:#f6fcff;font-size:14px;line-height:2;text-align:left;letter-spacing:1px;",
+      a: "color:#2d699c;text-decoration:underline;word-break:break-all;overflow-wrap:anywhere;letter-spacing:0;",
+      img: "display:block;max-width:100%;height:auto;margin:14px auto;",
+      hr: "width:95%;margin:24px auto;border:0;border-top:1px solid #6ca1c3;",
+      pre: "margin:16px 0;padding:12px 15px;background-color:#f6fcff;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.8;letter-spacing:0;",
+    },
+    resource: {
+      container:
+        "margin:18px 0 0;padding:15px;background-color:#f6fcff;text-align:left;text-align-last:left;letter-spacing:0;box-sizing:border-box;",
+      title:
+        "margin:0 0 10px;font-size:15px;font-weight:700;line-height:1.7;color:#2d699c;letter-spacing:1px;",
+      address:
+        "margin:0 0 10px;font-size:14px;line-height:1.9;text-align:left;text-align-last:left;letter-spacing:0;word-break:break-all;overflow-wrap:anywhere;",
+      code: "margin:0 0 8px;font-size:13px;line-height:1.8;color:#3e3e3e;letter-spacing:0;",
+      help: "margin:0;font-size:13px;line-height:1.8;color:#2d699c;letter-spacing:0;",
+    },
+    sectionLayout: {
+      intro:
+        "width:95%;margin:0 auto 24px;padding:15px;border:1px solid #6ca1c3;border-radius:20px 0;background-color:#fff;box-sizing:border-box;",
+      panel:
+        "width:95%;margin:0 auto 24px;padding:15px;border:1px solid #6ca1c3;background-color:#fff;box-sizing:border-box;",
+      heading:
+        "width:95%;margin:24px auto 20px;padding:0;font-size:18px;font-weight:700;line-height:1.6;text-align:center;text-align-last:center;letter-spacing:0;",
+      headingLabel:
+        "display:inline-block;max-width:calc(100% - 76px);margin:0 6px;padding:5px 16px;vertical-align:middle;background-color:#2d699c;color:#fff;font-size:18px;font-weight:700;line-height:1.6;letter-spacing:2px;overflow-wrap:anywhere;box-sizing:border-box;",
+      chevrons: ["#dbeaf2", "#a9cde2", "#6ca1c3"],
     },
   },
 ];

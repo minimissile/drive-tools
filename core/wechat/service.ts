@@ -41,6 +41,7 @@ import {
 } from "../../shared/wechat-read-more";
 import type { ResourceLinks } from "../resource-links";
 import { wechatTypesettingVersion } from "../../shared/wechat-typesetting";
+import { wechatTemplateIds } from "../../shared/wechat-templates";
 import {
   articleLinks,
   articleLinkOccurrences,
@@ -422,6 +423,7 @@ export class WechatArticles {
     return {
       article,
       templateSupport: true,
+      supportedTemplates: wechatTemplateIds,
       readMoreEntries: this.readMoreEntries(article),
       automaticVerification: !!this.d.port?.verifyDraft,
       editions: this.editionHistory(article),

@@ -296,10 +296,12 @@ export function ArticleEditor({
     onChanged();
   };
   const requireTemplateSupport = () => {
-    if (
-      draft.value.templateId !== defaultWechatTemplate &&
-      !detail.templateSupport
-    )
+    const supported =
+      detail.supportedTemplates ??
+      (detail.templateSupport
+        ? ["classic", "minimal"]
+        : [defaultWechatTemplate]);
+    if (!supported.includes(draft.value.templateId ?? defaultWechatTemplate))
       throw new Error(
         "排版模板更新尚未加载，请点击顶部“应用更新并重启”后保存。模板选择已保留在本窗口。",
       );
