@@ -8,6 +8,11 @@ import type {
 import type { WebsiteAccount } from "./website-accounts";
 import { isWechatImageUrl } from "./wechat-markup";
 import { wechatImageStyleSchema } from "./wechat-image-styles";
+import { wechatTemplateSchema } from "./wechat-templates";
+import {
+  wechatReadMoreSchema,
+  type WechatReadMoreEntry,
+} from "./wechat-read-more";
 import type {
   WechatTrafficWords,
   WechatTrafficWordPlan,
@@ -43,6 +48,8 @@ export const wechatTextInput = z.object({
         return false;
       }
     }, "请选择本地图片或填写 HTTPS 图片地址"),
+  readMore: wechatReadMoreSchema.optional(),
+  templateId: wechatTemplateSchema.optional(),
 });
 export type WechatText = z.infer<typeof wechatTextInput>;
 export type WechatStage = "editing" | "sending" | "synced" | "uncertain";
@@ -101,6 +108,8 @@ export interface WechatArticle extends WechatText {
 }
 export interface WechatDetail {
   article: WechatArticle;
+  templateSupport?: true;
+  readMoreEntries?: WechatReadMoreEntry[];
   automaticVerification?: boolean;
   trafficWordPlan?: WechatTrafficWordPlan;
   editions?: WechatEditionSummary[];

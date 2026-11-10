@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Database, databaseSchemaVersion } from "../core/database";
 import { RuntimeLog } from "../core/runtime-log";
+import { removeV34 } from "./helpers";
 
 test("运行日志：数据库与JSONL持久化、按账号和等级分页，凭据脱敏", async () => {
   const dir = await mkdtemp(join(tmpdir(), "panxu-runtime-log-")),
@@ -46,7 +47,7 @@ test("运行日志：v29迁移保留既有数据并生成备份", async () => {
   let db = new Database(path);
   try {
     db.setSetting("keep", { value: 123 });
-    db.db.exec("DROP TABLE runtime_logs; PRAGMA user_version=29;");
+    db.db.exec(`${removeV34} DROP TABLE runtime_logs; PRAGMA user_version=29;`);
     db.close();
     db = new Database(path);
     assert.equal(
@@ -61,7 +62,7 @@ test("运行日志：v29迁移保留既有数据并生成备份", async () => {
       message: "迁移完成",
     });
   } finally {
-    db.close();
+    if (db.db.isOpen) db.close();
     await rm(dir, { recursive: true, force: true });
   }
 });

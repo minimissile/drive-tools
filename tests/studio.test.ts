@@ -707,3 +707,96 @@ test("公众号图片 403 保留拒绝原因，主题生成沿用全局模型且
     await f.cleanup();
   }
 });
+
+test("公众号图片HTTP400真人面孔拒绝：只提交一次、中文原因和模型诊断入账", async () => {
+  const f = await setup();
+  try {
+    f.app.db.setSetting("aiModels", { image: "qa/image" });
+    let requests = 0;
+    Object.assign(f.app.studio, {
+      request: async () => {
+        requests++;
+        throw new ServiceHttpError(
+          400,
+          "The input content is suspected to include real human faces.",
+          "MEDIA_REJECTED",
+        );
+      },
+    });
+    await assert.rejects(
+      f.app.studio.generateReferenceImage(
+        Buffer.from(png, "base64"),
+        "参考图再创作",
+      ),
+      (error) => {
+        assert.equal((error as AppError).code, "MEDIA_FACE_REJECTED");
+        assert.match((error as Error).message, /疑似包含真人面孔/);
+        return true;
+      },
+    );
+    assert.equal(requests, 1, "内容拒绝不自动重试或切换模型");
+    const call = f.app.db.get<{
+      id: string;
+      status: string;
+      confirmed_micros: number | null;
+    }>(
+      "SELECT id,status,confirmed_micros FROM api_calls WHERE phase='wechat_image'",
+    )!;
+    assert.equal(call.status, "failed");
+    assert.equal(call.confirmed_micros, null, "未返回实费不声称免费");
+    const diagnostic = JSON.parse(
+      f.app.db.get<{ value: string }>(
+        "SELECT value FROM api_cache WHERE key=?",
+        `ai-diagnostic:${call.id}`,
+      )!.value,
+    );
+    assert.equal(diagnostic.model, "qa/image");
+    assert.equal(diagnostic.rejectionReason, "human-face");
+    assert.equal(diagnostic.httpStatus, 400);
+    assert.equal(
+      f.app.db.setting<Record<string, string>>("ai:modelIssues", {})[
+        "qa/image"
+      ],
+      undefined,
+      "单张素材拒绝不标记整个模型失效",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("工作室共用拒绝分类：内容拒绝不禁用模型，权限拒绝保持失败账本", async (t) => {
+  for (const [status, message, policy] of [
+    [400, "The input content is suspected to include real human faces.", true],
+    [403, "Provider Terms Of Service", true],
+    [403, "Permission denied", false],
+  ] as const)
+    await t.test(message, async () => {
+      const f = await setup();
+      try {
+        const draft = await f.create();
+        Object.assign(f.app.studio, {
+          request: async () => {
+            throw new ServiceHttpError(status, message, "MEDIA_REJECTED");
+          },
+        });
+        const job = await f.submit(draft);
+        assert.equal(job.status, "failed");
+        assert.match(job.error ?? "", /拒绝|权限/);
+        assert.equal(
+          f.app.db.get<{ status: string }>(
+            "SELECT status FROM api_calls WHERE id=?",
+            job.callId,
+          )?.status,
+          "failed",
+        );
+        const issue = f.app.db.setting<Record<string, string>>(
+          "ai:modelIssues",
+          {},
+        )["qa/image"];
+        assert.equal(!!issue, !policy);
+      } finally {
+        await f.cleanup();
+      }
+    });
+});

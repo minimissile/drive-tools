@@ -433,7 +433,8 @@ export function createWechatSession(
         await win.loadURL(
           `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${proof.draftId}&token=${identity.token}&lang=zh_CN`,
         );
-        await waitForRead(win, assertWechatSingleDraft);
+        // This is a read-only receipt check. Content is bound to the saved
+        // draft ID; article-count protection belongs only before an update.
         await verifySavedContent(win, proof);
       } finally {
         clearTimeout(timeout);

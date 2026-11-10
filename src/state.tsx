@@ -79,6 +79,7 @@ export type Page =
   | "tieba-autocare"
   | "tieba-publishing"
   | "settings"
+  | "system-logs"
   | "bulk"
   | "batch"
   | "split"
@@ -217,6 +218,7 @@ const pages: Page[] = [
   "tieba-autocare",
   "tieba-publishing",
   "settings",
+  "system-logs",
   "bulk",
   "batch",
   "split",

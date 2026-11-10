@@ -1,28 +1,11 @@
 import { providerSpecs } from "./providers";
+import { getWechatTemplate, type WechatTemplateId } from "./wechat-templates";
+import {
+  wechatResourceCard,
+  wechatResourceCards,
+} from "./wechat-resource-cards";
 
-export const wechatTypesettingVersion = 3;
-
-const bodyStyle =
-  "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:16px;line-height:1.85;color:#283245;text-align:left;text-align-last:left;letter-spacing:0;word-break:normal;overflow-wrap:break-word;";
-const styles: Record<string, string> = {
-  p: "margin:0 0 18px;padding:0;line-height:1.85;text-align:left;text-align-last:left;letter-spacing:0;",
-  h2: "margin:28px 0 14px;font-size:22px;font-weight:700;line-height:1.5;color:#1d293d;",
-  h3: "margin:26px 0 12px;font-size:20px;font-weight:700;line-height:1.5;color:#1d293d;",
-  h4: "margin:22px 0 10px;font-size:18px;font-weight:600;line-height:1.5;color:#1d293d;",
-  h5: "margin:20px 0 10px;font-size:17px;font-weight:600;line-height:1.5;color:#1d293d;",
-  h6: "margin:20px 0 10px;font-size:16px;font-weight:600;line-height:1.5;color:#1d293d;",
-  strong: "font-weight:700;color:#1d293d;",
-  blockquote:
-    "margin:20px 0;padding:12px 16px;background-color:#f5f7fb;color:#52627a;line-height:1.8;text-align:left;",
-  ul: "margin:0 0 20px;padding-left:1.5em;list-style-type:disc;",
-  ol: "margin:0 0 20px;padding-left:1.5em;list-style-type:decimal;",
-  li: "margin:0 0 8px;padding-left:2px;line-height:1.85;text-align:left;",
-  a: "color:#2d5edb;text-decoration:underline;word-break:break-all;letter-spacing:0;",
-  img: "display:block;max-width:100%;height:auto;margin:20px auto;",
-  hr: "margin:28px 0;border:0;border-top:1px solid #e0e6ef;",
-  pre: "margin:20px 0;padding:14px 16px;background-color:#f5f7fb;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.7;",
-  code: "font-family:Menlo,Consolas,monospace;font-size:0.9em;",
-};
+export const wechatTypesettingVersion = 5;
 
 function providerName(url: URL) {
   const host =
@@ -45,8 +28,11 @@ export function typesetWechatHtml(
     readMoreUrl?: string;
     compactLists?: boolean;
     entryLabels?: boolean;
+    resourceBlocks?: boolean;
+    templateId?: WechatTemplateId;
   } = {},
 ) {
+  const { bodyStyle, styles, resource } = getWechatTemplate(options.templateId);
   if (options.compactLists !== false)
     html = html.replace(
       /<(ul|ol)([^>]*)>([\s\S]*?)<\/\1>/g,
@@ -103,18 +89,13 @@ export function typesetWechatHtml(
         url.href === options.readMoreUrl
           ? "点击文末“阅读原文”打开资源"
           : "复制链接到浏览器打开";
-      return (
-        `<section style="margin:22px 0;padding:16px 18px;border:1px solid #e0e6ef;border-radius:12px;background-color:#f7f9fc;text-align:left;text-align-last:left;letter-spacing:0;">` +
-        `<p style="margin:0 0 10px;font-size:16px;font-weight:600;line-height:1.5;color:#1d293d;">${title}</p>` +
-        `<p style="margin:0 0 10px;font-size:14px;line-height:1.7;text-align:left;text-align-last:left;letter-spacing:0;word-break:break-all;overflow-wrap:anywhere;"><a href="${href}" rel="noopener noreferrer">${href}</a></p>` +
-        (code
-          ? `<p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#52627a;">${code}</p>`
-          : "") +
-        `<p style="margin:0;font-size:13px;line-height:1.6;color:#52627a;">${help}</p></section>`
-      );
+      return wechatResourceCard(href, title, code, help, resource);
     },
   );
-  const styled = resources.replace(
+  const currentResources = options.resourceBlocks
+    ? wechatResourceCards(resources, isResource, options.readMoreUrl, resource)
+    : resources;
+  const styled = currentResources.replace(
     /<(h[2-6]|p|strong|blockquote|ul|ol|li|a|img|hr|pre|code)(?=[ >])([^>]*)>/g,
     (tag, name: string, attributes: string) =>
       /\bstyle=/.test(attributes)

@@ -3,6 +3,7 @@ export class AppError extends Error {
     public code: string,
     message: string,
     public uncertain = false,
+    public details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "AppError";

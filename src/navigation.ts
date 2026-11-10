@@ -16,6 +16,7 @@ import {
   Users,
   Workflow,
   BrainCircuit,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import type { Page } from "./state";
@@ -50,6 +51,7 @@ export const sidebarEntries: NavigationEntry[] = [
   { page: "photo-posts", title: "资源图文营销", Icon: NotebookPen },
   { page: "browser-environments", title: "指纹浏览器", Icon: Fingerprint },
   { page: "settings", title: "连接与设置", Icon: Plug },
+  { page: "system-logs", title: "异常日志", Icon: ScrollText },
 ];
 export const resourceOperations: WorkbenchEntry[] = [
   driveFilesEntry,

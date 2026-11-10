@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import { AppService, type AppPorts } from "../core/service";
-import { AppError } from "../core/errors";
+import { AppError, ServiceHttpError } from "../core/errors";
+import { AiService } from "../core/ai";
+import type { fetchJson } from "../core/http";
 import { TestProvider, file } from "./helpers";
 import type { IpcArgs, IpcMethod, IpcValue } from "../shared/ipc";
 import type { SmzdmSource } from "../shared/smzdm";
@@ -30,6 +32,14 @@ import type { Account } from "../shared/types";
 const sourceUrl = "https://mp.weixin.qq.com/s/isolated-wechat-fixture";
 const sourceShare = "https://pan.quark.cn/s/source123";
 const sourceImage = "https://mmbiz.qpic.cn/isolated-fixture.png";
+const formatRegressionBody = [
+  "最近**人格测试**受到一些读者关注，文章分享了一个用于了解自身特质的入口。阅读结果时，可以先了解资料介绍和适用范围，再根据自己的情况判断。",
+  "下面提供对应的资源链接，供有需要的人参考。文章中的说明保留了原有条件，没有把问卷结果描述为固定结论，也不代表任何效果保证。",
+  "获取方法如下：",
+  `入口链接🔗：[查看资源](${sourceShare}?pwd=orig)`,
+  "复制上方链接后，打开对应网盘查阅。请按照页面已有说明进行操作，并保留资料中的注意事项；不把文章中的表达当作结果承诺。",
+  `![图片](${sourceImage})`,
+].join("\n\n");
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZfQAAAAASUVORK5CYII=",
   "base64",
@@ -74,6 +84,7 @@ async function fixture(
       input: RewriteInput;
       retainResponse: boolean;
       jsonMode: boolean;
+      plainJson: boolean;
     }[],
     payloads: [] as WechatDraftPayload[],
     opened: [] as { accountId: string; url?: string }[],
@@ -218,7 +229,11 @@ async function fixture(
     system: string,
     raw: unknown,
     _images: string[] = [],
-    options: { retainResponse?: boolean; jsonMode?: boolean } = {},
+    options: {
+      retainResponse?: boolean;
+      jsonMode?: boolean;
+      plainJson?: boolean;
+    } = {},
   ) => {
     if (_name === "wechat_article_titles") {
       const input = structuredClone(
@@ -235,6 +250,7 @@ async function fixture(
       input,
       retainResponse: options.retainResponse === true,
       jsonMode: options.jsonMode === true,
+      plainJson: options.plainJson === true,
     });
     if (control.aiError) throw control.aiError;
     return schema.parse(control.aiReply(input));
@@ -332,6 +348,150 @@ async function fixture(
   };
 }
 
+/** Seed confirmed local publication records; no site or drive request is made. */
+function publishedEntry(
+  f: Awaited<ReturnType<typeof fixture>>,
+  detail: WechatDetail,
+) {
+  const copy = f.app.repo.getCopy(detail.article.links[0].copyId!);
+  const record = {
+    id: "link-wechat-read-more",
+    resourceId: copy.resourceId,
+    slug: "wechatReadMore",
+    baseUrl: "https://panxu.site",
+    state: "synced",
+    enabled: true,
+    targetUrl: detail.article.links[0].ownUrl,
+    revision: 1,
+    syncedAt: new Date().toISOString(),
+    operationId: null,
+  };
+  const store = (patch = {}) =>
+    f.app.db.run(
+      "INSERT INTO resource_links(id,resource_id,slug,base_url,data) VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET data=excluded.data",
+      record.id,
+      copy.resourceId,
+      record.slug,
+      record.baseUrl,
+      JSON.stringify({ ...record, ...patch }),
+    );
+  store();
+  const landing = (patch = {}) =>
+    f.app.db.run(
+      "INSERT INTO resource_landing_pages(resource_id,data) VALUES(?,?) ON CONFLICT(resource_id) DO UPDATE SET data=excluded.data",
+      copy.resourceId,
+      JSON.stringify({
+        published: { document: { title: "已发布的资源说明" } },
+        pending: null,
+        ...patch,
+      }),
+    );
+  landing();
+  return { store, landing };
+}
+
+test("阅读原文：三种地址随稿保存、同稿更新，重存相同选择不增加版本", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.ready();
+    publishedEntry(f, current);
+    const linkId = current.article.links[0].id;
+    for (const [kind, url] of [
+      ["drive", `${f.drive.ownUrl}?pwd=test`],
+      ["landing", "https://panxu.site/r/wechatReadMore"],
+      ["redirect", "https://panxu.site/go/wechatReadMore"],
+    ] as const) {
+      current = await f.save(current, { readMore: { kind, linkId } });
+      const saved = await f.save(current, { readMore: { kind, linkId } });
+      assert.equal(saved.article.revision, current.article.revision);
+      current = await f.send(saved);
+      const payload = f.control.payloads.at(-1)!;
+      assert.equal(payload.sourceUrl, url);
+      assert.match(payload.html, /点击文末“阅读原文”打开资源/);
+      assert.match(payload.html, /https:\/\/pan.quark.cn\/s\/own123/);
+      assert.equal(current.article.remote?.draftId, "900001");
+    }
+    assert.equal(f.control.writes, 3);
+    current = await f.save(current, { title: "修改标题仍保留原文链接选择" });
+    assert.equal(
+      current.article.readMore?.kind,
+      "redirect",
+      "旧调用方省略字段也不会清除已有选择",
+    );
+    const next = await f.invoke("wechat.newEdition", {
+      id: current.article.id,
+      revision: current.article.revision,
+      requestId: randomUUID(),
+    });
+    assert.deepEqual(next.article.readMore, current.article.readMore);
+    const changed = await f.save(next, { readMore: { kind: "drive", linkId } });
+    assert.equal(changed.article.readMore?.kind, "drive");
+    assert.equal(
+      (await f.invoke("wechat.get", { id: current.article.id })).article
+        .readMore?.kind,
+      "redirect",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("阅读原文：未发布、停用、待核对的入口阻止送稿，保留原选择且不创建远端入口", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.ready();
+    const linkId = current.article.links[0].id;
+    current = await f.save(current, { readMore: { kind: "redirect", linkId } });
+    await assert.rejects(f.send(current), /尚未创建固定入口/);
+    const seeded = publishedEntry(f, current);
+    for (const [patch, pattern] of [
+      [{ enabled: false }, /已停用/],
+      [{ operationId: "pending-operation" }, /尚未同步完成/],
+      [{ targetUrl: null }, /尚未绑定/],
+    ] as const) {
+      seeded.store(patch);
+      await assert.rejects(f.send(current), pattern);
+    }
+    seeded.store();
+    current = await f.save(current, { readMore: { kind: "landing", linkId } });
+    seeded.landing({ published: null });
+    await assert.rejects(f.send(current), /尚未发布/);
+    seeded.landing({ pending: { operationId: "unresolved" } });
+    await assert.rejects(f.send(current), /发布状态待核实/);
+    assert.equal(f.control.writes, 0);
+    assert.equal(f.control.payloads.length, 0);
+    assert.equal(
+      (await f.invoke("wechat.get", { id: current.article.id })).article
+        .readMore?.kind,
+      "landing",
+    );
+    seeded.landing();
+    current = await f.send(current);
+    assert.equal(current.article.stage, "synced");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("阅读原文：删除所选正文资源后不会悄悄改用其他链接", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.ready();
+    current = await f.save(current, {
+      readMore: { kind: "drive", linkId: current.article.links[0].id },
+    });
+    current = await f.save(current, { body: "没有网盘链接的新正文。" });
+    await assert.rejects(f.send(current), /所选资源已不在正文/);
+    assert.equal(f.control.writes, 0);
+    current = await f.save(current, { readMore: { kind: "drive" } });
+    current = await f.send(current);
+    assert.equal(current.article.stage, "synced");
+    assert.equal(f.control.payloads.at(-1)?.sourceUrl, "");
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("公众号导入：正文、来源、提取码和插图入本地，重复导入不覆盖编辑", async () => {
   const f = await fixture();
   try {
@@ -363,6 +523,9 @@ test("同一原文的历史导入归组，不改动各稿内容；不同原文�
   const f = await fixture();
   try {
     const root = await f.save(await f.imported(), { title: "改写后的第一稿" });
+    // Historical imports must have a real chronological order, rather than relying on random IDs when timestamps tie.
+    root.article.createdAt = "2026-01-01T00:00:00.000Z";
+    f.app.db.setSetting(`wechat:article:v1:${root.article.id}`, root.article);
     const legacy = await f.invoke("wechat.import", {
       url: `${sourceUrl}?scene=1`,
     });
@@ -864,6 +1027,7 @@ test("公众号 Qwen 改写使用JSON兼容模式，本地段落与内容校验�
     f.app.db.setSetting("aiModels", { copy: "qwen/copy-model" });
     await f.invoke("wechat.rewrite", { id: current.article.id });
     assert.equal(f.control.aiCalls.at(-1)!.jsonMode, true);
+    assert.equal(f.control.aiCalls.at(-1)!.plainJson, true);
     f.control.aiReply = (input) => ({
       title: input.title,
       digest: "摘要",
@@ -882,6 +1046,7 @@ test("公众号 Qwen 改写使用JSON兼容模式，本地段落与内容校验�
     });
     await f.invoke("wechat.rewrite", { id: before.id });
     assert.equal(f.control.aiCalls.at(-1)!.jsonMode, false);
+    assert.equal(f.control.aiCalls.at(-1)!.plainJson, false);
   } finally {
     await f.cleanup();
   }
@@ -923,6 +1088,215 @@ test("公众号 Markdown 改写：排版保存与交付保留层次，原图与�
       (await f.invoke("wechat.get", { id: current.article.id })).article,
       result.article,
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("换稿格式回归：六种改写风格统一整理引导语并以同一模板预览和送稿", async () => {
+  const f = await fixture(formatRegressionBody);
+  try {
+    let current = await f.ready();
+    const originalBody = current.article.body;
+    for (const styleId of wechatRewriteStyleIds) {
+      current = await f.invoke("wechat.rewrite", {
+        id: current.article.id,
+        styleId,
+      });
+      assert.match(current.article.body, /## 获取方法如下/);
+      assert.equal(
+        current.article.body.replace("## 获取方法如下", "获取方法如下："),
+        originalBody,
+      );
+      assert.equal(current.article.rewriteStyleId, styleId);
+      current = await f.send(current);
+      assert.match(
+        f.control.payloads.at(-1)!.html,
+        /<h3[^>]*>获取方法如下<\/h3>/,
+      );
+      assert.match(f.control.payloads.at(-1)!.html, /border-radius:12px/);
+      assert.deepEqual(
+        current.article.links,
+        f.app.wechat.get(current.article.id).article.links,
+      );
+    }
+    assert.equal(
+      f.control.aiCalls.length,
+      wechatRewriteStyleIds.length,
+      "已有引导语只做机械排版，无需额外调用AI",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Markdown结构不合格自动修正一次，仍不合格不保存正文或累计词覆盖", async () => {
+  const f = await fixture(
+    formatRegressionBody.replace("获取方法如下：\n\n", ""),
+  );
+  try {
+    let current = await f.imported();
+    current = await f.invoke("wechat.saveTrafficWords", {
+      id: current.article.id,
+      wordsRevision: 0,
+      words: ["人格测试"],
+    });
+    let attempts = 0;
+    f.control.aiReply = (input) => ({
+      title: input.title,
+      digest: "阅读资料前先了解适用范围。",
+      sections: rewrittenSections(input, (text) =>
+        ++attempts ===
+        input.sections.filter((section) => !section.locked).length + 1
+          ? `## 资料的阅读范围\n\n${text}`
+          : text,
+      ),
+    });
+    const rewritten = await f.invoke("wechat.rewrite", {
+      id: current.article.id,
+    });
+    assert.equal(f.control.aiCalls.length, 2);
+    assert.match(rewritten.article.body, /## 资料的阅读范围/);
+    assert.match(
+      (f.control.aiCalls[1].input as RewriteInput & { retryFeedback: string })
+        .retryFeedback,
+      /排版不合格/,
+    );
+    assert.equal(rewritten.trafficWordPlan?.usage[0].uses, 1);
+    f.control.aiReply = (input) => ({
+      title: input.title,
+      digest: "阅读资料前先了解适用范围。",
+      sections: rewrittenSections(input, (text) =>
+        text.replace(/^##\s+/gm, "").replace(/\*\*/g, ""),
+      ),
+    });
+    await assert.rejects(
+      f.invoke("wechat.rewrite", { id: current.article.id }),
+      /正文排版仍未达到要求/,
+    );
+    assert.equal(f.control.aiCalls.length, 4);
+    assert.deepEqual(
+      f.app.wechat.get(current.article.id).article,
+      rewritten.article,
+    );
+    assert.equal(
+      f.app.wechat.get(current.article.id).trafficWordPlan?.usage[0].uses,
+      1,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("现有未分节的稿件可整理排版修复，保留图链、不调用AI且重复整理不升版", async () => {
+  const f = await fixture(formatRegressionBody);
+  try {
+    const current = await f.imported();
+    const formatted = await f.invoke("wechat.format", {
+      id: current.article.id,
+    });
+    assert.match(formatted.article.body, /## 获取方法如下/);
+    assert.equal(
+      formatted.article.body.replace("## 获取方法如下", "获取方法如下："),
+      current.article.body,
+    );
+    assert.equal(f.control.aiCalls.length, 0);
+    assert.equal(
+      (await f.invoke("wechat.format", { id: current.article.id })).article
+        .revision,
+      formatted.article.revision,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("排版模板随稿保存并由新稿继承，切换不改正文、不调用AI，更新原微信草稿", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.ready();
+    assert.equal(current.templateSupport, true);
+    current = await f.send(current);
+    const original = structuredClone(current.article);
+    current = await f.save(current, { templateId: "minimal" });
+    assert.equal(current.article.revision, original.revision + 1);
+    for (const key of [
+      "body",
+      "coverUrl",
+      "title",
+      "digest",
+      "author",
+      "links",
+      "trafficWords",
+    ] as const)
+      assert.deepEqual(current.article[key], original[key]);
+    const same = await f.save(current, { templateId: "minimal" });
+    assert.equal(same.article.revision, current.article.revision);
+    current = await f.send(same);
+    assert.equal(current.article.remote?.draftId, original.remote?.draftId);
+    assert.match(
+      f.control.payloads.at(-1)!.html,
+      /font-size:17px;line-height:1.95/,
+    );
+    assert.equal(f.control.aiCalls.length, 0);
+    current = await f.save(current, { title: "只改标题仍保留模板选择" });
+    assert.equal(current.article.templateId, "minimal");
+    const next = await f.invoke("wechat.newEdition", {
+      id: current.article.id,
+      revision: current.article.revision,
+      requestId: randomUUID(),
+    });
+    assert.equal(next.article.templateId, "minimal");
+    const changed = await f.save(next, { templateId: "classic" });
+    assert.equal(changed.article.templateId, "classic");
+    assert.equal(
+      f.app.wechat.get(current.article.id).article.templateId,
+      "minimal",
+    );
+    await assert.rejects(
+      f.app.invoke("wechat.save", {
+        ...current.article,
+        id: current.article.id,
+        revision: current.article.revision,
+        templateId: "unknown",
+      }),
+    );
+    assert.deepEqual(
+      f.app.wechat.get(current.article.id).article,
+      current.article,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("模板送稿未知回执保留所选样式，缺少快照时也按当时版本恢复核对", async () => {
+  const f = await fixture();
+  try {
+    let current = await f.save(await f.ready(), { templateId: "minimal" });
+    f.control.checkpoint = true;
+    f.control.afterWrite = async () => {
+      throw Error("回读暂未完成");
+    };
+    current = await f.send(current);
+    assert.equal(current.article.stage, "uncertain");
+    assert.match(
+      current.article.pendingDraft!.html,
+      /font-size:17px;line-height:1.95/,
+    );
+    const expected = current.article.pendingDraft!.html;
+    f.app.db.setSetting(`wechat:article:v1:${current.article.id}`, {
+      ...current.article,
+      pendingDraft: null,
+      message: "微信已返回草稿编号 900001，保存结果待核对。",
+    });
+    const verified = await f.invoke("wechat.recheck", {
+      id: current.article.id,
+    });
+    assert.equal(verified.article.stage, "synced");
+    assert.equal(verified.article.templateId, "minimal");
+    assert.equal(f.control.verifications.at(-1)!.proof.html, expected);
+    assert.equal(f.control.writes, 1);
   } finally {
     await f.cleanup();
   }
@@ -2521,6 +2895,328 @@ test("标题生成拒绝重复、缺项、超长和外链；失败或并发不�
     assert.deepEqual(
       f.app.wechat.get(current.article.id).article,
       current.article,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+const protocolBody = [
+  "七宗罪人格测试将七罪与七德设为对照维度，作答后生成雷达图展示不同特质。每个人的图形各有不同，结果用于了解资料中的概念。",
+  "原文作者分享了自己的测试结果，美德维度较高，原罪维度较低。这只是原文作者的结果，不代表所有人，也不能用一种图形作为统一标准。",
+  `入口：[查看资源](${sourceShare}?pwd=orig)`,
+  `![原图](${sourceImage})`,
+].join("\n\n");
+
+async function replayRewriteAi(
+  f: Awaited<ReturnType<typeof fixture>>,
+  reply: (
+    input: RewriteInput & { retryFeedback?: string },
+    count: number,
+  ) => { value: unknown; finishReason?: string } | Error,
+  model = "qwen/protocol-model",
+) {
+  await f.app.secrets.set("openrouter", "synthetic-wechat-protocol-key");
+  f.app.db.setSetting("aiModels", { copy: model });
+  f.app.db.setSetting("modelCatalog", [
+    {
+      id: model,
+      name: "协议回放",
+      structured: true,
+      textOutput: true,
+      promptPrice: 1e-7,
+      completionPrice: 1e-7,
+    },
+  ]);
+  const requests: Record<string, any>[] = [];
+  const request: typeof fetchJson = async (_url, init) => {
+    const payload = JSON.parse(String(init?.body));
+    requests.push(payload);
+    const input = JSON.parse(payload.messages[1].content);
+    const next = reply(input, requests.length);
+    if (next instanceof Error) throw next;
+    return {
+      id: `replay-${requests.length}`,
+      provider: "Replay",
+      usage: { cost: 0.00001 },
+      choices: [
+        {
+          finish_reason: next.finishReason ?? "stop",
+          message: {
+            role: "assistant",
+            content:
+              typeof next.value === "string"
+                ? next.value
+                : JSON.stringify(next.value),
+          },
+        },
+      ],
+    };
+  };
+  const ai = new AiService(f.app.repo, f.app.secrets, () => {}, request);
+  f.app.ai.resourceExport = ai.resourceExport.bind(ai);
+  return requests;
+}
+const completeProtocolReply = (input: RewriteInput) => ({
+  title: "七宗罪人格测试：如何理解罪与德的雷达图",
+  digest: "雷达图呈现不同特质，理解结果时保留原文的适用范围。",
+  sections: rewrittenSections(input, (text) =>
+    text.replace("七宗罪人格测试", "**七宗罪人格测试**"),
+  ),
+});
+
+test("真实AI适配器回放：六种风格均能从损坏sections恢复，正文图链与词覆盖完整保存", async (t) => {
+  for (const styleId of wechatRewriteStyleIds)
+    await t.test(styleId, async () => {
+      const f = await fixture(protocolBody);
+      try {
+        let current = await f.imported();
+        current = await f.invoke("wechat.saveTrafficWords", {
+          id: current.article.id,
+          wordsRevision: 0,
+          words: ["七宗罪人格测试"],
+        });
+        const requests = await replayRewriteAi(f, (input, count) => {
+          assert.deepEqual(
+            f.app.wechat.get(current.article.id).article,
+            current.article,
+            "重试完成前不修改任何稿件字段",
+          );
+          return {
+            value:
+              count === 1
+                ? {
+                    title: input.title,
+                    digest: "摘要",
+                    sections: [
+                      {
+                        id: 0,
+                        text: "七宗罪测试将",
+                        unexpected: "自我修正片段",
+                      },
+                      { 正文误作字段名: "某种" },
+                      "残缺的JSON片段",
+                    ],
+                  }
+                : completeProtocolReply(input),
+          };
+        });
+        const result = await f.invoke("wechat.rewrite", {
+          id: current.article.id,
+          styleId,
+        });
+        assert.equal(requests.length, 2);
+        assert(
+          requests.every((p) => !("response_format" in p)),
+          "Qwen请求不启用问题约束解码器",
+        );
+        assert.match(requests[0].messages[0].content, /输出JSON结构/);
+        assert.match(
+          JSON.parse(requests[1].messages[1].content).retryFeedback,
+          /返回格式异常/,
+        );
+        assert.equal(result.article.revision, current.article.revision + 1);
+        assert.equal(result.article.rewriteStyleId, styleId);
+        assert.match(result.article.body, /\*\*七宗罪人格测试\*\*/);
+        assert(result.article.body.includes(sourceShare));
+        assert(result.article.body.includes(sourceImage));
+        assert.match(result.article.body, /原文作者/);
+        assert.match(result.article.body, /统一标准/);
+        assert.equal(result.trafficWordPlan?.usage[0].uses, 1);
+        const failure = f.app.db.get<{ details: string }>(
+          "SELECT details FROM runtime_logs WHERE event='rewrite.response_invalid'",
+        );
+        assert.equal(JSON.parse(failure!.details).failureKind, "schema");
+        assert.equal(JSON.parse(failure!.details).outputMode, "prompt-json");
+      } finally {
+        await f.cleanup();
+      }
+    });
+});
+
+test("真实AI适配器回放：异常结束或无效JSON有限重试，连续失败原稿和词覆盖不动", async (t) => {
+  for (const kind of ["invalid-json", "schema", "finish-error", "unfinished"])
+    await t.test(kind, async () => {
+      const f = await fixture(protocolBody);
+      try {
+        const current = await f.imported();
+        const requests = await replayRewriteAi(f, (input) => ({
+          finishReason: kind === "finish-error" ? "error" : "stop",
+          value:
+            kind === "invalid-json"
+              ? '{"title":"未闭合'
+              : kind === "schema"
+                ? { title: input.title, digest: "摘要", sections: [{}] }
+                : kind === "unfinished"
+                  ? {
+                      ...completeProtocolReply(input),
+                      sections: rewrittenSections(
+                        input,
+                        () => "**七宗罪人格测试**将",
+                      ),
+                    }
+                  : completeProtocolReply(input),
+        }));
+        await assert.rejects(
+          f.invoke("wechat.rewrite", { id: current.article.id }),
+          { code: "WECHAT_REWRITE" },
+        );
+        assert.equal(requests.length, 2);
+        assert.deepEqual(
+          f.app.wechat.get(current.article.id).article,
+          current.article,
+        );
+        assert.equal(
+          f.app.db.get<{ n: number }>(
+            "SELECT COUNT(*) n FROM api_calls WHERE phase='wechat_article_copy'",
+          )?.n,
+          2,
+        );
+      } finally {
+        await f.cleanup();
+      }
+    });
+});
+
+test("真实AI适配器回放：限流、预算和过滤不被当成格式异常盲目重试", async (t) => {
+  for (const kind of ["http429", "budget", "content_filter", "length"])
+    await t.test(kind, async () => {
+      const f = await fixture(protocolBody);
+      try {
+        const current = await f.imported();
+        const requests = await replayRewriteAi(f, (input) =>
+          kind === "http429"
+            ? new ServiceHttpError(429, "请求限流")
+            : { finishReason: kind, value: completeProtocolReply(input) },
+        );
+        if (kind === "budget") f.app.db.setSetting("dailyAiBudgetMicros", 0);
+        await assert.rejects(
+          f.invoke("wechat.rewrite", { id: current.article.id }),
+        );
+        assert.equal(requests.length, kind === "budget" ? 0 : 1);
+        assert.deepEqual(
+          f.app.wechat.get(current.article.id).article,
+          current.article,
+        );
+      } finally {
+        await f.cleanup();
+      }
+    });
+});
+
+test("非Qwen模型先保留严格结构化输出，格式失败后仅重试一次提示词JSON", async () => {
+  const f = await fixture(protocolBody);
+  try {
+    const current = await f.imported();
+    const requests = await replayRewriteAi(
+      f,
+      (input, count) => ({
+        value:
+          count === 1
+            ? { title: input.title, digest: "摘要", sections: [{}] }
+            : completeProtocolReply(input),
+      }),
+      "other/structured-model",
+    );
+    await f.invoke("wechat.rewrite", {
+      id: current.article.id,
+      styleId: "commentary",
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].response_format.type, "json_schema");
+    assert(!("response_format" in requests[1]));
+    assert.equal(
+      f.app.db.setting<{ copy: string }>("aiModels", { copy: "" }).copy,
+      "other/structured-model",
+      "不修改全局模型设置",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("真人面孔拒绝按图片处理：封面正文复用失败回执，其他图片继续，异常关联稿件", async () => {
+  const second = "https://mmbiz.qpic.cn/objects-only.png";
+  const f = await fixture(
+    `说明正文。\n\n![人像素材](${sourceImage})\n\n![物件素材](${second})`,
+  );
+  try {
+    const current = await f.imported();
+    let references = 0,
+      themes = 0;
+    f.app.studio.generateReferenceImage = async () => {
+      references++;
+      if (references === 1)
+        throw new AppError(
+          "MEDIA_FACE_REJECTED",
+          "图片服务检测到输入中疑似包含真人面孔，拒绝了本次生成。",
+          false,
+          {
+            apiCallId: "face-call",
+            model: "qwen/image",
+            httpStatus: 400,
+            rejectionReason: "human-face",
+            providerReason:
+              "The input content is suspected to include real human faces.",
+          },
+        );
+      return png;
+    };
+    f.app.studio.generateThemeImage = async () => {
+      themes++;
+      return png;
+    };
+    const rejected = await f.invoke("wechat.regenerateImages", {
+      id: current.article.id,
+      revision: current.article.revision,
+      confirmed: true,
+      targets: [
+        { position: "cover", url: current.article.coverUrl },
+        { position: 0, url: sourceImage },
+        { position: 1, url: second },
+      ],
+    });
+    assert.equal(references, 2, "同图失败不重试，其他独立图片继续");
+    assert.equal(themes, 0, "不自动切换生成内容");
+    assert.equal(rejected.replaced, 1);
+    assert.deepEqual(
+      rejected.failed.map((e) => e.position),
+      ["cover", 0],
+    );
+    assert(rejected.failed.every((e) => e.code === "MEDIA_FACE_REJECTED"));
+    assert.equal(rejected.detail.article.coverUrl, current.article.coverUrl);
+    assert(rejected.detail.article.body.includes(sourceImage));
+    assert(!rejected.detail.article.body.includes(second));
+    const logs = f.app.db.all<{ task_id: string; details: string }>(
+      "SELECT task_id,details FROM runtime_logs WHERE event='image.generation_failed'",
+    );
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].task_id, current.article.id);
+    assert.equal(JSON.parse(logs[0].details).model, "qwen/image");
+    assert(!logs[0].details.includes(sourceImage));
+    f.app.studio.generateThemeImage = async (prompt) => {
+      themes++;
+      assert.match(prompt, /不描绘人物/);
+      assert(!prompt.includes(sourceImage));
+      return png;
+    };
+    const previousReads = f.control.remoteImageReads;
+    const next = await f.invoke("wechat.generateThemeImages", {
+      id: current.article.id,
+      revision: rejected.detail.article.revision,
+      confirmed: true,
+      description: "不描绘人物，使用抽象图形和物件组成主题插画。",
+      targets: [
+        { position: "cover", url: current.article.coverUrl },
+        { position: 0, url: sourceImage },
+      ],
+    });
+    assert.equal(themes, 1);
+    assert.equal(next.replaced, 2);
+    assert.equal(
+      f.control.remoteImageReads,
+      previousReads,
+      "新主题创作不读取拒绝的参考图",
     );
   } finally {
     await f.cleanup();

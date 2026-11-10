@@ -50,6 +50,7 @@ const IntelligentOperations = lazy(() => import("./operations/Workflow"));
 const WechatWorkflow = lazy(() => import("./wechat/Workflow"));
 const SmzdmWorkflow = lazy(() => import("./smzdm/Workflow"));
 const Settings = lazy(() => import("./pages/Settings"));
+const ExceptionLogs = lazy(() => import("./system-logs/ExceptionLogs"));
 const BatchProcessing = lazy(() => import("./pages/BatchProcessing"));
 
 const SearchOperations = lazy(() => import("./pages/SearchOperations"));
@@ -103,6 +104,7 @@ const surfaces = {
   "tieba-publishing": TiebaPublishingWorkflow,
   "pipix-sources": PipixWorkflow,
   settings: Settings,
+  "system-logs": ExceptionLogs,
   bulk: BatchProcessing,
   batch: BatchProcessing,
   split: Split,

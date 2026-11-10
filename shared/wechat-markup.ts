@@ -1,5 +1,6 @@
 import { articleHtml } from "./article-markup";
 import { providerSpecs } from "./providers";
+import type { WechatTemplateId } from "./wechat-templates";
 import {
   typesetWechatHtml,
   wechatTypesettingVersion,
@@ -98,34 +99,48 @@ export function wechatLegacyHtml(body: string) {
   return visibleResourceLinks(articleHtml(body, isWechatImageUrl));
 }
 
-/** The native WeChat entry accepts one URL; select the first resource in reading order. */
-export function wechatReadMoreUrl(body: string) {
+/** Visible resource addresses in reading order, without code examples or image URLs. */
+export function wechatReadMoreUrls(body: string) {
   const prose = body.replace(
     /```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))/g,
     "",
   );
   const html = articleHtml(prose, isWechatImageUrl);
+  const urls: string[] = [];
   for (const match of html.matchAll(/<a href="([^"]+)"/g)) {
     try {
       const url = new URL(match[1].replace(/&amp;/g, "&"));
-      if (isWechatResourceUrl(url)) return url.href;
+      if (isWechatResourceUrl(url) && !urls.includes(url.href))
+        urls.push(url.href);
     } catch {
       /* Generated links are validated; ignore any unsupported address. */
     }
   }
-  return "";
+  return urls;
 }
 
-export function wechatHtml(body: string, version = wechatTypesettingVersion) {
+export function wechatReadMoreUrl(body: string) {
+  return wechatReadMoreUrls(body)[0] ?? "";
+}
+
+export function wechatHtml(
+  body: string,
+  version = wechatTypesettingVersion,
+  readMoreResourceUrl?: string,
+  templateId?: WechatTemplateId,
+) {
   if (version < 1) return wechatLegacyHtml(body);
   return visibleResourceLinks(
     typesetWechatHtml(
       articleHtml(body, isWechatImageUrl),
       isWechatResourceUrl,
       {
-        readMoreUrl: version >= 2 ? wechatReadMoreUrl(body) : "",
+        readMoreUrl:
+          version >= 2 ? (readMoreResourceUrl ?? wechatReadMoreUrl(body)) : "",
         compactLists: version >= 2,
         entryLabels: version >= 3,
+        resourceBlocks: version >= 4,
+        templateId: version >= 5 ? templateId : undefined,
       },
     ),
   );

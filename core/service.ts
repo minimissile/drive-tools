@@ -65,13 +65,7 @@ import {
   type LinkPosition,
 } from "../shared/channels";
 import { createHash } from "node:crypto";
-import {
-  mkdir,
-  writeFile,
-  copyFile,
-  readdir,
-  chmod,
-} from "node:fs/promises";
+import { mkdir, writeFile, copyFile, readdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { Database, id, now } from "./database";
 import { assertBackupDatabaseFile, fileHash } from "./backups";
@@ -104,6 +98,7 @@ import { Operations } from "./operations";
 import { SearchOperations } from "./search";
 import { ShareStatisticsService } from "./share-statistics";
 import { AppError, safeMessage } from "./errors";
+import { SystemLogs } from "./system-logs";
 import { driveCapacitySchema } from "../shared/drive-capacity";
 import { parseShare, validateOutgoingLinks } from "./links";
 import { normalizedDirectory, type DriveProvider } from "./providers/provider";
@@ -178,6 +173,7 @@ export class AppService {
   readonly shareStatistics: ShareStatisticsService;
   readonly publicationChecks: PublicationChecks;
   private readonly handlers: ReturnType<typeof createApplicationHandlers>;
+  readonly systemLogs: SystemLogs;
   private switchingWorkspace = false;
   private capacityRequests = new Map<string, Promise<Account>>();
   readonly mutex = new AccountMutex();
@@ -190,6 +186,7 @@ export class AppService {
     dbPath = join(dataPath, "panxu.db"),
   ) {
     this.db = new Database(dbPath);
+    this.systemLogs = new SystemLogs(this.db, dataPath);
     this.repo = new Repository(this.db);
     this.baiduDiscovery = new BaiduDiscovery(this.db, ports, changed);
     this.secrets = new SecretStore(this.db, codec);
@@ -287,6 +284,8 @@ export class AppService {
       saveResource: (input) => this.saveResource(input),
       assertOwnCopy: (copy) => this.assertOwnCopy(copy),
       checkShare: (copyId) => this.checkShare(copyId),
+      resourcePublishedUrls: (resourceId) =>
+        this.resourceLinks.publishedUrls(resourceId),
       environmentStamp: (accountId) =>
         this.environments.stamp({ kind: "website", id: accountId }),
       changed,
@@ -555,7 +554,15 @@ export class AppService {
       posts: (accountId) => this.weiboPosts.list(accountId),
       marketing: () => this.weibo.history(),
     });
-    this.weiboWorkspace = new WeiboWorkspace({db:this.db,accounts:this.websiteAccounts,posts:this.weiboPosts,marketing:this.weibo,statistics:this.weiboStatistics,ai:this.ai,changed});
+    this.weiboWorkspace = new WeiboWorkspace({
+      db: this.db,
+      accounts: this.websiteAccounts,
+      posts: this.weiboPosts,
+      marketing: this.weibo,
+      statistics: this.weiboStatistics,
+      ai: this.ai,
+      changed,
+    });
     this.resourceDeletion = new ResourceDeletion({
       repo: this.repo,
       driveFiles: this.driveFiles,
@@ -744,6 +751,7 @@ export class AppService {
       changed,
     });
     this.handlers = createApplicationHandlers({
+      systemLogs: this.systemLogs,
       tiebaAutomation: this.tiebaAutomation,
       tiebaTopics: this.tiebaTopics,
       tiebaInsights: this.tiebaInsights,
@@ -1007,23 +1015,28 @@ export class AppService {
     });
   }
   async invoke(method: string, raw: unknown = undefined): Promise<unknown> {
-    if (
-      this.accountDeletion?.isBusy &&
-      method !== "snapshot" &&
-      method !== "account.remove" &&
-      !(queryMethods as readonly string[]).includes(method)
-    )
-      throw new AppError(
-        "ACCOUNT_DELETE_BUSY",
-        "正在清理本地账号，请等待完成后再操作。",
-      );
-    if (this.switchingWorkspace && method !== "snapshot")
-      throw new AppError(
-        "WORKSPACE_SWITCHING",
-        "工作空间正在切换，请等待应用重启。",
-      );
-    const object = raw ?? {};
-    return this.handlers.invoke(method, object);
+    try {
+      if (
+        this.accountDeletion?.isBusy &&
+        method !== "snapshot" &&
+        method !== "account.remove" &&
+        !(queryMethods as readonly string[]).includes(method)
+      )
+        throw new AppError(
+          "ACCOUNT_DELETE_BUSY",
+          "正在清理本地账号，请等待完成后再操作。",
+        );
+      if (this.switchingWorkspace && method !== "snapshot")
+        throw new AppError(
+          "WORKSPACE_SWITCHING",
+          "工作空间正在切换，请等待应用重启。",
+        );
+      const object = raw ?? {};
+      return await this.handlers.invoke(method, object);
+    } catch (error) {
+      this.systemLogs.capture(method, error, raw);
+      throw error;
+    }
   }
 
   private assertNoActiveJobs(accountId: string, allowShareCreation = false) {
@@ -1667,7 +1680,10 @@ export class AppService {
             m4a: "audio/mp4",
             aac: "audio/aac",
           }[entry.split(".").at(-1)!]!;
-          const src = await readMusicAsset(this.dataPath, { file: entry, mime });
+          const src = await readMusicAsset(this.dataPath, {
+            file: entry,
+            mime,
+          });
           await writeFile(
             join(folder, "music", entry),
             Buffer.from(src.slice(src.indexOf(",") + 1), "base64"),

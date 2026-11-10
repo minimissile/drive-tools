@@ -1,0 +1,107 @@
+.system-logs {
+  padding: var(--space-4);
+}
+.system-log-filters {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 180px 150px 160px;
+  gap: var(--space-3);
+  align-items: end;
+}
+.system-log-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-3);
+  font-size: 12px;
+}
+.system-log-columns,
+.system-log-list summary {
+  display: grid;
+  grid-template-columns: 150px 64px 130px minmax(0, 1fr) 16px;
+  align-items: start;
+  column-gap: var(--space-3);
+  padding: var(--space-3);
+}
+.system-log-columns {
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+}
+.system-log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.system-log-list > li {
+  border-bottom: 1px solid var(--line);
+}
+.system-log-list summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+.system-log-list summary::-webkit-details-marker {
+  display: none;
+}
+.system-log-list summary:hover,
+.system-log-list details[open] > summary {
+  background: var(--bg);
+}
+.system-log-list time {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.system-log-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.system-log-chevron {
+  margin-top: var(--space-1);
+  color: var(--muted);
+}
+.system-log-list details[open] .system-log-chevron {
+  transform: rotate(180deg);
+}
+.system-log-detail {
+  padding: 0 var(--space-3) var(--space-4);
+}
+.system-log-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+}
+.system-log-detail-heading strong,
+.system-log-detail > p {
+  font-size: 12px;
+}
+.system-log-detail > p {
+  color: var(--muted);
+  margin: var(--space-2) 0;
+  overflow-wrap: anywhere;
+}
+.system-log-detail pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: var(--space-3);
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+}
+@media (max-width: 1200px) {
+  .system-log-filters {
+    grid-template-columns: minmax(200px, 1fr) 160px 140px 145px;
+  }
+  .system-log-columns,
+  .system-log-list summary {
+    grid-template-columns: 140px 56px 100px minmax(0, 1fr) 16px;
+    column-gap: var(--space-2);
+  }
+}

@@ -1,4 +1,5 @@
 import type { PhotoPostContract } from "./photo-posts";
+import type { SystemLogContract } from "./system-logs";
 import type { VideoContract } from "./video-jobs";
 import type { MusicContract } from "./music";
 import type { BilibiliContract } from "./bilibili";
@@ -107,6 +108,7 @@ export type SplitSummary = {
 export interface IpcContract
   extends
     PhotoPostContract,
+    SystemLogContract,
     VideoContract,
     MusicContract,
     BilibiliContract,
@@ -254,6 +256,7 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "systemLogs.list",
   "zhihu.participation.snapshot",
   "zhihu.participation.logs",
   "photoPosts.list",

@@ -5,6 +5,7 @@ import { buildSync } from "esbuild";
 import { chromium, type Browser, type Page } from "playwright-core";
 import type { readWechatIdentity } from "../desktop/wechat-page";
 import { wechatHtml } from "../shared/wechat-markup";
+import { wechatTemplateIds } from "../shared/wechat-templates";
 
 // Use the same browser transformation as the desktop bundle; tsx function-name
 // helpers must not become dependencies of the functions running inside the DOM.
@@ -274,6 +275,25 @@ test("conflicting single/multi-article signals fail closed", async () => {
   );
 });
 
+test("更新前以当前草稿的已保存单篇数据为准，忽略空占位和其他草稿数据", async () => {
+  await singleDraft({
+    appmsgData: { app_id: 123456, item: [], items: [], multi_item: [{}] },
+    wx: { cgiData: { appmsg_info: { app_id: 999999, multi_item: [{}, {}] } } },
+  });
+  for (const fixture of [
+    {
+      appmsgData: { app_id: 999999, multi_item: [{}] },
+      dom: '<div class="appmsg_item_wrp"><div class="appmsg_item"></div></div>',
+    },
+    { appmsgData: { app_id: 123456, multi_item: [{}, {}] } },
+    {
+      appmsgData: { app_id: 123456, multi_item: [] },
+      wx: { cgiData: { appmsg_info: { item: [{}] } } },
+    },
+  ])
+    await assert.rejects(singleDraft(fixture), /未能确认微信草稿仍为单篇文章/);
+});
+
 const title = "离线草稿核对";
 const resourceUrl = "https://pan.baidu.com/s/1offline?pwd=A1b2&from=fixture";
 const encodedResourceUrl = resourceUrl.replace(/&/g, "&amp;");
@@ -284,6 +304,43 @@ const coverUrl =
 const encodedCoverUrl = coverUrl.replace(/&/g, "&amp;");
 const articleHtml = `<p>原文中的条件与步骤。</p><p><a href="${encodedResourceUrl}">下载资料（${encodedResourceUrl}）</a></p><img src="${imageOne}"><img src="${imageTwo}">`;
 const expected = { title, html: articleHtml, coverUrl };
+
+test("只读保存确认可按当前草稿内容核实，不需要旧版单篇导航或空占位计数", async () => {
+  const fixture = {
+    coverProof: null,
+    appmsgData: {
+      app_id: 123456,
+      item: [],
+      multi_item: [{ title, content: articleHtml, cdn_url: coverUrl }],
+    },
+    wx: {
+      cgiData: {
+        appmsg_info: {
+          app_id: 999999,
+          multi_item: [{ cdn_url: "https://mmbiz.qpic.cn/another-draft.png" }],
+        },
+      },
+    },
+  };
+  await readback(fixture, expected);
+});
+
+test("保存封面仍拒绝当前草稿的多篇数据、缺失封面及其他草稿冒充", async () => {
+  const item = { title, content: articleHtml, cdn_url: coverUrl };
+  for (const appmsgData of [
+    { app_id: 999999, multi_item: [item] },
+    { app_id: 123456, multi_item: [item, item] },
+    { app_id: 123456, multi_item: [], cdn_url: coverUrl },
+    { app_id: 123456, multi_item: [{ title, content: articleHtml }] },
+  ])
+    await assert.rejects(
+      readback(
+        { title, editorHtml: articleHtml, coverProof: null, appmsgData },
+        expected,
+      ),
+      /未能核实微信草稿封面/,
+    );
+});
 
 test("current editor verifies persisted multi_item without a global UE editor", async () => {
   for (const parent of ["appmsgData", "appmsg_data", "appmsg_info"])
@@ -757,6 +814,15 @@ test("正文外链被移除时，阅读原文入口仍需独立核实", async ()
     proof,
   );
   for (const sourceUrl of [
+    "https://panxu.site/r/readingEntry",
+    "https://panxu.site/go/readingEntry",
+  ]) {
+    await readback(
+      { title, editorHtml: stripped, sourceUrl },
+      { ...proof, sourceUrl },
+    );
+  }
+  for (const sourceUrl of [
     "",
     "https://pan.quark.cn/s/wrong",
     "javascript:alert(1)",
@@ -773,6 +839,22 @@ test("正文外链被移除时，阅读原文入口仍需独立核实", async ()
     { title, editorHtml: stripped },
     { ...proof, sourceUrl: undefined },
   );
+});
+
+test("所有排版模板在微信回读中保留正文列表与资源入口，不受外链属性清理影响", async () => {
+  for (const templateId of wechatTemplateIds) {
+    const html = wechatHtml(
+      `## 阅读范围\n\n保留**已有条件**。\n\n- 第一项\n- 第二项\n\n入口链接：[查看资源](${resourceUrl})`,
+      undefined,
+      undefined,
+      templateId,
+    );
+    const stripped = html.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/g, "$1");
+    await readback(
+      { title, editorHtml: stripped, sourceUrl: resourceUrl },
+      { title, html, coverUrl, sourceUrl: resourceUrl },
+    );
+  }
 });
 
 test("阅读原文以当前已保存元数据为准，不以未保存输入或其他草稿冒充", async () => {

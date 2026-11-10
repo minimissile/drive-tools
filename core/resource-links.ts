@@ -544,6 +544,46 @@ export class ResourceLinks {
       return undefined;
     }
   }
+  /** Local publication state only; never sync, create an entry, or read secrets. */
+  publishedUrls(resourceId: string) {
+    const link = this.record(resourceId);
+    const issue = !link
+      ? "尚未创建固定入口，请在资源库的固定入口中创建。"
+      : !link.enabled
+        ? "固定入口已停用，请先在资源库启用。"
+        : link.state !== "synced" ||
+            link.revision < 1 ||
+            !link.syncedAt ||
+            link.operationId
+          ? "固定入口尚未同步完成，请先在资源库完成同步。"
+          : !link.targetUrl
+            ? "固定入口尚未绑定网盘链接，请先在资源库绑定本人分享。"
+            : null;
+    const row = this.db.get<{ data: string }>(
+      "SELECT data FROM resource_landing_pages WHERE resource_id=?",
+      resourceId,
+    );
+    const landing = row
+      ? (JSON.parse(row.data) as {
+          published?: { document?: unknown } | null;
+          pending?: unknown;
+        })
+      : null;
+    const landingIssue =
+      issue ??
+      (landing?.pending
+        ? "落地页发布状态待核实，请先在资源库读取云端状态。"
+        : !landing?.published?.document
+          ? "尚未发布资源落地页，请先在资源库发布。"
+          : null);
+    return {
+      landingUrl:
+        !landingIssue && link ? `${link.baseUrl}/r/${link.slug}` : null,
+      redirectUrl: !issue && link ? `${link.baseUrl}/go/${link.slug}` : null,
+      landingIssue,
+      redirectIssue: issue,
+    };
+  }
   private currentCopy(resource: Resource) {
     return (
       resource.copies.find((copy) => {

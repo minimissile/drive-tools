@@ -1,4 +1,5 @@
 import { isWechatImageUrl, wechatHtml } from "../../shared/wechat-markup";
+import type { WechatTemplateId } from "../../shared/wechat-templates";
 
 /** The renderer never downloads arbitrary remote images directly. */
 export function wechatImagePreviewUrl(raw: string) {
@@ -22,8 +23,12 @@ const entities: Record<string, string> = {
   "&lt;": "<",
   "&gt;": ">",
 };
-export function wechatPreviewHtml(body: string) {
-  return wechatHtml(body).replace(
+export function wechatPreviewHtml(
+  body: string,
+  readMoreResourceUrl?: string,
+  templateId?: WechatTemplateId,
+) {
+  return wechatHtml(body, undefined, readMoreResourceUrl, templateId).replace(
     /(<img\b[^>]*\bsrc=")([^"]+)(")/g,
     (_, before: string, escaped: string, after: string) => {
       const url = escaped.replace(

@@ -37,6 +37,7 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  systemLogs: import("../system-logs").SystemLogs;
   bilibili: import("../bilibili/content").BilibiliContent;
   tiebaParticipation: import("../tieba-participation/service").TiebaParticipation;
   tiebaAutocare: import("../tieba-autocare/service").TiebaAutocare;

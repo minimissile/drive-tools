@@ -9,11 +9,15 @@ const protectedText =
 const htmlMarkup =
   /<\/?[a-z][^>]*>|<!--[\s\S]*?-->|<![a-z][^>]*>|<\?[\s\S]*?\?>/i;
 
-export const wechatRewriteResponse = z.object({
-  title: wechatTextInput.shape.title,
-  digest: wechatTextInput.shape.digest,
-  sections: z.array(z.object({ id: z.number().int(), text: z.string() })),
-});
+export const wechatRewriteResponse = z
+  .object({
+    title: wechatTextInput.shape.title,
+    digest: wechatTextInput.shape.digest,
+    sections: z.array(
+      z.object({ id: z.number().int(), text: z.string() }).strict(),
+    ),
+  })
+  .strict();
 
 export function wechatRewriteBody(body: string) {
   const blocks = body.split(/(\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*)/);
@@ -74,6 +78,29 @@ export function checkRewriteText(value: string) {
       "WECHAT_REWRITE",
       "改写结果加入了链接、图片或不支持的排版，原稿已保留。",
     );
+}
+
+/** Detect unmistakably unfinished endings even if a provider reports stop. */
+export function unfinishedWechatRewriteIds(
+  sections: { id: number; text: string }[],
+) {
+  return sections
+    .filter(({ text }) => {
+      const last =
+        text
+          .trim()
+          .split(/\r?\n/)
+          .filter((line) => line.trim())
+          .at(-1)
+          ?.trim() ?? "";
+      if (/^(?:#{1,6}\s|```|~~~)/.test(last)) return false;
+      const prose = last.replace(/\*\*|__/g, "").trim();
+      return (
+        prose.length > 6 &&
+        /(?:将|由于|以及|从而|某种|分别是|例如|包括)$/.test(prose)
+      );
+    })
+    .map(({ id }) => id);
 }
 
 export function restoreWechatRewrite(

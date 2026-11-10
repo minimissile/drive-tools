@@ -137,22 +137,39 @@ export function assertWechatSingleDraft() {
       };
     };
   };
-  const lists = [
-    global.appmsgData?.item,
-    global.appmsgData?.items,
-    global.appmsgData?.multi_item,
-    global.wx?.cgiData?.appmsg_data?.item,
-    global.wx?.cgiData?.appmsg_data?.multi_item,
-    global.wx?.cgiData?.appmsg_info?.item,
-    global.wx?.cgiData?.appmsg_info?.multi_item,
-  ];
-  const counts = lists.filter(Array.isArray).map((list) => list.length);
+  const metadata = [
+    global.appmsgData,
+    global.wx?.cgiData?.appmsg_data,
+    global.wx?.cgiData?.appmsg_info,
+  ] as (
+    | {
+        app_id?: string | number;
+        item?: unknown[];
+        items?: unknown[];
+        multi_item?: unknown[];
+      }
+    | undefined
+  )[];
+  const draftId = new URL(location.href).searchParams.get("appmsgid");
+  const scoped = metadata.filter(
+    (parent) => parent?.app_id != null && String(parent.app_id) !== "",
+  );
+  const current = scoped.filter((parent) => String(parent!.app_id) === draftId);
+  const parents = current.length ? current : scoped.length ? [] : metadata;
+  const counts = parents.flatMap((parent) => {
+    if (current.length && Array.isArray(parent?.multi_item))
+      return [parent.multi_item.length];
+    return [parent?.item, parent?.items, parent?.multi_item]
+      .filter(Array.isArray)
+      .map((list) => list!.length);
+  });
   // appmsg_edit_item also marks title/author/body form fields in the current
   // editor. Only the article navigation list proves the number of articles.
   const domCount = document.querySelectorAll(
     ".appmsg_item_wrp .appmsg_item",
   ).length;
-  if (domCount || !counts.length) counts.push(domCount);
+  if (scoped.length && !current.length) counts.push(0);
+  else if (domCount || !counts.length) counts.push(domCount);
   if (counts.some((count) => count !== 1))
     throw Error(
       "未能确认微信草稿仍为单篇文章，请在微信后台核对；本地稿件已保留，未覆盖远端草稿。",
@@ -295,18 +312,34 @@ export function assertWechatDraftContent(expected: {
     }
   };
   const covers = new Set<string>();
-  let invalidCover = false;
+  const draftId = new URL(location.href).searchParams.get("appmsgid");
+  const scoped = metadata.filter(
+    (parent) =>
+      record(parent) && parent.app_id != null && String(parent.app_id) !== "",
+  );
+  const current = scoped.filter(
+    (parent) => record(parent) && String(parent.app_id) === draftId,
+  );
+  const coverMetadata = current.length
+    ? current
+    : scoped.length
+      ? []
+      : metadata;
+  let invalidCover = scoped.length > 0 && current.length === 0;
   const addCover = (value: unknown) => {
     if (typeof value !== "string" || !value.trim()) return;
     const url = normalizeCover(value);
     if (url) covers.add(url);
     else invalidCover = true;
   };
-  for (const parent of metadata) {
+  for (const parent of coverMetadata) {
     if (!record(parent)) continue;
-    const items = [parent.item, parent.items, parent.multi_item].filter(
-      Array.isArray,
-    );
+    // Bound server data is authoritative; legacy item/items may be empty
+    // editor placeholders rather than another saved article collection.
+    const items =
+      current.length && Array.isArray(parent.multi_item)
+        ? [parent.multi_item]
+        : [parent.item, parent.items, parent.multi_item].filter(Array.isArray);
     if (items.some((list) => list.length !== 1)) invalidCover = true;
     const containers = [parent, ...items.map((list) => list[0]).filter(record)];
     for (const item of containers)

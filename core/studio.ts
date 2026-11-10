@@ -39,6 +39,7 @@ import type { Draft, Platform } from "../shared/types";
 import { redactPromptText } from "./text-safety";
 import { readResourceCover } from "./cover-assets";
 import { loadMediaModelCatalog } from "./media-model-catalog";
+import { describeMediaError, mediaRejectionReason } from "./media-errors";
 
 const base = "https://openrouter.ai/api/v1";
 const clean = redactPromptText;
@@ -64,14 +65,21 @@ async function mediaJson(url: string, init: RequestInit = {}) {
       `素材接口未返回JSON（HTTP ${response.status}），请核对服务商任务记录。`,
     );
   }
-  if (!response.ok)
-    throw new ServiceHttpError(
+  if (!response.ok) {
+    const error = new ServiceHttpError(
       response.status,
       `素材接口请求失败（HTTP ${response.status}）：${String(data.error?.message ?? data.error ?? "").slice(0, 200)}`,
       [400, 401, 402, 403, 404, 422, 429].includes(response.status)
         ? "MEDIA_REJECTED"
         : "MEDIA_UNCERTAIN",
     );
+    if (
+      typeof data.error?.code === "string" &&
+      /^[a-z0-9_.:-]{1,100}$/i.test(data.error.code)
+    )
+      error.details = { remoteCode: data.error.code };
+    throw error;
+  }
   return data;
 }
 export class StudioService {
@@ -210,9 +218,7 @@ export class StudioService {
       (source.copyId !== copy.id || source.platform !== platform.id)
     )
       throw new AppError("DRAFT_MISMATCH", "原草稿与当前资源或平台不一致。");
-    const pool = input.poolId
-      ? this.repo.getPool(input.poolId)
-      : null;
+    const pool = input.poolId ? this.repo.getPool(input.poolId) : null;
     if (
       input.poolId &&
       (!pool || (pool.resourceId && pool.resourceId !== resource.id))
@@ -661,10 +667,19 @@ export class StudioService {
         }
       }
     } catch (error) {
-      job.error = safeMessage(error).replaceAll(key, "[凭据省略]");
+      const failure = describeMediaError(error, {
+        key,
+        model: model.id,
+        apiCallId: job.callId,
+        kind: input.kind,
+        reference: !!referenceData,
+      });
+      job.error = failure.message;
+      this.recordMediaDiagnostic(job.callId, failure);
       if (
         error instanceof ServiceHttpError &&
-        [403, 404].includes(error.status)
+        [403, 404].includes(error.status) &&
+        !mediaRejectionReason(error)
       ) {
         this.repo.db.setSetting("ai:modelIssues", {
           ...this.repo.db.setting<Record<string, string>>("ai:modelIssues", {}),
@@ -688,7 +703,10 @@ export class StudioService {
             "MEDIA_REJECTED",
             "MEDIA_OUTPUT_INVALID",
             "MEDIA_REFERENCE_REQUIRED",
-          ].includes(error.code)
+            "MEDIA_POLICY_REJECTED",
+            "MEDIA_FACE_REJECTED",
+            "MEDIA_ACCESS_DENIED",
+          ].includes(failure.code)
             ? "failed"
             : "uncertain";
       const call = this.repo.db.get<{ status: string }>(
@@ -700,7 +718,12 @@ export class StudioService {
           "UPDATE api_calls SET status=?,message=? WHERE id=?",
           job.status === "failed" &&
             error instanceof AppError &&
-            error.code === "MEDIA_REJECTED"
+            [
+              "MEDIA_REJECTED",
+              "MEDIA_POLICY_REJECTED",
+              "MEDIA_FACE_REJECTED",
+              "MEDIA_ACCESS_DENIED",
+            ].includes(failure.code)
             ? "failed"
             : "uncertain",
           job.error,
@@ -736,6 +759,18 @@ export class StudioService {
       "reserved",
       now(),
     );
+  }
+  private recordMediaDiagnostic(callId: string, error: AppError) {
+    try {
+      this.repo.db.run(
+        "INSERT OR REPLACE INTO api_cache(key,value,expires_at) VALUES(?,?,?)",
+        `ai-diagnostic:${callId}`,
+        JSON.stringify(error.details ?? {}),
+        new Date(Date.now() + 86400000).toISOString(),
+      );
+    } catch {
+      // Diagnostics must not replace the original provider failure.
+    }
   }
   private requestMedia(
     kind: "image" | "video",
@@ -895,32 +930,32 @@ export class StudioService {
         );
       return await this.decodeImage(response);
     } catch (error) {
-      const message = safeMessage(error).replaceAll(key, "[凭据省略]");
+      const failure = describeMediaError(error, {
+        key,
+        model: model.id,
+        apiCallId: callId,
+        kind: "image",
+        reference: !!reference,
+      });
+      this.recordMediaDiagnostic(callId, failure);
+      const message = String(
+        failure.details?.providerReason ?? failure.message,
+      );
       const rejected =
-        error instanceof AppError && error.code === "MEDIA_REJECTED";
+        error instanceof AppError &&
+        [
+          "MEDIA_REJECTED",
+          "MEDIA_POLICY_REJECTED",
+          "MEDIA_FACE_REJECTED",
+          "MEDIA_ACCESS_DENIED",
+        ].includes(failure.code);
       this.repo.db.run(
         "UPDATE api_calls SET status=?,message=? WHERE id=? AND status='reserved'",
         rejected ? "failed" : "uncertain",
         message,
         callId,
       );
-      if (error instanceof ServiceHttpError && error.status === 403) {
-        if (/terms of service|content policy|moderation/i.test(message))
-          throw new AppError(
-            "MEDIA_POLICY_REJECTED",
-            reference
-              ? "图片服务商拒绝了这次参考图请求。可以改用文章主题生成新图，或上传自己的图片。"
-              : "图片服务商拒绝了这次主题生成请求。请调整画面描述或上传自己的图片。",
-          );
-        throw new AppError(
-          "MEDIA_ACCESS_DENIED",
-          "当前连接无法使用此图片模型。请在连接与设置中检查模型权限。",
-        );
-      }
-      throw new AppError(
-        error instanceof AppError ? error.code : "MEDIA_UNCERTAIN",
-        message,
-      );
+      throw failure;
     } finally {
       this.changed();
     }

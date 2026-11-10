@@ -17,7 +17,7 @@
 .wechat-tab-heading,
 .wechat-body-toolbar,
 .wechat-body-heading,
-.wechat-delivery-account,
+.wechat-delivery-account-control,
 .wechat-delivery-repair,
 .wechat-toolbar {
   display: flex;
@@ -73,6 +73,19 @@
 .wechat-tab-heading,
 .wechat-body-toolbar {
   justify-content: space-between;
+}
+
+.wechat-template-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wechat-template-control > .select-control {
+  width: 130px;
 }
 
 .wechat-section-heading h2 {
@@ -266,12 +279,22 @@
   min-width: 0;
 }
 
-.wechat-account-select {
-  width: 180px;
-}
-
 .wechat-editor > .notice {
   margin: var(--space-3) var(--space-4) 0;
+}
+
+.wechat-verification-reason {
+  margin-top: var(--space-2);
+  font-size: 12px;
+}
+
+.wechat-verification-reason > summary {
+  cursor: pointer;
+}
+
+.wechat-verification-reason > p {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
 }
 
 .wechat-editor > .wechat-content-panel {
@@ -295,6 +318,41 @@
 .wechat-title-row > .field {
   min-width: 0;
   margin: 0;
+}
+
+.wechat-read-more-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.wechat-read-more-controls > .field {
+  min-width: 0;
+  margin: 0;
+}
+
+.wechat-read-more-controls[data-multiple="true"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wechat-read-more-address {
+  display: grid;
+  gap: var(--space-1);
+  grid-column: 1 / -1;
+  min-width: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.wechat-read-more-address > span {
+  min-width: 0;
+}
+
+.wechat-read-more-address > .wechat-read-more-issue {
+  color: var(--amber);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .modal.wechat-titles-dialog {
@@ -418,10 +476,8 @@
   font-size: 12px;
 }
 
-.wechat-delivery-account {
-  padding-block: var(--space-2);
-  border-block: 1px solid var(--line);
-  font-size: 13px;
+.wechat-delivery-account > .field {
+  margin: 0;
 }
 
 .wechat-delivery-repair {
@@ -429,7 +485,7 @@
   font-size: 12px;
 }
 
-.wechat-delivery-account > .select-control {
+.wechat-delivery-account-control > .select-control {
   flex: 1;
   min-width: 160px;
 }

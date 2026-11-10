@@ -283,12 +283,13 @@ export function ArticleImages({
   const openGenerate = (
     targets: Targets,
     mode: WechatImageGenerationMode = "reference",
+    description = "",
   ) =>
     setConfirm({
       targets,
       mode,
       style: defaultWechatImageStyle,
-      description: "",
+      description,
     });
   const selectImage = (position: Position, url: string) => {
     const key = selectionKey({ position, url });
@@ -384,17 +385,24 @@ export function ArticleImages({
       );
       setSelected(failedTargets.map(selectionKey));
       if (result.failed.length) {
-        const canUseTheme =
-          confirm.mode === "reference" &&
-          result.failed.some(
-            ({ code }) =>
-              code === "MEDIA_POLICY_REJECTED" ||
-              code === "MEDIA_REFERENCE_MODEL",
-          );
+        const themeTargets =
+          confirm.mode === "reference"
+            ? failedTargets.filter((target) =>
+                result.failed.some(
+                  (failure) =>
+                    failure.position === target.position &&
+                    [
+                      "MEDIA_POLICY_REJECTED",
+                      "MEDIA_REFERENCE_MODEL",
+                      "MEDIA_FACE_REJECTED",
+                    ].includes(failure.code ?? ""),
+                ),
+              )
+            : [];
         setReport({
           replaced: result.replaced,
           failed: result.failed,
-          retry: canUseTheme ? failedTargets : [],
+          retry: themeTargets,
         });
       } else setBatch(false);
     } catch (cause) {
@@ -436,9 +444,23 @@ export function ArticleImages({
               <Button
                 size="compact"
                 disabled={blocked}
-                onClick={() => openGenerate(retryTargets, "theme")}
+                onClick={() =>
+                  openGenerate(
+                    retryTargets,
+                    "theme",
+                    report.failed.some(
+                      ({ code }) => code === "MEDIA_FACE_REJECTED",
+                    )
+                      ? "不描绘人物、人脸、人像或真人照片，使用抽象图形与主题相关物件组成原创概念插画。"
+                      : "",
+                  )
+                }
               >
-                改用文章主题生成
+                {report.failed.some(
+                  ({ code }) => code === "MEDIA_FACE_REJECTED",
+                )
+                  ? "生成无人物主题插画"
+                  : "改用文章主题生成"}
               </Button>
             ) : null}
           </div>

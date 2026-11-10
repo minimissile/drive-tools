@@ -10,6 +10,7 @@ import { watchDevParent } from "./dev-parent";
 import { loadProviderPage } from "./provider-navigation";
 import { WorkbenchWindows } from "./workbench-windows";
 import type { DevUpdateState } from "../shared/dev-updates";
+import { allowDevelopmentWorkbenchReload } from "./workbench-navigation";
 import { devSessionIdSchema, type DevSession, type OpenDevSession } from "../shared/dev-sessions";
 import {
   app,
@@ -821,7 +822,9 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
     window.show();
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", (event) => event.preventDefault());
+  window.webContents.on("will-navigate", (event, target) => {
+    if (!allowDevelopmentWorkbenchReload(development, developmentUrl, window.webContents.getURL(), target)) event.preventDefault();
+  });
   window.webContents.session.setPermissionRequestHandler(
     (_contents, permission, callback) =>
       callback(permission === "clipboard-sanitized-write"),

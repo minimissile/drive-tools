@@ -1,4 +1,5 @@
 import { createZhihuAutocareHandlers } from "./zhihu-autocare";
+import { createSystemLogHandlers } from "./system-logs";
 import { createTiebaAutocareHandlers } from "./tieba-autocare";
 import { createTiebaParticipationHandlers } from "./tieba-participation";
 import { createTiebaAutomationHandlers } from "./tieba-automation";
@@ -60,6 +61,7 @@ import { createWeiboWorkspaceHandlers } from "./weibo-workspace";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createSystemLogHandlers(services),
     createTiebaAutomationHandlers(services),
     createTiebaTopicsHandlers(services),
     createTiebaInsightsHandlers(services),

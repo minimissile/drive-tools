@@ -17,7 +17,7 @@ export const file: RemoteFile = {
 export const currentSchemaVersion = databaseSchemaVersion;
 // Legacy fixtures start from today's schema before reconstructing their old
 // version. Remove later tables too, so a fixture cannot retain future schema.
-const removeV34 = `
+export const removeV34 = `
   DROP TRIGGER IF EXISTS traffic_queries_revision_insert;
   DROP TRIGGER IF EXISTS traffic_queries_revision_update;
   DROP TRIGGER IF EXISTS traffic_queries_revision_delete;

@@ -80,6 +80,7 @@ test("explicit incomplete generation states reject even syntactically valid sche
         choices: [
           {
             finish_reason: finishReason,
+            native_finish_reason: "provider_stop",
             message: { role: "assistant", content: JSON.stringify(value) },
           },
         ],
@@ -112,6 +113,16 @@ test("explicit incomplete generation states reject even syntactically valid sche
         assert.equal(call?.confirmed_micros, 3286);
         assert.equal(call?.reserved_micros, 3286);
         assert.match(call?.message ?? "", /校验未通过/);
+        const diagnostic = f.db.get<{ value: string }>(
+          "SELECT value FROM api_cache WHERE key LIKE 'ai-diagnostic:%'",
+        );
+        assert(diagnostic);
+        const details = JSON.parse(diagnostic.value);
+        assert.equal(details.finishReason, finishReason);
+        assert.equal(details.nativeFinishReason, "provider_stop");
+        assert.equal(details.model, "fixture/text");
+        assert.equal(details.rawLength, JSON.stringify(value).length);
+        assert(!diagnostic.value.includes(value.body), "异常诊断不保留正文");
       } finally {
         f.db.close();
       }

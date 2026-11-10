@@ -5,14 +5,22 @@ import { ipc } from "../api/client";
 import { Dialog } from "../ui/Dialog";
 import { Button, Notice } from "../ui/primitives";
 import { wechatPreviewHtml } from "./image-preview";
+import { ArticleTemplateSelect } from "./ArticleTemplateSelect";
+import type { WechatTemplateId } from "../../shared/wechat-templates";
 
 export function ArticleComparison({
   source,
   current,
+  readMoreResourceUrl,
+  templateDisabled = true,
+  onTemplateChange,
   onClose,
 }: {
   source: WechatArticle["source"];
-  current: Pick<WechatText, "title" | "body" | "author">;
+  current: Pick<WechatText, "title" | "body" | "author" | "templateId">;
+  readMoreResourceUrl?: string;
+  templateDisabled?: boolean;
+  onTemplateChange?(id: WechatTemplateId): void;
   onClose(): void;
 }) {
   const [error, setError] = useState("");
@@ -77,6 +85,13 @@ export function ArticleComparison({
         <section aria-labelledby="wechat-comparison-current">
           <header>
             <h3 id="wechat-comparison-current">当前草稿</h3>
+            {onTemplateChange ? (
+              <ArticleTemplateSelect
+                value={current.templateId}
+                disabled={templateDisabled}
+                onChange={onTemplateChange}
+              />
+            ) : null}
           </header>
           <div
             className="wechat-comparison-scroll"
@@ -89,7 +104,11 @@ export function ArticleComparison({
               <article
                 className="wechat-preview"
                 dangerouslySetInnerHTML={{
-                  __html: wechatPreviewHtml(current.body),
+                  __html: wechatPreviewHtml(
+                    current.body,
+                    readMoreResourceUrl,
+                    current.templateId,
+                  ),
                 }}
               />
             ) : (

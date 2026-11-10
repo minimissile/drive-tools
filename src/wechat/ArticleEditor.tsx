@@ -51,6 +51,16 @@ import { linkifyWechatMarkdown } from "../../shared/wechat-markup";
 import { ArticleEditionsDialog } from "./ArticleEditionsDialog";
 import { ArticleEditionSwitcher } from "./ArticleEditionSwitcher";
 import { ArticleTitlesDialog } from "./ArticleTitlesDialog";
+import { ArticleReadMore } from "./ArticleReadMore";
+import { ArticleTemplateSelect } from "./ArticleTemplateSelect";
+import {
+  defaultWechatTemplate,
+  wechatTemplateSchema,
+} from "../../shared/wechat-templates";
+import {
+  resolveWechatReadMore,
+  wechatReadMoreSchema,
+} from "../../shared/wechat-read-more";
 const actions: ArticleResourceActions<WechatDetail> = {
   sync: (id) => ipc("wechat.syncLinks", { id }),
   bind: (id, linkId, copyId) =>
@@ -64,6 +74,8 @@ const text = (article: WechatText) => ({
   author: article.author,
   digest: article.digest,
   coverUrl: article.coverUrl,
+  readMore: article.readMore,
+  templateId: article.templateId ?? defaultWechatTemplate,
 });
 const editorSchema = z.object({
   title: z.string().max(200),
@@ -71,6 +83,8 @@ const editorSchema = z.object({
   author: z.string().max(200),
   digest: z.string().max(500),
   coverUrl: z.string().max(4000),
+  readMore: wechatReadMoreSchema.optional(),
+  templateId: wechatTemplateSchema.default(defaultWechatTemplate),
   coverAddress: z.string().max(4000).nullable().default(null),
   imageAddress: z.string().max(4000).nullable().default(null),
   revision: z.number().int().positive(),
@@ -82,7 +96,7 @@ const editorSchema = z.object({
 });
 type EditorTab = z.infer<typeof editorSchema>["tab"];
 type ActionError = {
-  target: "editor" | "delivery" | "rewrite" | "title";
+  target: "editor" | "delivery" | "rewrite" | "title" | "verification";
   message: string;
 };
 const emptyTrafficWords: WechatTrafficWords = { words: [], revision: 0 };
@@ -105,6 +119,7 @@ export function ArticleEditor({
     { navigate } = useAppNavigation();
   const [detail, setDetail] = useState(initial),
     [pending, setPending] = useState(""),
+    [checkingSaved, setCheckingSaved] = useState(false),
     [error, setError] = useState<ActionError | null>(null),
     [resourceBusy, setResourceBusy] = useState(false),
     [preview, setPreview] = useState(false),
@@ -155,6 +170,11 @@ export function ArticleEditor({
     available[0]?.id ||
     "";
   const account = available.find((a) => a.id === accountId);
+  const readMore = resolveWechatReadMore(
+    draft.value.body,
+    detail.readMoreEntries ?? [],
+    draft.value.readMore,
+  );
   const target = wechatTargetReceipt(article, accountId);
   const dirty =
     draft.value.textEdited !== false &&
@@ -187,6 +207,7 @@ export function ArticleEditor({
     missingLinks ||
     (!dirty && detail.issues.some((issue) => issue.severity === "error"));
   const lock = useRef(false),
+    verificationInFlight = useRef(false),
     rechecked = useRef(""),
     editionRequest = useRef<string | null>(null),
     alive = useRef(true),
@@ -274,7 +295,17 @@ export function ArticleEditor({
     });
     onChanged();
   };
+  const requireTemplateSupport = () => {
+    if (
+      draft.value.templateId !== defaultWechatTemplate &&
+      !detail.templateSupport
+    )
+      throw new Error(
+        "排版模板更新尚未加载，请点击顶部“应用更新并重启”后保存。模板选择已保留在本窗口。",
+      );
+  };
   const saved = async () => {
+    requireTemplateSupport();
     if (!dirty) return detail;
     const next = await ipc("wechat.save", {
       id: article.id,
@@ -299,7 +330,7 @@ export function ArticleEditor({
       const next = await action();
       apply(next);
       if (alive.current && next.article.stage === "uncertain")
-        setDeliveryOpen(true);
+        setDeliveryOpen(false);
       else if (success && alive.current) notify(success, "success");
     } catch (cause) {
       if (alive.current)
@@ -355,12 +386,34 @@ export function ArticleEditor({
       if (alive.current) setPending("");
     }
   };
+  const openDraft = async (errorTarget: ActionError["target"] = "editor") => {
+    if (lock.current || resourceBusy) return;
+    lock.current = true;
+    setPending("打开微信草稿");
+    setError(null);
+    try {
+      await ipc("wechat.open", { accountId, id: article.id });
+    } catch (cause) {
+      if (alive.current)
+        setError({
+          target: errorTarget,
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "微信草稿打开失败，请重试。",
+        });
+    } finally {
+      lock.current = false;
+      if (alive.current) setPending("");
+    }
+  };
   const createEdition = async () => {
     if (lock.current || resourceBusy) return;
     lock.current = true;
     setPending("创建新稿");
     setError(null);
     try {
+      requireTemplateSupport();
       editionRequest.current ??= crypto.randomUUID();
       const next = await ipc("wechat.newEdition", {
         id: article.id,
@@ -403,18 +456,35 @@ export function ArticleEditor({
       selectedTab?.focus({ preventScroll: true });
     });
   };
-  const checkSaved = () =>
-    void run(
-      "检查微信保存结果",
-      async () => {
-        const next = await ipc("wechat.recheck", { id: article.id });
-        if (alive.current && next.article.stage === "synced")
-          setDeliveryOpen(false);
-        return next;
-      },
-      "已核实微信草稿保存成功。",
-      "delivery",
+  const checkSaved = async () => {
+    if (verificationInFlight.current || lock.current || resourceBusy) return;
+    verificationInFlight.current = true;
+    setCheckingSaved(true);
+    setError((current) =>
+      current?.target === "verification" ? null : current,
     );
+    try {
+      const next = await ipc("wechat.recheck", { id: article.id });
+      if (!alive.current) return;
+      apply(next);
+      if (next.article.stage === "synced") {
+        setDeliveryOpen(false);
+        notify("已核实微信草稿保存成功。", "success");
+      }
+    } catch (cause) {
+      if (alive.current)
+        setError({
+          target: "verification",
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "暂时无法核对微信保存结果。",
+        });
+    } finally {
+      verificationInFlight.current = false;
+      if (alive.current) setCheckingSaved(false);
+    }
+  };
   const pendingDraftId =
     article.pendingDraft?.draftId ??
     article.message.match(/微信已返回草稿编号\s+(\d{1,30})(?!\d)/)?.[1] ??
@@ -424,8 +494,7 @@ export function ArticleEditor({
     const key = `${article.id}:${article.revision}:${pendingDraftId}`;
     if (rechecked.current === key) return;
     rechecked.current = key;
-    setDeliveryOpen(true);
-    checkSaved();
+    void checkSaved();
   }, [
     uncertain,
     busy,
@@ -434,6 +503,14 @@ export function ArticleEditor({
     pendingDraftId,
     detail.automaticVerification,
   ]);
+  useEffect(() => {
+    if (!uncertain || !detail.automaticVerification) return;
+    const onFocus = () => {
+      if (!lock.current && !resourceBusy) void checkSaved();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [uncertain, detail.automaticVerification, resourceBusy, article.id]);
   return (
     <div className="wechat-editor">
       <ArticleEditionSwitcher
@@ -474,24 +551,11 @@ export function ArticleEditor({
               已用 {wordUsage.used.length}/{trafficWords.words.length} 个流量词
             </span>
           ) : null}
-          {account ? (
+          {account && article.remote ? (
             <span>目标公众号：{account.nickname || account.alias}</span>
           ) : null}
         </div>
         <div className="wechat-editor-actions">
-          {available.length ? (
-            <Select
-              className="wechat-account-select"
-              aria-label="目标公众号"
-              value={accountId}
-              disabled={busy || uncertain || !!article.remote}
-              items={available.map((a) => ({
-                value: a.id,
-                label: a.nickname || a.alias,
-              }))}
-              onValueChange={(accountId) => draft.update({ accountId })}
-            />
-          ) : null}
           <Button
             quiet
             disabled={busy || !editable}
@@ -524,25 +588,59 @@ export function ArticleEditor({
           <Button
             primary
             disabled={busy}
+            aria-haspopup={editable && !synced ? "dialog" : undefined}
+            aria-busy={pending === "打开微信草稿" || undefined}
             onClick={() => {
-              if (uncertain || synced || sendBlocked || conflict || !accountId)
+              if (synced || uncertain) void openDraft();
+              else {
+                setError(null);
                 setDeliveryOpen(true);
-              else send();
+              }
             }}
           >
-            <Send size={14} />
-            {pending === "发送到微信草稿箱"
-              ? "正在保存到微信…"
-              : uncertain
-                ? "检查保存结果"
-                : synced
-                  ? "查看微信草稿"
-                  : target
-                    ? "更新本次微信草稿"
-                    : "保存为新微信草稿"}
+            {pending === "打开微信草稿" ? (
+              <LoaderCircle size={14} className="spin" aria-hidden="true" />
+            ) : synced || uncertain ? (
+              <ExternalLink size={14} />
+            ) : (
+              <Send size={14} />
+            )}
+            {pending === "打开微信草稿"
+              ? "正在打开微信…"
+              : pending === "发送到微信草稿箱"
+                ? "正在保存到微信…"
+                : uncertain
+                  ? pendingDraftId === "unknown"
+                    ? "打开微信草稿箱"
+                    : "查看微信草稿"
+                  : synced
+                    ? "查看微信草稿"
+                    : target
+                      ? "更新本次微信草稿"
+                      : "保存为新微信草稿"}
           </Button>
         </div>
       </div>
+      {uncertain ? (
+        <Notice warning>
+          <span role="status">
+            {checkingSaved
+              ? "正在后台确认微信保存结果，本地稿件已保留。"
+              : "微信保存结果暂未确认，本地稿件已保留。可打开微信草稿箱查看；返回本窗口会自动核对，不会重复发送。"}
+          </span>
+          {!checkingSaved &&
+          (article.message || error?.target === "verification") ? (
+            <details className="wechat-verification-reason">
+              <summary>查看原因</summary>
+              <p>
+                {error?.target === "verification"
+                  ? error.message
+                  : article.message}
+              </p>
+            </details>
+          ) : null}
+        </Notice>
+      ) : null}
       {error?.target === "editor" ? (
         <Notice danger>
           <span role="alert">{error.message}</span>
@@ -629,6 +727,14 @@ export function ArticleEditor({
                 {!preview ? <small>支持 Markdown</small> : null}
               </div>
               <div className="wechat-editor-actions">
+                <ArticleTemplateSelect
+                  value={draft.value.templateId}
+                  disabled={busy || !editable || conflict}
+                  onChange={(templateId) => {
+                    update({ templateId });
+                    setPreview(true);
+                  }}
+                />
                 <Button
                   quiet
                   size="compact"
@@ -656,7 +762,11 @@ export function ArticleEditor({
               <article
                 className="wechat-preview"
                 dangerouslySetInnerHTML={{
-                  __html: wechatPreviewHtml(draft.value.body),
+                  __html: wechatPreviewHtml(
+                    draft.value.body,
+                    readMore.driveUrl,
+                    draft.value.templateId,
+                  ),
                 }}
               />
             ) : (
@@ -823,6 +933,9 @@ export function ArticleEditor({
         <ArticleComparison
           source={article.source}
           current={draft.value}
+          readMoreResourceUrl={readMore.driveUrl}
+          templateDisabled={busy || !editable || conflict}
+          onTemplateChange={(templateId) => update({ templateId })}
           onClose={() => setComparisonOpen(false)}
         />
       ) : null}
@@ -867,18 +980,12 @@ export function ArticleEditor({
           }}
         />
       ) : null}
-      {deliveryOpen ? (
+      {deliveryOpen && !uncertain ? (
         <Dialog
           className="wechat-delivery"
-          focus="container"
+          focus="first-control"
           busy={!!pending}
-          title={
-            uncertain
-              ? "微信保存状态"
-              : synced
-                ? "微信草稿已保存"
-                : "送到微信草稿箱"
-          }
+          title={synced ? "微信草稿已保存" : "送到微信草稿箱"}
           onClose={() => {
             setDeliveryOpen(false);
           }}
@@ -890,15 +997,32 @@ export function ArticleEditor({
                   setDeliveryOpen(false);
                 }}
               >
-                {synced || uncertain ? "关闭" : "继续编辑"}
+                {synced ? "关闭" : "继续编辑"}
               </Button>
               {editable && !synced ? (
                 <Button
                   primary
-                  disabled={busy || conflict || !accountId || sendBlocked}
+                  disabled={
+                    busy ||
+                    conflict ||
+                    !accountId ||
+                    sendBlocked ||
+                    !!readMore.issue ||
+                    accounts.loading ||
+                    !!accounts.error
+                  }
+                  aria-busy={pending === "发送到微信草稿箱" || undefined}
                   onClick={send}
                 >
-                  <Send size={14} />
+                  {pending === "发送到微信草稿箱" ? (
+                    <LoaderCircle
+                      size={14}
+                      className="spin"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Send size={14} />
+                  )}
                   {pending === "发送到微信草稿箱"
                     ? "正在保存到微信…"
                     : target
@@ -906,35 +1030,25 @@ export function ArticleEditor({
                       : "保存为新微信草稿"}
                 </Button>
               ) : null}
-              {uncertain ? (
-                <Button primary disabled={busy} onClick={checkSaved}>
-                  {pending === "检查微信保存结果"
-                    ? "正在检查…"
-                    : "重新检查保存结果"}
-                </Button>
-              ) : null}
-              {accountId && (target || uncertain) ? (
+              {accountId && target ? (
                 <Button
                   primary={synced}
                   disabled={busy}
-                  onClick={() => {
-                    setError(null);
-                    void ipc("wechat.open", {
-                      accountId,
-                      id: article.id,
-                    }).catch((cause) =>
-                      setError({
-                        target: "delivery",
-                        message:
-                          cause instanceof Error
-                            ? cause.message
-                            : "微信后台打开失败，请重试。",
-                      }),
-                    );
-                  }}
+                  aria-busy={pending === "打开微信草稿" || undefined}
+                  onClick={() => void openDraft("delivery")}
                 >
-                  <ExternalLink size={14} />
-                  打开微信草稿箱
+                  {pending === "打开微信草稿" ? (
+                    <LoaderCircle
+                      size={14}
+                      className="spin"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <ExternalLink size={14} />
+                  )}
+                  {pending === "打开微信草稿"
+                    ? "正在打开微信…"
+                    : "打开微信草稿箱"}
                 </Button>
               ) : null}
             </>
@@ -952,39 +1066,51 @@ export function ArticleEditor({
             <LoadingState label="正在读取公众号账号…" compact />
           ) : accounts.data ? (
             <div className="wechat-delivery-account">
-              <span className="muted">目标公众号</span>
-              {available.length ? (
-                <Select
-                  aria-label="目标公众号"
-                  value={accountId}
-                  disabled={busy || uncertain || !!article.remote}
-                  items={available.map((a) => ({
-                    value: a.id,
-                    label: a.nickname || a.alias,
-                  }))}
-                  onValueChange={(accountId) => draft.update({ accountId })}
-                />
-              ) : (
-                <strong>尚未连接账号</strong>
-              )}
-              {account ? (
-                <Status
-                  kind={
-                    account.unverified
-                      ? "normal"
-                      : account.status === "connected"
-                        ? "good"
-                        : "warning"
-                  }
-                >
-                  {account.unverified
-                    ? "登录已缓存"
-                    : account.status === "connected"
-                      ? "已登录"
-                      : "需登录"}
-                </Status>
-              ) : null}
+              <Field label="目标公众号" as="div">
+                <div className="wechat-delivery-account-control">
+                  {available.length ? (
+                    <Select
+                      aria-label="目标公众号"
+                      value={accountId}
+                      disabled={busy || !!article.remote}
+                      items={available.map((a) => ({
+                        value: a.id,
+                        label: a.nickname || a.alias,
+                      }))}
+                      onValueChange={(accountId) => draft.update({ accountId })}
+                    />
+                  ) : (
+                    <strong>尚未连接账号</strong>
+                  )}
+                  {account ? (
+                    <Status
+                      kind={
+                        account.unverified
+                          ? "normal"
+                          : account.status === "connected"
+                            ? "good"
+                            : "warning"
+                      }
+                    >
+                      {account.unverified
+                        ? "登录已缓存"
+                        : account.status === "connected"
+                          ? "已登录"
+                          : "需登录"}
+                    </Status>
+                  ) : null}
+                </div>
+              </Field>
             </div>
+          ) : null}
+          {editable && !synced ? (
+            <ArticleReadMore
+              body={draft.value.body}
+              entries={detail.readMoreEntries ?? []}
+              value={draft.value.readMore}
+              disabled={busy || conflict}
+              onChange={(readMore) => update({ readMore })}
+            />
           ) : null}
           {accounts.data &&
           !account?.unverified &&
@@ -1056,13 +1182,6 @@ export function ArticleEditor({
                 </div>
               ) : null}
             </>
-          ) : null}
-          {uncertain ? (
-            <Notice warning>
-              {pending === "检查微信保存结果"
-                ? "正在后台核对标题、正文、插图与封面，无需重复发送。"
-                : article.message}
-            </Notice>
           ) : null}
         </Dialog>
       ) : null}
