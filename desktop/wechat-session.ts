@@ -1,4 +1,10 @@
-import { BrowserWindow, nativeImage, type Session } from "electron";
+import { nativeImage } from "electron";
+import {
+  nativeWechatContext,
+  type NativeWechatContext,
+  type WechatReader,
+  type WechatReaderContext,
+} from "./wechat-readers";
 import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import type {
@@ -6,13 +12,14 @@ import type {
   WebsiteSessionState,
 } from "../shared/website-accounts";
 import type { WechatPort, WechatDraftVerification } from "../shared/wechat";
-import { AppError, safeMessage } from "../core/errors";
+import { AppError } from "../core/errors";
 import {
   initialWechatIdentity,
   staleWechatIdentity,
 } from "./wechat-login-state";
 import { readContentImage } from "../core/content-assets";
 import { WechatImageUploads } from "./wechat-image-uploads";
+import { decodeWechatDraftReceipt } from "./wechat-draft-receipt";
 import {
   assertWechatImagePixels,
   wechatComparisonImageBytes,
@@ -28,10 +35,7 @@ import {
   wechatDraftCoverFields,
   WechatImageReceiptError,
 } from "./wechat-upload-receipt";
-import {
-  websiteNavigationAllowed,
-  isAbortedNavigation,
-} from "./website-session-policy";
+import { isAbortedNavigation } from "./website-session-policy";
 import {
   readWechatIdentity,
   wechatExchange,
@@ -39,7 +43,7 @@ import {
   assertWechatDraftContent,
 } from "./wechat-page";
 
-type Context = { profile: Session; window?: BrowserWindow };
+type Context = WechatReaderContext;
 type Identity = NonNullable<ReturnType<typeof readWechatIdentity>>;
 
 async function imageTarget(value: string) {
@@ -139,9 +143,32 @@ async function downloadImage(value: string): Promise<Buffer> {
 }
 
 export function createWechatSession(
-  context: (account: WebsiteAccount) => Context,
+  context: (account: WebsiteAccount) => NativeWechatContext,
   workspace: () => string,
   readArticle: WechatPort["readArticle"],
+) {
+  const contexts = new WeakMap<NativeWechatContext, WechatReaderContext>();
+  return createWechatBrowserSession(
+    (account) => {
+      const original = context(account);
+      let reader = contexts.get(original);
+      if (!reader) {
+        reader = nativeWechatContext(original);
+        contexts.set(original, reader);
+      }
+      return reader;
+    },
+    workspace,
+    readArticle,
+  );
+}
+
+/** The same account, upload and receipt workflow runs in either browser adapter. */
+export function createWechatBrowserSession(
+  context: (account: WebsiteAccount) => WechatReaderContext,
+  workspace: () => string,
+  readArticle: WechatPort["readArticle"],
+  readRemoteImage: (url: string) => Promise<Buffer> = downloadImage,
 ) {
   const states = new WeakMap<Context, WebsiteSessionState>();
   const pending = new WeakMap<Context, Promise<WebsiteSessionState>>();
@@ -149,13 +176,7 @@ export function createWechatSession(
   const ensureObserved = (ctx: Context) => {
     if (observed.has(ctx)) return;
     observed.add(ctx);
-    ctx.profile.cookies.on("changed", (_event, cookie) => {
-      if (
-        /(^|\.)weixin\.qq\.com$/.test(cookie.domain ?? "") &&
-        /^(slave_sid|slave_user|bizuin)$/.test(cookie.name)
-      )
-        states.set(ctx, staleWechatIdentity(states.get(ctx)));
-    });
+    ctx.observe(() => states.set(ctx, staleWechatIdentity(states.get(ctx))));
   };
   const status = (account: WebsiteAccount): WebsiteSessionState => {
     const ctx = context(account);
@@ -167,11 +188,11 @@ export function createWechatSession(
     };
   };
   const evaluate = async <T>(
-    win: BrowserWindow,
+    win: WechatReader,
     fn: Function,
     ...args: unknown[]
   ): Promise<T> => {
-    const result = (await win.webContents.executeJavaScript(
+    const result = (await win.executeJavaScript(
       `(async()=>{try{return {ok:true,value:await (${fn.toString()})(${args.map((a) => JSON.stringify(a)).join(",")})};}catch(error){return {ok:false,error:String(error?.message??"公众号处理失败").slice(0,500)};}})()`,
     )) as { ok: boolean; value: T; error?: string };
     if (!result.ok)
@@ -181,35 +202,9 @@ export function createWechatSession(
       );
     return result.value;
   };
-  const reader = (ctx: Context, show = false) => {
-    const win = new BrowserWindow({
-      show,
-      width: 1280,
-      height: 900,
-      title: "微信公众号 · 草稿箱",
-      webPreferences: {
-        session: ctx.profile,
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-      },
-    });
-    win.webContents.setWindowOpenHandler(({ url }) => {
-      if (show && websiteNavigationAllowed("wechat", url))
-        void win.loadURL(url).catch(() => {});
-      return { action: "deny" };
-    });
-    win.webContents.on("will-navigate", (e) => {
-      if (!websiteNavigationAllowed("wechat", e.url)) e.preventDefault();
-    });
-    win.webContents.on("will-redirect", (e) => {
-      if (e.isMainFrame && !websiteNavigationAllowed("wechat", e.url))
-        e.preventDefault();
-    });
-    return win;
-  };
+  const reader = (ctx: Context, show = false) => ctx.reader(show);
   const waitForRead = async (
-    win: BrowserWindow,
+    win: WechatReader,
     fn: Function,
     ...args: unknown[]
   ) => {
@@ -226,11 +221,11 @@ export function createWechatSession(
     throw failure;
   };
   const identify = async (
-    win: BrowserWindow,
+    win: WechatReader,
     ctx: Context,
   ): Promise<Identity> => {
     await win.loadURL("https://mp.weixin.qq.com/");
-    const current = new URL(win.webContents.getURL());
+    const current = new URL(win.getURL());
     const token = current.searchParams.get("token");
     if (token && /^\d{1,24}$/.test(token))
       await win.loadURL(
@@ -250,7 +245,7 @@ export function createWechatSession(
       windowOpen: false,
       error: null,
     });
-    await ctx.profile.cookies.flushStore().catch(() => {});
+    await ctx.flush().catch(() => {});
     return identity;
   };
   const verify = async (account: WebsiteAccount) => {
@@ -258,9 +253,9 @@ export function createWechatSession(
     ensureObserved(ctx);
     if (pending.has(ctx)) return pending.get(ctx)!;
     const task = (async () => {
-      const win = reader(ctx),
+      const win = await reader(ctx),
         timeout = setTimeout(() => {
-          if (!win.isDestroyed()) win.destroy();
+          if (!win.isDestroyed()) void win.destroy();
         }, 35000);
       let verified: WebsiteSessionState | undefined;
       try {
@@ -290,7 +285,7 @@ export function createWechatSession(
         });
       } finally {
         clearTimeout(timeout);
-        if (!win.isDestroyed()) win.destroy();
+        if (!win.isDestroyed()) await win.destroy();
       }
       // A normal cookie refresh can invalidate the cache while this reader
       // closes. Return the identity just read; writes still verify it again.
@@ -325,7 +320,7 @@ export function createWechatSession(
         storage: "content-assets",
       });
     }
-    return downloadImage(raw);
+    return readRemoteImage(raw);
   };
   const samePixels = async (expected: string, actual: string) => {
     if (expected === actual) return;
@@ -348,7 +343,7 @@ export function createWechatSession(
     },
   );
   const verifySavedContent = async (
-    win: BrowserWindow,
+    win: WechatReader,
     proof: WechatDraftVerification,
   ) => {
     const result = (await waitForRead(win, assertWechatDraftContent, {
@@ -367,7 +362,7 @@ export function createWechatSession(
       const win =
         ctx.window && !ctx.window.isDestroyed()
           ? ctx.window
-          : reader(ctx, true);
+          : await reader(ctx, true);
       ctx.window = win;
       const identity = await identify(win, ctx);
       if (identity.uid !== account.uid)
@@ -412,14 +407,13 @@ export function createWechatSession(
       } catch (error) {
         if (!isAbortedNavigation(error)) throw error;
       }
-      win.show();
-      win.focus();
+      await win.show();
     },
     async verifyDraft(account, proof) {
       const ctx = context(account),
-        win = reader(ctx);
+        win = await reader(ctx);
       const timeout = setTimeout(() => {
-        if (!win.isDestroyed()) win.destroy();
+        if (!win.isDestroyed()) void win.destroy();
       }, 180000);
       try {
         const identity = await identify(win, ctx);
@@ -438,15 +432,15 @@ export function createWechatSession(
         await verifySavedContent(win, proof);
       } finally {
         clearTimeout(timeout);
-        await ctx.profile.cookies.flushStore().catch(() => {});
-        if (!win.isDestroyed()) win.destroy();
+        await ctx.flush().catch(() => {});
+        if (!win.isDestroyed()) await win.destroy();
       }
     },
     async saveDraft(account, payload, beforeSubmit, onReceipt) {
       const ctx = context(account),
-        win = reader(ctx);
+        win = await reader(ctx);
       const timeout = setTimeout(() => {
-        if (!win.isDestroyed()) win.destroy();
+        if (!win.isDestroyed()) void win.destroy();
       }, 5 * 60000);
       try {
         const identity = await identify(win, ctx);
@@ -591,61 +585,28 @@ export function createWechatSession(
           article_type0: "0",
         };
         if (payload.draftId) fields.appmsgid = payload.draftId;
-        // This is the sole draft mutation boundary. No publish or mass-send
-        // endpoint exists in this adapter; every later failure is uncertain.
+        // This is the sole draft mutation boundary. Only a missing or invalid
+        // success receipt leaves the save uncertain; never submit again here.
         await beforeSubmit();
         const response = await evaluate<Record<string, unknown>>(
           win,
           wechatExchange,
           { path: "/cgi-bin/operate_appmsg", token: identity.token, fields },
         );
-        const result = response.base_resp as { ret?: number } | undefined;
-        const draftId = String(
-          response.appMsgId ??
-            response.appmsgid ??
-            response.appmsg_id ??
-            payload.draftId ??
-            "",
-        );
-        if (
-          result?.ret !== 0 ||
-          !/^\d{1,30}$/.test(draftId) ||
-          (payload.draftId && draftId !== payload.draftId)
-        )
-          throw new AppError(
-            "WECHAT_DRAFT_UNCERTAIN",
-            `未取得可核实的微信草稿保存回执（${result?.ret ?? "无回执"}），请到微信草稿箱核对后再处理，避免重复创建。`,
-          );
+        const receipt = decodeWechatDraftReceipt(response, payload.draftId);
         const proof: WechatDraftVerification = {
-          draftId,
-          url: `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${draftId}&lang=zh_CN`,
+          ...receipt,
           title: payload.title,
           html,
           coverUrl: cover.url,
           sourceUrl: payload.sourceUrl || "",
         };
         await onReceipt?.(proof);
-        try {
-          await win.loadURL(
-            `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${draftId}&token=${identity.token}&lang=zh_CN`,
-          );
-          await verifySavedContent(win, proof);
-        } catch (error) {
-          const reason = safeMessage(error).replace(
-            /([?&](?:token|key|tempkey)=)[^&\s]+/gi,
-            "$1[已隐藏]",
-          );
-          throw new AppError(
-            "WECHAT_DRAFT_UNCERTAIN",
-            `微信已返回草稿编号 ${draftId}，但保存后核对未通过：${reason} 请在微信草稿箱核对，应用不会自动重发。`,
-            true,
-          );
-        }
-        return { draftId: proof.draftId, url: proof.url };
+        return receipt;
       } finally {
         clearTimeout(timeout);
-        await ctx.profile.cookies.flushStore().catch(() => {});
-        if (!win.isDestroyed()) win.destroy();
+        await ctx.flush().catch(() => {});
+        if (!win.isDestroyed()) await win.destroy();
       }
     },
   };

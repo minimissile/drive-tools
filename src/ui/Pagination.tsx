@@ -6,6 +6,7 @@ export function Pagination({
   page,
   pageSize,
   total,
+  hasNextPage,
   onPageChange,
   disabled = false,
   label,
@@ -15,8 +16,6 @@ export function Pagination({
   children,
 }: {
   page: number;
-  pageSize: number;
-  total: number;
   onPageChange(page: number): void;
   disabled?: boolean;
   label: string;
@@ -24,15 +23,21 @@ export function Pagination({
   nextLabel?: string;
   className?: string;
   children?: ReactNode;
-}) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
+} & (
+  | { pageSize: number; total: number; hasNextPage?: never }
+  | { pageSize?: never; total?: never; hasNextPage: boolean }
+)) {
+  const pages =
+    total === undefined ? null : Math.max(1, Math.ceil(total / pageSize!));
+  const canGoNext = hasNextPage ?? (pages !== null && page < pages);
+  const showButtons = page > 1 || canGoNext || (pages !== null && pages > 1);
   return (
     <nav
       className={`row spread ${className}`}
-      data-single-page={pages === 1 || undefined}
+      data-single-page={!showButtons || undefined}
       aria-label={label}
     >
-      {pages > 1 ? (
+      {showButtons ? (
         <Button
           size="compact"
           disabled={disabled || page <= 1}
@@ -42,12 +47,15 @@ export function Pagination({
         </Button>
       ) : null}
       <small aria-live="polite">
-        {children ?? `第 ${page} / ${pages} 页 · 共 ${total} 项`}
+        {children ??
+          (pages === null
+            ? `第 ${page} 页`
+            : `第 ${page} / ${pages} 页 · 共 ${total} 项`)}
       </small>
-      {pages > 1 ? (
+      {showButtons ? (
         <Button
           size="compact"
-          disabled={disabled || page >= pages}
+          disabled={disabled || !canGoNext}
           onClick={() => onPageChange(page + 1)}
         >
           {nextLabel}

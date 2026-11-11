@@ -104,7 +104,7 @@ export interface WechatArticle extends WechatText {
   remote: WechatRemote | null;
   /** Account intended for a write whose result still needs to be resolved. */
   pendingAccount: { id: string; uid: string } | null;
-  /** Persisted immediately after WeChat returns an ID, before readback. No tokens. */
+  /** Persisted immediately after the official save receipt, for crash recovery. No tokens. */
   pendingDraft?: WechatDraftVerification | null;
   createdAt: string;
   updatedAt: string;
@@ -114,7 +114,6 @@ export interface WechatDetail {
   templateSupport?: true;
   supportedTemplates?: readonly WechatTemplateId[];
   readMoreEntries?: WechatReadMoreEntry[];
-  automaticVerification?: boolean;
   trafficWordPlan?: WechatTrafficWordPlan;
   editions?: WechatEditionSummary[];
   issues: SmzdmIssue[];
@@ -149,6 +148,8 @@ export interface WechatDraftReceipt {
   url: string;
 }
 export interface WechatDraftVerification extends WechatDraftReceipt {
+  /** A successful save response, distinct from legacy reconstructed readback proofs. */
+  acknowledged?: true;
   title: string;
   html: string;
   coverUrl: string;

@@ -85,7 +85,7 @@ export function DriveBrowserDialog({
       <p className="drive-browser-intro">
         <strong>{latest.alias}</strong>{" "}
         创建时已固定使用比特指纹浏览器，浏览器方式和所选配置不能更换。
-        此环境可供贴吧、知道共用，日常请求在同一后台串行执行。
+        此环境可供贴吧、知道和公众号共用，日常请求在同一后台串行执行。
       </p>
       {browser ? (
         <section className="drive-browser-current" aria-label="固定的指纹环境">
@@ -124,7 +124,7 @@ export function DriveBrowserDialog({
             <div className="drive-browser-detach">
               <p>
                 将关闭“{browser.profileName}
-                ”的全部可见窗口（包括共用的贴吧、知道网页）并在后台启动。请先保存未提交的网页内容；已保存登录信息和网盘文件保留。
+                ”的全部可见窗口（包括共用的贴吧、知道和公众号网页）并在后台启动。请先保存未提交的网页内容；已保存登录信息和网盘文件保留。
               </p>
               <Button
                 size="compact"

@@ -133,11 +133,7 @@ export function OtherAccountRow({
       label: account.windowOpen ? "返回登录窗口" : "重新登录",
       icon: <LogIn />,
     });
-  if (
-    account.provider !== "smzdm" &&
-    account.provider !== "wechat" &&
-    !document
-  )
+  if (account.provider !== "smzdm" && !document)
     menu.push({
       action: "environment",
       label: "关联浏览器环境",

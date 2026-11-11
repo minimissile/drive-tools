@@ -43,6 +43,13 @@ export interface AppPorts {
   resourceLinksFetch?(url: string, init: RequestInit): Promise<Response>;
   smzdm?: import("../shared/smzdm").SmzdmPort;
   wechat?: import("../shared/wechat").WechatPort;
+  wechatBrowserSession?(
+    context: import("playwright-core").BrowserContext,
+    account: import("../shared/website-accounts").WebsiteAccount,
+  ): {
+    verify(): Promise<import("../shared/website-accounts").WebsiteSessionState>;
+    port: import("../shared/wechat").WechatPort;
+  };
   readWechatImage?(): Promise<{ name: string; bytes: Buffer } | null>;
   readWechatRemoteImage?(url: string): Promise<{ bytes: Buffer }>;
   collectionWebSession?: {

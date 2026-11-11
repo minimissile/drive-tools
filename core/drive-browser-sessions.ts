@@ -12,7 +12,7 @@ import type {
 import { id, now } from "./database";
 import { AppError } from "./errors";
 import { browserExitIp } from "./browser-exit-ip";
-import { isBaiduSharedMember } from "../shared/browser-environment-sharing";
+import { isDriveSharedMember } from "../shared/browser-environment-sharing";
 import {
   providerApiAllowed,
   providerAuthAllowed,
@@ -246,12 +246,12 @@ export class DriveBrowserSessions {
           ?.accounts.some((r) =>
             r.kind === "drive"
               ? r.id !== input.accountId
-              : !isBaiduSharedMember(r),
+              : !isDriveSharedMember(r),
           )
       )
         throw new AppError(
           "DRIVE_PROFILE_EXCLUSIVE",
-          "此环境已有百度网盘或不支持共用的平台账号，请选择空闲环境或仅关联贴吧、知道的环境。",
+          "此环境已有百度网盘或不支持共用的平台账号，请选择空闲环境或仅关联贴吧、知道和公众号的环境。",
         );
     }
     const requireProxy =

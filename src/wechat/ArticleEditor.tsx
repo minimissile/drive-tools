@@ -96,7 +96,7 @@ const editorSchema = z.object({
 });
 type EditorTab = z.infer<typeof editorSchema>["tab"];
 type ActionError = {
-  target: "editor" | "delivery" | "rewrite" | "title" | "verification";
+  target: "editor" | "delivery" | "rewrite" | "title";
   message: string;
 };
 const emptyTrafficWords: WechatTrafficWords = { words: [], revision: 0 };
@@ -119,7 +119,6 @@ export function ArticleEditor({
     { navigate } = useAppNavigation();
   const [detail, setDetail] = useState(initial),
     [pending, setPending] = useState(""),
-    [checkingSaved, setCheckingSaved] = useState(false),
     [error, setError] = useState<ActionError | null>(null),
     [resourceBusy, setResourceBusy] = useState(false),
     [preview, setPreview] = useState(false),
@@ -207,8 +206,6 @@ export function ArticleEditor({
     missingLinks ||
     (!dirty && detail.issues.some((issue) => issue.severity === "error"));
   const lock = useRef(false),
-    verificationInFlight = useRef(false),
-    rechecked = useRef(""),
     editionRequest = useRef<string | null>(null),
     alive = useRef(true),
     received = useRef(initial),
@@ -458,61 +455,10 @@ export function ArticleEditor({
       selectedTab?.focus({ preventScroll: true });
     });
   };
-  const checkSaved = async () => {
-    if (verificationInFlight.current || lock.current || resourceBusy) return;
-    verificationInFlight.current = true;
-    setCheckingSaved(true);
-    setError((current) =>
-      current?.target === "verification" ? null : current,
-    );
-    try {
-      const next = await ipc("wechat.recheck", { id: article.id });
-      if (!alive.current) return;
-      apply(next);
-      if (next.article.stage === "synced") {
-        setDeliveryOpen(false);
-        notify("已核实微信草稿保存成功。", "success");
-      }
-    } catch (cause) {
-      if (alive.current)
-        setError({
-          target: "verification",
-          message:
-            cause instanceof Error
-              ? cause.message
-              : "暂时无法核对微信保存结果。",
-        });
-    } finally {
-      verificationInFlight.current = false;
-      if (alive.current) setCheckingSaved(false);
-    }
-  };
   const pendingDraftId =
     article.pendingDraft?.draftId ??
     article.message.match(/微信已返回草稿编号\s+(\d{1,30})(?!\d)/)?.[1] ??
     "unknown";
-  useEffect(() => {
-    if (!uncertain || busy || !detail.automaticVerification) return;
-    const key = `${article.id}:${article.revision}:${pendingDraftId}`;
-    if (rechecked.current === key) return;
-    rechecked.current = key;
-    void checkSaved();
-  }, [
-    uncertain,
-    busy,
-    article.id,
-    article.revision,
-    pendingDraftId,
-    detail.automaticVerification,
-  ]);
-  useEffect(() => {
-    if (!uncertain || !detail.automaticVerification) return;
-    const onFocus = () => {
-      if (!lock.current && !resourceBusy) void checkSaved();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [uncertain, detail.automaticVerification, resourceBusy, article.id]);
   return (
     <div className="wechat-editor">
       <ArticleEditionSwitcher
@@ -626,19 +572,12 @@ export function ArticleEditor({
       {uncertain ? (
         <Notice warning>
           <span role="status">
-            {checkingSaved
-              ? "正在后台确认微信保存结果，本地稿件已保留。"
-              : "微信保存结果暂未确认，本地稿件已保留。可打开微信草稿箱查看；返回本窗口会自动核对，不会重复发送。"}
+            未收到有效的微信保存成功回执，本地稿件已保留。请打开微信草稿箱查看，避免重复发送。
           </span>
-          {!checkingSaved &&
-          (article.message || error?.target === "verification") ? (
+          {article.message ? (
             <details className="wechat-verification-reason">
               <summary>查看原因</summary>
-              <p>
-                {error?.target === "verification"
-                  ? error.message
-                  : article.message}
-              </p>
+              <p>{article.message}</p>
             </details>
           ) : null}
         </Notice>

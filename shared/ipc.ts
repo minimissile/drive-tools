@@ -28,6 +28,7 @@ import type { TiebaTopicsContract } from "./tieba-topics";
 import type { TiebaInsightsContract } from "./tieba-insights";
 import type { TiebaPublishingContract } from "./tieba-publishing";
 import type { TiebaPostStatsContract } from "./tieba-post-stats";
+import type { TiebaAnalysisContract } from "./tieba-analysis";
 import type { ZhihuContract } from "./zhihu";
 import type { ZhihuParticipationContract } from "./zhihu-participation";
 import type { IntelligentOperationsContract } from "./intelligent-operations";
@@ -131,6 +132,7 @@ export interface IpcContract
     TiebaInsightsContract,
     TiebaPublishingContract,
     TiebaPostStatsContract,
+    TiebaAnalysisContract,
     ZhihuParticipationContract,
     IntelligentOperationsContract,
     PipixContract,

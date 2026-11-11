@@ -59,9 +59,14 @@ export default function TiebaWorkflow() {
         title="贴吧自动养号"
         description="管理签到、回帖批次与主题创作，分别核对官网进度和发布可见性。"
         action={
-          <Button quiet onClick={() => navigate("tieba-publishing")}>
-            资源发帖与统计
-          </Button>
+          <div className="row">
+            <Button quiet onClick={() => navigate("tieba-publishing")}>
+              资源发帖与统计
+            </Button>
+            <Button quiet onClick={() => navigate("tieba-analysis")}>
+              数据分析
+            </Button>
+          </div>
         }
       />
       <QueryError

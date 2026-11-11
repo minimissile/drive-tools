@@ -326,7 +326,7 @@ export class BrowserEnvironments {
     )
       throw new AppError(
         "DRIVE_PROFILE_EXCLUSIVE",
-        "百度网盘后台环境仅可与贴吧、知道共用，其他平台请选择独立环境。",
+        "百度网盘后台环境仅可与贴吧、知道和公众号共用，其他平台请选择独立环境。",
       );
     if (
       ["feishu", "tencent-docs", "shimo"].includes(info.platform) &&
@@ -337,12 +337,12 @@ export class BrowserEnvironments {
         "文档平台当前使用内置浏览器保存会话，请选择内置环境。",
       );
     if (
-      ["smzdm", "wechat"].includes(info.platform) &&
+      info.platform === "smzdm" &&
       this.get(environmentId).engine !== "electron"
     )
       throw new AppError(
         "SMZDM_NATIVE_SESSION",
-        "什么值得买与微信公众号目前使用内置浏览器环境，请选择内置环境。",
+        "什么值得买目前使用内置浏览器环境，请选择内置环境。",
       );
     if (
       ref.kind !== "binding" &&

@@ -19,6 +19,7 @@ import {
   type WechatArticle,
   type WechatDetail,
   type WechatDraftPayload,
+  type WechatDraftReceipt,
   type WechatImageGenerationMode,
   type WechatPort,
   type WechatRegenerateImagesInput,
@@ -127,6 +128,19 @@ export class WechatArticles {
     });
     this.logs = new RuntimeLog(d.repo.db, d.dataPath, "wechat");
     for (const article of this.articles()) {
+      if (
+        (article.stage === "sending" || article.stage === "uncertain") &&
+        article.pendingAccount &&
+        article.pendingDraft &&
+        this.hasSuccessfulReceipt(article)
+      ) {
+        this.confirmDelivery(
+          article,
+          article.pendingAccount,
+          article.pendingDraft,
+        );
+        continue;
+      }
       if (article.stage !== "sending") continue;
       article.stage = "uncertain";
       article.message =
@@ -425,7 +439,6 @@ export class WechatArticles {
       templateSupport: true,
       supportedTemplates: wechatTemplateIds,
       readMoreEntries: this.readMoreEntries(article),
-      automaticVerification: !!this.d.port?.verifyDraft,
       editions: this.editionHistory(article),
       trafficWordPlan: wechatTrafficWordPlan(
         this.d.repo.db,
@@ -1310,6 +1323,64 @@ export class WechatArticles {
     url.hash = "";
     return { draftId, url: url.href };
   }
+  private hasSuccessfulReceipt(article: WechatArticle) {
+    const proof = article.pendingDraft,
+      account = article.pendingAccount;
+    if (!proof || !account) return false;
+    if (proof.acknowledged) return true;
+    // Old first-save checkpoints lack the new marker. Recover only when the
+    // latest save-failure log proves that the adapter already accepted a
+    // successful official response for this exact account and draft ID.
+    // A reconstructed update proof or an older failure is not such evidence.
+    if (
+      article.remote ||
+      article.deliveryHistory?.length ||
+      proof.title !== article.title
+    )
+      return false;
+    const failure = this.d.repo.db.get<{ message: string; created_at: string }>(
+      "SELECT message,created_at FROM runtime_logs WHERE domain='wechat' AND event='draft.save_failed' AND task_id=? AND account_id=? ORDER BY id DESC LIMIT 1",
+      article.id,
+      account.id,
+    );
+    return !!(
+      failure &&
+      failure.created_at >= article.createdAt &&
+      failure.message.startsWith(
+        `微信已返回草稿编号 ${proof.draftId}，但保存后核对未通过：`,
+      )
+    );
+  }
+  private confirmDelivery(
+    article: WechatArticle,
+    account: { id: string; uid: string },
+    receipt: WechatDraftReceipt,
+  ) {
+    const confirmed = this.receipt(receipt.draftId, receipt.url);
+    const target = wechatTargetReceipt(article, account.id);
+    if (
+      (article.remote && article.remote.accountId !== account.id) ||
+      (target &&
+        (target.draftId !== confirmed.draftId || target.uid !== account.uid))
+    )
+      throw new AppError(
+        "WECHAT_RECEIPT",
+        "微信返回的草稿标识与当前目标公众号记录不一致。",
+      );
+    article.remote = {
+      ...confirmed,
+      accountId: account.id,
+      uid: account.uid,
+      revision: article.revision,
+      sentAt: now(),
+    };
+    this.recordDelivery(article, target ? "updated" : "created");
+    article.pendingAccount = null;
+    article.pendingDraft = null;
+    article.stage = "synced";
+    article.message = "已保存到微信草稿箱。请到微信后台预览并自行发文。";
+    this.persist(article);
+  }
   private async payload(
     article: WechatArticle,
     uid: string,
@@ -1377,6 +1448,7 @@ export class WechatArticles {
         "请在当前源码桌面窗口发送微信草稿。",
       );
     this.active.add(id);
+    let receiptAccepted = false;
     try {
       await this.d.accounts.use(
         accountId,
@@ -1447,6 +1519,7 @@ export class WechatArticles {
                 );
               article.pendingDraft = {
                 ...receipt,
+                acknowledged: true,
                 title: proof.title,
                 html: proof.html,
                 coverUrl: proof.coverUrl,
@@ -1460,31 +1533,38 @@ export class WechatArticles {
               "WECHAT_RECEIPT",
               "未记录微信保存操作，未将本次结果标记为成功。",
             );
-          const confirmed = this.receipt(receipt.draftId, receipt.url);
-          if (target && target.draftId !== confirmed.draftId)
-            throw new AppError(
-              "WECHAT_RECEIPT",
-              "微信返回了不同的草稿标识，请先在后台核对结果。",
-            );
-          const wasUpdate = !!target;
-          article.remote = {
-            ...confirmed,
-            accountId: verified.id,
-            uid: verified.uid,
-            revision: article.revision,
-            sentAt: now(),
-          };
-          this.recordDelivery(article, wasUpdate ? "updated" : "created");
-          article.pendingAccount = null;
-          article.pendingDraft = null;
-          article.stage = "synced";
-          article.message = "已保存到微信草稿箱。请到微信后台预览并自行发文。";
-          this.persist(article);
+          this.confirmDelivery(
+            article,
+            { id: verified.id, uid: verified.uid },
+            receipt,
+          );
+          receiptAccepted = true;
         },
         "保存公众号微信草稿",
       );
     } catch (error) {
-      if (!this.closed) {
+      if (
+        !this.closed &&
+        article.pendingAccount &&
+        article.pendingDraft?.acknowledged
+      ) {
+        this.confirmDelivery(
+          article,
+          article.pendingAccount,
+          article.pendingDraft,
+        );
+        receiptAccepted = true;
+      }
+      if (receiptAccepted) {
+        this.logs.record({
+          level: "warning",
+          event: "draft.receipt_recovered",
+          message: "微信已返回保存成功回执，收尾异常未改变已保存结果。",
+          taskId: article.id,
+          accountId,
+          details: { reason: safeMessage(error) },
+        });
+      } else if (!this.closed) {
         if (article.stage === "sending") article.stage = "uncertain";
         article.message =
           safeMessage(error) +
@@ -1507,7 +1587,7 @@ export class WechatArticles {
         });
         this.persist(article);
       }
-      if (article.stage !== "uncertain") throw error;
+      if (article.stage !== "uncertain" && !receiptAccepted) throw error;
     } finally {
       this.active.delete(id);
     }
@@ -1519,6 +1599,14 @@ export class WechatArticles {
       throw new AppError("WECHAT_BUSY", "草稿正在处理，请稍后重试。");
     if (article.stage !== "uncertain" || !article.pendingAccount)
       return this.get(id);
+    if (article.pendingDraft && this.hasSuccessfulReceipt(article)) {
+      this.confirmDelivery(
+        article,
+        article.pendingAccount,
+        article.pendingDraft,
+      );
+      return this.get(id);
+    }
     if (!this.d.port?.verifyDraft)
       throw new AppError(
         "WECHAT_DESKTOP",

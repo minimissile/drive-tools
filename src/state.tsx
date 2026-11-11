@@ -78,6 +78,7 @@ export type Page =
   | "zhihu-operations"
   | "tieba-autocare"
   | "tieba-publishing"
+  | "tieba-analysis"
   | "settings"
   | "system-logs"
   | "bulk"
@@ -217,6 +218,7 @@ const pages: Page[] = [
   "zhihu-operations",
   "tieba-autocare",
   "tieba-publishing",
+  "tieba-analysis",
   "settings",
   "system-logs",
   "bulk",

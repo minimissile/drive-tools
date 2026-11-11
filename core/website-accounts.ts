@@ -97,15 +97,6 @@ export class WebsiteAccounts {
   }
   add(provider: WebsiteProvider, alias?: string, environmentId?: string) {
     if (
-      provider === "wechat" &&
-      environmentId &&
-      this.environments?.get(environmentId).engine !== "electron"
-    )
-      throw new AppError(
-        "WECHAT_NATIVE_SESSION",
-        "微信公众号使用内置浏览器扫码登录，请选择内置环境。",
-      );
-    if (
       isDocumentProvider(provider) &&
       environmentId &&
       this.environments?.get(environmentId).engine !== "electron"

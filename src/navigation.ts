@@ -140,6 +140,12 @@ export const zhihuOperations: WorkbenchEntry[] = [
 export const tiebaOperations: WorkbenchEntry[] = [
   { page: "tieba-autocare", title: "贴吧自动养号", description: "同步关注吧，按目标签到并核对官网结果", Icon: ListChecks },
   { page: "tieba-publishing", title: "贴吧资源发帖", description: "选流量词和网盘资源，发布并统计帖子数据", Icon: Send },
+  {
+    page: "tieba-analysis",
+    title: "贴吧数据分析",
+    description: "查询指定用户的公开主题帖和浏览量",
+    Icon: ChartNoAxesCombined,
+  },
 ];
 export const wechatOperations: WorkbenchEntry[] = [
   { page: "wechat-workflow", title: "公众号草稿箱", description: "导入文章、替换资源与插图，发送到微信草稿箱", Icon: NotebookPen },

@@ -31,6 +31,18 @@ export function normalizeTiebaForumName(value: string) {
   return tiebaForumNameSchema.parse(value);
 }
 
+/** Only build links to the official forum page, with the name as a parameter. */
+export function tiebaForumHomeUrl(name: string): string | null {
+  const trimmed = name.trim();
+  if (
+    !trimmed ||
+    trimmed.length > 100 ||
+    /[\u0000-\u001f\u007f]/u.test(trimmed)
+  )
+    return null;
+  return `https://tieba.baidu.com/f?kw=${encodeURIComponent(trimmed)}&ie=utf-8`;
+}
+
 /** Decode official /f keyword bytes; legacy personal lists still emit GBK. */
 export function decodeTiebaForumUrlName(
   value: string,

@@ -71,7 +71,7 @@ export default function OtherAccounts({
   const [provider, setProvider] = useState<OtherProvider>(initialProvider);
   const singleSmzdm = provider === "smzdm";
   const documentProvider = isDocumentProvider(provider);
-  const nativeOnly = singleSmzdm || provider === "wechat" || documentProvider;
+  const nativeOnly = singleSmzdm || documentProvider;
   const hasSmzdm = accounts.data.some(
     (account) => account.provider === "smzdm",
   );

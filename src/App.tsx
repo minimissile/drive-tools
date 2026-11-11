@@ -46,6 +46,7 @@ const PipixWorkflow = lazy(() => import("./pipix/Workflow"));
 const ZhihuWorkflow = lazy(() => import("./zhihu/Workflow"));
 const TiebaWorkflow = lazy(() => import("./tieba/Workflow"));
 const TiebaPublishingWorkflow = lazy(() => import("./tieba-publishing/Workflow"));
+const TiebaAnalysis = lazy(() => import("./tieba/Analysis"));
 const IntelligentOperations = lazy(() => import("./operations/Workflow"));
 const WechatWorkflow = lazy(() => import("./wechat/Workflow"));
 const SmzdmWorkflow = lazy(() => import("./smzdm/Workflow"));
@@ -102,6 +103,7 @@ const surfaces = {
   "zhihu-operations": ZhihuWorkflow,
   "tieba-autocare": TiebaWorkflow,
   "tieba-publishing": TiebaPublishingWorkflow,
+  "tieba-analysis": TiebaAnalysis,
   "pipix-sources": PipixWorkflow,
   settings: Settings,
   "system-logs": ExceptionLogs,

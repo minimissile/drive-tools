@@ -75,7 +75,7 @@ export function AccountBrowserChoice({
               },
               ...choices.map((env) => ({
                 value: env.id,
-                label: `${env.name}${env.accounts.some((a) => a.kind === "drive") ? " · 百度共用后台" : ""}`,
+                label: `${env.name}${env.accounts.some((a) => a.kind === "drive") ? " · 网盘共用后台" : ""}`,
               })),
               ...(value.environmentId && !selected
                 ? [
@@ -91,7 +91,7 @@ export function AccountBrowserChoice({
       ) : null}
       {value.fingerprint && !disabled && !choices.length ? (
         <Notice>
-          暂无可用于此平台的指纹环境。网盘后台仅可与贴吧、知道共用。
+          暂无可用于此平台的指纹环境。网盘后台仅可与贴吧、知道和公众号共用。
           {onConfigure ? (
             <Button quiet onClick={onConfigure}>
               配置指纹浏览器

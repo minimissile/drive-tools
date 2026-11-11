@@ -16,6 +16,7 @@ import { createWebsiteIdentitySession } from "./website-identity-session";
 import { tiebaIdentityScript } from "../core/tieba/identity";
 import { createSmzdmSession } from "./smzdm-session";
 import { createWechatSession } from "./wechat-session";
+import { createWechatBitSession } from "./wechat-bit-session";
 import { createDocumentSessions } from "./document-session";
 import { isDocumentProvider } from "../shared/document-platforms";
 import { browserSessionFetch } from "./browser-session-fetch";
@@ -566,6 +567,7 @@ export function createWebsiteSessions(
     weiboStatistics: weiboSessions.statistics,
     smzdm: smzdm.port,
     wechat: wechat.port,
+    wechatBrowserSession: createWechatBitSession(workspace, smzdm.port.readArticle),
     bilibili: bilibiliContent.port,
     readWechatPreviewImage: wechat.readPreviewImage,
   };

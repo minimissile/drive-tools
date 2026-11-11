@@ -3,6 +3,7 @@ import type { TiebaForumReading } from "../../shared/tieba-autocare";
 import { tiebaCurrentUser } from "./identity";
 import {
   normalizeTiebaForumName,
+  tiebaForumHomeUrl,
   decodeTiebaForumUrlName,
 } from "../../shared/tieba-forums";
 
@@ -109,17 +110,13 @@ export interface TiebaAutocarePageSnapshot {
 }
 
 export function tiebaForumUrl(name: string) {
-  const trimmed = name.trim();
-  if (
-    !trimmed ||
-    trimmed.length > 100 ||
-    /[\u0000-\u001f\u007f]/u.test(trimmed)
-  )
+  const url = tiebaForumHomeUrl(name);
+  if (!url)
     throw new AppError(
       "TIEBA_FORUM_INVALID",
       "贴吧名称无效，请重新同步关注吧。",
     );
-  return `https://tieba.baidu.com/f?kw=${encodeURIComponent(trimmed)}&ie=utf-8`;
+  return url;
 }
 
 function officialUrl(value: string) {

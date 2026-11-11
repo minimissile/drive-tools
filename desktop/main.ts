@@ -547,6 +547,7 @@ const ports: AppPorts = {
   bilibili: websiteSessions.bilibili,
   smzdm: websiteSessions.smzdm,
   wechat: websiteSessions.wechat,
+  wechatBrowserSession: websiteSessions.wechatBrowserSession,
   readWechatRemoteImage: websiteSessions.readWechatPreviewImage,
   weiboPublisher: websiteSessions.weiboPublisher,
   weiboStatistics: websiteSessions.weiboStatistics,

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { NewDriveBrowserPreview } from "../../shared/drive-browser";
-import { isBaiduSharedMember } from "../../shared/browser-environment-sharing";
+import { isDriveSharedMember } from "../../shared/browser-environment-sharing";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { ipc } from "../api/client";
 import { useAppData, useAppNavigation } from "../state";
@@ -61,7 +61,7 @@ export function DriveBrowserCreation({
         </Button>
       </div>
       <p className="muted">
-        选择已登录本人百度网盘的环境，可与贴吧、知道共用。读取并核对账号后创建，创建后不能切换内置浏览器或改绑其他环境。
+        选择已登录本人百度网盘的环境，可与贴吧、知道和公众号共用。读取并核对账号后创建，创建后不能切换内置浏览器或改绑其他环境。
       </p>
       {!data?.settings.bitUrl ? (
         <Button
@@ -107,7 +107,7 @@ export function DriveBrowserCreation({
                           e.engine === "bitbrowser" && e.profileId === p.id,
                       )?.accounts ?? [];
                     const used = related.some(
-                      (a) => a.kind === "drive" || !isBaiduSharedMember(a),
+                      (a) => a.kind === "drive" || !isDriveSharedMember(a),
                     );
                     return {
                       value: p.id,

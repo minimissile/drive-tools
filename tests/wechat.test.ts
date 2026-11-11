@@ -8,11 +8,13 @@ import type { z } from "zod";
 import { AppService, type AppPorts } from "../core/service";
 import { AppError, ServiceHttpError } from "../core/errors";
 import { AiService } from "../core/ai";
+import { RuntimeLog } from "../core/runtime-log";
 import type { fetchJson } from "../core/http";
 import { TestProvider, file } from "./helpers";
 import type { IpcArgs, IpcMethod, IpcValue } from "../shared/ipc";
 import type { SmzdmSource } from "../shared/smzdm";
 import type {
+  WechatArticle,
   WechatDetail,
   WechatDraftPayload,
   WechatDraftReceipt,
@@ -1270,7 +1272,7 @@ test("排版模板随稿保存并由新稿继承，切换不改正文、不调�
   }
 });
 
-test("模板送稿未知回执保留所选样式，缺少快照时也按当时版本恢复核对", async () => {
+test("模板送稿取得成功回执后直接完成，旧未知回执仍按当时模板恢复", async () => {
   const f = await fixture();
   try {
     let current = await f.save(await f.ready(), { templateId: "minimal" });
@@ -1279,14 +1281,14 @@ test("模板送稿未知回执保留所选样式，缺少快照时也按当时�
       throw Error("回读暂未完成");
     };
     current = await f.send(current);
-    assert.equal(current.article.stage, "uncertain");
-    assert.match(
-      current.article.pendingDraft!.html,
-      /font-size:17px;line-height:1.95/,
-    );
-    const expected = current.article.pendingDraft!.html;
+    assert.equal(current.article.stage, "synced");
+    assert.equal(current.article.pendingDraft, null);
+    const expected = f.control.payloads.at(-1)!.html;
+    assert.match(expected, /font-size:17px;line-height:1.95/);
     f.app.db.setSetting(`wechat:article:v1:${current.article.id}`, {
       ...current.article,
+      stage: "uncertain",
+      pendingAccount: { id: f.publisher.id, uid: f.publisher.uid! },
       pendingDraft: null,
       message: "微信已返回草稿编号 900001，保存结果待核对。",
     });
@@ -2141,7 +2143,7 @@ test("微信回读失败保留具体原因和诊断，不叠加同一恢复提�
   }
 });
 
-test("微信已返回编号时先保留核验快照，回读失败后自动检查而不再次提交", async () => {
+test("微信成功回执先持久化，后续收尾失败也直接完成，不回读或重复提交", async () => {
   const f = await fixture();
   try {
     let current = await f.ready();
@@ -2151,6 +2153,7 @@ test("微信已返回编号时先保留核验快照，回读失败后自动检�
       const during = f.app.wechat.get(current.article.id).article;
       assert.equal(during.stage, "sending");
       assert.equal(during.pendingDraft?.draftId, "900001");
+      assert.equal(during.pendingDraft?.acknowledged, true);
       assert.equal(
         during.pendingDraft?.sourceUrl,
         `${f.drive.ownUrl}?pwd=test`,
@@ -2159,32 +2162,24 @@ test("微信已返回编号时先保留核验快照，回读失败后自动检�
       throw new AppError("WECHAT_DRAFT_UNCERTAIN", "微信回读暂未完成", true);
     };
     current = await f.send(current);
-    assert.equal(current.article.stage, "uncertain");
-    assert(current.article.pendingDraft);
-    f.control.verificationError = new AppError(
-      "WECHAT_IMAGE_MISMATCH",
-      "封面内容不同",
-    );
-    current = await f.invoke("wechat.recheck", { id: current.article.id });
-    assert.equal(current.article.stage, "uncertain");
-    assert(current.article.pendingDraft);
-    assert.equal(f.control.writes, 1);
-    f.control.verificationError = null;
-    current = await f.invoke("wechat.recheck", { id: current.article.id });
     assert.equal(current.article.stage, "synced");
     assert.equal(current.article.remote?.draftId, "900001");
     assert.equal(current.article.pendingAccount, null);
     assert.equal(current.article.pendingDraft, null);
     assert.equal(current.article.body, original.body);
     assert.equal(f.control.writes, 1);
-    assert.equal(f.control.verifications.length, 2);
-    assert.equal(
-      f.control.verifications[0].proof.sourceUrl,
-      `${f.drive.ownUrl}?pwd=test`,
-    );
-    assert.equal(current.article.deliveryHistory?.at(-1)?.action, "verified");
+    assert.equal(f.control.verifications.length, 0);
+    assert.equal(current.article.deliveryHistory?.at(-1)?.action, "created");
     await f.invoke("wechat.recheck", { id: current.article.id });
-    assert.equal(f.control.verifications.length, 2);
+    assert.equal(f.control.verifications.length, 0);
+    await f.send(current);
+    assert.equal(f.control.writes, 1);
+    assert.equal(
+      current.article.deliveryHistory?.filter(
+        (item) => item.draftId === "900001",
+      ).length,
+      1,
+    );
   } finally {
     await f.cleanup();
   }
@@ -2338,6 +2333,131 @@ test("公众号中断恢复：重开临时工作空间后保留未知意图，�
     reopened?.close();
     await rm(f.dir, { recursive: true, force: true });
   }
+});
+
+test("成功回执落盘后中断：新旧回执重开直接恢复，不重新登录、回读或送稿", async (t) => {
+  for (const origin of ["current", "legacy"])
+    await t.test(origin, async () => {
+      const f = await fixture();
+      let reopened: AppService | null = null;
+      try {
+        let checkpoint: WechatArticle | undefined;
+        const current = await f.ready();
+        f.control.checkpoint = true;
+        f.control.afterWrite = async () => {
+          checkpoint = structuredClone(
+            f.app.wechat.get(current.article.id).article,
+          );
+        };
+        await f.send(current);
+        assert.equal(checkpoint?.stage, "sending");
+        assert.equal(checkpoint?.pendingDraft?.acknowledged, true);
+        if (origin === "legacy") {
+          delete checkpoint!.pendingDraft!.acknowledged;
+          checkpoint!.stage = "uncertain";
+          checkpoint!.message =
+            "微信草稿保存核验未完成：此账号已有操作进行中，请等待完成。";
+          new RuntimeLog(f.app.db, f.dir, "wechat").record({
+            level: "warning",
+            event: "draft.save_failed",
+            taskId: current.article.id,
+            accountId: f.publisher.id,
+            message:
+              "微信已返回草稿编号 900001，但保存后核对未通过：The operation was aborted 请在微信草稿箱核对，应用不会自动重发。",
+          });
+        }
+        f.app.db.setSetting(
+          `wechat:article:v1:${current.article.id}`,
+          checkpoint,
+        );
+        f.app.close();
+        reopened = new AppService(
+          f.dir,
+          {
+            available: () => true,
+            encrypt: async (value) => value,
+            decrypt: async (value) => value,
+          },
+          {
+            quark: f.drive,
+            baidu: f.drive,
+            uc: f.drive,
+            xunlei: f.drive,
+            guangya: f.drive,
+            pikpak: f.drive,
+          },
+          f.ports,
+          () => {},
+        );
+        const recovered = reopened.wechat.get(current.article.id);
+        assert.equal(recovered.article.stage, "synced");
+        assert.equal(recovered.article.remote?.draftId, "900001");
+        assert.equal(recovered.article.pendingDraft, null);
+        assert.equal(recovered.article.pendingAccount, null);
+        assert.equal(recovered.article.deliveryHistory?.length, 1);
+        assert.equal(f.control.verifications.length, 0);
+        await reopened.wechat.send(
+          current.article.id,
+          current.article.revision,
+          f.publisher.id,
+        );
+        assert.equal(f.control.writes, 1);
+        assert.equal(f.control.verifications.length, 0);
+      } finally {
+        reopened?.close();
+        await rm(f.dir, { recursive: true, force: true });
+      }
+    });
+});
+
+test("旧回执恢复不把过往编号、其他账号或最近未获回执的失败当作成功", async (t) => {
+  for (const reason of ["no-log", "other-id", "other-account", "newer-failure"])
+    await t.test(reason, async () => {
+      const f = await fixture();
+      try {
+        const current = await f.ready();
+        const log = new RuntimeLog(f.app.db, f.dir, "wechat");
+        if (reason !== "no-log")
+          log.record({
+            level: "warning",
+            event: "draft.save_failed",
+            taskId: current.article.id,
+            accountId:
+              reason === "other-account" ? "other-account" : f.publisher.id,
+            message: `微信已返回草稿编号 ${reason === "other-id" ? "900002" : "900001"}，但保存后核对未通过：回读失败。`,
+          });
+        if (reason === "newer-failure")
+          log.record({
+            level: "warning",
+            event: "draft.save_failed",
+            taskId: current.article.id,
+            accountId: f.publisher.id,
+            message: "提交后断线，未收到保存回执。",
+          });
+        f.app.db.setSetting(`wechat:article:v1:${current.article.id}`, {
+          ...current.article,
+          stage: "uncertain",
+          pendingAccount: { id: f.publisher.id, uid: f.publisher.uid },
+          pendingDraft: {
+            draftId: "900001",
+            url: draftUrl(),
+            title: current.article.title,
+            html: wechatHtml(current.article.body),
+            coverUrl: current.article.coverUrl,
+          },
+        });
+        f.control.verificationError = Error("旧记录不能凭编号猜测成功");
+        const next = await f.invoke("wechat.recheck", {
+          id: current.article.id,
+        });
+        assert.equal(next.article.stage, "uncertain");
+        assert.equal(next.article.remote, null);
+        assert.equal(f.control.writes, 0);
+        assert.equal(f.control.verifications.length, 1);
+      } finally {
+        await f.cleanup();
+      }
+    });
 });
 
 test("首次发送可选择公众号，发送后绑定；新一稿可以选择其他公众号", async () => {

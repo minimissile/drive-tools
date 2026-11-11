@@ -67,14 +67,20 @@ export function createBrowserPlatformPorts(
           "DOCUMENT_NATIVE_SESSION",
           "文档平台当前使用内置浏览器，请在账号管理关联内置环境。",
         );
-      if (a.provider === "smzdm" || a.provider === "wechat")
+      if (a.provider === "smzdm")
         throw new AppError(
           "SMZDM_NATIVE_SESSION",
-          "什么值得买与微信公众号目前使用内置浏览器，请在账号管理关联内置环境。",
+          "什么值得买目前使用内置浏览器，请在账号管理关联内置环境。",
         );
       let state: WebsiteSessionState;
-      if (a.provider === "tieba") state = await verifyBitTieba(context);
-      else if (a.provider === "bilibili") state = await verifyBitBilibili(context);
+      if (a.provider === "wechat")
+        state = await (native.wechatBrowserSession ?? missing())(
+          context,
+          a,
+        ).verify();
+      else if (a.provider === "tieba") state = await verifyBitTieba(context);
+      else if (a.provider === "bilibili")
+        state = await verifyBitBilibili(context);
       else if (a.provider === "zhihu") state = await verifyZhihu(context);
       else if (a.provider === "weibo") state = await verifyBitWeibo(context);
       else {
@@ -121,6 +127,49 @@ export function createBrowserPlatformPorts(
   ) =>
     profile(webRef(a), (context) => bitBaiduExchange(context, a, spec, file));
   return Object.assign(Object.create(native) as AppPorts, {
+    wechat:
+      native.wechat || native.wechatBrowserSession
+        ? {
+            readArticle: (url) => (native.wechat ?? missing()).readArticle(url),
+            saveDraft: (account, payload, beforeSubmit, onReceipt) =>
+              !isBit(webRef(account))
+                ? (native.wechat ?? missing()).saveDraft(
+                    account,
+                    payload,
+                    beforeSubmit,
+                    onReceipt,
+                  )
+                : profile(webRef(account), (context) =>
+                    (native.wechatBrowserSession ?? missing())(
+                      context,
+                      account,
+                    ).port.saveDraft(account, payload, beforeSubmit, onReceipt),
+                  ),
+            verifyDraft: (account, proof) =>
+              !isBit(webRef(account))
+                ? (native.wechat?.verifyDraft ?? missing())(account, proof)
+                : profile(webRef(account), (context) =>
+                    (
+                      (native.wechatBrowserSession ?? missing())(
+                        context,
+                        account,
+                      ).port.verifyDraft ?? missing()
+                    )(account, proof),
+                  ),
+            open: (account, url) =>
+              !isBit(webRef(account))
+                ? (native.wechat ?? missing()).open(account, url)
+                : profile(
+                    webRef(account),
+                    (context) =>
+                      (native.wechatBrowserSession ?? missing())(
+                        context,
+                        account,
+                      ).port.open(account, url),
+                    true,
+                  ),
+          }
+        : undefined,
     tiebaTopics:
       native.tiebaTopics ??
       tiebaTopicPublisher((account, action) => {
@@ -204,10 +253,10 @@ export function createBrowserPlatformPorts(
             "DOCUMENT_NATIVE_SESSION",
             "文档平台账号请使用内置浏览器环境。",
           );
-        if (a.provider === "smzdm" || a.provider === "wechat")
+        if (a.provider === "smzdm")
           throw new AppError(
             "SMZDM_NATIVE_SESSION",
-            "什么值得买与微信公众号账号请使用内置浏览器环境。",
+            "什么值得买账号请使用内置浏览器环境。",
           );
         await profile(
           webRef(a),
@@ -217,13 +266,15 @@ export function createBrowserPlatformPorts(
               `panxu:${a.provider}:${a.id}`,
               a.provider === "tieba"
                 ? "https://tieba.baidu.com/"
-                : a.provider === "zhihu"
-                  ? "https://www.zhihu.com/"
-                  : a.provider === "weibo"
-                    ? "https://weibo.com/"
-                    : a.provider === "bilibili"
-                      ? "https://passport.bilibili.com/login"
-                    : "https://qingge.baidu.com/login",
+                : a.provider === "wechat"
+                  ? "https://mp.weixin.qq.com/"
+                  : a.provider === "zhihu"
+                    ? "https://www.zhihu.com/"
+                    : a.provider === "weibo"
+                      ? "https://weibo.com/"
+                      : a.provider === "bilibili"
+                        ? "https://passport.bilibili.com/login"
+                        : "https://qingge.baidu.com/login",
             );
             await page.bringToFront();
           },

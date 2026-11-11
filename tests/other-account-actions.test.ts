@@ -47,8 +47,8 @@ test("其他账号按平台调用原账号接口，保留各自账号 ID", async
       assert.deepEqual(
         calls[0].args,
         isKnown
-          ? { alias: "测试备注", cookie: "qa-cookie" }
-          : { provider, alias: "测试备注" },
+          ? { alias: "测试备注", cookie: "qa-cookie", environmentId: undefined }
+          : { provider, alias: "测试备注", environmentId: undefined },
       );
       for (const call of calls.slice(1)) assert.equal(call.args.id, created.id);
       assert.equal(calls[4].args.confirmed, true);

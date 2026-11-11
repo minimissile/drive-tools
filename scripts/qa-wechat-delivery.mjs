@@ -48,10 +48,7 @@ export async function run({ page, windowId }) {
   let mode = "success",
     release,
     openRelease,
-    openFailure = false,
-    recheckPause = true,
-    recheckRelease,
-    verificationResolved = false;
+    openFailure = false;
   await page.exposeFunction("__deliveryQaInvoke", async (method, args) => {
     if (method === "websiteAccounts.list") return available;
     if (method === "wechat.list")
@@ -82,27 +79,7 @@ export async function run({ page, windowId }) {
     }
     if (method === "wechat.recheck") {
       calls.push({ method, args });
-      if (recheckPause) {
-        await new Promise((resolve) => {
-          recheckRelease = resolve;
-        });
-        recheckPause = false;
-      }
-      if (verificationResolved) {
-        detail.article.stage = "synced";
-        detail.article.pendingAccount = null;
-        detail.article.pendingDraft = null;
-        detail.article.remote = {
-          accountId: account.id,
-          uid: account.uid,
-          draftId: "900001",
-          url: "https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit&appmsgid=900001",
-          revision: detail.article.revision,
-          sentAt: new Date().toISOString(),
-        };
-        detail.article.message = "已保存到微信草稿箱。";
-      }
-      return detail;
+      throw Error("页面不得自动回查微信草稿并占用账号");
     }
     if (method === "wechat.send") {
       calls.push({ method, args });
@@ -227,6 +204,15 @@ export async function run({ page, windowId }) {
     ["wechat.save", "wechat.send"],
   );
   assert.equal(calls[0].args.author, "编辑部");
+  assert.equal(
+    await editor
+      .getByText("正在后台确认微信保存结果", { exact: false })
+      .count(),
+    0,
+    "有效成功回执不触发后台回读提示",
+  );
+  await editor.locator(".wechat-editor-bar").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(out, "saved-receipt.png") });
   const view = editor.getByRole("button", {
     name: "查看微信草稿",
     exact: true,
@@ -321,7 +307,7 @@ export async function run({ page, windowId }) {
   release = undefined;
   await editor
     .getByRole("status")
-    .filter({ hasText: "正在后台确认微信保存结果" })
+    .filter({ hasText: "未收到有效的微信保存成功回执" })
     .waitFor();
   assert.equal(
     await page.getByRole("dialog").count(),
@@ -332,20 +318,20 @@ export async function run({ page, windowId }) {
     name: "查看微信草稿",
     exact: true,
   });
-  assert(await uncertainView.isEnabled(), "后台读取不阻止用户打开微信草稿");
+  assert(await uncertainView.isEnabled(), "未知结果仍可直接打开微信草稿");
   assert(
     await editor
       .getByRole("button", { name: "再发一篇", exact: true })
       .isDisabled(),
     "保留防重复送稿保护",
   );
-  for (let i = 0; !recheckRelease && i < 30; i++) await page.waitForTimeout(50);
-  assert(recheckRelease);
-  recheckRelease();
-  await editor
-    .getByRole("status")
-    .filter({ hasText: "微信保存结果暂未确认" })
-    .waitFor();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForTimeout(300);
+  assert.equal(
+    calls.filter((call) => call.method === "wechat.recheck").length,
+    0,
+    "即使旧后端仍返回自动核对能力，载入与窗口聚焦也不触发后台回查",
+  );
   assert.equal(
     await page
       .getByRole("button", { name: "重新检查保存结果", exact: true })
@@ -366,16 +352,25 @@ export async function run({ page, windowId }) {
   openRelease();
   openRelease = undefined;
   await uncertainView.waitFor();
-  verificationResolved = true;
+  detail.article.stage = "synced";
+  detail.article.pendingAccount = null;
+  detail.article.pendingDraft = null;
+  detail.article.remote.revision = detail.article.revision;
+  detail.article.message = "已根据成功回执恢复微信草稿。";
+  await page.reload();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await editor
     .getByRole("status")
-    .filter({ hasText: "微信保存结果暂未确认" })
+    .filter({ hasText: "未收到有效的微信保存成功回执" })
     .waitFor({ state: "hidden" });
   assert.equal(
     calls.filter((x) => x.method === "wechat.send").length,
     4,
-    "自动核对只读取，不重发",
+    "恢复保存状态不重发",
+  );
+  assert.equal(
+    calls.filter((call) => call.method === "wechat.recheck").length,
+    0,
   );
   assert.equal(await page.getByRole("dialog").count(), 0);
   detail.article.stage = "editing";
@@ -451,14 +446,15 @@ export async function run({ page, windowId }) {
       "作者与摘要标签及输入顶部对齐",
       "首次发送集中选择后一次提交",
       "先保存本地修改",
+      "成功回执直接完成且不显示后台确认提示",
       "发送中防重复",
       "查看微信草稿直接打开无弹窗",
       "打开中loading与防重复",
       "打开失败可重试且目标账号稿件准确",
       "更新同稿选择后不追加确认",
       "失败保留正文并可重试",
-      "未知结果后台核对，不弹窗、不要求手动检查",
-      "返回窗口自动恢复保存状态且不重发",
+      "历史未知结果不自动回查或抢占账号",
+      "返回窗口不触发回查，恢复保存状态不重发",
       "缺封面不提交",
       "多账号在送稿弹窗选择",
       "缓存登录状态由发送时重新核验",

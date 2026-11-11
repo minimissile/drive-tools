@@ -46,7 +46,7 @@ export function OtherAccountConnection({
   onConfigure(): void;
 }) {
   const document = isDocumentProvider(provider);
-  const nativeOnly = provider === "smzdm" || provider === "wechat" || document;
+  const nativeOnly = provider === "smzdm" || document;
   return (
     <section
       className="account-connect website-account-connect"
@@ -102,13 +102,11 @@ export function OtherAccountConnection({
       </div>
       {nativeOnly ? (
         <p className="website-account-connect-hint">
-          {provider === "wechat"
-            ? "使用微信扫码登录公众号后台，完成后检查身份。无需配置 AppID 或密钥。"
-            : document
-              ? "使用独立内置浏览器保存登录；文档的公开访问权限需在官方平台设置。"
-              : hasSmzdm
-                ? "什么值得买仅支持一个账号，请在下方账号中登录或检查身份。"
-                : "什么值得买使用独立内置浏览器保存登录状态。"}
+          {document
+            ? "使用独立内置浏览器保存登录；文档的公开访问权限需在官方平台设置。"
+            : hasSmzdm
+              ? "什么值得买仅支持一个账号，请在下方账号中登录或检查身份。"
+              : "什么值得买使用独立内置浏览器保存登录状态。"}
         </p>
       ) : (
         <AccountBrowserChoice
@@ -131,6 +129,12 @@ export function OtherAccountConnection({
       {provider === "zhihu" && !browser.fingerprint ? (
         <p className="website-account-connect-hint">
           知乎养号和自动发布任务需关联指纹浏览器环境。
+        </p>
+      ) : null}
+      {provider === "wechat" ? (
+        <p className="website-account-connect-hint">
+          可关联已登录公众号的比特环境，或打开所选环境扫码登录后检查身份。素材上传与微信草稿使用该环境的登录状态、代理和指纹，无需
+          AppID 或密钥。
         </p>
       ) : null}
       {provider === "baidu-zhidao" ? (
