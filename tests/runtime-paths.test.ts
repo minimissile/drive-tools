@@ -2,17 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runtimeDataPath } from "../desktop/runtime-paths";
 import { join, resolve } from "node:path";
-test("development and production profiles isolate databases, cookies and restore pointers", () => {
+test("desktop runtimes use a common data root for their lock and workspace selection", () => {
   const base = resolve("application-data");
-  assert.equal(runtimeDataPath(base, true), join(base, "盘序"));
-  assert.equal(runtimeDataPath(base, false), join(base, "盘序开发"));
-  assert.notEqual(runtimeDataPath(base, true), runtimeDataPath(base, false));
+  assert.equal(runtimeDataPath(base), join(base, "盘序"));
+});
+
+test("explicit test workspace paths remain supported and must be absolute", () => {
+  const base = resolve("application-data");
   assert.equal(
-    runtimeDataPath(base, true, resolve("test-profile")),
+    runtimeDataPath(base, resolve("test-profile")),
     resolve("test-profile"),
   );
   assert.throws(
-    () => runtimeDataPath(base, false, "relative/path"),
+    () => runtimeDataPath(base, "relative/path"),
     /绝对路径/,
   );
 });

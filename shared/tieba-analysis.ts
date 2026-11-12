@@ -45,6 +45,8 @@ export interface TiebaAnalysisThread {
   likes: number | null;
   shares: number | null;
   authorId?: string | null;
+  forumLevel?: number | null;
+  potential?: { score: number; place: number; sample: number } | null;
   resource?: TiebaDiscoveryEvidence;
 }
 
@@ -55,12 +57,27 @@ export interface TiebaAnalysisForumPage {
   page: number;
   hasMore: boolean;
   threads: (TiebaAnalysisThread & { author: string })[];
+  exposure?: TiebaForumExposure | null;
+}
+
+export interface TiebaForumExposure {
+  hourly: number;
+  sample: number;
+  observedAt: number;
 }
 
 export interface TiebaAnalysisPage {
   uid: string;
   profileId: string | null;
   author: string;
+  ageYears?: number | null;
+  vip?: boolean | null;
+  forums?: {
+    id: string;
+    name: string;
+    level: number | null;
+    exposure: TiebaForumExposure | null;
+  }[];
   threads: TiebaAnalysisThread[];
 }
 

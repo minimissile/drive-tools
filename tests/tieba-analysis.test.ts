@@ -5,6 +5,7 @@ import {
   queryTiebaAnalysis,
   queryTiebaAnalysisFollowedForums,
   queryTiebaAnalysisForumPosts,
+  queryTiebaAnalysisWithContext,
 } from "../core/tieba/analysis";
 import {
   encodeTiebaFields,
@@ -23,6 +24,92 @@ async function requestPayload(init?: RequestInit) {
     tiebaFields(Buffer.from(await file.arrayBuffer())).bytes(1)!,
   );
 }
+
+test("用户查询用公开资料和同吧同期样本补充吧龄、VIP、吧内等级及曝光潜力", async () => {
+  const when = BigInt(Math.floor(Date.now() / 1000) - 3600);
+  const name = Buffer.from("网盘资源");
+  const fid = 201n;
+  const result = await queryTiebaAnalysisWithContext(
+    { target: `UID: ${uid}`, page: 1 },
+    async (url) => {
+      switch (new URL(String(url)).pathname) {
+        case "/c/u/feed/userpost":
+          return response(
+            encode([
+              [
+                1,
+                encode([
+                  [1, fid],
+                  [2, BigInt(tid)],
+                  [5, when],
+                  [6, name],
+                  [18, BigInt(uid)],
+                  [33, 100n],
+                ]),
+              ],
+            ]),
+          );
+        case "/c/u/user/profile":
+          return response(
+            encode([
+              [
+                1,
+                encode([
+                  [2, BigInt(uid)],
+                  [38, Buffer.from("2.8")],
+                  [39, 1n],
+                  [45, encode([[2, 3n]])],
+                ]),
+              ],
+            ]),
+          );
+        case "/c/f/frs/page":
+          return response(
+            encode([
+              [
+                2,
+                encode([
+                  [1, fid],
+                  [2, name],
+                ]),
+              ],
+              ...[100, 5, 10, 15].map(
+                (views, i) =>
+                  [
+                    7,
+                    encode([
+                      [1, BigInt(tid) + BigInt(i)],
+                      [5, BigInt(views)],
+                      [45, when],
+                      [56, BigInt(uid)],
+                    ]),
+                  ] as const,
+              ),
+              [
+                17,
+                encode([
+                  [2, BigInt(uid)],
+                  [23, 7n],
+                ]),
+              ],
+            ]),
+          );
+        default:
+          assert.fail("用户隐藏关注列表时无需调用关注接口");
+      }
+    },
+  );
+  assert.equal(result.ageYears, 2.8);
+  assert.equal(result.vip, true);
+  assert.equal(result.threads[0].forumLevel, 7);
+  assert.deepEqual(result.threads[0].potential, {
+    score: 100,
+    sample: 4,
+    place: 1,
+  });
+  assert.equal(result.forums?.[0].exposure?.sample, 4);
+  assert(Math.abs((result.forums?.[0].exposure?.hourly ?? 0) - 12.5) < 0.01);
+});
 
 test("公开主题链接解析楼主，保留长 ID 和浏览量字段是否存在", async () => {
   const calls: string[] = [];

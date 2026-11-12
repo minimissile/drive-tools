@@ -316,6 +316,7 @@ export const queryMethods = [
   "tieba.postStats.snapshot",
   "tieba.discovery.snapshot",
   "tieba.discovery.potential",
+  "tieba.discovery.traffic",
   "zhihu.autocare.logs",
   "zhihu.logs",
   "intelligentOps.snapshot",

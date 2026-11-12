@@ -23,6 +23,7 @@ import { FollowedForums } from "./FollowedForums";
 import { ForumPerformance } from "./ForumPerformance";
 import { ForumPosts } from "./ForumPosts";
 import { ResourceDiscovery } from "./ResourceDiscovery";
+import { TiebaPotentialFormula } from "./TiebaPotentialFormula";
 import {
   AnalysisThreadsTable,
   formatAnalysisCount,
@@ -123,6 +124,20 @@ function Analysis({ workspace }: { workspace: string }) {
         );
         const before = threads.size;
         for (const post of next.threads) threads.set(post.id, post);
+        const forums = new Map(
+          (request.page > 1 ? (previous?.forums ?? []) : []).map((forum) => [
+            forum.id,
+            forum,
+          ]),
+        );
+        for (const forum of next.forums ?? []) {
+          const old = forums.get(forum.id);
+          forums.set(forum.id, {
+            ...forum,
+            level: forum.level ?? old?.level ?? null,
+            exposure: forum.exposure ?? old?.exposure ?? null,
+          });
+        }
         return {
           uid: next.uid,
           profileId:
@@ -131,6 +146,10 @@ function Analysis({ workspace }: { workspace: string }) {
           author:
             next.author || (request.page > 1 ? (previous?.author ?? "") : ""),
           threads: [...threads.values()],
+          ageYears:
+            next.ageYears ?? (request.page > 1 ? previous?.ageYears : null),
+          vip: next.vip ?? (request.page > 1 ? previous?.vip : null),
+          forums: [...forums.values()],
           sourcePage: request.page,
           end: threads.size === before,
         };
@@ -254,6 +273,18 @@ function Analysis({ workspace }: { workspace: string }) {
               </small>
             </div>
             <div>
+              <small className="muted">吧龄</small>
+              <strong>
+                {result.ageYears == null ? "未知" : `${result.ageYears} 年`}
+              </strong>
+            </div>
+            <div>
+              <small className="muted">贴吧 VIP</small>
+              <strong>
+                {result.vip == null ? "未知" : result.vip ? "是" : "否"}
+              </strong>
+            </div>
+            <div>
               <small className="muted">已读取帖子</small>
               <strong>{number.format(ordered.length)} 篇</strong>
             </div>
@@ -301,6 +332,7 @@ function Analysis({ workspace }: { workspace: string }) {
                     />
                     {loadMore}
                   </div>
+                  <TiebaPotentialFormula />
                   <AnalysisThreadsTable threads={visible} scope="user" />
                   <Pagination
                     page={page}
@@ -325,6 +357,7 @@ function Analysis({ workspace }: { workspace: string }) {
                 key={result.uid}
                 workspace={workspace}
                 threads={result.threads}
+                forums={result.forums}
                 loadMore={loadMore}
               />
             </TabPanel>

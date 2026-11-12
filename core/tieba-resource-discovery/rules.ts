@@ -4,12 +4,14 @@ import type {
   TiebaDiscoveryGrowth,
   TiebaDiscoveryMetrics,
   TiebaDiscoveryPotentialEvidence,
+  TiebaDiscoveryRules,
 } from "../../shared/tieba-resource-discovery";
+import { defaultTiebaDiscoveryRules } from "../../shared/tieba-resource-discovery";
 import { tiebaBodyDriveLinks } from "../tieba-post-stats/links";
 
 const hour = 60 * 60 * 1000;
 export const discoveryInterval = hour;
-export const discoveryLookback = 48 * hour;
+export const trafficLookback = 30 * 24 * hour;
 export const minReadingGap = hour / 2;
 const maxReadingGap = 3 * hour;
 const provider =
@@ -80,7 +82,11 @@ function ageBand(age: number) {
   if (age < 2 * hour) return 0;
   if (age < 8 * hour) return 1;
   if (age < 24 * hour) return 2;
-  return 3;
+  if (age < 48 * hour) return 3;
+  if (age < 72 * hour) return 4;
+  if (age < 7 * 24 * hour) return 5;
+  if (age < 14 * 24 * hour) return 6;
+  return 7;
 }
 
 export function groupResources<T extends { id: string; keys: string[] }>(
@@ -115,7 +121,61 @@ export function groupResources<T extends { id: string; keys: string[] }>(
 const cohortKey = (forum: string, age: number) =>
   `${forum.normalize("NFKC").trim().toLowerCase()}:${ageBand(age)}`;
 
-const interactionFields = ["replies", "likes", "shares"] as const;
+type PublicReading = {
+  id: string;
+  forum: string;
+  publishedAt: string | null;
+  views: number | null;
+};
+
+function viewVelocity(post: PublicReading, at: number, lookback: number) {
+  const age = at - Date.parse(post.publishedAt ?? "");
+  if (post.views === null || !(age >= 0 && age <= lookback)) return null;
+  return {
+    key: cohortKey(post.forum, age),
+    speed: (post.views * hour) / Math.max(minReadingGap, age),
+  };
+}
+
+function velocityRank(speed: number, peers: readonly number[]) {
+  const sample = peers.length;
+  const place = peers.filter((peer) => peer >= speed).length;
+  return {
+    place,
+    sample,
+    score: Math.floor((100 * (sample - place)) / (sample - 1)),
+  };
+}
+
+export function publicPostPotential(
+  post: PublicReading,
+  peers: readonly PublicReading[],
+  at: number,
+  lookback = 48 * hour,
+) {
+  const current = viewVelocity(post, at, lookback);
+  if (!current) return null;
+  const speeds = [current.speed];
+  for (const peer of peers) {
+    if (peer.id === post.id) continue;
+    const reading = viewVelocity(peer, at, lookback);
+    if (reading?.key === current.key) speeds.push(reading.speed);
+  }
+  return speeds.length >= 4 ? velocityRank(current.speed, speeds) : null;
+}
+
+export function forumExposure(posts: readonly PublicReading[], at: number) {
+  const speeds = posts
+    .flatMap((post) => viewVelocity(post, at, 48 * hour)?.speed ?? [])
+    .sort((a, b) => a - b);
+  if (speeds.length < 4) return null;
+  const center = Math.floor(speeds.length / 2);
+  const hourly =
+    speeds.length % 2
+      ? speeds[center]
+      : (speeds[center - 1] + speeds[center]) / 2;
+  return { hourly, sample: speeds.length, observedAt: at };
+}
 
 export function potentialSignals<
   T extends TiebaDiscoveryMetrics & {
@@ -124,15 +184,24 @@ export function potentialSignals<
     forum: string;
     publishedAt: string;
   },
->(posts: readonly T[], at: number) {
-  const groups = new Map<string, (T & { views: number })[]>();
+>(
+  posts: readonly T[],
+  at: number,
+  rules: TiebaDiscoveryRules = defaultTiebaDiscoveryRules,
+) {
+  const groups = new Map<string, (T & { views: number; velocity: number })[]>();
+  const lookback = rules.lookbackHours * hour;
   for (const post of posts) {
-    const age = at - Date.parse(post.publishedAt);
-    if (post.views === null || !(age >= 0 && age <= discoveryLookback))
+    const reading = viewVelocity(post, at, lookback);
+    if (post.views === null || post.views >= rules.trafficThreshold || !reading)
       continue;
-    const key = cohortKey(post.forum, age);
+    const key = reading.key;
     const cohort = groups.get(key) ?? [];
-    cohort.push({ ...post, views: post.views });
+    cohort.push({
+      ...post,
+      views: post.views,
+      velocity: reading.speed,
+    });
     groups.set(key, cohort);
   }
 
@@ -140,54 +209,27 @@ export function potentialSignals<
   for (const cohort of groups.values()) {
     const peers = groupResources(cohort).map(
       (copies) =>
-        copies.sort((a, b) => b.views - a.views || a.id.localeCompare(b.id))[0],
+        copies.sort(
+          (a, b) => b.velocity - a.velocity || a.id.localeCompare(b.id),
+        )[0],
     );
     const sample = peers.length;
     if (sample < 4) continue;
-    const interactionSamples = interactionFields.map((field) =>
-      peers.flatMap((peer) => peer[field] ?? []),
-    );
-    const scored = peers.map((post) => {
-      const viewPlace = peers.filter((peer) => peer.views >= post.views).length;
-      const interactionScores = interactionFields.flatMap((field, index) => {
-        const values = interactionSamples[index];
-        const value = post[field];
-        if (value === null || values.length < 4) return [];
-        return [
-          (values.length - values.filter((peer) => peer >= value).length) /
-            (values.length - 1),
-        ];
-      });
-      const interactions = interactionScores.length
-        ? interactionScores.reduce((sum, value) => sum + value, 0) /
-          interactionScores.length
-        : 0;
-      return {
-        post,
-        viewPlace,
-        comparedInteractions: interactionScores.length > 0,
-        score:
-          ((sample - viewPlace) / (sample - 1)) * 0.75 + interactions * 0.25,
-      };
-    });
-    for (const { post, viewPlace, score, comparedInteractions } of scored) {
-      const place = scored.filter((peer) => peer.score >= score).length;
-      if (
-        post.views < 10 ||
-        viewPlace > Math.ceil(sample / 2) ||
-        place > Math.floor(sample / 4)
-      )
-        continue;
+    const speeds = peers.map((peer) => peer.velocity);
+    for (const post of peers) {
+      const { place, score } = velocityRank(post.velocity, speeds);
+      if (post.views < 10 || score < rules.potentialThreshold) continue;
       const { views, replies, likes, shares } = post;
       selected.set(post.id, {
         at,
+        score,
         views,
         replies,
         likes,
         shares,
-        comparedInteractions,
+        comparedInteractions: false,
         rank: { place, sample },
-        viewRank: { place: viewPlace, sample },
+        viewRank: { place, sample },
       });
     }
   }
@@ -201,12 +243,12 @@ export function resourceRanks<
     publishedAt: string;
     growth: TiebaDiscoveryGrowth | null;
   },
->(posts: readonly T[], now: number) {
+>(posts: readonly T[], now: number, lookback: number) {
   const groups = new Map<string, (T & { growth: TiebaDiscoveryGrowth })[]>();
   for (const post of posts) {
     if (!post.growth || now - post.growth.to > 2 * hour) continue;
     const age = post.growth.to - Date.parse(post.publishedAt);
-    if (age < 0 || age > discoveryLookback) continue;
+    if (age < 0 || age > lookback) continue;
     const key = cohortKey(post.forum, age);
     const list = groups.get(key) ?? [];
     list.push({ ...post, growth: post.growth });

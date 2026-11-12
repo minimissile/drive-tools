@@ -7,7 +7,12 @@ import type {
 import { normalizeTiebaForumName } from "../../shared/tieba-forums";
 import { AppError } from "../errors";
 import { readLimited, readLimitedBytes } from "../http";
-import { resourceEvidence } from "../tieba-resource-discovery/rules";
+import {
+  forumExposure,
+  publicPostPotential,
+  resourceEvidence,
+  trafficLookback,
+} from "../tieba-resource-discovery/rules";
 import { encodeTiebaFields, tiebaFields } from "./analysis-protobuf";
 import { tiebaForumUrl } from "./autocare-page";
 import { tiebaThreadIdFromUrl, tiebaThreadUrl } from "./participation-page";
@@ -356,7 +361,7 @@ export async function queryTiebaAnalysisForumPosts(
     const authorName = (user: ReturnType<typeof tiebaFields>) =>
       user.string(4) || user.string(3);
     const authors = new Map(
-      data.messages(17).map((user) => [user.integer(2), authorName(user)]),
+      data.messages(17).map((user) => [objectId(user.integer(2)), user]),
     );
     const threads = new Map<
       string,
@@ -366,6 +371,10 @@ export async function queryTiebaAnalysisForumPosts(
       const tid = objectId(post.integer(1));
       if (!tid || threads.has(tid)) continue;
       const author = tiebaFields(post.bytes(18) ?? empty);
+      const embeddedUid = objectId(author.integer(2));
+      const authorUid = objectId(post.integer(56)) ?? embeddedUid;
+      const listedAuthor = authorUid ? authors.get(authorUid) : undefined;
+      const embeddedMatches = !embeddedUid || embeddedUid === authorUid;
       const agree = tiebaFields(post.bytes(126) ?? empty);
       const title = post.string(3) || "无标题主题帖";
       threads.set(tid, {
@@ -373,7 +382,15 @@ export async function queryTiebaAnalysisForumPosts(
         forumId: id,
         forum: canonical,
         title,
-        author: authorName(author) || authors.get(post.integer(56)) || "",
+        author:
+          (embeddedMatches ? authorName(author) : "") ||
+          (listedAuthor ? authorName(listedAuthor) : ""),
+        authorId: authorUid,
+        forumLevel:
+          count(
+            (embeddedMatches ? author.integer(23) : undefined) ??
+              listedAuthor?.integer(23),
+          ) || null,
         url: tiebaThreadUrl(tid),
         publishedAt: publishTime(post.integer(45)),
         views: count(post.integer(5)),
@@ -382,21 +399,21 @@ export async function queryTiebaAnalysisForumPosts(
         shares: count(post.integer(135)),
         ...(discoverResources
           ? {
-              authorId:
-                objectId(post.integer(56)) ?? objectId(author.integer(2)),
               resource: discoveryEvidence(post, 142, title),
             }
           : {}),
       });
     }
     if (!threads.size && hasMore === 1n) throw invalidResponse();
+    const list = [...threads.values()];
     return {
       id,
       name: canonical,
       url: tiebaForumUrl(canonical),
       page,
       hasMore: hasMore === 1n,
-      threads: [...threads.values()],
+      threads: list,
+      exposure: forumExposure(list, Date.now()),
     };
   } catch (error) {
     if (error instanceof AppError) throw error;
@@ -409,6 +426,15 @@ export async function queryTiebaAnalysisFollowedForums(
   send: typeof fetch = fetch,
 ): Promise<TiebaAnalysisFollowedPage> {
   const user = await readAccount({ uid }, send);
+  return readFollowedPage(uid, page, user, send);
+}
+
+async function readFollowedPage(
+  uid: string,
+  page: number,
+  user: ReturnType<typeof tiebaFields>,
+  send: typeof fetch,
+): Promise<TiebaAnalysisFollowedPage> {
   try {
     if (objectId(user.integer(2)) !== uid) throw invalidResponse();
     const privacy = tiebaFields(user.bytes(45) ?? empty).integer(2);
@@ -499,4 +525,96 @@ export async function queryTiebaAnalysisFollowedForums(
       "未能读取贴吧关注列表，请稍后重试。",
     );
   }
+}
+
+export async function queryTiebaAnalysisWithContext(
+  input: { target: string; page: number },
+  send: typeof fetch = fetch,
+): Promise<TiebaAnalysisPage> {
+  const result = await queryTiebaAnalysis(input, send);
+  const timeout = AbortSignal.timeout(12_000);
+  const read: typeof fetch = (url, options) =>
+    send(url, {
+      ...options,
+      signal: options?.signal
+        ? AbortSignal.any([timeout, options.signal])
+        : timeout,
+    });
+  const targets = new Map(
+    result.threads.flatMap((post) =>
+      post.forumId && post.forum ? [[post.forumId, post.forum] as const] : [],
+    ),
+  );
+  const samples = new Map<string, TiebaAnalysisForumPage>();
+  const levels = new Map<string, number>();
+  let ageYears: number | null = null;
+  let vip: boolean | null = null;
+  const profile = async () => {
+    const user = await readAccount({ uid: result.uid }, read);
+    if (objectId(user.integer(2)) !== result.uid) return;
+    const age = user.string(38).trim();
+    if (/^\d+(?:\.\d+)?$/u.test(age) && Number.isFinite(Number(age)))
+      ageYears = Number(age);
+    const status = tiebaFields(user.bytes(61) ?? empty).integer(1);
+    const member = user.integer(39);
+    if (member !== undefined) vip = member !== 0n;
+    else if (status === 1n || status === 0n) vip = status === 1n;
+    for (let page = 1; page <= 3 && levels.size < targets.size; page++) {
+      const followed = await readFollowedPage(result.uid, page, user, read);
+      if (followed.visibility === "restricted") break;
+      for (const forum of followed.forums) {
+        if (targets.has(forum.id) && forum.level !== null)
+          levels.set(forum.id, forum.level);
+      }
+      if (!followed.hasMore) break;
+    }
+  };
+  const queue = targets.entries();
+  const sample = async () => {
+    for (const [id, name] of queue) {
+      if (timeout.aborted) break;
+      const page = await queryTiebaAnalysisForumPosts(
+        { name, page: 1 },
+        read,
+      ).catch(() => null);
+      if (page?.id === id) samples.set(id, page);
+    }
+  };
+  await Promise.all([
+    profile().catch(() => {}),
+    ...Array.from({ length: Math.min(4, targets.size) }, sample),
+  ]);
+  const at = Date.now();
+  const forums = [...targets].map(([id, name]) => {
+    const page = samples.get(id);
+    const forumLevel = page?.threads.find(
+      (post) => post.authorId === result.uid && post.forumLevel,
+    )?.forumLevel;
+    return {
+      id,
+      name,
+      level: levels.get(id) ?? forumLevel ?? null,
+      exposure: page?.exposure ?? null,
+    };
+  });
+  const byId = new Map(forums.map((forum) => [forum.id, forum]));
+  return {
+    ...result,
+    ageYears,
+    vip,
+    forums,
+    threads: result.threads.map((post) => {
+      const id = post.forumId ?? "";
+      return {
+        ...post,
+        forumLevel: byId.get(id)?.level ?? null,
+        potential: publicPostPotential(
+          post,
+          samples.get(id)?.threads ?? [],
+          at,
+          trafficLookback,
+        ),
+      };
+    }),
+  };
 }

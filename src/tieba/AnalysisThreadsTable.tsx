@@ -41,6 +41,7 @@ export function AnalysisThreadsTable({
             <th scope="col">{scope === "forum" ? "作者" : "贴吧"}</th>
             <th scope="col">发布时间（北京时间）</th>
             <th scope="col">浏览量</th>
+            {scope === "user" ? <th scope="col">潜力值</th> : null}
             <th scope="col">回复</th>
             <th scope="col">获赞</th>
             <th scope="col">分享数</th>
@@ -64,6 +65,13 @@ export function AnalysisThreadsTable({
               </td>
               <td>
                 {(scope === "forum" ? post.author : post.forum) || "未知"}
+                {scope === "user" ? (
+                  <small className="muted">
+                    {post.forumLevel
+                      ? `吧内 Lv.${post.forumLevel}`
+                      : "吧内等级未知"}
+                  </small>
+                ) : null}
               </td>
               <td>
                 {post.publishedAt ? (
@@ -77,6 +85,20 @@ export function AnalysisThreadsTable({
               <td>
                 <strong>{formatAnalysisCount(post.views)}</strong>
               </td>
+              {scope === "user" ? (
+                <td>
+                  {post.potential ? (
+                    <>
+                      <strong>{post.potential.score}</strong>
+                      <small className="muted">
+                        {post.potential.place} / {post.potential.sample}
+                      </small>
+                    </>
+                  ) : (
+                    "暂无评分"
+                  )}
+                </td>
+              ) : null}
               <td>{formatAnalysisCount(post.replies)}</td>
               <td>{formatAnalysisCount(post.likes)}</td>
               <td>{formatAnalysisCount(post.shares)}</td>

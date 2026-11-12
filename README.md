@@ -228,18 +228,13 @@ npm run dev
 
 前端由 Vite 热更新，桌面后端编译后暂存，点击“应用更新并重启”后统一加载至 `dist-dev`。开发时直接修改当前工作区，不反复制作安装包。macOS 开发程序的程序坞图标带有 DEV 标识，便于与安装版区分。`npm start` 读取已有生产构建，不提供热更新。
 
-默认数据目录：
-
-| 环境 | macOS | Windows |
-| --- | --- | --- |
-| 正式版 | `~/Library/Application Support/盘序` | `%APPDATA%/盘序` |
-| 开发版 | `~/Library/Application Support/盘序开发` | `%APPDATA%/盘序开发` |
+开发版和安装版共用工作空间。两者通过同一个目录读取 `workspace-location.json` 并申请单实例锁。macOS 的入口目录为 `~/Library/Application Support/盘序`，Windows 为 `%APPDATA%/盘序`。
 
 同一项目只运行一个 `npm run dev` 后台，支持多个带功能与会话标识的窗口，共用源码、数据库、Cookie、缓存和附件。通过顶部“会话窗口”或 `npm run dev:window -- --label "资源目录" --session "开发会话"` 打开窗口，各窗口单独保留导航与未提交输入。共享窗口自动化使用 `test:session`，运行或暂停期间阻止手动应用后端更新。首次采用手动应用策略需有序重启现有开发服务一次，详情见[会话窗口](docs/development/session-windows.md)。
 
 不同端口和临时数据目录仍共用后台启动锁，重复启动不会另开后台或覆盖正在使用的 `dist-dev`。退出时等待本服务的桌面子进程结束后释放锁；开发父进程意外断开时，桌面子进程也会退出。异常终止后启动锁最多等待约 10 秒恢复。
 
-工作空间切换记录随环境隔离。测试使用绝对路径的 `PANXU_DATA_DIR` 指定临时空间；不要让开发版和安装版同时使用同一个真实空间。原生产数据保持原位，新开发环境不会自动复制账号或资源。
+可将 `workspace-location.json` 的 `path` 指向已有工作空间的绝对路径。保留原工作空间目录可以继续使用已有数据库、附件与登录资料。同一时间只运行一个客户端。安装版须支持当前工作空间的数据库版本。隔离测试可通过绝对路径的 `PANXU_DATA_DIR` 选择临时工作空间。
 
 ## 验证
 

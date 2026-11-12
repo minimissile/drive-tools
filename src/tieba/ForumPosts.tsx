@@ -20,6 +20,10 @@ import {
   Notice,
   Panel,
 } from "../ui/primitives";
+import {
+  formatForumExposure,
+  TiebaPotentialFormula,
+} from "./TiebaPotentialFormula";
 import { AnalysisThreadsTable } from "./AnalysisThreadsTable";
 
 const maxInputLength = 2000;
@@ -163,6 +167,11 @@ export function ForumPosts({ workspace }: { workspace: string }) {
             )
           }
         >
+          <p className="tieba-analysis-exposure">
+            本页曝光潜力 <strong>{formatForumExposure(result.exposure)}</strong>
+            {result.exposure ? ` · ${result.exposure.sample} 篇样本` : ""}
+          </p>
+          <TiebaPotentialFormula />
           {result.threads.length ? (
             <AnalysisThreadsTable threads={result.threads} scope="forum" />
           ) : (

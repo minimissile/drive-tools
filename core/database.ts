@@ -9,7 +9,7 @@ import { migrateTiebaParticipation } from "./tieba-participation/migration";
 import { migrateTiebaAutomation } from "./tieba-automation/migration";
 import { migrateTiebaTopics } from "./tieba-topics/migration";
 import { migrateTiebaInsights } from "./tieba-insights/migration";
-import { migrateTiebaDiscoveryArchive } from "./tieba-resource-discovery/archive";
+import { migrateTiebaDiscoveryArchive, migrateTiebaTrafficArchive } from "./tieba-resource-discovery/archive";
 import {
   migrateTrafficCurrentEntries,
   migrateTrafficKnowledge,
@@ -18,7 +18,7 @@ import {
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 36;
+export const databaseSchemaVersion = 37;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -86,6 +86,18 @@ export class Database {
     if (version > databaseSchemaVersion)
       throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 36) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v37-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaTrafficArchive(this.db);
+        this.db.exec("PRAGMA user_version=37;");
+      });
+      return;
+    }
     if (version === 35) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v36-${randomUUID()}.bak`;
@@ -96,6 +108,7 @@ export class Database {
         migrateTiebaDiscoveryArchive(this.db);
         this.db.exec("PRAGMA user_version=36;");
       });
+      this.migrate(false);
       return;
     }
     if (version === 34) {

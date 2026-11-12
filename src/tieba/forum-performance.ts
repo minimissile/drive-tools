@@ -1,4 +1,8 @@
-import type { TiebaAnalysisThread } from "../../shared/tieba-analysis";
+import type {
+  TiebaAnalysisPage,
+  TiebaAnalysisThread,
+  TiebaForumExposure,
+} from "../../shared/tieba-analysis";
 import { tiebaForumHomeUrl } from "../../shared/tieba-forums";
 
 export interface ForumPerformanceRow {
@@ -9,9 +13,16 @@ export interface ForumPerformanceRow {
   measured: number;
   views: number | null;
   average: number | null;
+  level: number | null;
+  exposure: TiebaForumExposure | null;
 }
 
-export const forumPerformanceMetrics = ["posts", "views", "average"] as const;
+export const forumPerformanceMetrics = [
+  "posts",
+  "views",
+  "average",
+  "exposure",
+] as const;
 export type ForumPerformanceOrder = {
   metric: (typeof forumPerformanceMetrics)[number];
   direction: "asc" | "desc";
@@ -22,8 +33,10 @@ const names = new Intl.Collator("zh-CN", { numeric: true });
 export function forumPerformanceRows(
   threads: readonly Pick<TiebaAnalysisThread, "forumId" | "forum" | "views">[],
   order: ForumPerformanceOrder,
+  forums: TiebaAnalysisPage["forums"] = [],
 ) {
   const groups = new Map<string, ForumPerformanceRow>();
+  const context = new Map(forums.map((forum) => [forum.id, forum]));
   for (const thread of threads) {
     const name = thread.forum.trim();
     const key = thread.forumId
@@ -31,6 +44,7 @@ export function forumPerformanceRows(
       : `name:${name.normalize("NFKC").toLowerCase()}`;
     let row = groups.get(key);
     if (!row) {
+      const stats = context.get(thread.forumId ?? "");
       row = {
         key,
         name: name || "未知贴吧",
@@ -39,6 +53,8 @@ export function forumPerformanceRows(
         measured: 0,
         views: null,
         average: null,
+        level: stats?.level ?? null,
+        exposure: stats?.exposure ?? null,
       };
       groups.set(key, row);
     } else if (!row.url && name) {
@@ -53,8 +69,11 @@ export function forumPerformanceRows(
     }
   }
   return [...groups.values()].sort((a, b) => {
-    const left = a[order.metric],
-      right = b[order.metric];
+    const metric = order.metric;
+    const left =
+      metric === "exposure" ? (a.exposure?.hourly ?? null) : a[metric];
+    const right =
+      metric === "exposure" ? (b.exposure?.hourly ?? null) : b[metric];
     if (left === null && right !== null) return 1;
     if (left !== null && right === null) return -1;
     if (left !== null && right !== null && left !== right)

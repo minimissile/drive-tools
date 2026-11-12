@@ -3,6 +3,9 @@ import { useRef, useState } from "react";
 import { z } from "zod";
 import {
   tiebaDiscoveryPotentialPageSize,
+  tiebaDiscoveryCadenceMinutes,
+  defaultTiebaDiscoveryRules,
+  tiebaDiscoveryRulesSchema,
   tiebaResourceSeedsSchema,
   type TiebaDiscoveryCandidate,
   type TiebaDiscoverySnapshot,
@@ -26,21 +29,60 @@ import {
 } from "../ui/primitives";
 import { Pagination } from "../ui/Pagination";
 import { QueryError } from "../ui/QueryError";
-import { Switch } from "../ui/Switch";
+import { Select } from "../ui/Select";
 import { Tabs, TabList, TabPanel } from "../ui/Tabs";
 import {
   formatAnalysisCount,
   formatAnalysisTime,
 } from "./AnalysisThreadsTable";
+import {
+  formatForumExposure,
+  TiebaPotentialFormula,
+} from "./TiebaPotentialFormula";
 import "./resource-discovery.css";
 
-const draftSchema = z.object({ seeds: z.string().max(2048).nullable() });
+const maxSeedInputLength = 10_004;
+const ruleFields = [
+  { key: "lookbackHours", label: "潜力帖观察期（小时）", min: 1, max: 720 },
+  { key: "potentialThreshold", label: "监控门槛（分）", min: 0, max: 100 },
+  {
+    key: "trafficThreshold",
+    label: "高流量门槛（浏览）",
+    min: 1,
+    max: Number.MAX_SAFE_INTEGER,
+  },
+] as const;
+const draftSchema = z.object({
+  seeds: z.string().max(maxSeedInputLength).nullable(),
+  rules: z
+    .object({
+      lookbackHours: z.string(),
+      potentialThreshold: z.string(),
+      trafficThreshold: z.string(),
+    })
+    .nullable()
+    .default(null),
+});
+const resultsSchema = z.object({
+  tab: z.enum(["posts", "sources", "logs"]),
+  postType: z.enum(["potential", "traffic", "trending", "watching"]),
+});
+type ResultsView = z.infer<typeof resultsSchema>;
 const datetime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+  hourCycle: "h23",
+});
+const logTime = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
   hourCycle: "h23",
 });
 const rate = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
@@ -56,13 +98,19 @@ export function ResourceDiscovery({ workspace }: { workspace: string }) {
   });
   const draft = useLocalDraft<z.infer<typeof draftSchema>>(
     `tieba-discovery-seeds:${workspace}`,
-    { seeds: null },
+    { seeds: null, rules: null },
     draftSchema.parse,
   );
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const locked = useRef(false);
   const state = snapshot.data;
+  const rules = state?.rules ?? defaultTiebaDiscoveryRules;
+  const ruleInputs = draft.value.rules ?? {
+    lookbackHours: String(rules.lookbackHours),
+    potentialThreshold: String(rules.potentialThreshold),
+    trafficThreshold: String(rules.trafficThreshold),
+  };
 
   async function action(run: () => Promise<TiebaDiscoverySnapshot>) {
     if (locked.current) return;
@@ -99,105 +147,225 @@ export function ResourceDiscovery({ workspace }: { workspace: string }) {
           <Panel
             title="资源发现"
             extra={
-              <label className="tieba-discovery-auto">
-                每小时自动扫描
-                <Switch
-                  aria-label="每小时自动扫描"
-                  checked={state.auto}
+              <div className="tieba-discovery-run-controls">
+                {!state.auto && state.busy ? (
+                  <small className="muted" role="status">
+                    本批结束后待命
+                  </small>
+                ) : null}
+                <Button
+                  size="compact"
+                  primary={!state.auto}
                   disabled={
                     pending || (!state.auto && draft.value.seeds !== null)
                   }
-                  onCheckedChange={(enabled) =>
-                    void action(() => ipc("tieba.discovery.auto", { enabled }))
+                  onClick={() =>
+                    void action(() =>
+                      ipc("tieba.discovery.auto", { enabled: !state.auto }),
+                    )
                   }
-                />
-              </label>
+                >
+                  {state.auto ? "暂停持续发现" : "开始持续发现"}
+                </Button>
+              </div>
             }
           >
-            <form
-              className="tieba-discovery-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void action(async () => {
-                  const seeds = tiebaResourceSeedsSchema.parse({
-                    seeds: (draft.value.seeds ?? state.seeds.join("\n"))
-                      .split(/\r?\n/u)
-                      .map((line) => line.trim())
-                      .filter(Boolean)
-                      .map(tiebaForumInputName),
-                  }).seeds;
-                  const updated = await ipc("tieba.discovery.seeds", { seeds });
-                  draft.update({ seeds: null });
-                  return updated;
-                });
-              }}
-            >
-              <Field label="种子贴吧（每行一个，最多五个）">
-                <textarea
-                  rows={3}
-                  maxLength={2048}
-                  disabled={pending}
-                  value={draft.value.seeds ?? state.seeds.join("\n")}
-                  onChange={(event) =>
-                    draft.update({ seeds: event.target.value })
-                  }
-                />
-              </Field>
-              <div className="tieba-discovery-actions">
+            <div className="tieba-discovery-controls">
+              <form
+                className="tieba-discovery-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void action(async () => {
+                    const seeds = tiebaResourceSeedsSchema.parse({
+                      seeds: (draft.value.seeds ?? state.seeds.join("\n"))
+                        .split(/\r?\n/u)
+                        .map((line) => line.trim())
+                        .filter(Boolean)
+                        .map(tiebaForumInputName),
+                    }).seeds;
+                    const updated = await ipc("tieba.discovery.seeds", {
+                      seeds,
+                    });
+                    draft.update({ seeds: null });
+                    return updated;
+                  });
+                }}
+              >
+                <Field label="种子贴吧（首页链接或吧名，每行一个，最多五个）">
+                  <textarea
+                    rows={3}
+                    maxLength={maxSeedInputLength}
+                    disabled={pending}
+                    value={draft.value.seeds ?? state.seeds.join("\n")}
+                    onChange={(event) =>
+                      draft.update({ seeds: event.target.value })
+                    }
+                  />
+                </Field>
                 <Button
                   type="submit"
                   disabled={state.busy || pending || draft.value.seeds === null}
                 >
                   保存种子
                 </Button>
-                <Button
-                  primary
-                  disabled={state.busy || pending || draft.value.seeds !== null}
-                  onClick={() => void action(() => ipc("tieba.discovery.scan"))}
-                >
-                  {state.busy ? "正在扫描…" : "扫描一轮"}
-                </Button>
-              </div>
-            </form>
+              </form>
+              <form
+                className="tieba-discovery-rules"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void action(async () => {
+                    const input = tiebaDiscoveryRulesSchema.parse({
+                      lookbackHours: Number(ruleInputs.lookbackHours),
+                      potentialThreshold: Number(ruleInputs.potentialThreshold),
+                      trafficThreshold: Number(ruleInputs.trafficThreshold),
+                    });
+                    const updated = await ipc("tieba.discovery.rules", input);
+                    draft.update({ rules: null });
+                    return updated;
+                  });
+                }}
+              >
+                <fieldset>
+                  <legend>发现规则</legend>
+                  <div className="tieba-discovery-rule-fields">
+                    {ruleFields.map(({ key, label, min, max }) => (
+                      <Field key={key} label={label}>
+                        <input
+                          type="number"
+                          required
+                          min={min}
+                          max={max}
+                          step={1}
+                          disabled={pending}
+                          value={ruleInputs[key]}
+                          onChange={(event) =>
+                            draft.update({
+                              rules: {
+                                ...ruleInputs,
+                                [key]: event.target.value,
+                              },
+                            })
+                          }
+                        />
+                      </Field>
+                    ))}
+                    <Button
+                      type="submit"
+                      disabled={pending || draft.value.rules === null}
+                    >
+                      保存规则
+                    </Button>
+                  </div>
+                </fieldset>
+              </form>
+            </div>
             <p className="muted tieba-discovery-note">
-              从种子吧发现作者和新贴吧，追踪最近 48
-              小时内读到的公开资源帖。潜力帖会自动入库，并在工作台运行期间优先复查。
+              从种子吧发现作者和新贴吧。按已保存的规则，追踪最近{" "}
+              {rules.lookbackHours} 小时内的潜力帖，达到{" "}
+              {rules.potentialThreshold} 分后优先复查，达到{" "}
+              {formatAnalysisCount(rules.trafficThreshold)} 浏览后直接入库。
+            </p>
+            <TiebaPotentialFormula />
+            <p className="muted tieba-discovery-note">
+              自动扫描每批随机等待。扩散{" "}
+              {tiebaDiscoveryCadenceMinutes.expand.min}–
+              {tiebaDiscoveryCadenceMinutes.expand.max} 分钟，巡查{" "}
+              {tiebaDiscoveryCadenceMinutes.survey.min}–
+              {tiebaDiscoveryCadenceMinutes.survey.max} 分钟。
             </p>
             {state.nextAt !== null ? (
               <small className="muted">
-                下次扫描 {datetime.format(state.nextAt)}
+                {state.nextMode === "expand" ? "下一批扩散" : "下次定时巡查"}{" "}
+                {datetime.format(state.nextAt)}
+                {state.queuedForums
+                  ? ` · ${state.queuedForums} 个候选吧待扫`
+                  : ""}
               </small>
             ) : null}
-            {state.busy ? <Loading label="正在读取贴吧并更新候选…" /> : null}
+            {state.busy ? (
+              <Loading
+                label={
+                  state.scanningForum
+                    ? `正在扫描 ${state.scanningForum} 吧…`
+                    : "正在核对帖子与作者…"
+                }
+              />
+            ) : null}
             {draft.error ? <Notice warning>{draft.error}</Notice> : null}
             {error ? <Notice danger>{error}</Notice> : null}
           </Panel>
-          <DiscoveryResults state={state} />
+          <DiscoveryResults
+            workspace={workspace}
+            state={state}
+            scanDisabled={state.busy || pending || draft.value.seeds !== null}
+            onScan={() => void action(() => ipc("tieba.discovery.scan"))}
+          />
         </>
       ) : null}
     </div>
   );
 }
 
-type DiscoveryTab = "potential" | "trending" | "watching" | "sources";
-
-function DiscoveryResults({ state }: { state: TiebaDiscoverySnapshot }) {
+function DiscoveryResults({
+  workspace,
+  state,
+  scanDisabled,
+  onScan,
+}: {
+  workspace: string;
+  state: TiebaDiscoverySnapshot;
+  scanDisabled: boolean;
+  onScan: () => void;
+}) {
   const { command } = useAppActions();
-  const [tab, setTab] = useState<DiscoveryTab>("potential");
+  const view = useLocalDraft<ResultsView>(
+    `tieba-discovery-results:${workspace}`,
+    { tab: "posts", postType: "potential" },
+    resultsSchema.parse,
+  );
+  const { tab, postType } = view.value;
+  const postTypes = [
+    {
+      value: "potential",
+      label:
+        state.potentialCount == null
+          ? "潜力帖"
+          : `潜力帖 ${state.potentialCount}`,
+    },
+    {
+      value: "traffic",
+      label:
+        state.trafficCount == null
+          ? "高流量帖"
+          : `高流量帖 ${state.trafficCount}`,
+    },
+    { value: "trending", label: `近期上涨 ${state.trending.length}` },
+    { value: "watching", label: `其他样本 ${state.watching.length}` },
+  ] as const;
   const last = state.lastRun;
   return (
     <Panel
       title="发现结果"
       extra={
-        last ? (
-          <small className="muted">上轮 {datetime.format(last.at)}</small>
+        last || tab === "logs" ? (
+          <div className="tieba-discovery-run-controls">
+            {last ? (
+              <small className="muted">上轮 {datetime.format(last.at)}</small>
+            ) : null}
+            {tab === "logs" ? (
+              <Button size="compact" disabled={scanDisabled} onClick={onScan}>
+                手动扫一轮
+              </Button>
+            ) : null}
+          </div>
         ) : null
       }
     >
       {last ? (
         <p className="muted tieba-discovery-note">
-          读到 {last.forums} 个贴吧 · 复查 {last.authors} 位作者 · 新发现{" "}
-          {last.added} 个贴吧
+          {state.rounds ? `第 ${state.rounds} 批 · ` : ""}
+          {last.mode === "expand" ? "扩散扫描" : "巡查"} · 读到 {last.forums}{" "}
+          个贴吧 · 查看 {last.authors} 位作者 · 新发现 {last.added} 个贴吧
         </p>
       ) : null}
       {last?.warnings.length ? (
@@ -212,38 +380,60 @@ function DiscoveryResults({ state }: { state: TiebaDiscoverySnapshot }) {
           </details>
         </Notice>
       ) : null}
-      <Tabs<DiscoveryTab>
+      <Tabs<ResultsView["tab"]>
         className="tieba-analysis-tabs"
         value={tab}
-        onChange={setTab}
+        onChange={(tab) => view.update({ tab })}
       >
         <TabList
           label="资源发现结果"
           items={[
-            [
-              "potential",
-              state.potentialCount == null
-                ? "潜力帖"
-                : `潜力帖 ${state.potentialCount}`,
-            ],
-            ["trending", `近期上涨 ${state.trending.length}`],
-            ["watching", `观察中 ${state.watching.length}`],
-            ["sources", `来源贴吧 ${state.sources.length}`],
+            ["posts", "帖子"],
+            ["sources", `扩散路径 ${state.sources.length}`],
+            ["logs", "扫描日志"],
           ]}
         />
-        <TabPanel value="potential" keepMounted>
-          <PotentialPosts enabled={tab === "potential"} revision={last?.at} />
-        </TabPanel>
-        <TabPanel value="trending" keepMounted>
-          <DiscoveryPosts
-            items={state.trending}
-            empty={last ? "暂未发现达到增长门槛的帖子" : "扫描后开始记录浏览量"}
+        <TabPanel value="posts" keepMounted>
+          <div className="tieba-analysis-toolbar">
+            <Select
+              aria-label="帖子类型"
+              items={[...postTypes]}
+              value={postType}
+              onValueChange={(value) => {
+                const selection = postTypes.find(
+                  (item) => item.value === value,
+                );
+                if (selection) view.update({ postType: selection.value });
+              }}
+            />
+          </div>
+          <ArchivedPosts
+            kind="potential"
+            enabled={tab === "posts" && postType === "potential"}
+            revision={last?.at}
           />
-        </TabPanel>
-        <TabPanel value="watching" keepMounted>
-          <DiscoveryPosts items={state.watching} empty="暂无观察中的资源帖" />
+          <ArchivedPosts
+            kind="traffic"
+            enabled={tab === "posts" && postType === "traffic"}
+            revision={last?.at}
+          />
+          <div hidden={postType !== "trending"}>
+            <DiscoveryPosts
+              items={state.trending}
+              empty={
+                last ? "暂未发现达到增长门槛的帖子" : "扫描后开始记录浏览量"
+              }
+            />
+          </div>
+          <div hidden={postType !== "watching"}>
+            <DiscoveryPosts items={state.watching} empty="暂无其他资源帖样本" />
+          </div>
         </TabPanel>
         <TabPanel value="sources" keepMounted>
+          <p className="muted tieba-discovery-note">
+            沿贴吧 → 公开发帖作者 →
+            新贴吧继续扩散。待扫描的候选吧在持续发现开启时进入下一批。
+          </p>
           <ul className="tieba-discovery-sources">
             {state.sources.map((source) => {
               const url = tiebaForumHomeUrl(source.name);
@@ -264,18 +454,62 @@ function DiscoveryResults({ state }: { state: TiebaDiscoverySnapshot }) {
                       source.name
                     )}
                     <small className="muted">{source.path.join(" → ")}</small>
+                    {source.via ? (
+                      <small className="muted">
+                        {source.via.reason === "posted"
+                          ? "来自作者发帖"
+                          : "来自作者公开关注"}{" "}
+                        · 第 {Math.floor((source.path.length - 1) / 2)} 层
+                      </small>
+                    ) : null}
                   </div>
-                  <small className="muted">
-                    {source.status === "seed"
-                      ? "种子贴吧"
-                      : source.status === "active"
-                        ? "常规监测"
-                        : "观察中"}
-                  </small>
+                  <div className="tieba-discovery-source-reading">
+                    <strong>
+                      曝光潜力 {formatForumExposure(source.exposure)}
+                    </strong>
+                    <small className="muted">
+                      {source.status === "seed"
+                        ? "种子贴吧"
+                        : source.scannedAt === null
+                          ? source.lastAttemptAt
+                            ? "本批未读到"
+                            : "待扫描"
+                          : source.status === "active"
+                            ? "常规监测"
+                            : "已扫描"}
+                      {source.exposure
+                        ? ` · ${source.exposure.sample} 篇样本`
+                        : ""}
+                      {source.scannedAt
+                        ? ` · ${datetime.format(source.scannedAt)}`
+                        : ""}
+                    </small>
+                  </div>
                 </li>
               );
             })}
           </ul>
+        </TabPanel>
+        <TabPanel value="logs">
+          {state.logs?.length ? (
+            <div role="log" aria-label="扫描进程" aria-live="polite">
+              <ul className="tieba-discovery-log">
+                {state.logs.toReversed().map((entry) => (
+                  <li key={entry.id}>
+                    <time
+                      className="muted"
+                      dateTime={new Date(entry.at).toISOString()}
+                    >
+                      {logTime.format(entry.at)}
+                    </time>
+                    <span>{entry.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <Empty title="暂无扫描日志" compact />
+          )}
         </TabPanel>
       </Tabs>
     </Panel>
@@ -289,17 +523,22 @@ const potentialMetrics = [
   ["shares", "分享数"],
 ] as const;
 
-function PotentialPosts({
+function ArchivedPosts({
+  kind,
   enabled,
   revision,
 }: {
+  kind: "potential" | "traffic";
   enabled: boolean;
   revision?: number;
 }) {
   const { command } = useAppActions();
   const [page, setPage] = useState(1);
+  const label = kind === "potential" ? "潜力帖" : "高流量帖";
   const { data, error, loading, reload } = useIpcQuery(
-    "tieba.discovery.potential",
+    kind === "potential"
+      ? "tieba.discovery.potential"
+      : "tieba.discovery.traffic",
     { page },
     { enabled, revision, keepPrevious: true },
   );
@@ -313,11 +552,13 @@ function PotentialPosts({
         onRetry={reload}
       />
       {!data && !error ? (
-        <LoadingState label="正在读取潜力帖…" compact />
+        <LoadingState label={`正在读取${label}…`} compact />
       ) : null}
       {data && !data.items.length ? (
-        <Empty icon={Radar} title="潜力帖库暂无记录" compact>
-          扫描时按同吧同期的浏览量和已返回的互动数据筛选，符合条件的帖子会自动入库。
+        <Empty icon={Radar} title={`${label}库暂无记录`} compact>
+          {kind === "potential"
+            ? "按发帖时长折算浏览速度，与同吧同期的帖子比较。达标后自动入库并复查。"
+            : "扫描最近 30 天的资源帖，达到浏览量门槛后自动入库。"}
         </Empty>
       ) : null}
       {data?.items.length ? (
@@ -344,21 +585,30 @@ function PotentialPosts({
                       {formatAnalysisTime(post.publishedAt)}
                     </time>
                   </small>
-                  <small className="muted">
-                    {post.first.comparedInteractions
-                      ? "入库时综合"
-                      : "入库时浏览量"}
-                    同吧同期第 {post.first.rank.place} /{" "}
-                    {post.first.rank.sample}
-                    {post.first.comparedInteractions
-                      ? ` · 浏览量第 ${post.first.viewRank.place}`
-                      : ""}
-                    {` · ${post.confirmedAt ? "已确认上涨" : post.active ? "优先复查" : "已归档"}`}
-                  </small>
-                  <small className="muted">
-                    入库 {formatAnalysisTime(post.first.at)} · 最近读取{" "}
-                    {formatAnalysisTime(post.checkedAt)}
-                  </small>
+                  {"first" in post ? (
+                    <>
+                      <small className="muted">
+                        {post.score == null
+                          ? "历史入库记录"
+                          : `潜力值 ${post.score} / 100`}
+                        {post.first.score != null
+                          ? ` · 同吧同期浏览速度第 ${post.first.rank.place} / ${post.first.rank.sample}`
+                          : ""}
+                        {` · ${post.confirmedAt ? "已确认上涨" : post.active ? "优先复查" : "已归档"}`}
+                      </small>
+                      <small className="muted">
+                        入库 {formatAnalysisTime(post.first.at)} · 最近读取{" "}
+                        {formatAnalysisTime(post.checkedAt)}
+                      </small>
+                    </>
+                  ) : (
+                    <small className="muted">
+                      入库 {formatAnalysisTime(post.checkedAt)} ·{" "}
+                      {post.fromPotential
+                        ? "潜力帖转入，已结束复查"
+                        : "已达流量门槛，直接入库"}
+                    </small>
+                  )}
                 </div>
                 <dl className="tieba-discovery-metrics" aria-label="已读取指标">
                   {potentialMetrics.map(([key, label]) => (
@@ -377,7 +627,7 @@ function PotentialPosts({
             total={data.total}
             disabled={loading}
             onPageChange={setPage}
-            label="潜力帖分页"
+            label={`${label}分页`}
           />
         </>
       ) : null}
@@ -458,7 +708,7 @@ function DiscoveryPosts({
                 <small className="muted">
                   {post.growth
                     ? `${Math.round((post.growth.to - post.growth.from) / 60000)} 分钟 · 每小时 ${rate.format(post.growth.hourly)}`
-                    : "等待下一次读数"}
+                    : "本轮读取"}
                 </small>
                 {post.rank ? (
                   <small className="muted">

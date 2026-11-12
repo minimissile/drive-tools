@@ -19,7 +19,7 @@
 - 收尾前关闭本任务新建窗口：开发窗口执行 `npm run dev:window -- --finish 窗口ID`，自动化使用 `test:session --close` 或 `withDevTestSession({ close: true }, ...)`；失败、中断也按 ID 核对清理。
 - 不关闭主窗口、既有窗口或其他任务窗口；用户要求保留或已接管的现场保留。切回主窗口，未新建窗口时执行 `npm run dev:window -- --focus main`；清理失败须如实说明。
 - 所有窗口共享业务数据、Cookie、缓存及附件；导航、筛选、选择和未提交表单按窗口 ID 暂存。业务变更通知全部窗口，文件对话框归属发起窗口。
-- 使用真实数据前退出占用同一空间的安装版；测试授权不包含清库、重置登录态、付费调用、远端转存、建链或发布，按本次已授权范围执行。窗口细则见 `docs/development/session-windows.md`。
+- 开发版和安装版共用工作空间，切换前退出另一客户端。测试授权不包含清库、重置登录态、付费调用、远端转存、建链或发布，按本次已授权范围执行。窗口细则见 `docs/development/session-windows.md`。
 
 ## 产品与界面
 

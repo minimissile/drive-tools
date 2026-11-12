@@ -4,12 +4,14 @@ import {
   tiebaAnalysisInputSchema,
 } from "../../shared/tieba-analysis";
 import {
-  queryTiebaAnalysis,
+  queryTiebaAnalysisWithContext,
   queryTiebaAnalysisFollowedForums,
   queryTiebaAnalysisForumPosts,
 } from "../tieba/analysis";
 
-export function createTiebaAnalysisHandlers(query = queryTiebaAnalysis) {
+export function createTiebaAnalysisHandlers(
+  query = queryTiebaAnalysisWithContext,
+) {
   return {
     "tieba.analysis.query": (input: unknown) =>
       query(tiebaAnalysisInputSchema.parse(input)),

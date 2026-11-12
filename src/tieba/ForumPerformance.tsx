@@ -7,11 +7,18 @@ import {
   BarChart3,
 } from "lucide-react";
 import { z } from "zod";
-import type { TiebaAnalysisThread } from "../../shared/tieba-analysis";
+import type {
+  TiebaAnalysisPage,
+  TiebaAnalysisThread,
+} from "../../shared/tieba-analysis";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppActions } from "../state";
 import { Pagination } from "../ui/Pagination";
 import { Button, Empty } from "../ui/primitives";
+import {
+  formatForumExposure,
+  TiebaPotentialFormula,
+} from "./TiebaPotentialFormula";
 import {
   forumPerformanceMetrics,
   forumPerformanceRows,
@@ -29,15 +36,18 @@ const metricLabels = {
   posts: "发帖数",
   views: "总浏览量",
   average: "篇均浏览量",
+  exposure: "曝光潜力",
 };
 
 export function ForumPerformance({
   workspace,
   threads,
+  forums,
   loadMore,
 }: {
   workspace: string;
   threads: readonly TiebaAnalysisThread[];
+  forums?: TiebaAnalysisPage["forums"];
   loadMore: ReactNode;
 }) {
   const { command } = useAppActions();
@@ -47,7 +57,7 @@ export function ForumPerformance({
     orderSchema.parse,
   );
   const [page, setPage] = useState(1);
-  const rows = forumPerformanceRows(threads, order.value);
+  const rows = forumPerformanceRows(threads, order.value, forums);
   const displayPage = Math.min(
     page,
     Math.max(1, Math.ceil(rows.length / pageSize)),
@@ -71,6 +81,7 @@ export function ForumPerformance({
           浏览量缺失的帖子计入发帖数。总浏览量和篇均浏览量按有浏览量的帖子计算。
         </p>
       ) : null}
+      <TiebaPotentialFormula />
       <div className="table-scroll">
         <table
           className="tieba-performance-table"
@@ -79,6 +90,7 @@ export function ForumPerformance({
           <thead>
             <tr>
               <th scope="col">贴吧</th>
+              <th scope="col">吧内等级</th>
               {forumPerformanceMetrics.map((metric) => {
                 const selected = order.value.metric === metric;
                 const ascending = order.value.direction === "asc";
@@ -142,6 +154,7 @@ export function ForumPerformance({
                         row.name
                       )}
                     </td>
+                    <td>{row.level ? `Lv.${row.level}` : "未知"}</td>
                     <td>{count.format(row.posts)}</td>
                     <td>
                       <strong>
@@ -157,6 +170,14 @@ export function ForumPerformance({
                       {row.average === null
                         ? "未知"
                         : average.format(row.average)}
+                    </td>
+                    <td>
+                      <strong>{formatForumExposure(row.exposure)}</strong>
+                      {row.exposure ? (
+                        <small className="muted">
+                          {row.exposure.sample} 篇样本
+                        </small>
+                      ) : null}
                     </td>
                   </tr>
                 );

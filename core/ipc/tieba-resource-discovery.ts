@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   tiebaDiscoveryPotentialPageSchema,
+  tiebaDiscoveryRulesSchema,
   tiebaResourceSeedsSchema,
 } from "../../shared/tieba-resource-discovery";
 import type { TiebaResourceDiscovery } from "../tieba-resource-discovery/service";
@@ -15,8 +16,14 @@ export function createTiebaResourceDiscoveryHandlers({
 }) {
   return {
     "tieba.discovery.snapshot": () => tiebaResourceDiscovery.snapshot(),
+    "tieba.discovery.rules": (input) =>
+      tiebaResourceDiscovery.saveRules(tiebaDiscoveryRulesSchema.parse(input)),
     "tieba.discovery.potential": (input) =>
       tiebaResourceDiscovery.potential(
+        tiebaDiscoveryPotentialPageSchema.parse(input).page,
+      ),
+    "tieba.discovery.traffic": (input) =>
+      tiebaResourceDiscovery.traffic(
         tiebaDiscoveryPotentialPageSchema.parse(input).page,
       ),
     "tieba.discovery.seeds": (input) =>

@@ -106,6 +106,26 @@
   overflow-wrap: anywhere;
 }
 
+.tieba-analysis-table td small,
+.tieba-performance-table td small {
+  display: block;
+}
+
+.tieba-potential-formula,
+.tieba-analysis-exposure {
+  margin: 8px 0;
+}
+
+.tieba-potential-formula summary {
+  cursor: pointer;
+  color: var(--blue);
+}
+
+.tieba-potential-formula p {
+  margin: 6px 0;
+  max-width: 72ch;
+}
+
 .tieba-analysis-table :is(th, td):nth-child(3) {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

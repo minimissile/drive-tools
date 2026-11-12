@@ -1,5 +1,4 @@
-.tieba-discovery-auto,
-.tieba-discovery-actions {
+.tieba-discovery-run-controls {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -12,6 +11,13 @@
   align-items: end;
 }
 
+.tieba-discovery-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 470px), 1fr));
+  align-items: end;
+  gap: 12px 20px;
+}
+
 .tieba-discovery-form > .field {
   flex: 1 1 320px;
   max-width: 480px;
@@ -22,11 +28,56 @@
   margin: 8px 0;
 }
 
+.tieba-discovery-rules fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.tieba-discovery-rules legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.tieba-discovery-rule-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.tieba-discovery-rule-fields > .field {
+  flex: 1 1 112px;
+  margin: 0;
+}
+
 .tieba-discovery-posts,
-.tieba-discovery-sources {
+.tieba-discovery-sources,
+.tieba-discovery-log {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.tieba-discovery-log > li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tieba-discovery-log time {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tieba-discovery-log li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tieba-discovery-posts > li,
@@ -50,7 +101,8 @@
   display: block;
 }
 
-.tieba-discovery-growth {
+.tieba-discovery-growth,
+.tieba-discovery-source-reading {
   flex-shrink: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
