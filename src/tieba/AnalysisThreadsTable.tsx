@@ -18,6 +18,9 @@ const date = new Intl.DateTimeFormat("zh-CN", {
 export const formatAnalysisCount = (value: number | null | undefined) =>
   value == null ? "未知" : number.format(value);
 
+export const formatAnalysisTime = (value: string | number) =>
+  date.format(new Date(value));
+
 export function AnalysisThreadsTable({
   threads,
   scope,
@@ -65,7 +68,7 @@ export function AnalysisThreadsTable({
               <td>
                 {post.publishedAt ? (
                   <time dateTime={post.publishedAt}>
-                    {date.format(new Date(post.publishedAt))}
+                    {formatAnalysisTime(post.publishedAt)}
                   </time>
                 ) : (
                   "未知"

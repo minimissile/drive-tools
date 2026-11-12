@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { tiebaForumNameSchema } from "./tieba-forums";
+import type { TiebaDiscoveryEvidence } from "./tieba-resource-discovery";
 
 export const tiebaAnalysisInputSchema = z.object({
   target: z.string().trim().min(1).max(2048),
@@ -43,6 +44,8 @@ export interface TiebaAnalysisThread {
   replies: number | null;
   likes: number | null;
   shares: number | null;
+  authorId?: string | null;
+  resource?: TiebaDiscoveryEvidence;
 }
 
 export interface TiebaAnalysisForumPage {

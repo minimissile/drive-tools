@@ -29,6 +29,7 @@ import type { TiebaInsightsContract } from "./tieba-insights";
 import type { TiebaPublishingContract } from "./tieba-publishing";
 import type { TiebaPostStatsContract } from "./tieba-post-stats";
 import type { TiebaAnalysisContract } from "./tieba-analysis";
+import type { TiebaResourceDiscoveryContract } from "./tieba-resource-discovery";
 import type { ZhihuContract } from "./zhihu";
 import type { ZhihuParticipationContract } from "./zhihu-participation";
 import type { IntelligentOperationsContract } from "./intelligent-operations";
@@ -133,6 +134,7 @@ export interface IpcContract
     TiebaPublishingContract,
     TiebaPostStatsContract,
     TiebaAnalysisContract,
+    TiebaResourceDiscoveryContract,
     ZhihuParticipationContract,
     IntelligentOperationsContract,
     PipixContract,
@@ -312,6 +314,8 @@ export const queryMethods = [
   "tieba.publishing.words",
   "tieba.publishing.resources",
   "tieba.postStats.snapshot",
+  "tieba.discovery.snapshot",
+  "tieba.discovery.potential",
   "zhihu.autocare.logs",
   "zhihu.logs",
   "intelligentOps.snapshot",

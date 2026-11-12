@@ -1,8 +1,11 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ArrowUpRight, Search } from "lucide-react";
 import { z } from "zod";
 import type { TiebaAnalysisForumPage } from "../../shared/tieba-analysis";
-import { tiebaForumNameSchema } from "../../shared/tieba-forums";
+import {
+  tiebaForumInputName,
+  tiebaForumNameSchema,
+} from "../../shared/tieba-forums";
 import { ipc } from "../api/client";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppActions } from "../state";
@@ -19,11 +22,13 @@ import {
 } from "../ui/primitives";
 import { AnalysisThreadsTable } from "./AnalysisThreadsTable";
 
-const draftSchema = z.object({ name: z.string().max(100) });
+const maxInputLength = 2000;
+const draftSchema = z.object({ name: z.string().max(maxInputLength) });
 type ForumRequest = { name: string; page: number };
 
 export function ForumPosts({ workspace }: { workspace: string }) {
   const { command } = useAppActions();
+  const validationId = useId();
   const draft = useLocalDraft(
     `tieba-analysis-forum:${workspace}`,
     { name: "" },
@@ -35,6 +40,7 @@ export function ForumPosts({ workspace }: { workspace: string }) {
   const [validationError, setValidationError] = useState("");
   const inFlight = useRef(false);
   const retry = useRef<ForumRequest | null>(null);
+  const resultPanel = useRef<HTMLElement>(null);
 
   async function query(input: ForumRequest) {
     if (inFlight.current) return;
@@ -50,6 +56,13 @@ export function ForumPosts({ workspace }: { workspace: string }) {
       )
         throw new Error("贴吧返回的页面与请求不一致，请重试。");
       setResult(next);
+      const panel = resultPanel.current;
+      if (
+        next.id === result?.id &&
+        next.page !== result.page &&
+        panel?.getClientRects().length
+      )
+        panel.scrollIntoView({ block: "start" });
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "读取失败，请稍后重试。";
@@ -71,23 +84,28 @@ export function ForumPosts({ workspace }: { workspace: string }) {
           className="tieba-analysis-form"
           onSubmit={(event) => {
             event.preventDefault();
-            const parsed = tiebaForumNameSchema.safeParse(draft.value.name);
-            if (!parsed.success) {
+            try {
+              const name = tiebaForumInputName(draft.value.name);
+              setValidationError("");
+              void query({ name, page: 1 });
+            } catch (cause) {
               setValidationError(
-                parsed.error.issues[0]?.message ?? "请输入有效的贴吧名称。",
+                cause instanceof z.ZodError
+                  ? (cause.issues[0]?.message ?? "吧名或首页链接无效。")
+                  : cause instanceof Error
+                    ? cause.message
+                    : "吧名或首页链接无效。",
               );
-              return;
             }
-            setValidationError("");
-            void query({ name: parsed.data, page: 1 });
           }}
         >
-          <Field label="贴吧名称">
+          <Field label="吧名或贴吧首页链接">
             <input
-              placeholder="例如：网盘资源"
-              maxLength={100}
+              placeholder="例如：网盘资源，或粘贴贴吧首页链接"
+              maxLength={maxInputLength}
               value={draft.value.name}
               aria-invalid={!!validationError}
+              aria-describedby={validationError ? validationId : undefined}
               onChange={(event) => {
                 draft.update({ name: event.target.value });
                 setValidationError("");
@@ -103,7 +121,11 @@ export function ForumPosts({ workspace }: { workspace: string }) {
             查询吧内帖子
           </Button>
         </form>
-        {validationError ? <Notice danger>{validationError}</Notice> : null}
+        {validationError ? (
+          <Notice danger>
+            <span id={validationId}>{validationError}</span>
+          </Notice>
+        ) : null}
         {draft.error ? <Notice warning>{draft.error}</Notice> : null}
       </Panel>
       <QueryError
@@ -118,11 +140,12 @@ export function ForumPosts({ workspace }: { workspace: string }) {
       ) : null}
       {!result && !pending && !error ? (
         <Panel>
-          <Empty title="输入吧名后开始查询" compact />
+          <Empty title="输入吧名或粘贴贴吧首页链接后开始查询" compact />
         </Panel>
       ) : null}
       {result ? (
         <Panel
+          ref={resultPanel}
           title={`${result.name} · 公开主题帖`}
           extra={
             pending ? (

@@ -22,6 +22,7 @@ import { TabList, TabPanel, Tabs } from "../ui/Tabs";
 import { FollowedForums } from "./FollowedForums";
 import { ForumPerformance } from "./ForumPerformance";
 import { ForumPosts } from "./ForumPosts";
+import { ResourceDiscovery } from "./ResourceDiscovery";
 import {
   AnalysisThreadsTable,
   formatAnalysisCount,
@@ -33,7 +34,7 @@ const draftSchema = z.object({
   sort: z.enum(["views", "recent"]).default("views"),
 });
 const number = new Intl.NumberFormat("zh-CN");
-const modeSchema = z.object({ mode: z.enum(["user", "forum"]) });
+const modeSchema = z.object({ mode: z.enum(["user", "forum", "discovery"]) });
 const pageSize = 12;
 const sortItems = [
   { value: "views", label: "浏览量从高到低" },
@@ -69,6 +70,7 @@ function AnalysisWorkspace({ workspace }: { workspace: string }) {
           items={[
             ["user", "按用户查询"],
             ["forum", "按贴吧查询"],
+            ["discovery", "资源发现"],
           ]}
         />
         <TabPanel value="user" keepMounted>
@@ -76,6 +78,9 @@ function AnalysisWorkspace({ workspace }: { workspace: string }) {
         </TabPanel>
         <TabPanel value="forum" keepMounted>
           <ForumPosts workspace={workspace} />
+        </TabPanel>
+        <TabPanel value="discovery">
+          <ResourceDiscovery workspace={workspace} />
         </TabPanel>
       </Tabs>
     </div>

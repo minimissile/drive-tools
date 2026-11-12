@@ -7,6 +7,7 @@ import type {
 import { normalizeTiebaForumName } from "../../shared/tieba-forums";
 import { AppError } from "../errors";
 import { readLimited, readLimitedBytes } from "../http";
+import { resourceEvidence } from "../tieba-resource-discovery/rules";
 import { encodeTiebaFields, tiebaFields } from "./analysis-protobuf";
 import { tiebaForumUrl } from "./autocare-page";
 import { tiebaThreadIdFromUrl, tiebaThreadUrl } from "./participation-page";
@@ -208,20 +209,10 @@ async function resolveAuthor(target: string, send: typeof fetch) {
       "TIEBA_ANALYSIS_TARGET",
       "请输入贴吧主页 ID，或粘贴百度贴吧个人主页、公开主题帖链接。",
     );
-  const data = await request(
-    "thread",
-    encodeTiebaFields([
-      [4, BigInt(tid)],
-      [13, 2n],
-      [18, 1n],
-      [25, legacyCommon],
-    ]),
-    send,
-  );
-  const thread = tiebaFields(data.bytes(8) ?? empty);
+  const { thread } = await readThread(tid, send);
   const author = tiebaFields(thread.bytes(18) ?? empty);
   const uid = objectId(thread.integer(56)) ?? objectId(author.integer(2));
-  if (!uid || objectId(thread.integer(1)) !== tid)
+  if (!uid)
     throw new AppError(
       "TIEBA_ANALYSIS_AUTHOR",
       "未能从该主题帖确认作者，请改用主页 ID。",
@@ -233,9 +224,51 @@ async function resolveAuthor(target: string, send: typeof fetch) {
   };
 }
 
+async function readThread(tid: string, send: typeof fetch) {
+  const data = await request(
+    "thread",
+    encodeTiebaFields([
+      [4, BigInt(tid)],
+      [13, 2n],
+      [18, 1n],
+      [25, legacyCommon],
+    ]),
+    send,
+  );
+  const thread = tiebaFields(data.bytes(8) ?? empty);
+  if (objectId(thread.integer(1)) !== tid) throw invalidResponse();
+  return { data, thread };
+}
+
+export async function readTiebaDiscoveryViews(
+  tid: string,
+  send: typeof fetch = fetch,
+) {
+  if (!numericId(tid)) throw invalidResponse();
+  const { data } = await readThread(tid, send);
+  return count(data.integer(37));
+}
+
+function discoveryEvidence(
+  post: ReturnType<typeof tiebaFields>,
+  field: number,
+  title: string,
+) {
+  const fragments = post.messages(field).slice(0, 50);
+  return resourceEvidence(
+    title,
+    fragments
+      .map((part) => part.string(2))
+      .join("\n")
+      .slice(0, 8000),
+    fragments.map((part) => part.string(3)).filter(Boolean),
+  );
+}
+
 export async function queryTiebaAnalysis(
   { target, page }: { target: string; page: number },
   send: typeof fetch = fetch,
+  discoverResources = false,
 ): Promise<TiebaAnalysisPage> {
   const identity = await resolveAuthor(target, send);
   const { uid } = identity;
@@ -259,9 +292,10 @@ export async function queryTiebaAnalysis(
       if (!id || objectId(post.integer(18)) !== uid) throw invalidResponse();
       author ||= post.string(35) || post.string(10);
       const agree = tiebaFields(post.bytes(40) ?? empty);
+      const title = post.string(7) || "无标题主题帖";
       return {
         id,
-        title: post.string(7) || "无标题主题帖",
+        title,
         forumId: objectId(post.integer(1)),
         forum: post.string(6),
         url: tiebaThreadUrl(id),
@@ -270,6 +304,9 @@ export async function queryTiebaAnalysis(
         replies: count(post.integer(17)),
         likes: count(agree.integer(1)),
         shares: count(post.integer(39)),
+        ...(discoverResources
+          ? { authorId: uid, resource: discoveryEvidence(post, 49, title) }
+          : {}),
       };
     });
     return { ...identity, author: author || identity.author, threads };
@@ -281,6 +318,7 @@ export async function queryTiebaAnalysis(
 export async function queryTiebaAnalysisForumPosts(
   { name, page }: { name: string; page: number },
   send: typeof fetch = fetch,
+  discoverResources = false,
 ): Promise<TiebaAnalysisForumPage> {
   const data = await request(
     "forum",
@@ -329,11 +367,12 @@ export async function queryTiebaAnalysisForumPosts(
       if (!tid || threads.has(tid)) continue;
       const author = tiebaFields(post.bytes(18) ?? empty);
       const agree = tiebaFields(post.bytes(126) ?? empty);
+      const title = post.string(3) || "无标题主题帖";
       threads.set(tid, {
         id: tid,
         forumId: id,
         forum: canonical,
-        title: post.string(3) || "无标题主题帖",
+        title,
         author: authorName(author) || authors.get(post.integer(56)) || "",
         url: tiebaThreadUrl(tid),
         publishedAt: publishTime(post.integer(45)),
@@ -341,6 +380,13 @@ export async function queryTiebaAnalysisForumPosts(
         replies: count(post.integer(4)),
         likes: count(agree.integer(1)),
         shares: count(post.integer(135)),
+        ...(discoverResources
+          ? {
+              authorId:
+                objectId(post.integer(56)) ?? objectId(author.integer(2)),
+              resource: discoveryEvidence(post, 142, title),
+            }
+          : {}),
       });
     }
     if (!threads.size && hasMore === 1n) throw invalidResponse();

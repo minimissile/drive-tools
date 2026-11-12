@@ -1,4 +1,5 @@
 import { TiebaPublishing } from "./tieba-publishing/service";
+import { TiebaResourceDiscovery } from "./tieba-resource-discovery/service";
 import { stopTiebaPublishingForBackup } from "./tieba-publishing/store";
 import { TiebaPostStats } from "./tieba-post-stats/service";
 import { ZhihuAutocare } from "./zhihu-autocare/service";
@@ -133,6 +134,7 @@ export class AppService {
   readonly tiebaInsights: TiebaInsights;
   readonly tiebaPublishing: TiebaPublishing;
   readonly tiebaPostStats: TiebaPostStats;
+  readonly tiebaResourceDiscovery: TiebaResourceDiscovery;
   readonly zhihuParticipation: ZhihuParticipation;
   readonly intelligentOps: IntelligentOperations;
   readonly pipix: PipixSources;
@@ -736,6 +738,7 @@ export class AppService {
       ],
       changed,
     });
+    this.tiebaResourceDiscovery = new TiebaResourceDiscovery(this.db, changed);
     this.tiebaInsights = new TiebaInsights({
       db: this.db,
       accounts: this.websiteAccounts,
@@ -757,6 +760,7 @@ export class AppService {
       tiebaInsights: this.tiebaInsights,
       tiebaPublishing: this.tiebaPublishing,
       tiebaPostStats: this.tiebaPostStats,
+      tiebaResourceDiscovery: this.tiebaResourceDiscovery,
       tiebaParticipation: this.tiebaParticipation,
       tiebaAutocare: this.tiebaAutocare,
       zhihuAutocare: this.zhihuAutocare,
@@ -1381,6 +1385,7 @@ export class AppService {
       this.tiebaInsights?.isBusy ||
       this.tiebaPublishing?.isBusy ||
       this.tiebaPostStats?.isBusy ||
+      this.tiebaResourceDiscovery?.isBusy ||
       this.zhihu.isBusy ||
       this.zhihuParticipation?.isBusy ||
       this.intelligentOps?.isBusy ||
@@ -1735,6 +1740,7 @@ export class AppService {
     this.tiebaTopics.dispose();
     this.tiebaPublishing.dispose();
     this.tiebaPostStats.dispose();
+    this.tiebaResourceDiscovery.dispose();
     this.tiebaParticipation.dispose();
     this.tiebaAutocare.dispose();
     this.zhihuAutocare.close();

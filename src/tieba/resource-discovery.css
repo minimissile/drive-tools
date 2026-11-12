@@ -1,0 +1,83 @@
+.tieba-discovery-auto,
+.tieba-discovery-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tieba-discovery-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.tieba-discovery-form > .field {
+  flex: 1 1 320px;
+  max-width: 480px;
+  margin: 0;
+}
+
+.tieba-discovery-note {
+  margin: 8px 0;
+}
+
+.tieba-discovery-posts,
+.tieba-discovery-sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tieba-discovery-posts > li,
+.tieba-discovery-sources > li {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tieba-discovery-posts > li > div:first-child,
+.tieba-discovery-sources > li > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tieba-discovery-posts small,
+.tieba-discovery-sources small {
+  display: block;
+}
+
+.tieba-discovery-growth {
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tieba-discovery-potential > li {
+  flex-wrap: wrap;
+}
+
+.tieba-discovery-potential > li > div:first-child {
+  flex: 1 1 420px;
+}
+
+.tieba-discovery-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(4em, 1fr));
+  flex: 0 1 312px;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tieba-discovery-metrics dt {
+  font-size: 12px;
+}
+
+.tieba-discovery-metrics dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
