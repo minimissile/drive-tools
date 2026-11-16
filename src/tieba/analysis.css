@@ -5,11 +5,14 @@
   min-width: 0;
 }
 
-.tieba-analysis > .page-heading {
-  margin-bottom: 0;
+.tieba-analysis-modes > .page-heading {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin-bottom: 12px;
 }
 
-.tieba-analysis > .page-heading h1 {
+.tieba-analysis-modes > .page-heading h1 {
   font-size: 20px;
 }
 
@@ -19,12 +22,17 @@
   padding: 16px;
 }
 
-.tieba-analysis-modes > .tabs {
-  padding-bottom: 10px;
+.tieba-analysis-modes > .page-heading > .tabs {
+  flex-wrap: wrap;
+  padding: 0;
 }
 
 .tieba-analysis-modes > .tab-panel {
   margin-top: 0;
+}
+
+.tieba-analysis-page-top {
+  scroll-margin-top: 12px;
 }
 
 .tieba-analysis-form {
@@ -40,9 +48,65 @@
   margin: 0;
 }
 
+.tieba-forum-cache-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: end;
+  min-height: var(--control-height);
+  margin-inline-start: var(--space-2);
+  font-size: 13px;
+}
+
+.tieba-forum-cache-switch label {
+  cursor: pointer;
+}
+
+.tieba-forum-cache-progress,
+.tieba-forum-cache-progress > [role="status"] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.tieba-forum-cache-progress > [role="status"] {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .tieba-analysis-hint {
   display: block;
   margin-top: 6px;
+}
+
+.tieba-analysis .data-state--empty.data-state--compact {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4);
+  background: var(--bg);
+  border-radius: var(--control-radius);
+}
+
+.tieba-analysis .data-state--empty .data-state-symbol {
+  width: 36px;
+  height: 36px;
+  background: var(--blue-bg);
+}
+
+.tieba-analysis .data-state--empty .data-state-copy {
+  flex: 0 1 auto;
+}
+
+.tieba-analysis .data-state--empty h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tieba-analysis .data-state--empty p {
+  margin-top: 2px;
+  line-height: 1.6;
 }
 
 .tieba-analysis-overview {
@@ -86,7 +150,7 @@
 }
 
 .tieba-analysis-toolbar .select-control {
-  width: 168px;
+  width: 216px;
 }
 
 .tieba-analysis-table {
@@ -99,7 +163,7 @@
 }
 
 .tieba-analysis-table :is(th, td):first-child {
-  width: 43%;
+  width: 35%;
 }
 
 .tieba-analysis-table td:nth-child(2) {
@@ -111,9 +175,26 @@
   display: block;
 }
 
-.tieba-potential-formula,
+.tieba-analysis .tieba-post-exposure {
+  width: 94px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tieba-post-exposure small {
+  white-space: nowrap;
+}
+
 .tieba-analysis-exposure {
   margin: 8px 0;
+}
+
+.tieba-potential-formula {
+  margin: 0 0 12px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  font-size: 12px;
 }
 
 .tieba-potential-formula summary {
@@ -121,9 +202,40 @@
   color: var(--blue);
 }
 
-.tieba-potential-formula p {
-  margin: 6px 0;
-  max-width: 72ch;
+.tieba-rule-details {
+  margin: 8px 0 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.tieba-rule-details dl {
+  display: grid;
+  grid-template-columns: 7em minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 8px 0 0;
+}
+
+.tieba-potential-formula dt {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tieba-potential-formula dd {
+  margin: 0;
+  max-width: 100ch;
+}
+
+.tieba-rule-details p {
+  margin: 0;
+}
+
+.tieba-rule-details p + p {
+  margin-top: 4px;
+}
+
+.tieba-rule-details strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .tieba-analysis-table :is(th, td):nth-child(3) {
@@ -135,6 +247,10 @@
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.tieba-analysis-operation {
+  width: 84px;
 }
 
 .tieba-analysis .tieba-analysis-link[data-size="compact"] {
@@ -193,12 +309,27 @@
 }
 
 .tieba-followed-forums li {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tieba-followed-heading,
+.tieba-followed-counts {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--line);
+}
+
+.tieba-followed-heading {
+  justify-content: space-between;
+}
+
+.tieba-followed-counts {
+  flex-wrap: wrap;
+  column-gap: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .tieba-followed-forums li small {

@@ -38,12 +38,25 @@ export interface WechatTrafficWordPlan {
   coveredWords: string[];
   mode: "uncovered" | "least-used";
   usage: WechatTrafficWordCount[];
+  deliveryCoverage?: WechatTrafficWordDeliveryCoverage;
+}
+
+export interface WechatTrafficWordDeliveryCoverage {
+  count: number;
+  coveredWords: string[];
+  incomplete: boolean;
+}
+
+export interface WechatTrafficWordUsage {
+  used: string[];
+  unused: string[];
 }
 
 /** All words remain available. Priority is advisory and never consumes the pool. */
 export function planWechatTrafficWords(
   words: readonly string[],
   history: readonly WechatTrafficWordCount[] = [],
+  deliveryCoverage?: WechatTrafficWordDeliveryCoverage,
 ): WechatTrafficWordPlan {
   const counts = new Map(
     history.map(({ word, uses }) => [word.toLocaleLowerCase(), uses]),
@@ -52,8 +65,11 @@ export function planWechatTrafficWords(
     word,
     uses: counts.get(word.toLocaleLowerCase()) ?? 0,
   }));
+  const sent = new Set(deliveryCoverage?.coveredWords);
   const uncovered = usage
-    .filter(({ uses }) => uses === 0)
+    .filter(({ word, uses }) =>
+      deliveryCoverage?.count ? !sent.has(word) : uses === 0,
+    )
     .map(({ word }) => word);
   const lowest = usage.length ? Math.min(...usage.map(({ uses }) => uses)) : 0;
   return {
@@ -63,6 +79,7 @@ export function planWechatTrafficWords(
     coveredWords: usage.filter(({ uses }) => uses > 0).map(({ word }) => word),
     mode: uncovered.length || !usage.length ? "uncovered" : "least-used",
     usage,
+    ...(deliveryCoverage ? { deliveryCoverage } : {}),
   };
 }
 
@@ -71,7 +88,7 @@ export function wechatTrafficWordUsage(
   words: readonly string[],
   title: string,
   body: string,
-) {
+): WechatTrafficWordUsage {
   const visible = `${title}\n${body
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")

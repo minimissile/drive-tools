@@ -56,6 +56,8 @@ type RewriteInput = {
   trafficWords: string[];
   priorityTrafficWords: string[];
   trafficWordPriorityMode: "uncovered" | "least-used";
+  trafficWordTarget: number;
+  retryFeedback: string;
 };
 type RewriteOutput = {
   title: string;
@@ -565,6 +567,79 @@ test("同一原文的历史导入归组，不改动各稿内容；不同原文�
         (await f.invoke("wechat.get", { id: article.id })).article,
         article,
       );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("手动替换更新正文中的重复链接和提取码，并允许送入微信草稿", async () => {
+  const f = await fixture(
+    `原文说明。\n\n![示意图](${sourceImage})\n\n[配套资料](${sourceShare}?pwd=orig) 提取码：orig\n\n[另一个入口](${sourceShare}?pwd=orig)`,
+  );
+  try {
+    const original = await f.imported();
+    const { id, revision, links } = original.article;
+    const url = "https://pan.baidu.com/s/1manual123";
+    const current = await f.invoke("wechat.replaceLink", {
+      id,
+      revision,
+      linkId: links[0].id,
+      shareText: `配套资料：${url} 提取码：new8`,
+    });
+    assert.equal(current.article.links[0].id, links[0].id);
+    assert.equal(current.article.links[0].provider, "baidu");
+    assert.equal(current.article.links[0].manual, true);
+    assert.equal(current.article.links[0].copyId, null);
+    assert.equal(current.article.links[0].code, "new8");
+    assert.equal(current.article.body.split(`${url}?pwd=new8`).length - 1, 2);
+    assert.ok(current.article.body.includes("提取码：new8"));
+    assert.ok(!current.article.body.includes(sourceShare));
+    assert.equal(current.article.source.body, original.article.source.body);
+    const saved = await f.save(current, { title: "已更新标题" });
+    assert.equal(saved.article.links[0].manual, true);
+    await f.send(saved);
+    assert.equal(f.control.writes, 1);
+    assert.ok(f.control.payloads[0].html.includes(url));
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("删除单篇本地文稿校验版本并保留同来源的其他稿件", async () => {
+  const f = await fixture();
+  try {
+    const first = await f.imported();
+    const child = await f.invoke("wechat.newEdition", {
+      id: first.article.id,
+      revision: first.article.revision,
+      requestId: randomUUID(),
+    });
+    const saved = await f.save(first, { title: "其他窗口刚更新的标题" });
+    await assert.rejects(
+      f.invoke("wechat.delete", {
+        id: first.article.id,
+        revision: first.article.revision,
+      }),
+      /草稿已在其他窗口更新/,
+    );
+    const remaining = await f.invoke("wechat.delete", {
+      id: saved.article.id,
+      revision: saved.article.revision,
+    });
+    assert.deepEqual(
+      remaining.map(({ id }) => id),
+      [child.article.id],
+    );
+    assert.equal(remaining[0].sourceTitle, first.article.source.title);
+    await assert.rejects(
+      f.invoke("wechat.get", { id: first.article.id }),
+      /草稿不存在/,
+    );
+    assert.deepEqual(
+      (await f.invoke("wechat.get", { id: child.article.id })).article,
+      child.article,
+    );
+    assert.equal(f.control.writes, 0);
   } finally {
     await f.cleanup();
   }
@@ -1505,6 +1580,97 @@ test("公众号流量词轮换：完整词池与优先词同时交给AI，按成
       current.trafficWordPlan,
       "手动编辑不冒充成功改写轮次",
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("流量词优先补充同源送稿未覆盖的词，保存送稿时的实际命中", async () => {
+  const f = await fixture();
+  try {
+    const words = ["电子版", "学习资料", "阅读清单"];
+    let current = await f.ready();
+    current = await f.invoke("wechat.saveTrafficWords", {
+      id: current.article.id,
+      wordsRevision: 0,
+      words,
+    });
+    current = await f.save(current, {
+      title: "电子版的阅读说明",
+      body: current.article.body + "\n\n可按这份阅读清单查看。",
+    });
+    const sent = await f.send(current);
+    assert.deepEqual(sent.article.deliveryHistory?.at(-1)?.trafficWordUsage, {
+      used: ["电子版", "阅读清单"],
+      unused: ["学习资料"],
+    });
+    const edited = await f.save(sent, {
+      title: "学习资料的阅读说明",
+      body: sent.article.body.replace("阅读清单", "说明"),
+    });
+    assert.deepEqual(edited.trafficWordPlan?.deliveryCoverage, {
+      count: 1,
+      coveredWords: ["电子版", "阅读清单"],
+      incomplete: false,
+    });
+    assert.deepEqual(edited.trafficWordPlan?.priorityWords, ["学习资料"]);
+    const legacy = {
+      ...edited.article,
+      deliveryHistory: edited.article.deliveryHistory?.map(
+        ({ trafficWordUsage, ...record }) => record,
+      ),
+    };
+    f.app.db.setSetting(`wechat:article:v1:${legacy.id}`, legacy);
+    assert.deepEqual(
+      f.app.wechat.get(legacy.id).trafficWordPlan?.deliveryCoverage,
+      {
+        count: 1,
+        coveredWords: ["电子版"],
+        incomplete: true,
+      },
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("改写在同一重试上限内补充优先词，失败保留有效版本", async () => {
+  const f = await fixture();
+  try {
+    const current = await f.imported();
+    await f.invoke("wechat.saveTrafficWords", {
+      id: current.article.id,
+      wordsRevision: 0,
+      words: ["电子版", "阅读资料", "数学题"],
+    });
+    f.control.aiReply = (input) => ({
+      title: "电子版阅读说明",
+      digest: "阅读条件。",
+      sections: rewrittenSections(input, (text) =>
+        input.retryFeedback ? `${text} 可查看这份阅读资料。` : text,
+      ),
+    });
+    const rewritten = await f.invoke("wechat.rewrite", {
+      id: current.article.id,
+    });
+    assert.equal(f.control.aiCalls.length, 2);
+    assert.equal(f.control.aiCalls[0].input.trafficWordTarget, 2);
+    assert.match(f.control.aiCalls[1].input.retryFeedback, /只命中 1 个优先词/);
+    assert.deepEqual(rewritten.trafficWordPlan?.coveredWords, [
+      "电子版",
+      "阅读资料",
+    ]);
+    f.control.aiReply = (input) => ({
+      title: "电子版资料的适用条件",
+      digest: "阅读条件。",
+      sections: input.retryFeedback ? [] : rewrittenSections(input),
+    });
+    const retained = await f.invoke("wechat.rewrite", {
+      id: current.article.id,
+    });
+    assert.equal(f.control.aiCalls.length, 4);
+    assert.equal(retained.article.title, "电子版资料的适用条件");
+    assert.equal(retained.trafficWordPlan?.usage.at(-1)?.uses, 0);
   } finally {
     await f.cleanup();
   }

@@ -6,6 +6,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   Users,
 } from "lucide-react";
 import { wechatArticleUrl } from "../../shared/wechat";
@@ -16,6 +17,7 @@ import { useAppData, useAppNavigation } from "../state";
 import {
   Button,
   Empty,
+  Field,
   Header,
   LoadingState,
   Notice,
@@ -23,7 +25,8 @@ import {
   SearchField,
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
-import { Pagination } from "../ui/Pagination";
+import { Dialog } from "../ui/Dialog";
+import { Select } from "../ui/Select";
 import { formatTime } from "../lib/format";
 import { ArticleEditor } from "./ArticleEditor";
 import { WechatDiscovery } from "./Discovery";
@@ -31,6 +34,7 @@ import {
   groupWechatArticles,
   matchesWechatArticle,
   preferredWechatEdition,
+  type WechatArticleGroup,
 } from "./article-groups";
 import "../ui/workspace.css";
 import "./wechat.css";
@@ -39,10 +43,10 @@ const selectionSchema = z.object({
   url: z.string().max(4000),
   selected: z.string().max(100),
   query: z.string().max(200),
-  page: z.number().int().positive().default(1),
+  visibleCount: z.number().int().min(50).default(50),
   lastEditions: z.record(z.string().max(100), z.string().max(100)).default({}),
 });
-const pageSize = 8;
+const pageSize = 50;
 
 export default function WechatWorkflow() {
   const { data } = useAppData(),
@@ -54,7 +58,7 @@ export default function WechatWorkflow() {
       url: "",
       selected: "",
       query: "",
-      page: 1,
+      visibleCount: pageSize,
       lastEditions: {} as Record<string, string>,
     },
     (v) => selectionSchema.parse(v),
@@ -82,14 +86,28 @@ export default function WechatWorkflow() {
     editorRegion = useRef<HTMLElement>(null);
   const [locate, setLocate] = useState("");
   const [focusVersion, setFocusVersion] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [deletion, setDeletion] = useState<{
+    group: WechatArticleGroup;
+    id: string;
+  } | null>(null);
+  const [deleteError, setDeleteError] = useState("");
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
     };
   }, []);
+  const requested = selection.value.selected;
   const selected =
-    selection.value.selected ||
+    (requested &&
+    (!groups ||
+      locate === requested ||
+      groups.some((group) =>
+        group.editions.some((item) => item.id === requested),
+      ))
+      ? requested
+      : "") ||
     (groups?.[0]
       ? preferredWechatEdition(
           groups[0],
@@ -107,8 +125,8 @@ export default function WechatWorkflow() {
   );
   const current = detail.data?.article.id === selected ? detail.data : null;
   useEffect(() => {
-    if (!selection.value.selected && selected) selection.update({ selected });
-  }, [selected, selection.value.selected, selection.update]);
+    if (requested !== selected) selection.update({ selected });
+  }, [requested, selected, selection.update]);
   useEffect(() => {
     if (
       activeGroup &&
@@ -128,9 +146,12 @@ export default function WechatWorkflow() {
         group.editions.some((item) => item.id === locate),
       ) ?? -1;
     if (index < 0) return;
-    selection.update({ page: Math.floor(index / pageSize) + 1 });
+    if (index >= selection.value.visibleCount)
+      selection.update({
+        visibleCount: (Math.floor(index / pageSize) + 1) * pageSize,
+      });
     setLocate("");
-  }, [items, locate, selection.update]);
+  }, [items, locate, selection.value.visibleCount, selection.update]);
   const selectEdition = (id: string) => {
     const group = groups?.find((group) =>
       group.editions.some((item) => item.id === id),
@@ -182,7 +203,7 @@ export default function WechatWorkflow() {
           url: "",
           query: "",
           selected: result.article.id,
-          page: 1,
+          visibleCount: pageSize,
         });
         setImportOpen(false);
         setLocate(result.article.id);
@@ -201,10 +222,50 @@ export default function WechatWorkflow() {
       if (alive.current) setPending(false);
     }
   };
-  const currentPage = Math.min(
-    selection.value.page,
-    Math.max(1, Math.ceil((items?.length ?? 0) / pageSize)),
-  );
+  const deleteDraft = async () => {
+    if (!deletion || lock.current || editorBusy) return;
+    const draft = deletion.group.editions.find(({ id }) => id === deletion.id);
+    if (!draft) return;
+    lock.current = true;
+    setPending(true);
+    setDeleteError("");
+    try {
+      const next = await ipc("wechat.delete", {
+        id: draft.id,
+        revision: draft.revision,
+      });
+      if (!alive.current) return;
+      history.setData(next);
+      if (selected === draft.id) {
+        const remaining = groupWechatArticles(next);
+        const siblings = new Set(deletion.group.editions.map(({ id }) => id));
+        const group =
+          remaining.find(({ editions }) =>
+            editions.some(({ id }) => siblings.has(id)),
+          ) ?? remaining[0];
+        selection.update({
+          selected: group
+            ? preferredWechatEdition(
+                group,
+                selection.value.lastEditions[group.id],
+              )
+            : "",
+        });
+        setFocusVersion("");
+        setLocate("");
+      }
+      setDeletion(null);
+    } catch (cause) {
+      if (alive.current)
+        setDeleteError(
+          cause instanceof Error ? cause.message : "删除失败，请重试。",
+        );
+    } finally {
+      lock.current = false;
+      if (alive.current) setPending(false);
+    }
+  };
+  const visibleItems = items?.slice(0, selection.value.visibleCount);
   return (
     <div className="workspace-frame wechat-workflow">
       <Header
@@ -309,22 +370,35 @@ export default function WechatWorkflow() {
             <aside className="wechat-history" aria-label="公众号文章列表">
               <div className="wechat-section-heading">
                 <h2>文章</h2>
-                <Button
-                  quiet
-                  size="compact"
-                  aria-label="刷新公众号草稿"
-                  disabled={pending}
-                  onClick={history.reload}
-                >
-                  <RefreshCw size={14} />
-                </Button>
+                <div className="wechat-history-actions">
+                  <Button
+                    quiet={!editing}
+                    size="compact"
+                    aria-pressed={editing}
+                    disabled={
+                      pending || editorBusy || (!editing && !groups?.length)
+                    }
+                    onClick={() => setEditing(!editing)}
+                  >
+                    {editing ? "完成" : "编辑"}
+                  </Button>
+                  <Button
+                    quiet
+                    size="compact"
+                    aria-label="刷新公众号草稿"
+                    disabled={pending || history.loading}
+                    onClick={history.reload}
+                  >
+                    <RefreshCw size={14} />
+                  </Button>
+                </div>
               </div>
               <SearchField
                 label="搜索公众号文章"
                 placeholder="搜索文章或稿件标题"
                 value={selection.value.query}
                 onChange={(query) => {
-                  selection.update({ query, page: 1 });
+                  selection.update({ query, visibleCount: pageSize });
                   setLocate("");
                 }}
               />
@@ -338,14 +412,9 @@ export default function WechatWorkflow() {
               ) : items?.length ? (
                 <>
                   <div className="wechat-history-list">
-                    {items
-                      .slice(
-                        (currentPage - 1) * pageSize,
-                        currentPage * pageSize,
-                      )
-                      .map((item) => (
+                    {visibleItems?.map((item) => (
+                      <div key={item.id} className="wechat-history-row">
                         <button
-                          key={item.id}
                           className="wechat-history-entry"
                           disabled={editorBusy || pending}
                           aria-current={
@@ -371,21 +440,52 @@ export default function WechatWorkflow() {
                           <strong>{item.title}</strong>
                           <span>
                             <small>{item.editions.length} 稿</small>
-                            <small>更新 {formatTime(item.updatedAt)}</small>
+                            <small title={formatTime(item.updatedAt)}>
+                              {formatTime(item.updatedAt).split(" ")[0]}
+                            </small>
                           </span>
                         </button>
-                      ))}
+                        {editing ? (
+                          <Button
+                            quiet
+                            size="compact"
+                            aria-label={`删除「${item.title}」的文稿`}
+                            disabled={editorBusy || pending}
+                            onClick={() => {
+                              setDeleteError("");
+                              setDeletion({
+                                group: item,
+                                id: preferredWechatEdition(
+                                  item,
+                                  selection.value.lastEditions[item.id],
+                                ),
+                              });
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
-                  <Pagination
-                    page={currentPage}
-                    pageSize={pageSize}
-                    total={items.length}
-                    onPageChange={(page) => {
-                      selection.update({ page });
-                      setLocate("");
-                    }}
-                    label="公众号文章分页"
-                  />
+                  <div className="wechat-history-footer">
+                    <small>
+                      已显示 {visibleItems?.length} / {items.length} 篇
+                    </small>
+                    {items.length > selection.value.visibleCount ? (
+                      <Button
+                        size="compact"
+                        onClick={() =>
+                          selection.update({
+                            visibleCount:
+                              selection.value.visibleCount + pageSize,
+                          })
+                        }
+                      >
+                        加载更多
+                      </Button>
+                    ) : null}
+                  </div>
                 </>
               ) : history.data ? (
                 <Empty
@@ -434,6 +534,53 @@ export default function WechatWorkflow() {
               ) : null}
             </section>
           </div>
+          {deletion ? (
+            <Dialog
+              title="删除本地文稿"
+              busy={pending}
+              onClose={() => setDeletion(null)}
+              footer={
+                <>
+                  <Button disabled={pending} onClick={() => setDeletion(null)}>
+                    取消
+                  </Button>
+                  <Button
+                    className="wechat-delete-confirm"
+                    disabled={pending || editorBusy}
+                    onClick={() => void deleteDraft()}
+                  >
+                    {pending ? "正在删除…" : "删除文稿"}
+                  </Button>
+                </>
+              }
+            >
+              <p>{deletion.group.title}</p>
+              {deletion.group.editions.length > 1 ? (
+                <Field label="要删除的稿件">
+                  <Select
+                    value={deletion.id}
+                    disabled={pending}
+                    items={deletion.group.editions.map((edition) => ({
+                      value: edition.id,
+                      label: `第 ${edition.editionNumber ?? edition.edition?.number ?? 1} 稿 · ${edition.title}`,
+                    }))}
+                    onValueChange={(id) => {
+                      setDeletion({ ...deletion, id });
+                      setDeleteError("");
+                    }}
+                  />
+                </Field>
+              ) : null}
+              <p className="muted">
+                删除所选本地文稿后无法恢复。微信草稿、已发表文章和网盘资源会保留。
+              </p>
+              {deleteError ? (
+                <Notice danger>
+                  <span role="alert">{deleteError}</span>
+                </Notice>
+              ) : null}
+            </Dialog>
+          ) : null}
         </>
       ) : null}
     </div>

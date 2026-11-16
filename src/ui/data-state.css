@@ -154,6 +154,25 @@
 .data-skeleton-copy > span:nth-child(3) {
   width: 28%;
 }
+.data-loading-list[data-compact] {
+  padding: 0;
+}
+.data-loading-list[data-compact] > .loading {
+  margin-bottom: var(--space-2);
+}
+.data-loading-list[data-compact] .data-skeleton-row {
+  min-height: 42px;
+}
+.data-loading-list[data-compact] .data-skeleton-icon {
+  display: none;
+}
+.data-loading-list[data-compact] .data-skeleton-copy {
+  grid-template-columns: minmax(90px, 2.5fr) repeat(2, minmax(40px, 1fr));
+  align-items: center;
+}
+.data-loading-list[data-compact] .data-skeleton-copy > span {
+  background: var(--line);
+}
 @media (max-width: 700px) {
   .data-state--compact {
     flex-wrap: wrap;

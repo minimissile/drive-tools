@@ -10,7 +10,7 @@
   border-top: 1px solid var(--line);
 }
 
-.article-resource-row > div:first-child {
+.article-resource-info {
   display: grid;
   gap: var(--space-1);
   min-width: 0;
@@ -74,4 +74,54 @@
 
 .article-resource-alternative > .article-resource-new {
   margin-top: var(--space-2);
+}
+
+.article-resources-compact .article-resource-row {
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+}
+
+.article-resource-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.article-resource-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.article-resources-compact .article-resource-link,
+.article-resource-management {
+  color: var(--muted);
+}
+
+.article-resource-management {
+  font-size: 12px;
+}
+
+.article-resource-management > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.article-resource-management[open] > :not(summary) {
+  display: block;
+  margin-top: var(--space-2);
+}
+
+.article-resource-management[open] > .article-resource-controls {
+  display: flex;
+}
+
+.article-resource-replace {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.article-resource-replace .field {
+  margin: 0;
 }

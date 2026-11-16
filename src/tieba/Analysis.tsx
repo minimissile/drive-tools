@@ -1,10 +1,12 @@
-import { useId, useRef, useState } from "react";
+import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { BarChart3, Search } from "lucide-react";
 import { z } from "zod";
-import type { TiebaAnalysisPage } from "../../shared/tieba-analysis";
+import { tiebaPostExposure, type TiebaAnalysisPage } from "../../shared/tieba-analysis";
 import { ipc } from "../api/client";
+import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppData } from "../state";
+import { ClearableField } from "../ui/ClearableField";
 import {
   Button,
   Empty,
@@ -15,11 +17,11 @@ import {
   Notice,
   Panel,
 } from "../ui/primitives";
-import { Pagination } from "../ui/Pagination";
 import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { TabList, TabPanel, Tabs } from "../ui/Tabs";
 import { FollowedForums } from "./FollowedForums";
+import { AnalysisPages } from "./AnalysisPages";
 import { ForumPerformance } from "./ForumPerformance";
 import { ForumPosts } from "./ForumPosts";
 import { ResourceDiscovery } from "./ResourceDiscovery";
@@ -32,17 +34,20 @@ import "./analysis.css";
 
 const draftSchema = z.object({
   target: z.string().max(2048),
-  sort: z.enum(["views", "recent"]).default("views"),
+  sort: z.enum(["views", "recent", "exposure"]).default("views"),
 });
 const number = new Intl.NumberFormat("zh-CN");
 const modeSchema = z.object({ mode: z.enum(["user", "forum", "discovery"]) });
-const pageSize = 12;
+const pageSize = 10;
 const sortItems = [
   { value: "views", label: "浏览量从高到低" },
   { value: "recent", label: "发布时间从新到旧" },
+  { value: "exposure", label: "曝光潜力从高到低" },
 ];
-type Result = TiebaAnalysisPage & { sourcePage: number; end: boolean };
+type Result = TiebaAnalysisPage & { sourcePage: number; end: boolean; observedAt: number };
 type Request = { target: string; page: number };
+type Attempt = { request: Request; displayPage?: number };
+type AnalysisHandle = { findAuthor(target: string): void };
 
 export default function TiebaAnalysis() {
   const { data } = useAppData();
@@ -50,49 +55,67 @@ export default function TiebaAnalysis() {
 }
 
 function AnalysisWorkspace({ workspace }: { workspace: string }) {
+  const user = useRef<AnalysisHandle>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const selection = useLocalDraft<z.infer<typeof modeSchema>>(
     `tieba-analysis-mode:${workspace}`,
     { mode: "user" },
     modeSchema.parse,
   );
+  const discovery = useIpcQuery("tieba.discovery.snapshot", undefined, {
+    enabled: rulesOpen || selection.value.mode === "discovery",
+    keepPrevious: true,
+  });
   return (
     <div className="tieba-analysis" data-testid="tieba-analysis">
-      <Header
-        title="贴吧数据分析"
-        description="按用户或贴吧查询公开主题帖、浏览量和互动数据。"
-      />
       <Tabs
         className="tieba-analysis-modes"
         value={selection.value.mode}
         onChange={(mode) => selection.update({ mode })}
       >
-        <TabList
-          label="贴吧查询方式"
-          items={[
-            ["user", "按用户查询"],
-            ["forum", "按贴吧查询"],
-            ["discovery", "资源发现"],
-          ]}
+        <Header
+          title="贴吧数据分析"
+          description="按用户或贴吧查询公开主题帖、浏览量和互动数据。"
+          action={
+            <TabList
+              label="贴吧查询方式"
+              items={[
+                ["user", "按用户查询"],
+                ["forum", "按贴吧查询"],
+                ["discovery", "资源发现"],
+              ]}
+            />
+          }
+        />
+        <TiebaPotentialFormula
+          open={rulesOpen}
+          onOpenChange={setRulesOpen}
+          snapshot={discovery}
+          showQueryError={selection.value.mode !== "discovery"}
         />
         <TabPanel value="user" keepMounted>
-          <Analysis workspace={workspace} />
+          <Analysis workspace={workspace} ref={user} />
         </TabPanel>
         <TabPanel value="forum" keepMounted>
-          <ForumPosts workspace={workspace} />
+          <ForumPosts workspace={workspace} onFindAuthor={(target) => {
+            selection.update({ mode: "user" });
+            user.current?.findAuthor(target);
+          }} />
         </TabPanel>
         <TabPanel value="discovery">
-          <ResourceDiscovery workspace={workspace} />
+          <ResourceDiscovery workspace={workspace} snapshot={discovery} />
         </TabPanel>
       </Tabs>
     </div>
   );
 }
 
-function Analysis({ workspace }: { workspace: string }) {
+function Analysis({ workspace, ref }: { workspace: string; ref: Ref<AnalysisHandle> }) {
   const hintId = useId();
-  const draft = useLocalDraft(
+  const inputId = useId();
+  const draft = useLocalDraft<z.output<typeof draftSchema>>(
     `tieba-analysis:${workspace}`,
-    { target: "", sort: "views" as "views" | "recent" },
+    { target: "", sort: "views" },
     draftSchema.parse,
   );
   const [result, setResult] = useState<Result>();
@@ -103,27 +126,29 @@ function Analysis({ workspace }: { workspace: string }) {
   const [followedUid, setFollowedUid] = useState<string>();
   const [pending, setPending] = useState<Request>();
   const [error, setError] = useState("");
-  const lastRequest = useRef<Request | undefined>(undefined);
+  const lastRequest = useRef<Attempt | undefined>(undefined);
+  const active = useRef(0);
   const lock = useRef(false);
 
-  async function query(request: Request) {
-    if (lock.current) return;
+  async function query(request: Request, displayPage?: number, replace = false) {
+    if (lock.current && !replace) return;
+    const token = ++active.current;
     lock.current = true;
-    lastRequest.current = request;
+    lastRequest.current = { request, displayPage };
     setPending(request);
     setError("");
     try {
       const next = await ipc("tieba.analysis.query", request);
+      if (token !== active.current) return;
       if (request.page > 1 && next.uid !== result?.uid)
         throw new Error("贴吧返回的作者与当前查询不一致，请重试。");
+      const observedAt = Date.now();
+      const threads = new Map(
+        request.page === 1 ? [] : result?.threads.map((post) => [post.id, post]),
+      );
+      const before = threads.size;
+      for (const post of next.threads) threads.set(post.id, post);
       setResult((previous) => {
-        const threads = new Map(
-          request.page === 1
-            ? []
-            : previous?.threads.map((post) => [post.id, post]),
-        );
-        const before = threads.size;
-        for (const post of next.threads) threads.set(post.id, post);
         const forums = new Map(
           (request.page > 1 ? (previous?.forums ?? []) : []).map((forum) => [
             forum.id,
@@ -152,14 +177,18 @@ function Analysis({ workspace }: { workspace: string }) {
           forums: [...forums.values()],
           sourcePage: request.page,
           end: threads.size === before,
+          observedAt,
         };
       });
       if (request.page === 1) {
         setPage(1);
         setTab("threads");
         setFollowedUid(undefined);
+      } else if (displayPage !== undefined) {
+        setPage(Math.min(displayPage, Math.max(1, Math.ceil(threads.size / pageSize))));
       }
     } catch (cause) {
+      if (token !== active.current) return;
       const message =
         cause instanceof Error ? cause.message : "查询失败，请稍后重试。";
       setError(
@@ -168,13 +197,31 @@ function Analysis({ workspace }: { workspace: string }) {
           : message,
       );
     } finally {
-      lock.current = false;
-      setPending(undefined);
+      if (token === active.current) {
+        lock.current = false;
+        setPending(undefined);
+      }
     }
+  }
+
+  useImperativeHandle(ref, () => ({
+    findAuthor(target) {
+      draft.update({ target });
+      setResult(undefined);
+      void query({ target, page: 1 }, undefined, true);
+    },
+  }));
+
+  function more(displayPage?: number) {
+    if (result && !result.end)
+      void query({ target: `UID: ${result.uid}`, page: result.sourcePage + 1 }, displayPage);
   }
 
   const ordered = (result?.threads ?? []).toSorted((a, b) => {
     const recent = (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "");
+    if (draft.value.sort === "exposure" && result)
+      return (tiebaPostExposure(b.views, b.publishedAt, result.observedAt) ?? -1) -
+        (tiebaPostExposure(a.views, a.publishedAt, result.observedAt) ?? -1) || recent;
     return draft.value.sort === "views"
       ? (b.views ?? -1) - (a.views ?? -1) || recent
       : recent;
@@ -182,23 +229,6 @@ function Analysis({ workspace }: { workspace: string }) {
   const known = ordered.filter((post) => post.views !== null);
   const totalViews = known.reduce((sum, post) => sum + post.views!, 0);
   const visible = ordered.slice((page - 1) * pageSize, page * pageSize);
-  const loadMore = result?.end ? (
-    <small className="muted" role="status">
-      没有更多可读取的主题帖
-    </small>
-  ) : result ? (
-    <Button
-      disabled={!!pending}
-      onClick={() =>
-        void query({
-          target: `UID: ${result.uid}`,
-          page: result.sourcePage + 1,
-        })
-      }
-    >
-      加载更多帖子
-    </Button>
-  ) : null;
 
   return (
     <div className="tieba-analysis-content">
@@ -211,10 +241,12 @@ function Analysis({ workspace }: { workspace: string }) {
             if (target) void query({ target, page: 1 });
           }}
         >
-          <Field label="主页 ID、主页链接或主题帖链接">
-            <input
+          <Field as="div" htmlFor={inputId} label="主页 ID、主页链接或主题帖链接">
+            <ClearableField
+              id={inputId}
               value={draft.value.target}
-              onChange={(event) => draft.update({ target: event.target.value })}
+              onValueChange={(target) => draft.update({ target })}
+              clearLabel="清除用户查询输入"
               placeholder="输入主页 ID，或粘贴贴吧链接"
               aria-describedby={hintId}
               maxLength={2048}
@@ -238,16 +270,17 @@ function Analysis({ workspace }: { workspace: string }) {
       <QueryError
         error={error}
         onRetry={() => {
-          if (lastRequest.current) void query(lastRequest.current);
+          const attempt = lastRequest.current;
+          if (attempt) void query(attempt.request, attempt.displayPage);
         }}
       />
       {!result && pending ? (
-        <LoadingState label="正在查询公开主题帖…" layout="list" />
+        <Panel><LoadingState label="正在查询公开主题帖…" layout="list" compact /></Panel>
       ) : null}
       {!result && !pending && !error ? (
         <Panel>
-          <Empty icon={BarChart3} title="输入用户或帖子后开始查询" compact>
-            查询结果会在这里按浏览量排列。
+          <Empty icon={BarChart3} title="等待查询用户帖子" compact>
+            输入主页 ID，或粘贴个人主页、主题帖链接开始查询。
           </Empty>
         </Panel>
       ) : null}
@@ -258,7 +291,7 @@ function Analysis({ workspace }: { workspace: string }) {
           extra={
             pending ? (
               <Loading
-                label={pending.page === 1 ? "正在查询…" : "正在加载更多…"}
+                label={pending.page === 1 ? "正在查询…" : "正在读取下一批帖子…"}
               />
             ) : null
           }
@@ -322,25 +355,36 @@ function Analysis({ workspace }: { workspace: string }) {
                   <div className="tieba-analysis-toolbar">
                     <Select
                       aria-label="帖子排序"
+                      disabled={!!pending}
                       items={sortItems}
                       value={draft.value.sort}
                       onValueChange={(value) => {
-                        if (value === "views" || value === "recent")
+                        if (value === "views" || value === "recent" || value === "exposure")
                           draft.update({ sort: value });
                         setPage(1);
                       }}
                     />
-                    {loadMore}
                   </div>
-                  <TiebaPotentialFormula />
-                  <AnalysisThreadsTable threads={visible} scope="user" />
-                  <Pagination
+                  <AnalysisPages
                     page={page}
                     pageSize={pageSize}
                     total={ordered.length}
-                    onPageChange={setPage}
+                    onPageChange={(next) => {
+                      if (next <= Math.ceil(ordered.length / pageSize)) setPage(next);
+                      else more(next);
+                    }}
                     label="公开主题帖分页"
-                  />
+                    partial={!result.end}
+                    hasNextPage={!result.end || page < Math.ceil(ordered.length / pageSize)}
+                    loading={!!pending}
+                  >
+                    <AnalysisThreadsTable
+                      key={result.uid}
+                      threads={visible}
+                      scope="user"
+                      observedAt={result.observedAt}
+                    />
+                  </AnalysisPages>
                 </>
               ) : (
                 <Empty
@@ -358,7 +402,9 @@ function Analysis({ workspace }: { workspace: string }) {
                 workspace={workspace}
                 threads={result.threads}
                 forums={result.forums}
-                loadMore={loadMore}
+                onLoadMore={() => more()}
+                partial={!result.end}
+                loading={!!pending}
               />
             </TabPanel>
             <TabPanel value="followed" keepMounted>

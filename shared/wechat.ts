@@ -19,6 +19,7 @@ import {
 import type {
   WechatTrafficWords,
   WechatTrafficWordPlan,
+  WechatTrafficWordUsage,
 } from "./wechat-traffic-words";
 import type { WechatRewriteStyleId } from "./wechat-rewrite";
 import type {
@@ -76,6 +77,7 @@ export interface WechatDeliveryRecord extends WechatRemote {
   action: "created" | "updated" | "verified" | "saved";
   rewriteStyleId?: WechatRewriteStyleId;
   publicationMarkedAt?: string;
+  trafficWordUsage?: WechatTrafficWordUsage;
 }
 export interface WechatEditionSummary {
   id: string;
@@ -216,6 +218,17 @@ type Contract<A, V> = { args: A; value: V };
 export interface WechatContract {
   "wechat.list": Contract<undefined, WechatSummary[]>;
   "wechat.get": Contract<{ id: string }, WechatDetail>;
+  "wechat.delete": Contract<{ id: string; revision: number }, WechatSummary[]>;
+  "wechat.replaceLink": Contract<
+    {
+      id: string;
+      revision: number;
+      linkId: string;
+      shareText: string;
+      code?: string;
+    },
+    WechatDetail
+  >;
   "wechat.newEdition": Contract<
     { id: string; revision: number; requestId: string; text?: WechatText },
     WechatDetail

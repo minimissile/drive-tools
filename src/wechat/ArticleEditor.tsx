@@ -63,6 +63,8 @@ import {
 } from "../../shared/wechat-read-more";
 const actions: ArticleResourceActions<WechatDetail> = {
   sync: (id) => ipc("wechat.syncLinks", { id }),
+  replace: (id, revision, linkId, shareText, code) =>
+    ipc("wechat.replaceLink", { id, revision, linkId, shareText, code }),
   bind: (id, linkId, copyId) =>
     ipc("wechat.bindResource", { id, linkId, copyId }),
   create: (id, linkId, accountId) =>
@@ -200,7 +202,9 @@ export function ArticleEditor({
   const missingCover = !draft.value.coverUrl.trim();
   const missingLinks =
     draft.value.body === article.body &&
-    article.links.some((link) => !link.copyId || !link.ownUrl);
+    article.links.some(
+      (link) => !link.manual && (!link.copyId || !link.ownUrl),
+    );
   const sendBlocked =
     missingCover ||
     missingLinks ||
@@ -496,7 +500,8 @@ export function ArticleEditor({
           </span>
           {trafficWords.words.length ? (
             <span>
-              已用 {wordUsage.used.length}/{trafficWords.words.length} 个流量词
+              本稿已用 {wordUsage.used.length}/{trafficWords.words.length}{" "}
+              个流量词
             </span>
           ) : null}
           {account && article.remote ? (
@@ -683,19 +688,6 @@ export function ArticleEditor({
                 >
                   <Eye size={14} />
                   {preview ? "继续编辑" : "排版预览"}
-                </Button>
-                <Button
-                  quiet
-                  size="compact"
-                  disabled={busy || !editable || conflict}
-                  onClick={() =>
-                    void run("整理排版", async () => {
-                      await saved();
-                      return ipc("wechat.format", { id: article.id });
-                    })
-                  }
-                >
-                  整理排版
                 </Button>
               </div>
             </div>

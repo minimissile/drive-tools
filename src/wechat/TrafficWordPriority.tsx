@@ -13,13 +13,14 @@ export function TrafficWordPriority({
       <p className="wechat-editor-dialog-help">
         全部 {wordCount} 个流量词均可用。
         {plan.mode === "uncovered"
-          ? `下次优先考虑 ${plan.priorityWords.length} 个历史改写尚未覆盖的相关词。`
-          : "词池已覆盖一轮，下次优先考虑使用较少的相关词。"}
-        核心词可重复，长尾词轮换，不要求全部填入。
+          ? plan.deliveryCoverage?.count
+            ? "下次优先补充送稿尚未确认覆盖的相关词。"
+            : "下次优先补充改写尚未覆盖的相关词。"
+          : "词池已覆盖一轮，下次优先使用较少出现的相关词。"}
       </p>
       {plan.priorityWords.length ? (
         <details>
-          <summary>优先考虑（{plan.priorityWords.length}）</summary>
+          <summary>下次优先（{plan.priorityWords.length}）</summary>
           <p>{plan.priorityWords.join("、")}</p>
         </details>
       ) : null}

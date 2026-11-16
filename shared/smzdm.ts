@@ -50,6 +50,7 @@ export interface SmzdmResourceLink {
   copyId: string | null;
   resourceId: string | null;
   ownUrl: string | null;
+  manual?: true;
 }
 export interface SmzdmArticle {
   id: string;

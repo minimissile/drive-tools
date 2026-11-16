@@ -35,10 +35,8 @@ export interface TiebaDiscoveryMetrics {
 
 export interface TiebaDiscoveryPotentialEvidence extends TiebaDiscoveryMetrics {
   at: number;
-  score?: number;
-  rank: TiebaDiscoveryRank;
-  viewRank: TiebaDiscoveryRank;
-  comparedInteractions: boolean;
+  hourlyViews?: number;
+  recentGrowth?: TiebaDiscoveryGrowth;
 }
 
 export interface TiebaDiscoveryCandidate {
@@ -53,8 +51,8 @@ export interface TiebaDiscoveryCandidate {
   growth: TiebaDiscoveryGrowth | null;
   rank: TiebaDiscoveryRank | null;
   streak: number;
-  paths: string[][];
   copies: number;
+  resource?: TiebaOldResourceEvidence;
 }
 
 export interface TiebaDiscoveryReadingPost extends TiebaDiscoveryMetrics {
@@ -64,40 +62,143 @@ export interface TiebaDiscoveryReadingPost extends TiebaDiscoveryMetrics {
   forum: string;
   author: string;
   publishedAt: string;
-  path: string[];
   checkedAt: number;
+  resource?: TiebaOldResourceEvidence;
 }
 
 export interface TiebaDiscoveryPotentialPost extends TiebaDiscoveryReadingPost {
   first: TiebaDiscoveryPotentialEvidence;
-  score?: number;
+  confirmedGrowth?: TiebaDiscoveryGrowth;
   confirmedAt: number | null;
   active: boolean;
+  awaitingMatureReading?: boolean;
+}
+
+export interface TiebaDiscoveryPendingPost extends TiebaDiscoveryReadingPost {
+  queuedAt: number;
+  dueAt: number;
 }
 
 export interface TiebaDiscoveryTrafficPost extends TiebaDiscoveryReadingPost {
   views: number;
   fromPotential: boolean;
+  archivedAt?: number;
+}
+
+export const defaultOldTrafficThreshold = 30;
+export const defaultRecentGrowthDailyViews = 48;
+export const recentGrowthMaxReadingHours = 24;
+export const oldTrafficMinimumAgeDays = 7;
+export const oldTrafficObservationDays = 3;
+export const defaultPendingObservationHours = 24;
+export const pendingObservationMultiplier = 2;
+export const tiebaDiscoveryLogLimit = 50;
+
+export const tiebaOldResourceSources = ["标题", "正文", "回复"] as const;
+export interface TiebaOldResourceEvidence {
+  linkSources: (typeof tiebaOldResourceSources)[number][];
+  keywords: string[];
+}
+
+export interface TiebaOldTrafficPost {
+  id: string;
+  title: string;
+  url: string;
+  forum: string;
+  publishedAt: string;
+  views: number;
+  checkedAt: number;
+  observationAt?: number;
+  lifetimeDailyViews: number;
+  baselineAt: number | null;
+  addedViews: number | null;
+  dailyAddedViews: number | null;
+  sustained: boolean;
+  resource?: TiebaOldResourceEvidence & { checked: boolean };
 }
 
 export const tiebaDiscoveryRulesSchema = z.object({
   lookbackHours: z.number().int().min(1).max(720),
-  potentialThreshold: z.number().int().min(0).max(100),
+  minHourlyViews: z.number().min(0).max(Number.MAX_SAFE_INTEGER),
+  recentGrowthMinDailyViews: z.number().min(1).max(Number.MAX_SAFE_INTEGER).default(defaultRecentGrowthDailyViews),
   trafficThreshold: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-});
+  oldTrafficMinTotalViews: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).default(1000),
+  oldTrafficMinLifetimeDailyViews: z.number().min(0).max(Number.MAX_SAFE_INTEGER).default(10),
+  oldTrafficMinViews: z.number().min(1).max(Number.MAX_SAFE_INTEGER).default(defaultOldTrafficThreshold),
+  oldResourceCheckEnabled: z.boolean().default(true),
+  pendingObservationHours: z.number().min(0.5).max(719).optional(),
+}).refine(
+  ({ lookbackHours, pendingObservationHours }) =>
+    pendingObservationHours === undefined || pendingObservationHours < lookbackHours,
+  { path: ["pendingObservationHours"], message: "待观察时长须短于潜力帖观察期。" },
+).transform(({ pendingObservationHours, ...rules }) => ({
+  ...rules,
+  pendingObservationHours: pendingObservationHours ??
+    (rules.lookbackHours > defaultPendingObservationHours
+      ? defaultPendingObservationHours
+      : rules.lookbackHours / 2),
+}));
 
 export type TiebaDiscoveryRules = z.infer<typeof tiebaDiscoveryRulesSchema>;
 
 export const defaultTiebaDiscoveryRules: Readonly<TiebaDiscoveryRules> = {
   lookbackHours: 48,
-  potentialThreshold: 75,
+  minHourlyViews: 3,
+  recentGrowthMinDailyViews: defaultRecentGrowthDailyViews,
   trafficThreshold: 10_000,
+  oldTrafficMinTotalViews: 1000,
+  oldTrafficMinLifetimeDailyViews: 10,
+  oldTrafficMinViews: defaultOldTrafficThreshold,
+  oldResourceCheckEnabled: true,
+  pendingObservationHours: defaultPendingObservationHours,
 };
 
-export const tiebaDiscoveryPotentialPageSize = 8;
+export const tiebaDiscoveryPageSize = 10;
+export const tiebaDiscoveryRefreshSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.enum(["potential", "pending", "traffic", "trending", "oldTraffic", "trafficPosts"]),
+    ids: z.array(z.string().regex(/^[1-9]\d{0,18}$/)).min(1).max(tiebaDiscoveryPageSize),
+  }),
+  z.object({
+    kind: z.literal("sources"),
+    names: z.array(tiebaForumNameSchema).min(1).max(tiebaDiscoveryPageSize),
+  }),
+]);
+export type TiebaDiscoveryRefresh = z.output<typeof tiebaDiscoveryRefreshSchema>;
+export const tiebaDiscoveryImportSchema = z.object({
+  id: z.string().regex(/^[1-9]\d{0,18}$/),
+});
+export type TiebaDiscoveryImportKind = "traffic" | "potential" | "pending" | "oldTraffic" | "growthWatch";
 export const tiebaDiscoveryPotentialPageSchema = z.object({
   page: z.number().int().min(1).max(2_147_483_647),
 });
+export const tiebaDiscoveryPotentialFilterSchema = tiebaDiscoveryPotentialPageSchema.extend({
+  grew: z.boolean().optional(),
+});
+export const tiebaOldTrafficPageSchema = tiebaDiscoveryPotentialPageSchema.extend({
+  view: z.enum(["screened", "qualified"]).default("qualified"),
+  resource: z.enum(["all", "linked", "keywords", "pending", "none"]).default("all"),
+});
+export type TiebaOldTrafficView = z.output<typeof tiebaOldTrafficPageSchema>["view"];
+export type TiebaOldResourceFilter = z.output<typeof tiebaOldTrafficPageSchema>["resource"];
+export const tiebaTrafficPostsPageSchema = tiebaOldTrafficPageSchema.extend({
+  view: z.enum(["all", "high", "screened", "qualified"]).default("all"),
+});
+export type TiebaTrafficPostsView = z.output<typeof tiebaTrafficPostsPageSchema>["view"];
+export type TiebaTrafficPost =
+  | (TiebaDiscoveryTrafficPost & { kind: "high"; archivedAt: number })
+  | (TiebaOldTrafficPost & { kind: "old" });
+export const tiebaOldResourceDeleteSchema = z.object({
+  id: z.string().regex(/^[1-9]\d{0,18}$/),
+});
+
+export interface TiebaHistoryProgress {
+  forum?: string;
+  page?: number;
+  completed: number;
+  total: number;
+  revision: number;
+}
 
 export interface TiebaDiscoveryPostPage<T> {
   page: number;
@@ -107,20 +208,20 @@ export interface TiebaDiscoveryPostPage<T> {
 
 export type TiebaDiscoveryPotentialPage =
   TiebaDiscoveryPostPage<TiebaDiscoveryPotentialPost>;
+export type TiebaDiscoveryPendingPage =
+  TiebaDiscoveryPostPage<TiebaDiscoveryPendingPost>;
 export type TiebaDiscoveryTrafficPage =
   TiebaDiscoveryPostPage<TiebaDiscoveryTrafficPost>;
 
 export interface TiebaDiscoverySource {
   name: string;
-  path: string[];
   status: "seed" | "active" | "watch";
   scannedAt: number | null;
+  addedAt?: number;
   lastAttemptAt?: number;
   exposure?: TiebaForumExposure | null;
   via?: {
     forum: string;
-    author: string;
-    uid: string;
     reason: "posted" | "followed";
   };
 }
@@ -157,12 +258,26 @@ export interface TiebaDiscoverySnapshot {
   sources: TiebaDiscoverySource[];
   rules: TiebaDiscoveryRules;
   potentialCount: number;
+  pendingCount?: number;
   trafficCount: number;
+  oldTraffic?: { tracked: number; total: number };
+  oldResourceReady?: boolean;
+  oldResourceAdmission?: boolean;
+  oldResourcePending?: number;
+  historyProgress?: TiebaHistoryProgress;
   trending: TiebaDiscoveryCandidate[];
   watching: TiebaDiscoveryCandidate[];
 }
 
 export interface TiebaResourceDiscoveryContract {
+  "tieba.discovery.import": {
+    args: z.input<typeof tiebaDiscoveryImportSchema>;
+    value: { kind: TiebaDiscoveryImportKind; already: boolean; measuredDailyGrowth?: number };
+  };
+  "tieba.discovery.refresh": {
+    args: z.input<typeof tiebaDiscoveryRefreshSchema>;
+    value: { updated: number; failed: number };
+  };
   "tieba.discovery.snapshot": {
     args: undefined;
     value: TiebaDiscoverySnapshot;
@@ -176,14 +291,31 @@ export interface TiebaResourceDiscoveryContract {
     value: TiebaDiscoverySnapshot;
   };
   "tieba.discovery.potential": {
-    args: z.input<typeof tiebaDiscoveryPotentialPageSchema>;
+    args: z.input<typeof tiebaDiscoveryPotentialFilterSchema>;
     value: TiebaDiscoveryPotentialPage;
+  };
+  "tieba.discovery.pending": {
+    args: z.input<typeof tiebaDiscoveryPotentialPageSchema>;
+    value: TiebaDiscoveryPendingPage;
   };
   "tieba.discovery.traffic": {
     args: z.input<typeof tiebaDiscoveryPotentialPageSchema>;
     value: TiebaDiscoveryTrafficPage;
   };
+  "tieba.discovery.oldTraffic": {
+    args: z.input<typeof tiebaOldTrafficPageSchema>;
+    value: TiebaDiscoveryPostPage<TiebaOldTrafficPost>;
+  };
+  "tieba.discovery.trafficPosts": {
+    args: z.input<typeof tiebaTrafficPostsPageSchema>;
+    value: TiebaDiscoveryPostPage<TiebaTrafficPost>;
+  };
+  "tieba.discovery.deleteOldResource": {
+    args: z.input<typeof tiebaOldResourceDeleteSchema>;
+    value: void;
+  };
   "tieba.discovery.scan": { args: undefined; value: TiebaDiscoverySnapshot };
+  "tieba.discovery.scanOldForum": { args: undefined; value: TiebaDiscoverySnapshot };
   "tieba.discovery.auto": {
     args: { enabled: boolean };
     value: TiebaDiscoverySnapshot;

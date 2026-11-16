@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { SmzdmDetail, SmzdmResourceLink } from "../../shared/smzdm";
 import {
   DriveResourceDialog,
@@ -14,13 +14,26 @@ import {
 } from "../state";
 import { Button, Empty, Field, Notice, Panel, Status } from "../ui/primitives";
 import { Select } from "../ui/Select";
+import { Dialog } from "../ui/Dialog";
 import "./article-resources.css";
 interface ResourceDetail {
-  article: { id: string; stage: string; links: SmzdmResourceLink[] };
+  article: {
+    id: string;
+    revision: number;
+    stage: string;
+    links: SmzdmResourceLink[];
+  };
   resources: SmzdmDetail["resources"];
 }
 export interface ArticleResourceActions<T> {
   sync(id: string): Promise<T>;
+  replace?(
+    id: string,
+    revision: number,
+    linkId: string,
+    shareText: string,
+    code?: string,
+  ): Promise<T>;
   bind(id: string, linkId: string, copyId: string): Promise<T>;
   create(
     id: string,
@@ -42,7 +55,7 @@ export function ArticleResources<T extends ResourceDetail>({
   partialSync?: boolean;
   busy: boolean;
   onBusy(value: boolean): void;
-  beforeAction(): Promise<unknown>;
+  beforeAction(): Promise<T>;
   onChanged(next: T): void;
 }) {
   const { data } = useAppData(),
@@ -57,6 +70,13 @@ export function ArticleResources<T extends ResourceDetail>({
     alive = useRef(true);
   const [viewing, setViewing] = useState<DriveResourceTarget | null>(null);
   const [viewLoading, setViewLoading] = useState("");
+  const replacementForm = useId();
+  const [replacement, setReplacement] = useState<{
+    link: SmzdmResourceLink;
+    number: number;
+    shareText: string;
+    code: string;
+  } | null>(null);
   const viewLink = async (link: SmzdmResourceLink, accountId: string) => {
     if (viewLoading) return;
     setViewLoading(link.id);
@@ -103,18 +123,21 @@ export function ArticleResources<T extends ResourceDetail>({
     (row) => row.status === "ready" && row.copyId,
   ).length;
   const allReady = links.length > 0 && readyCount === links.length;
-  const allReplaced = links.every((link) => !!link.ownUrl);
-  const replacedCount = links.filter((link) => !!link.ownUrl).length;
+  const replacedCount = links.filter(
+    (link) => link.manual || link.ownUrl,
+  ).length;
+  const allReplaced = replacedCount === links.length;
   const canSync = partialSync ? readyCount > 0 : allReady;
-  const run = async (id: string, action: () => Promise<void>) => {
+  const compact = !!actions.replace;
+  const run = async (id: string, action: (current: T) => Promise<void>) => {
     if (lock.current || busy) return;
     lock.current = true;
     onBusy(true);
     setPending(id);
     setError("");
     try {
-      await beforeAction();
-      await action();
+      const current = await beforeAction();
+      await action(current);
     } catch (cause) {
       if (alive.current)
         setError(
@@ -129,6 +152,7 @@ export function ArticleResources<T extends ResourceDetail>({
   return (
     <Panel
       title="正文网盘链接"
+      className={compact ? "article-resources-compact" : undefined}
       extra={
         canSync ? (
           <Button
@@ -152,7 +176,7 @@ export function ArticleResources<T extends ResourceDetail>({
         ) : undefined
       }
     >
-      {error ? (
+      {error && !replacement ? (
         <Notice danger>
           <span role="alert">{error}</span>
         </Notice>
@@ -160,13 +184,15 @@ export function ArticleResources<T extends ResourceDetail>({
       {links.length ? (
         <>
           <p className="article-resource-progress muted">
-            {allReplaced && allReady
-              ? "正文已使用你的网盘链接。"
-              : partialSync && !allReady
-                ? `已替换 ${replacedCount} / ${links.length} 条。可先替换已就绪的链接。`
-                : allReady
-                  ? "副本已就绪，可以替换正文链接。"
-                  : `已备好 ${readyCount} / ${links.length} 个副本。全部就绪后即可替换正文链接。`}
+            {compact
+              ? `已替换 ${replacedCount} / ${links.length} 条${readyCount && !allReplaced ? " · 可同步已就绪的本人链接" : ""}`
+              : allReplaced && allReady
+                ? "正文已使用你的网盘链接。"
+                : partialSync && !allReady
+                  ? `已替换 ${replacedCount} / ${links.length} 条。可先替换已就绪的链接。`
+                  : allReady
+                    ? "副本已就绪，可以替换正文链接。"
+                    : `已备好 ${readyCount} / ${links.length} 个副本。全部就绪后即可替换正文链接。`}
           </p>
           <div className="article-resource-list">
             {links.map((link, i) => {
@@ -182,7 +208,7 @@ export function ArticleResources<T extends ResourceDetail>({
               const accountId = target?.id ?? "";
               const linked = !!link.copyId && row.status !== "missing";
               const ready = linked && row.status === "ready";
-              const replaced = ready && !!link.ownUrl;
+              const replaced = !!link.manual || (ready && !!link.ownUrl);
               const candidate =
                 row.candidates.find((c) => c.copyId === selected[link.id]) ??
                 row.candidates[0];
@@ -248,23 +274,24 @@ export function ArticleResources<T extends ResourceDetail>({
                   )}
                 </div>
               );
-              return (
-                <article className="article-resource-row" key={link.id}>
-                  <div>
-                    <div className="article-resource-title">
-                      <strong>
-                        资源 {i + 1} · {providers[link.provider]}
-                      </strong>
-                      <Status
-                        kind={
-                          replaced
-                            ? "good"
-                            : ready || linked
-                              ? "normal"
-                              : "warning"
-                        }
-                      >
-                        {replaced
+              const info = (
+                <div className="article-resource-info">
+                  <div className="article-resource-title">
+                    <strong>
+                      资源 {i + 1} · {providers[link.provider]}
+                    </strong>
+                    <Status
+                      kind={
+                        replaced
+                          ? "good"
+                          : ready || linked
+                            ? "normal"
+                            : "warning"
+                      }
+                    >
+                      {link.manual
+                        ? "已手动替换"
+                        : replaced
                           ? "已替换"
                           : ready
                             ? "待替换"
@@ -273,102 +300,160 @@ export function ArticleResources<T extends ResourceDetail>({
                               : canReuse
                                 ? "有现成副本"
                                 : "待入库"}
-                      </Status>
-                    </div>
-                    {linked ? (
-                      <small>
-                        {row.title}
-                        {!ready ? ` · ${row.message}` : ""}
-                      </small>
-                    ) : null}
-                    {replaced ? (
-                      <small className="article-own-url">{link.ownUrl}</small>
-                    ) : null}
-                    {linked ? (
-                      <details className="article-resource-source">
-                        <summary>原网盘链接</summary>
-                        <code>{link.sourceText}</code>
-                      </details>
-                    ) : (
-                      <small className="article-resource-link">
-                        {link.url}
-                      </small>
-                    )}
+                    </Status>
                   </div>
-                  <div className="article-resource-controls">
-                    <Button
-                      disabled={
-                        busy ||
-                        !!pending ||
-                        !!viewLoading ||
-                        (!linked && !accountId)
-                      }
-                      onClick={() => void viewLink(link, accountId)}
-                    >
-                      {viewLoading === link.id ? "正在读取…" : "查看网盘资源"}
-                    </Button>
-                    {canReuse ? (
-                      <>
-                        {row.candidates.length > 1 ? (
-                          <Field label={`资源 ${i + 1} 已有副本`}>
-                            <Select
-                              value={candidate.copyId}
-                              disabled={busy || !!pending || !editable}
-                              onValueChange={(v) =>
-                                setSelected({ ...selected, [link.id]: v })
-                              }
-                              items={row.candidates.map((c) => ({
-                                value: c.copyId,
-                                label: `${c.title} · ${c.account}`,
-                              }))}
-                            />
-                          </Field>
-                        ) : (
-                          <small className="article-resource-target">
-                            {candidate.title} · {candidate.account}
-                          </small>
-                        )}
-                        <Button
-                          primary
-                          disabled={busy || !!pending || !editable}
-                          onClick={() =>
-                            void run(link.id, async () => {
-                              const next = await actions.bind(
-                                detail.article.id,
-                                link.id,
-                                candidate.copyId,
-                              );
-                              if (alive.current) onChanged(next);
-                            })
-                          }
-                        >
-                          关联已有副本
-                        </Button>
-                      </>
-                    ) : null}
-                    {!linked ? (
-                      canReuse ? (
-                        <details className="article-resource-alternative">
-                          <summary>改用新副本</summary>
-                          {newResource}
-                        </details>
+                  {linked ? (
+                    <small>
+                      {row.title}
+                      {!ready ? ` · ${row.message}` : ""}
+                    </small>
+                  ) : null}
+                  {replaced && !compact ? (
+                    <small className="article-own-url">{link.ownUrl}</small>
+                  ) : null}
+                  {linked && !compact ? (
+                    <details className="article-resource-source">
+                      <summary>原网盘链接</summary>
+                      <code>{link.sourceText}</code>
+                    </details>
+                  ) : (
+                    <small className="article-resource-link">
+                      {link.ownUrl ?? link.url}
+                      {link.manual && link.code ? ` · 提取码 ${link.code}` : ""}
+                    </small>
+                  )}
+                </div>
+              );
+              const viewButton = (
+                <Button
+                  size={compact ? "compact" : "default"}
+                  quiet={compact}
+                  disabled={
+                    busy ||
+                    !!pending ||
+                    !!viewLoading ||
+                    (!linked && !accountId)
+                  }
+                  onClick={() => void viewLink(link, accountId)}
+                >
+                  {viewLoading === link.id
+                    ? "正在读取…"
+                    : compact
+                      ? "查看资源"
+                      : "查看网盘资源"}
+                </Button>
+              );
+              const controls = (
+                <div className="article-resource-controls">
+                  {!compact ? viewButton : null}
+                  {canReuse ? (
+                    <>
+                      {row.candidates.length > 1 ? (
+                        <Field label={`资源 ${i + 1} 已有副本`}>
+                          <Select
+                            value={candidate.copyId}
+                            disabled={busy || !!pending || !editable}
+                            onValueChange={(v) =>
+                              setSelected({ ...selected, [link.id]: v })
+                            }
+                            items={row.candidates.map((c) => ({
+                              value: c.copyId,
+                              label: `${c.title} · ${c.account}`,
+                            }))}
+                          />
+                        </Field>
                       ) : (
-                        newResource
-                      )
-                    ) : !ready ? (
+                        <small className="article-resource-target">
+                          {candidate.title} · {candidate.account}
+                        </small>
+                      )}
                       <Button
+                        primary
                         disabled={busy || !!pending || !editable}
                         onClick={() =>
                           void run(link.id, async () => {
-                            if (alive.current)
-                              edit(link.resourceId!, link.copyId!);
+                            const next = await actions.bind(
+                              detail.article.id,
+                              link.id,
+                              candidate.copyId,
+                            );
+                            if (alive.current) onChanged(next);
                           })
                         }
                       >
-                        继续资源归档
+                        关联已有副本
                       </Button>
-                    ) : null}
-                  </div>
+                    </>
+                  ) : null}
+                  {!linked ? (
+                    canReuse ? (
+                      <details className="article-resource-alternative">
+                        <summary>改用新副本</summary>
+                        {newResource}
+                      </details>
+                    ) : (
+                      newResource
+                    )
+                  ) : !ready ? (
+                    <Button
+                      disabled={busy || !!pending || !editable}
+                      onClick={() =>
+                        void run(link.id, async () => {
+                          if (alive.current)
+                            edit(link.resourceId!, link.copyId!);
+                        })
+                      }
+                    >
+                      继续资源归档
+                    </Button>
+                  ) : null}
+                </div>
+              );
+              return (
+                <article className="article-resource-row" key={link.id}>
+                  {compact ? (
+                    <>
+                      <div className="article-resource-line">
+                        {info}
+                        <div className="article-resource-actions">
+                          {viewButton}
+                          <Button
+                            size="compact"
+                            disabled={busy || !!pending || !editable}
+                            onClick={() => {
+                              setError("");
+                              setReplacement({
+                                link,
+                                number: i + 1,
+                                shareText: link.manual ? link.url : "",
+                                code: link.manual ? link.code : "",
+                              });
+                            }}
+                          >
+                            手动替换
+                          </Button>
+                        </div>
+                      </div>
+                      {!link.manual ? (
+                        <details className="article-resource-management">
+                          <summary>
+                            {ready
+                              ? "原网盘链接"
+                              : linked
+                                ? "归档操作"
+                                : "入库与关联"}
+                          </summary>
+                          {linked ? <code>{link.sourceText}</code> : null}
+                          {!ready ? controls : null}
+                        </details>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      {info}
+                      {controls}
+                    </>
+                  )}
                 </article>
               );
             })}
@@ -384,6 +469,108 @@ export function ArticleResources<T extends ResourceDetail>({
           target={viewing}
           onClose={() => setViewing(null)}
         />
+      ) : null}
+      {replacement && actions.replace ? (
+        <Dialog
+          title={`手动替换资源 ${replacement.number}`}
+          busy={!!pending}
+          onClose={() => {
+            setReplacement(null);
+            setError("");
+          }}
+          footer={
+            <>
+              <Button
+                disabled={!!pending}
+                onClick={() => {
+                  setReplacement(null);
+                  setError("");
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                primary
+                type="submit"
+                form={replacementForm}
+                disabled={
+                  busy ||
+                  !!pending ||
+                  !editable ||
+                  !replacement.shareText.trim()
+                }
+              >
+                {pending ? "正在替换…" : "替换正文链接"}
+              </Button>
+            </>
+          }
+        >
+          <p className="article-resource-link">
+            当前链接：{replacement.link.ownUrl ?? replacement.link.url}
+          </p>
+          <form
+            id={replacementForm}
+            className="article-resource-replace"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!replacement.shareText.trim() || !editable) return;
+              void run(replacement.link.id, async (current) => {
+                const link = current.article.links.find(
+                  ({ id }) => id === replacement.link.id,
+                );
+                if (
+                  !link ||
+                  link.url !== replacement.link.url ||
+                  link.ownUrl !== replacement.link.ownUrl ||
+                  link.code !== replacement.link.code
+                )
+                  throw new Error("这条正文链接已变化，请关闭后重新选择。");
+                const next = await actions.replace!(
+                  current.article.id,
+                  current.article.revision,
+                  link.id,
+                  replacement.shareText,
+                  replacement.code,
+                );
+                if (alive.current) {
+                  onChanged(next);
+                  setReplacement(null);
+                  notify("正文网盘链接已替换。", "success");
+                }
+              });
+            }}
+          >
+            <Field label="新分享链接">
+              <input
+                value={replacement.shareText}
+                maxLength={4000}
+                disabled={!!pending}
+                placeholder="粘贴网盘链接或分享文本"
+                onChange={(event) =>
+                  setReplacement({
+                    ...replacement,
+                    shareText: event.target.value,
+                  })
+                }
+              />
+            </Field>
+            <Field label="提取码" hint="可选，留空从分享文本读取">
+              <input
+                value={replacement.code}
+                maxLength={8}
+                disabled={!!pending}
+                onChange={(event) =>
+                  setReplacement({ ...replacement, code: event.target.value })
+                }
+              />
+            </Field>
+          </form>
+          {error ? (
+            <Notice danger>
+              <span role="alert">{error}</span>
+            </Notice>
+          ) : null}
+        </Dialog>
       ) : null}
     </Panel>
   );

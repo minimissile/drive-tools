@@ -47,6 +47,7 @@ export interface HandlerServices {
   tiebaPublishing: import("../tieba-publishing/service").TiebaPublishing;
   tiebaPostStats: import("../tieba-post-stats/service").TiebaPostStats;
   tiebaResourceDiscovery: import("../tieba-resource-discovery/service").TiebaResourceDiscovery;
+  tiebaForumCache: import("../tieba/forum-cache").TiebaForumCache;
   zhihuAutocare: import("../zhihu-autocare/service").ZhihuAutocare;
   contentSupply: import("../content-supply/service").ContentSupply;
   intelligentOps: import("../intelligent-operations/service").IntelligentOperations;

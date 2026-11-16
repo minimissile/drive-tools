@@ -6,3 +6,45 @@
 .pagination[data-single-page] {
   justify-content: flex-end;
 }
+
+.pagination[data-numbered] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pagination-actions,
+.pagination-jump {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pagination-number {
+  min-width: var(--control-compact-height);
+  padding-inline: 6px;
+}
+
+.pagination-number[aria-current="page"] {
+  color: var(--blue);
+  background: var(--blue-bg);
+  border-color: var(--blue);
+}
+
+.pagination-gap {
+  min-width: 16px;
+  text-align: center;
+}
+
+.pagination-jump {
+  margin-inline-start: 4px;
+}
+
+.pagination-jump input {
+  width: 68px;
+  height: var(--control-compact-height);
+  padding: 4px 6px;
+}

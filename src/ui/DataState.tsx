@@ -103,6 +103,7 @@ export function LoadingState({
         role="status"
         aria-live="polite"
         aria-atomic="true"
+        data-compact={compact || undefined}
         data-fill={fill || undefined}
       >
         <Loading label={label} announce={false} />

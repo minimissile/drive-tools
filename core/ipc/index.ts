@@ -7,7 +7,7 @@ import { createTiebaTopicsHandlers } from "./tieba-topics";
 import { createTiebaInsightsHandlers } from "./tieba-insights";
 import { createTiebaPublishingHandlers } from "./tieba-publishing";
 import { createTiebaPostStatsHandlers } from "./tieba-post-stats";
-import { createTiebaAnalysisHandlers } from "./tieba-analysis";
+import { createTiebaAnalysisHandlers, createTiebaForumCacheHandlers } from "./tieba-analysis";
 import { createTiebaResourceDiscoveryHandlers } from "./tieba-resource-discovery";
 import { createPhotoPostHandlers } from "./photo-posts";
 import { createResourceCatalogHandlers } from "./resource-catalog";
@@ -70,6 +70,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createTiebaPublishingHandlers(services),
     createTiebaPostStatsHandlers(services),
     createTiebaAnalysisHandlers(),
+    createTiebaForumCacheHandlers(services),
     createTiebaResourceDiscoveryHandlers(services),
     createTiebaParticipationHandlers(services),
     createTiebaAutocareHandlers(services),

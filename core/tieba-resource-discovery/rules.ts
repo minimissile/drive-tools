@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+  tiebaForumExposureHours,
+  tiebaForumExposureSampleLimit,
+  tiebaPostExposure,
+} from "../../shared/tieba-analysis";
 import type {
   TiebaDiscoveryEvidence,
   TiebaDiscoveryGrowth,
@@ -6,7 +11,7 @@ import type {
   TiebaDiscoveryPotentialEvidence,
   TiebaDiscoveryRules,
 } from "../../shared/tieba-resource-discovery";
-import { defaultTiebaDiscoveryRules } from "../../shared/tieba-resource-discovery";
+import { defaultTiebaDiscoveryRules, oldTrafficMinimumAgeDays, pendingObservationMultiplier, recentGrowthMaxReadingHours } from "../../shared/tieba-resource-discovery";
 import { tiebaBodyDriveLinks } from "../tieba-post-stats/links";
 
 const hour = 60 * 60 * 1000;
@@ -14,6 +19,7 @@ export const discoveryInterval = hour;
 export const trafficLookback = 30 * 24 * hour;
 export const minReadingGap = hour / 2;
 const maxReadingGap = 3 * hour;
+const recentGrowthMaxReadingGap = recentGrowthMaxReadingHours * hour;
 const provider =
   /网盘|云盘|百度盘|夸克盘|阿里盘|迅雷盘|115盘|pan\.baidu\.com|pan\.quark\.cn/iu;
 const sharing = /分享|合集|整理|完整版|全集|高清|下载|资源|打包|附链|自取/iu;
@@ -63,10 +69,11 @@ export function observeViews(
   previous: ViewState,
   at: number,
   views: number | null,
+  maxGap = maxReadingGap,
 ): ViewState {
   if (views === null) return { baseline: null, growth: null, streak: 0 };
   const baseline = previous.baseline;
-  if (!baseline || views < baseline.views || at - baseline.at > maxReadingGap)
+  if (!baseline || views < baseline.views || at - baseline.at > maxGap)
     return { baseline: { at, views }, growth: null, streak: 0 };
   const span = at - baseline.at;
   if (span < minReadingGap) return previous;
@@ -130,43 +137,26 @@ type PublicReading = {
 
 function viewVelocity(post: PublicReading, at: number, lookback: number) {
   const age = at - Date.parse(post.publishedAt ?? "");
-  if (post.views === null || !(age >= 0 && age <= lookback)) return null;
+  if (!(age >= 0 && age <= lookback)) return null;
+  const speed = tiebaPostExposure(post.views, post.publishedAt, at);
+  if (speed === null) return null;
   return {
-    key: cohortKey(post.forum, age),
-    speed: (post.views * hour) / Math.max(minReadingGap, age),
+    age,
+    speed,
   };
-}
-
-function velocityRank(speed: number, peers: readonly number[]) {
-  const sample = peers.length;
-  const place = peers.filter((peer) => peer >= speed).length;
-  return {
-    place,
-    sample,
-    score: Math.floor((100 * (sample - place)) / (sample - 1)),
-  };
-}
-
-export function publicPostPotential(
-  post: PublicReading,
-  peers: readonly PublicReading[],
-  at: number,
-  lookback = 48 * hour,
-) {
-  const current = viewVelocity(post, at, lookback);
-  if (!current) return null;
-  const speeds = [current.speed];
-  for (const peer of peers) {
-    if (peer.id === post.id) continue;
-    const reading = viewVelocity(peer, at, lookback);
-    if (reading?.key === current.key) speeds.push(reading.speed);
-  }
-  return speeds.length >= 4 ? velocityRank(current.speed, speeds) : null;
 }
 
 export function forumExposure(posts: readonly PublicReading[], at: number) {
-  const speeds = posts
-    .flatMap((post) => viewVelocity(post, at, 48 * hour)?.speed ?? [])
+  const eligible = new Map<string, { age: number; speed: number }>();
+  for (const post of posts) {
+    if (eligible.has(post.id)) continue;
+    const reading = viewVelocity(post, at, tiebaForumExposureHours * hour);
+    if (reading) eligible.set(post.id, reading);
+  }
+  const speeds = [...eligible.values()]
+    .sort((a, b) => a.age - b.age)
+    .slice(0, tiebaForumExposureSampleLimit)
+    .map(({ speed }) => speed)
     .sort((a, b) => a - b);
   if (speeds.length < 4) return null;
   const center = Math.floor(speeds.length / 2);
@@ -177,59 +167,114 @@ export function forumExposure(posts: readonly PublicReading[], at: number) {
   return { hourly, sample: speeds.length, observedAt: at };
 }
 
+type PotentialReading = Pick<TiebaDiscoveryMetrics, "views"> & {
+  publishedAt: string;
+  checkedAt: number;
+};
+
+export function pendingObservationDueAt(
+  post: Pick<PotentialReading, "publishedAt">,
+  rules: TiebaDiscoveryRules,
+) {
+  return Date.parse(post.publishedAt) + rules.pendingObservationHours * hour;
+}
+
+export function awaitsMaturePotentialReading(
+  post: Pick<PotentialReading, "publishedAt" | "checkedAt">,
+  rules: TiebaDiscoveryRules,
+) {
+  return post.checkedAt < pendingObservationDueAt(post, rules);
+}
+
+export function qualifyingHourlyViews(
+  post: PotentialReading,
+  now: number,
+  rules: TiebaDiscoveryRules,
+) {
+  const age = now - Date.parse(post.publishedAt);
+  if (
+    !(age >= 0 && age <= rules.lookbackHours * hour) ||
+    post.checkedAt > now ||
+    post.views === null ||
+    post.views >= rules.trafficThreshold
+  )
+    return null;
+  const hourly = tiebaPostExposure(post.views, post.publishedAt, post.checkedAt);
+  return hourly !== null && hourly >= rules.minHourlyViews ? hourly : null;
+}
+
+export function inRecentGrowthWindow(
+  post: Pick<PotentialReading, "publishedAt">,
+  at: number,
+  rules: TiebaDiscoveryRules,
+) {
+  const age = at - Date.parse(post.publishedAt);
+  return age > rules.lookbackHours * hour && age < oldTrafficMinimumAgeDays * 24 * hour;
+}
+
+export function observePostViews(
+  post: Pick<PotentialReading, "publishedAt"> & ViewState,
+  at: number,
+  views: number,
+  rules: TiebaDiscoveryRules,
+) {
+  return observeViews(post, at, views,
+    inRecentGrowthWindow(post, at, rules) ? recentGrowthMaxReadingGap : maxReadingGap);
+}
+
 export function potentialSignals<
-  T extends TiebaDiscoveryMetrics & {
+  T extends TiebaDiscoveryMetrics & PotentialReading & {
     id: string;
     keys: string[];
     forum: string;
-    publishedAt: string;
+    growth?: TiebaDiscoveryGrowth | null;
   },
 >(
   posts: readonly T[],
   at: number,
   rules: TiebaDiscoveryRules = defaultTiebaDiscoveryRules,
 ) {
-  const groups = new Map<string, (T & { views: number; velocity: number })[]>();
-  const lookback = rules.lookbackHours * hour;
+  type Stage = "pending" | "potential";
+  const groups = new Map<string, (T & { hourlyViews: number; stage: Stage; recentGrowth?: TiebaDiscoveryGrowth })[]>();
   for (const post of posts) {
-    const reading = viewVelocity(post, at, lookback);
-    if (post.views === null || post.views >= rules.trafficThreshold || !reading)
+    const growth = post.growth;
+    const recentGrowth = inRecentGrowthWindow(post, post.checkedAt, rules) &&
+      post.views !== null && post.views < rules.trafficThreshold &&
+      growth && growth.to === post.checkedAt && growth.to <= at &&
+      growth.to - growth.from >= minReadingGap && growth.to - growth.from <= recentGrowthMaxReadingGap &&
+      growth.hourly * 24 >= rules.recentGrowthMinDailyViews ? growth : undefined;
+    const hourlyViews = recentGrowth?.hourly ?? qualifyingHourlyViews(post, at, rules);
+    if (hourlyViews === null) continue;
+    const stage = post.checkedAt < pendingObservationDueAt(post, rules)
+      ? "pending" : "potential";
+    if (stage === "pending" && hourlyViews < rules.minHourlyViews * pendingObservationMultiplier)
       continue;
-    const key = reading.key;
+    const key = recentGrowth
+      ? `growth:${post.id}`
+      : `${stage}:${cohortKey(post.forum, at - Date.parse(post.publishedAt))}`;
     const cohort = groups.get(key) ?? [];
-    cohort.push({
-      ...post,
-      views: post.views,
-      velocity: reading.speed,
-    });
+    cohort.push({ ...post, hourlyViews, stage, recentGrowth });
     groups.set(key, cohort);
   }
 
-  const selected = new Map<string, TiebaDiscoveryPotentialEvidence>();
+  const selected = new Map<string, TiebaDiscoveryPotentialEvidence & {
+    stage: Stage;
+  }>();
   for (const cohort of groups.values()) {
-    const peers = groupResources(cohort).map(
-      (copies) =>
-        copies.sort(
-          (a, b) => b.velocity - a.velocity || a.id.localeCompare(b.id),
-        )[0],
-    );
-    const sample = peers.length;
-    if (sample < 4) continue;
-    const speeds = peers.map((peer) => peer.velocity);
-    for (const post of peers) {
-      const { place, score } = velocityRank(post.velocity, speeds);
-      if (post.views < 10 || score < rules.potentialThreshold) continue;
-      const { views, replies, likes, shares } = post;
+    for (const copies of groupResources(cohort)) {
+      const [post] = copies.sort(
+        (a, b) => b.hourlyViews - a.hourlyViews || a.id.localeCompare(b.id),
+      );
+      const { checkedAt, hourlyViews, views, replies, likes, shares, stage, recentGrowth } = post;
       selected.set(post.id, {
-        at,
-        score,
+        at: checkedAt,
+        hourlyViews,
         views,
         replies,
         likes,
         shares,
-        comparedInteractions: false,
-        rank: { place, sample },
-        viewRank: { place, sample },
+        stage,
+        ...(recentGrowth ? { recentGrowth } : {}),
       });
     }
   }
@@ -246,7 +291,8 @@ export function resourceRanks<
 >(posts: readonly T[], now: number, lookback: number) {
   const groups = new Map<string, (T & { growth: TiebaDiscoveryGrowth })[]>();
   for (const post of posts) {
-    if (!post.growth || now - post.growth.to > 2 * hour) continue;
+    if (!post.growth || now - post.growth.to > 2 * hour ||
+        post.growth.to - post.growth.from > maxReadingGap) continue;
     const age = post.growth.to - Date.parse(post.publishedAt);
     if (age < 0 || age > lookback) continue;
     const key = cohortKey(post.forum, age);

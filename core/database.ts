@@ -10,6 +10,10 @@ import { migrateTiebaAutomation } from "./tieba-automation/migration";
 import { migrateTiebaTopics } from "./tieba-topics/migration";
 import { migrateTiebaInsights } from "./tieba-insights/migration";
 import { migrateTiebaDiscoveryArchive, migrateTiebaTrafficArchive } from "./tieba-resource-discovery/archive";
+import { compactTiebaDiscoveryPaths } from "./tieba-resource-discovery/migration";
+import { migrateTiebaOldTraffic } from "./tieba-resource-discovery/old-traffic";
+import { migrateTiebaOldResources, migrateTiebaOldResourceAdmission } from "./tieba-resource-discovery/old-resource";
+import { migrateTiebaForumCache } from "./tieba/forum-cache";
 import {
   migrateTrafficCurrentEntries,
   migrateTrafficKnowledge,
@@ -18,7 +22,7 @@ import {
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 37;
+export const databaseSchemaVersion = 42;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -86,6 +90,65 @@ export class Database {
     if (version > databaseSchemaVersion)
       throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 41) {
+      this.transaction(() => {
+        migrateTiebaForumCache(this.db);
+        this.db.exec("PRAGMA user_version=42;");
+      });
+      return;
+    }
+    if (version === 40) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v41-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaOldResourceAdmission(this.db);
+        this.db.exec("PRAGMA user_version=41;");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 39) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v40-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaOldResources(this.db);
+        this.db.exec("PRAGMA user_version=40;");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 38) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v39-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        migrateTiebaOldTraffic(this.db);
+        this.db.exec("PRAGMA user_version=39;");
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 37) {
+      if (backupExisting && this.path !== ":memory:") {
+        const backup = `${this.path}.before-v38-${randomUUID()}.bak`;
+        this.db.prepare("VACUUM INTO ?").run(backup);
+        chmodSync(backup, 0o600);
+      }
+      this.transaction(() => {
+        compactTiebaDiscoveryPaths(this.db);
+        this.db.exec("PRAGMA user_version=38;");
+      });
+      this.migrate(false);
+      return;
+    }
     if (version === 36) {
       if (backupExisting && this.path !== ":memory:") {
         const backup = `${this.path}.before-v37-${randomUUID()}.bak`;
@@ -96,6 +159,7 @@ export class Database {
         migrateTiebaTrafficArchive(this.db);
         this.db.exec("PRAGMA user_version=37;");
       });
+      this.migrate(false);
       return;
     }
     if (version === 35) {

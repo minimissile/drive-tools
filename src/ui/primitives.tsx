@@ -94,23 +94,32 @@ export function Field({
   hint,
   children,
   required,
+  htmlFor,
   as: Element = "label",
 }: {
   label: string;
   hint?: string;
   children: ReactNode;
   required?: boolean;
+  htmlFor?: string;
   as?: "label" | "div";
 }) {
   const labelId = useId();
+  const LabelText = Element === "div" && htmlFor ? "label" : "span";
   return (
     <FieldLabelContext value={labelId}>
-      <Element className="field">
+      <Element
+        className="field"
+        htmlFor={Element === "label" ? htmlFor : undefined}
+      >
         <span>
-          <span id={labelId}>
+          <LabelText
+            id={labelId}
+            htmlFor={LabelText === "label" ? htmlFor : undefined}
+          >
             {label}
             {required ? <em className="required"> *</em> : null}
-          </span>
+          </LabelText>
           {hint ? <small>{hint}</small> : null}
         </span>
         {children}

@@ -6,12 +6,14 @@ import {
   queryTiebaAnalysisFollowedForums,
   queryTiebaAnalysisForumPosts,
   queryTiebaAnalysisWithContext,
+  readTiebaOldResource,
 } from "../core/tieba/analysis";
 import {
   encodeTiebaFields,
   tiebaFields,
 } from "../core/tieba/analysis-protobuf";
 import { forumPerformanceRows } from "../src/tieba/forum-performance";
+import { tiebaPostExposure } from "../shared/tieba-analysis";
 
 const uid = "9007199254740999";
 const tid = "9007199254740997";
@@ -25,7 +27,48 @@ async function requestPayload(init?: RequestInit) {
   );
 }
 
-test("用户查询用公开资料和同吧同期样本补充吧龄、VIP、吧内等级及曝光潜力", async () => {
+test("老帖扫描接受贴吧标记仍有下一页的空页", async () => {
+  const send = async () => response(encode([
+    [2, encode([[1, 3n], [2, Buffer.from("热门")]])],
+    [4, encode([[3, 34n], [6, 1n]])],
+  ]));
+  const page = await queryTiebaAnalysisForumPosts({ name: "热门", page: 34 }, send, "old");
+  assert.equal(page.hasMore, true);
+  assert.deepEqual(page.threads, []);
+  await assert.rejects(queryTiebaAnalysisForumPosts({ name: "热门", page: 34 }, send));
+});
+
+test("老帖资源检查从正文、回复和楼中楼区分链接与关键词", async () => {
+  const text = (value: string) => encode([[2, Buffer.from(value)]]);
+  const link = (value: string) => encode([[3, Buffer.from(value)]]);
+  const result = await readTiebaOldResource(tid, async (_, init) => {
+    const request = await requestPayload(init);
+    assert.equal(request.integer(13), 21n);
+    assert.equal(request.integer(6), 1n);
+    assert.equal(request.integer(8), 1n);
+    return response(encode([
+      [8, encode([[1, BigInt(tid)], [3, Buffer.from("求资源链接")]])],
+      [6, encode([[3, 1n], [5, text("百度 网盘")], [5, link("https://pan.baidu.com/s/1demo")]])],
+      [6, encode([
+        [3, 2n],
+        [4, 1n],
+        [5, link("https://example.org/s/unrelated")],
+        [15, encode([[2, encode([[2, text("夸克")], [2, link("https://pan.quark.cn/s/demo")], [3, 30n]])]])],
+      ])],
+      ...Array.from({ length: 19 }, (_, index) => [6, encode([
+        [3, BigInt(index + 3)], [4, BigInt(index + 2)], [5, text("谢谢分享")],
+      ])] as const),
+      [6, encode([[3, 30n], [4, 1n], [5, text("提取码")]])],
+      [37, 12n],
+    ]));
+  });
+  assert.deepEqual(result, {
+    linkSources: ["正文", "回复"],
+    keywords: ["网盘", "资源", "链接", "百度", "夸克"],
+  });
+});
+
+test("用户查询用公开资料和吧内公开帖子补充吧龄、VIP、吧内等级及贴吧曝光潜力", async () => {
   const when = BigInt(Math.floor(Date.now() / 1000) - 3600);
   const name = Buffer.from("网盘资源");
   const fid = 201n;
@@ -102,13 +145,18 @@ test("用户查询用公开资料和同吧同期样本补充吧龄、VIP、吧�
   assert.equal(result.ageYears, 2.8);
   assert.equal(result.vip, true);
   assert.equal(result.threads[0].forumLevel, 7);
-  assert.deepEqual(result.threads[0].potential, {
-    score: 100,
-    sample: 4,
-    place: 1,
-  });
   assert.equal(result.forums?.[0].exposure?.sample, 4);
   assert(Math.abs((result.forums?.[0].exposure?.hourly ?? 0) - 12.5) < 0.01);
+});
+
+test("单帖曝光潜力可计算历史帖子，保留零值并识别缺失或异常时间", () => {
+  const at = Date.parse("2026-11-12T03:00:00Z");
+  assert.equal(tiebaPostExposure(720, "2026-10-13T03:00:00Z", at), 1);
+  assert.equal(tiebaPostExposure(10, "2026-11-12T02:45:00Z", at), 20);
+  assert.equal(tiebaPostExposure(0, "2026-10-13T03:00:00Z", at), 0);
+  assert.equal(tiebaPostExposure(null, "2026-10-13T03:00:00Z", at), null);
+  assert.equal(tiebaPostExposure(30, null, at), null);
+  assert.equal(tiebaPostExposure(30, "2026-11-12T03:01:00Z", at), null);
 });
 
 test("公开主题链接解析楼主，保留长 ID 和浏览量字段是否存在", async () => {
@@ -174,12 +222,14 @@ test("公开主题链接解析楼主，保留长 ID 和浏览量字段是否存�
 test("按贴吧查询使用实际页号，保留明确的零值和未返回的指标", async () => {
   const query = (name: string, current: bigint) =>
     queryTiebaAnalysisForumPosts(
-      { name: "网盘资源", page: 2 },
+      { name: "网盘资源", page: 2, list: "replied", pageSize: 10 },
       async (url, init) => {
         assert.equal(new URL(String(url)).pathname, "/c/f/frs/page");
         const request = await requestPayload(init);
         assert.equal(request.string(1), "网盘资源");
         assert.equal(request.integer(15), 2n);
+        assert.equal(request.integer(2), 10n);
+        assert.equal(request.integer(47), 6n);
         const post = (id: bigint, metrics: boolean) =>
           encode([
             [1, id],
@@ -194,12 +244,15 @@ test("按贴吧查询使用实际页号，保留明确的零值和未返回的�
               encode([
                 [1, 1114324n],
                 [2, Buffer.from(name)],
+                [9, 70870n],
+                [11, 2128159n],
               ]),
             ],
             [
               4,
               encode([
                 [3, current],
+                [5, 500n],
                 [6, 1n],
               ]),
             ],
@@ -219,6 +272,9 @@ test("按贴吧查询使用实际页号，保留明确的零值和未返回的�
   const page = await query("网盘资源", 2n);
   assert.equal(page.hasMore, true);
   assert.equal(page.page, 2);
+  assert.equal(page.totalPages, 500);
+  assert.equal(page.followers, 70870);
+  assert.equal(page.posts, 2128159);
   assert.equal(page.threads[0]?.author, "作者");
   assert.deepEqual(
     page.threads.map(({ views, shares }) => [views, shares]),

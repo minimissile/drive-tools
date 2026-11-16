@@ -25,6 +25,26 @@ export function createWechatHandlers({
   return {
     "wechat.list": () => wechat.list(),
     "wechat.get": (raw) => wechat.get(article.parse(raw).id),
+    "wechat.delete": (raw) => {
+      const input = version.parse(raw);
+      return wechat.deleteDraft(input.id, input.revision);
+    },
+    "wechat.replaceLink": (raw) => {
+      const input = version
+        .extend({
+          linkId: identifier,
+          shareText: z.string().trim().min(1).max(4000),
+          code: z.string().trim().max(8).optional(),
+        })
+        .parse(raw);
+      return wechat.replaceLink(
+        input.id,
+        input.revision,
+        input.linkId,
+        input.shareText,
+        input.code,
+      );
+    },
     "wechat.newEdition": (raw) => {
       const input = version
         .extend({ requestId: z.uuid(), text: wechatTextInput.optional() })

@@ -3,11 +3,12 @@ import { ArrowUpRight } from "lucide-react";
 import type { TiebaAnalysisFollowedPage } from "../../shared/tieba-analysis";
 import { ipc } from "../api/client";
 import { useAppActions } from "../state";
-import { Pagination } from "../ui/Pagination";
 import { QueryError } from "../ui/QueryError";
 import { Button, Empty, Loading, LoadingState } from "../ui/primitives";
+import { AnalysisPages } from "./AnalysisPages";
+import { formatAnalysisCount } from "./AnalysisThreadsTable";
 
-const displaySize = 12;
+const displaySize = 10;
 type PublicPage = Extract<TiebaAnalysisFollowedPage, { visibility: "public" }>;
 
 export function FollowedForums({ uid }: { uid: string }) {
@@ -77,7 +78,7 @@ export function FollowedForums({ uid }: { uid: string }) {
         onRetry={() => load(request.page)}
       />
       {!result && loading ? (
-        <LoadingState label="正在读取关注贴吧…" compact />
+        <LoadingState label="正在读取关注贴吧…" layout="list" compact />
       ) : null}
       {result?.visibility === "public" ? (
         <>
@@ -97,7 +98,14 @@ export function FollowedForums({ uid }: { uid: string }) {
             ) : null}
           </div>
           {result.forums.length ? (
-            <>
+            <AnalysisPages
+              page={displayPage}
+              pageSize={displaySize}
+              total={result.forums.length}
+              onPageChange={setDisplayPage}
+              label="关注贴吧分页"
+              partial={result.hasMore}
+            >
               <ul className="tieba-followed-forums" aria-label="关注贴吧列表">
                 {result.forums
                   .slice(
@@ -106,31 +114,30 @@ export function FollowedForums({ uid }: { uid: string }) {
                   )
                   .map((forum) => (
                     <li key={forum.id}>
-                      <Button
-                        quiet
-                        size="compact"
-                        className="tieba-analysis-link"
-                        onClick={() =>
-                          void command("system.external", { url: forum.url })
-                        }
-                      >
-                        <span>{forum.name}</span>
-                        <ArrowUpRight size={14} aria-hidden="true" />
-                      </Button>
-                      {forum.level !== null ? (
-                        <small className="muted">{forum.level} 级</small>
-                      ) : null}
+                      <div className="tieba-followed-heading">
+                        <Button
+                          quiet
+                          size="compact"
+                          className="tieba-analysis-link"
+                          onClick={() =>
+                            void command("system.external", { url: forum.url })
+                          }
+                        >
+                          <span>{forum.name}</span>
+                          <ArrowUpRight size={14} aria-hidden="true" />
+                        </Button>
+                        {forum.level !== null ? (
+                          <small className="muted">{forum.level} 级</small>
+                        ) : null}
+                      </div>
+                      <small className="tieba-followed-counts muted">
+                        <span>关注 {formatAnalysisCount(forum.followers)}</span>
+                        <span>帖子 {formatAnalysisCount(forum.posts)}</span>
+                      </small>
                     </li>
                   ))}
               </ul>
-              <Pagination
-                page={displayPage}
-                pageSize={displaySize}
-                total={result.forums.length}
-                onPageChange={setDisplayPage}
-                label="关注贴吧分页"
-              />
-            </>
+            </AnalysisPages>
           ) : (
             <Empty title="公开关注列表为空" compact />
           )}

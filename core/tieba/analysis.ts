@@ -7,11 +7,10 @@ import type {
 import { normalizeTiebaForumName } from "../../shared/tieba-forums";
 import { AppError } from "../errors";
 import { readLimited, readLimitedBytes } from "../http";
+import { oldResourceEvidence } from "../tieba-resource-discovery/old-resource";
 import {
   forumExposure,
-  publicPostPotential,
   resourceEvidence,
-  trafficLookback,
 } from "../tieba-resource-discovery/rules";
 import { encodeTiebaFields, tiebaFields } from "./analysis-protobuf";
 import { tiebaForumUrl } from "./autocare-page";
@@ -36,6 +35,10 @@ const objectId = (n: bigint | undefined) =>
   n !== undefined && n > 0n && n <= maxId ? n.toString() : null;
 const count = (n: bigint | undefined) =>
   n !== undefined && n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : null;
+const jsonCount = (value: unknown) => {
+  const parsed = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  return typeof parsed === "number" && Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+};
 const publishTime = (value: bigint | undefined) =>
   value && value <= 0xffffffffn
     ? new Date(Number(value) * 1000).toISOString()
@@ -229,14 +232,15 @@ async function resolveAuthor(target: string, send: typeof fetch) {
   };
 }
 
-async function readThread(tid: string, send: typeof fetch) {
+async function readThread(tid: string, send: typeof fetch, latestReplies = false) {
   const data = await request(
     "thread",
     encodeTiebaFields([
       [4, BigInt(tid)],
-      [13, 2n],
+      [13, latestReplies ? 21n : 2n],
       [18, 1n],
       [25, legacyCommon],
+      ...(latestReplies ? [[6, 1n], [8, 1n], [9, 5n]] as const : []),
     ]),
     send,
   );
@@ -254,20 +258,69 @@ export async function readTiebaDiscoveryViews(
   return count(data.integer(37));
 }
 
+export async function readTiebaOldResource(tid: string, send: typeof fetch = fetch) {
+  return (await readTiebaDiscoveryDetails(tid, send)).resource;
+}
+
+export async function readTiebaDiscoveryThread(tid: string, send: typeof fetch = fetch) {
+  if (!numericId(tid)) throw invalidResponse();
+  const { data, thread } = await readThread(tid, send);
+  const author = tiebaFields(thread.bytes(18) ?? empty);
+  const forum = tiebaFields(data.bytes(2) ?? empty);
+  const firstFloor = data.messages(6).find((post) => post.integer(3) === 1n);
+  return {
+    views: count(data.integer(37)),
+    title: thread.string(3) || "无标题主题帖",
+    forum: forum.string(2) || thread.string(28),
+    author: author.string(4) || author.string(3),
+    uid: objectId(thread.integer(56)) ?? objectId(author.integer(2)),
+    publishedAt: publishTime(thread.integer(45) ?? firstFloor?.integer(4)),
+    replies: count(thread.integer(4)),
+    likes: count(tiebaFields(thread.bytes(126) ?? empty).integer(1)),
+    shares: count(thread.integer(135)),
+  };
+}
+
+export async function readTiebaDiscoveryDetails(tid: string, send: typeof fetch = fetch) {
+  if (!numericId(tid)) throw invalidResponse();
+  const { data, thread } = await readThread(tid, send, true);
+  const posts = data.messages(6);
+  const firstFloor = (items: typeof posts) => items.find((post) => post.integer(3) === 1n);
+  const body = firstFloor(posts) ?? firstFloor((await readThread(tid, send)).data.messages(6));
+  if (!body) throw invalidResponse();
+  const replies = posts.flatMap((post) => [
+    ...(post.integer(3) === 1n ? [] : [{
+      time: Number(post.integer(4) ?? 0n),
+      ...contentFragments(post, 5),
+    }]),
+    ...tiebaFields(post.bytes(15) ?? empty).messages(2).slice(0, 5).map((reply) => ({
+      time: Number(reply.integer(3) ?? 0n),
+      ...contentFragments(reply, 2),
+    })),
+  ]).sort((a, b) => b.time - a.time).slice(0, 20);
+  const resource = oldResourceEvidence([
+    { source: "标题", text: thread.string(3) },
+    { source: "正文", ...contentFragments(body, 5) },
+    ...replies.map((reply) => ({ source: "回复" as const, ...reply })),
+  ]);
+  return { views: count(data.integer(37)), resource };
+}
+
+function contentFragments(post: ReturnType<typeof tiebaFields>, field: number) {
+  const fragments = post.messages(field).slice(0, 50);
+  return {
+    text: fragments.map((part) => part.string(2)).join("\n").slice(0, 8000),
+    hrefs: fragments.map((part) => part.string(3)).filter(Boolean),
+  };
+}
+
 function discoveryEvidence(
   post: ReturnType<typeof tiebaFields>,
   field: number,
   title: string,
 ) {
-  const fragments = post.messages(field).slice(0, 50);
-  return resourceEvidence(
-    title,
-    fragments
-      .map((part) => part.string(2))
-      .join("\n")
-      .slice(0, 8000),
-    fragments.map((part) => part.string(3)).filter(Boolean),
-  );
+  const { text, hrefs } = contentFragments(post, field);
+  return resourceEvidence(title, text, hrefs);
 }
 
 export async function queryTiebaAnalysis(
@@ -321,19 +374,26 @@ export async function queryTiebaAnalysis(
 }
 
 export async function queryTiebaAnalysisForumPosts(
-  { name, page }: { name: string; page: number },
+  { name, page, list = "published", pageSize = 20, allowEmptyPage = false }: {
+    name: string;
+    page: number;
+    list?: "published" | "featured" | "replied";
+    pageSize?: number;
+    allowEmptyPage?: boolean;
+  },
   send: typeof fetch = fetch,
-  discoverResources = false,
+  discoverResources: boolean | "old" = false,
 ): Promise<TiebaAnalysisForumPage> {
   const data = await request(
     "forum",
     encodeTiebaFields([
       [1, Buffer.from(name)],
-      [2, 20n],
-      [3, 25n],
+      [2, BigInt(pageSize)],
+      [3, BigInt(pageSize + 5)],
+      ...(list === "featured" ? [[4, 1n] as const] : []),
       ...(page > 1 ? [[15, BigInt(page)] as const] : []),
       [39, legacyCommon],
-      [47, 1n],
+      [47, list === "published" ? 1n : list === "replied" ? 6n : 0n],
     ]),
     send,
   );
@@ -352,6 +412,7 @@ export async function queryTiebaAnalysisForumPosts(
     const pagination = tiebaFields(data.bytes(4) ?? empty);
     const current = pagination.integer(3) ?? 0n;
     const hasMore = pagination.integer(6) ?? 0n;
+    const totalPages = count(pagination.integer(5));
     if (
       (current !== BigInt(page) && !(page === 1 && current === 0n)) ||
       hasMore > 1n
@@ -393,25 +454,39 @@ export async function queryTiebaAnalysisForumPosts(
           ) || null,
         url: tiebaThreadUrl(tid),
         publishedAt: publishTime(post.integer(45)),
+        repliedAt: publishTime(post.integer(7)),
         views: count(post.integer(5)),
         replies: count(post.integer(4)),
         likes: count(agree.integer(1)),
         shares: count(post.integer(135)),
-        ...(discoverResources
+        ...(discoverResources === "old"
+          ? { oldResource: oldResourceEvidence([
+              { source: "标题", text: title },
+              { source: "正文", ...contentFragments(post, 142) },
+            ]) }
+          : discoverResources
           ? {
               resource: discoveryEvidence(post, 142, title),
             }
           : {}),
       });
     }
-    if (!threads.size && hasMore === 1n) throw invalidResponse();
+    if (!allowEmptyPage && !threads.size && hasMore === 1n && (discoverResources !== "old" || data.messages(7).length))
+      throw invalidResponse();
     const list = [...threads.values()];
+    const followers = count(forum.integer(9));
+    const posts = count(forum.integer(11));
     return {
       id,
       name: canonical,
       url: tiebaForumUrl(canonical),
       page,
       hasMore: hasMore === 1n,
+      ...(totalPages !== null && totalPages >= page + Number(hasMore === 1n) &&
+        totalPages <= 2_147_483_647 && (hasMore === 1n || totalPages === page)
+        ? { totalPages } : {}),
+      ...(followers !== null ? { followers } : {}),
+      ...(posts !== null ? { posts } : {}),
       threads: list,
       exposure: forumExposure(list, Date.now()),
     };
@@ -424,9 +499,32 @@ export async function queryTiebaAnalysisForumPosts(
 export async function queryTiebaAnalysisFollowedForums(
   { uid, page }: { uid: string; page: number },
   send: typeof fetch = fetch,
+  withStats = false,
 ): Promise<TiebaAnalysisFollowedPage> {
   const user = await readAccount({ uid }, send);
-  return readFollowedPage(uid, page, user, send);
+  const result = await readFollowedPage(uid, page, user, send);
+  if (result.visibility === "restricted" || !withStats) return result;
+  const queue = result.forums.entries();
+  const forums = [...result.forums];
+  const deadline = AbortSignal.timeout(9000);
+  const read: typeof fetch = (input, options) => send(input, {
+    ...options,
+    signal: options?.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
+  });
+  await Promise.all(Array.from({ length: Math.min(4, result.forums.length) }, async () => {
+    for (const [index, forum] of queue) {
+      if (deadline.aborted) break;
+      if (forum.followers != null && forum.posts != null) continue;
+      const sample = await queryTiebaAnalysisForumPosts({ name: forum.name, page: 1 }, read).catch(() => null);
+      if (sample?.id === forum.id)
+        forums[index] = {
+          ...forum,
+          followers: forum.followers ?? sample.followers,
+          posts: forum.posts ?? sample.posts,
+        };
+    }
+  }));
+  return { ...result, forums };
 }
 
 async function readFollowedPage(
@@ -502,10 +600,14 @@ async function readFollowedPage(
       if (!id || typeof forum.forum_name !== "string") throw invalidResponse();
       const name = forum.forum_name.trim();
       const level = forum.level_id;
+      const followers = jsonCount(forum.member_num);
+      const posts = jsonCount(forum.post_num);
       return {
         id,
         name,
         url: tiebaForumUrl(name),
+        ...(followers !== undefined ? { followers } : {}),
+        ...(posts !== undefined ? { posts } : {}),
         level:
           typeof level === "number" && Number.isSafeInteger(level) && level > 0
             ? level
@@ -584,7 +686,6 @@ export async function queryTiebaAnalysisWithContext(
     profile().catch(() => {}),
     ...Array.from({ length: Math.min(4, targets.size) }, sample),
   ]);
-  const at = Date.now();
   const forums = [...targets].map(([id, name]) => {
     const page = samples.get(id);
     const forumLevel = page?.threads.find(
@@ -608,12 +709,6 @@ export async function queryTiebaAnalysisWithContext(
       return {
         ...post,
         forumLevel: byId.get(id)?.level ?? null,
-        potential: publicPostPotential(
-          post,
-          samples.get(id)?.threads ?? [],
-          at,
-          trafficLookback,
-        ),
       };
     }),
   };

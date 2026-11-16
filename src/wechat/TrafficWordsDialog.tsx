@@ -45,6 +45,7 @@ export function TrafficWordsDialog({
   const words = normalizeWechatTrafficWords(draft.value.text);
   const usage = wechatTrafficWordUsage(words, title, body);
   const dirty = JSON.stringify(words) !== JSON.stringify(saved.words);
+  const coverage = !dirty ? plan.deliveryCoverage : undefined;
   const conflict = draft.value.revision !== saved.revision && dirty;
   useEffect(() => {
     if (!dirty && draft.value.revision !== saved.revision)
@@ -144,7 +145,7 @@ export function TrafficWordsDialog({
           {words.length ? (
             <div className="wechat-traffic-usage">
               <span className="muted">
-                当前标题与正文已含 {usage.used.length}/{words.length} 个词
+                本稿标题与正文已用 {usage.used.length}/{words.length} 个词
               </span>
               {usage.used.length ? (
                 <details>
@@ -160,15 +161,33 @@ export function TrafficWordsDialog({
               ) : null}
             </div>
           ) : null}
+          {coverage?.count ? (
+            <div className="wechat-traffic-usage">
+              <strong>
+                同源送稿覆盖 {coverage.coveredWords.length}/{words.length} 个词
+              </strong>
+              <details>
+                <summary>查看 {coverage.count} 次送稿的覆盖</summary>
+                <p>
+                  已覆盖：{coverage.coveredWords.join("、") || "暂无可确认的词"}
+                </p>
+                {coverage.incomplete ? (
+                  <p className="muted">
+                    部分旧送稿的正文已变更，按可确认的内容统计。
+                  </p>
+                ) : null}
+              </details>
+            </div>
+          ) : null}
           {dirty ? (
             <p className="wechat-editor-dialog-help muted">
-              保存词表后，会按同一原文的历史改写记录更新优先词。
+              保存词表后更新同源送稿覆盖与下次优先词。
             </p>
           ) : (
             <TrafficWordPriority plan={plan} wordCount={saved.words.length} />
           )}
           <p className="wechat-editor-dialog-help muted">
-            标题优先选择最相关的 1–2 个词，正文自然融入其余相关词，不强行堆砌。
+            标题与正文分开使用相关词，优先覆盖新词，核心词可以重复。
           </p>
         </aside>
       </div>
