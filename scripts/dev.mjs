@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { context } from "esbuild";
 import { createServer } from "vite";
 import updateConfig from "./update-config.cjs";
-import { syncMacDevIdentity } from "./dev-macos.mjs";
+import { restoreMacElectronBundle, syncMacDevIdentity } from "./dev-macos.mjs";
 import { acquireDevLock, stopDevChild } from "./dev-lifecycle.mjs";
 import { DevUpdates } from "./dev-updates.mjs";
 
@@ -28,7 +28,7 @@ let sessions = process.env.PANXU_DEV_SESSIONS
   cdpPort;
 const require = createRequire(import.meta.url);
 const builds = [];
-let devExecutable = require("electron");
+let devExecutable;
 let child,
   server,
   releaseDevLock,
@@ -315,10 +315,13 @@ async function start() {
   await mkdir(output, { recursive: true });
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const productName = pkg.productName ?? pkg.build.productName;
+  if (process.platform === "darwin")
+    await restoreMacElectronBundle({ root, productName });
+  devExecutable = require("electron");
   if (process.platform === "darwin") {
     const identity = await syncMacDevIdentity({
       root,
-      executable: require("electron"),
+      executable: devExecutable,
       productName,
       appId: pkg.build.appId,
     });

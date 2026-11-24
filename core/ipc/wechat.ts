@@ -10,11 +10,15 @@ import {
   wechatRewriteStyleSchema,
 } from "../../shared/wechat-rewrite";
 import type { HandlerMap, HandlerServices } from "./types";
-import {
-  wechatDiscoverySearch,
-  wechatDiscoveryStatsInput,
-} from "../../shared/wechat-discovery";
 import { wechatTrafficWordsInput } from "../../shared/wechat-traffic-words";
+import {
+  wechatDeleteArticleModuleInput,
+  wechatSaveArticleModuleInput,
+} from "../../shared/wechat-article-modules";
+import {
+  keyboardSkinDraftInput,
+  keyboardSkinSampleInput,
+} from "../../shared/keyboard-skins";
 
 const identifier = z.string().min(1).max(100);
 const article = z.object({ id: identifier });
@@ -25,6 +29,16 @@ export function createWechatHandlers({
   return {
     "wechat.list": () => wechat.list(),
     "wechat.get": (raw) => wechat.get(article.parse(raw).id),
+    "wechat.listModules": () => wechat.modules.list(),
+    "wechat.saveModule": (raw) =>
+      wechat.modules.save(wechatSaveArticleModuleInput.parse(raw)),
+    "wechat.deleteModule": (raw) =>
+      wechat.modules.delete(wechatDeleteArticleModuleInput.parse(raw)),
+    "wechat.keyboardSkinsOverview": () => wechat.keyboardSkinsOverview(),
+    "wechat.sampleKeyboardSkins": (raw) =>
+      wechat.sampleKeyboardSkins(keyboardSkinSampleInput.parse(raw).count),
+    "wechat.createKeyboardSkinsDraft": (raw) =>
+      wechat.createKeyboardSkinsDraft(keyboardSkinDraftInput.parse(raw)),
     "wechat.delete": (raw) => {
       const input = version.parse(raw);
       return wechat.deleteDraft(input.id, input.revision);
@@ -71,11 +85,6 @@ export function createWechatHandlers({
         input.accountId,
       );
     },
-    "wechat.discoveryConfig": () => wechat.discovery.config(),
-    "wechat.discover": (raw) =>
-      wechat.discovery.discover(wechatDiscoverySearch.parse(raw)),
-    "wechat.discoveryStats": (raw) =>
-      wechat.discovery.stats(wechatDiscoveryStatsInput.parse(raw)),
     "wechat.import": (raw) =>
       wechat.importArticle(z.object({ url: wechatArticleUrl }).parse(raw).url),
     "wechat.save": (raw) => {
@@ -119,6 +128,8 @@ export function createWechatHandlers({
       return wechat.rewrite(i.id, i.instruction, i.styleId);
     },
     "wechat.pickImage": (raw) => wechat.pickImage(article.parse(raw).id),
+    "wechat.pasteImage": (raw) =>
+      wechat.pickImage(article.parse(raw).id, "clipboard"),
     "wechat.generateTitles": (raw) => {
       const input = version
         .extend({ text: wechatTextInput.optional() })

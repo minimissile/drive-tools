@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { ArrowRight, Plus } from "lucide-react";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useIpcQuery } from "../api/useIpcQuery";
@@ -17,6 +16,11 @@ import { Tabs, TabList, TabPanel } from "../ui/Tabs";
 import { formatTime } from "../lib/format";
 import { PublishingEditor } from "./PublishingEditor";
 import { PostStatistics } from "./PostStatistics";
+import {
+  tiebaDraftSelectionDefaults,
+  tiebaDraftSelectionKey,
+  tiebaDraftSelectionSchema,
+} from "./draft-selection";
 import { publishingBackendPending, publishingStatus } from "./view";
 import "./publishing.css";
 
@@ -25,16 +29,9 @@ export default function TiebaPublishingWorkflow() {
   const { command } = useAppActions();
   const { navigate } = useAppNavigation();
   const selection = useLocalDraft(
-    `panxu-tieba-publishing-selection-v1:${data!.dataPath}`,
-    { id: "", tab: "compose" as "compose" | "statistics", newKey: "initial" },
-    (value) =>
-      z
-        .object({
-          id: z.string(),
-          tab: z.enum(["compose", "statistics"]),
-          newKey: z.string().default("initial"),
-        })
-        .parse(value),
+    tiebaDraftSelectionKey(data!.dataPath),
+    tiebaDraftSelectionDefaults,
+    tiebaDraftSelectionSchema.parse,
   );
   const snapshot = useIpcQuery("tieba.publishing.snapshot", undefined, {
     keepPrevious: true,

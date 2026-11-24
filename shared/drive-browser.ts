@@ -1,3 +1,9 @@
+export type DriveBrowserProvider = "baidu" | "quark";
+export const supportsDriveBrowser = (
+  provider: string,
+): provider is DriveBrowserProvider =>
+  provider === "baidu" || provider === "quark";
+
 export interface DriveBrowserBinding {
   environmentId: string;
   profileId: string;
@@ -11,6 +17,8 @@ export interface DriveBrowserBinding {
   boundAt: string;
 }
 export interface DriveBrowserPreview {
+  /** Missing only in responses from older Baidu-only backends. */
+  provider?: DriveBrowserProvider;
   token: string;
   accountId: string;
   profileId: string;
@@ -26,7 +34,12 @@ export type DriveAccountBrowserInput =
   { engine: "electron" } | { engine: "bitbrowser"; previewToken: string };
 export interface DriveBrowserContract {
   "driveBrowser.previewNew": {
-    args: { profileId: string; connectorKey: string; requireProxy: boolean };
+    args: {
+      provider?: DriveBrowserProvider;
+      profileId: string;
+      connectorKey: string;
+      requireProxy: boolean;
+    };
     value: NewDriveBrowserPreview;
   };
   "driveBrowser.preview": {

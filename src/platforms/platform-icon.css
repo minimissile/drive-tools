@@ -12,6 +12,11 @@
   height: 18px;
   border-radius: 4px;
 }
+.platform-icon--medium {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
 .platform-icon--large {
   width: 36px;
   height: 36px;

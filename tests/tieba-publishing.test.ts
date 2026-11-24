@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -24,6 +25,7 @@ import { queryMethods } from "../shared/ipc";
 import {
   tiebaPublishingSaveSchema,
   tiebaPublishingSubmitSchema,
+  tiebaKeyboardSkinDraftSchema,
 } from "../shared/tieba-publishing";
 import type { AppPorts } from "../core/ports";
 import type { TiebaTopicPayload } from "../core/tieba/topic-types";
@@ -264,6 +266,89 @@ const submit = (id: string, version: number) => ({
   id,
   version,
   confirmed: true as const,
+});
+
+test("键盘皮肤交接只为所选贴吧账号和目标生成一份本人分享草稿", async () => {
+  const f = await fixture();
+  try {
+    const input = tiebaKeyboardSkinDraftSchema.parse({
+      accountId: f.account.id,
+      targetId: "tiebatarget_resource",
+      requestId: randomUUID(),
+      resourceIds: ["resource_test"],
+      title: "手机键盘皮肤分享｜1 款",
+    });
+    assert.equal(
+      tiebaKeyboardSkinDraftSchema.safeParse({
+        ...input,
+        resourceIds: Array.from(
+          { length: 11 },
+          (_, index) => `resource_${index}`,
+        ),
+      }).success,
+      false,
+    );
+    assert.equal(
+      tiebaKeyboardSkinDraftSchema.safeParse({
+        ...input,
+        resourceIds: ["resource_test", "resource_test"],
+      }).success,
+      false,
+    );
+    await assert.rejects(f.service.saveKeyboardSkins(input), {
+      code: "KEYBOARD_SKINS_CHANGED",
+    });
+    f.db.run(
+      "UPDATE resources SET category='键盘皮肤', title='月白键盘皮肤 https://example.com/' WHERE id='resource_test'",
+    );
+    f.db.run(
+      "UPDATE copies SET files=? WHERE id='copy_test'",
+      JSON.stringify([
+        {
+          id: "1",
+          name: "skin.zip",
+          isDirectory: false,
+          size: 41,
+          parentId: "0",
+        },
+      ]),
+    );
+    await assert.rejects(
+      f.service.saveKeyboardSkins({ ...input, accountId: "web_other" }),
+      { code: "TIEBA_PUBLISHING_TARGET_CHANGED" },
+    );
+
+    const created = await f.service.saveKeyboardSkins(input);
+    assert.deepEqual(await f.service.saveKeyboardSkins(input), created);
+    await assert.rejects(
+      f.service.saveKeyboardSkins({ ...input, title: "另一篇帖子" }),
+      { code: "KEYBOARD_SKINS_REQUEST" },
+    );
+    const [draft, ...others] = f.service.snapshot().drafts;
+    assert.equal(others.length, 0);
+    assert.equal(draft.id, created.id);
+    assert.equal(draft.version, 1);
+    assert.equal(draft.status, "ready");
+    assert.equal(draft.targetId, input.targetId);
+    assert.equal(draft.accountId, input.accountId);
+    assert.deepEqual(
+      draft.resources.map(({ resourceId }) => resourceId),
+      input.resourceIds,
+    );
+    assert.match(draft.body, /月白键盘皮肤/);
+    assert.match(
+      draft.body,
+      /https:\/\/pan\.baidu\.com\/s\/1Owned\n提取码：a1b2/,
+    );
+    assert.doesNotMatch(draft.body, /example\.com/);
+    assert.equal(draft.receipt, null);
+    assert.equal(f.publishes, 0);
+    f.restart();
+    assert.deepEqual(await f.service.saveKeyboardSkins(input), created);
+    assert.equal(f.service.snapshot().drafts.length, 1);
+  } finally {
+    await f.cleanup();
+  }
 });
 
 test("资源发帖从本地词池和资源库读取，不发起建链、转存或模型请求", async () => {

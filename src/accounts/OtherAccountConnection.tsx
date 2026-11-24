@@ -137,6 +137,11 @@ export function OtherAccountConnection({
           AppID 或密钥。
         </p>
       ) : null}
+      {provider === "jianshu" ? (
+        <p className="website-account-connect-hint">
+          支持内置浏览器登录，或关联已登录简书的比特环境。检查登录后读取本人身份与昵称；需要安全验证时，请在该账号的官方窗口完成。
+        </p>
+      ) : null}
       {provider === "baidu-zhidao" ? (
         <p className="website-account-connect-hint">
           登录检查、资格与额度、知道采集、自动答题和问答上传均使用所选环境的登录状态与网络。

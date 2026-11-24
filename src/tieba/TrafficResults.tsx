@@ -1,4 +1,4 @@
-import { ArrowUpRight, Radar } from "lucide-react";
+import { ArrowUpRight, Check, Radar } from "lucide-react";
 import { useState } from "react";
 import {
   oldTrafficMinimumAgeDays,
@@ -6,6 +6,8 @@ import {
   tiebaDiscoveryPageSize,
   type TiebaDiscoverySnapshot,
   type TiebaTrafficPostsView,
+  type TiebaTrafficSort,
+  type TiebaTrafficSortDirection,
   type TiebaOldResourceFilter,
   type TiebaOldTrafficPost,
 } from "../../shared/tieba-resource-discovery";
@@ -32,6 +34,12 @@ const resourceFilters = [
   { value: "linked", label: "含网盘链接" },
   { value: "keywords", label: "仅关键词" },
 ] satisfies { value: TiebaOldResourceFilter; label: string }[];
+const sortOptions = [
+  { value: "archivedAt", label: "录入时间" },
+  { value: "views", label: "累计浏览" },
+  { value: "lifetimeDailyViews", label: "发帖以来日均" },
+  { value: "dailyAddedViews", label: "实测日均新增" },
+] satisfies { value: TiebaTrafficSort; label: string }[];
 
 function resourceLabel(
   resource: TiebaOldTrafficPost["resource"],
@@ -46,7 +54,6 @@ function resourceLabel(
 
 export function TrafficResults({
   result,
-  highCount,
   resourceReady,
   resourceAdmission,
   resourcePending,
@@ -61,7 +68,6 @@ export function TrafficResults({
   onStop,
 }: {
   result: TiebaDiscoverySnapshot["oldTraffic"];
-  highCount: number;
   resourceReady: boolean;
   resourceAdmission: boolean;
   resourcePending?: number;
@@ -78,20 +84,39 @@ export function TrafficResults({
   const { command } = useAppActions();
   const { notify } = useFeedbackActions();
   const [page, setPage] = useState(1);
-  const [view, setView] = useState<TiebaTrafficPostsView>("all");
+  const [view, setView] = useState<Exclude<TiebaTrafficPostsView, "high">>("all");
   const [resource, setResource] = useState<TiebaOldResourceFilter>("all");
+  const [sort, setSort] = useState<TiebaTrafficSort>("archivedAt");
+  const [direction, setDirection] = useState<TiebaTrafficSortDirection>("desc");
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [marking, setMarking] = useState<string | null>(null);
   const oldOnly = view === "screened" || view === "qualified";
   const ready = result?.total !== undefined && progress !== undefined;
   const { data, error, loading, reload } = useIpcQuery(
     "tieba.discovery.trafficPosts",
-    { page, view, resource: oldOnly && resourceReady ? resource : "all" },
+    { page, view, resource: oldOnly && resourceReady ? resource : "all", sort, direction },
     {
       enabled: enabled && ready,
       keepPrevious: true,
       revision: `${revision ?? ""}:${threshold}:${progress?.revision ?? ""}:${resourceCheckEnabled}`,
     },
   );
+  const resourceMarkReady = data?.items[0]?.resourceRecorded !== undefined;
+
+  async function markResource(id: string, recorded: boolean) {
+    if (marking !== null) return;
+    setMarking(id);
+    try {
+      await ipc("tieba.discovery.setResourceRecorded", { id, recorded });
+      reload();
+      notify(recorded ? "已标记为已入库" : "已取消入库标记", "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "保存入库标记失败，请重试", "error");
+    } finally {
+      setMarking(null);
+    }
+  }
+
   async function deletePost(id: string) {
     if (deleting) return;
     setDeleting(id);
@@ -124,7 +149,6 @@ export function TrafficResults({
             value={view}
             items={[
               { value: "all", label: "全部流量帖" },
-              { value: "high", label: `累计高流量 ${formatAnalysisCount(highCount)}` },
               {
                 value: "screened",
                 label: `老帖 · 通过初筛 ${formatAnalysisCount(result.tracked)}`,
@@ -135,7 +159,7 @@ export function TrafficResults({
               },
             ]}
             onValueChange={(value) => {
-              if (value === "all" || value === "high" || value === "screened" || value === "qualified")
+              if (value === "all" || value === "screened" || value === "qualified")
                 setView(value);
               setPage(1);
             }}
@@ -153,6 +177,30 @@ export function TrafficResults({
               }}
             />
           ) : null}
+          <Select
+            aria-label="流量帖排序"
+            value={sort}
+            items={sortOptions}
+            onValueChange={(value) => {
+              const option = sortOptions.find((item) => item.value === value);
+              if (!option) return;
+              setSort(option.value);
+              setPage(1);
+            }}
+          />
+          <Select
+            aria-label="排序方向"
+            value={direction}
+            items={[
+              { value: "desc", label: sort === "archivedAt" ? "最新优先" : "从高到低" },
+              { value: "asc", label: sort === "archivedAt" ? "最早优先" : "从低到高" },
+            ]}
+            onValueChange={(value) => {
+              if (value !== "asc" && value !== "desc") return;
+              setDirection(value);
+              setPage(1);
+            }}
+          />
           {oldOnly ? <small className="muted">
             {resourcePending
               ? `${formatAnalysisCount(resourcePending)} 篇待核验 · `
@@ -227,7 +275,8 @@ export function TrafficResults({
                   <th scope="col">发帖以来日均</th>
                   <th scope="col">实测日均新增</th>
                   <th scope="col">观测跨度 · 最近读数</th>
-                  {resourceAdmission ? <th scope="col">操作</th> : null}
+                  {resourceMarkReady ? <th scope="col" className="tieba-traffic-mark">资源入库</th> : null}
+                  {resourceAdmission ? <th scope="col" className="tieba-traffic-action">操作</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -250,11 +299,6 @@ export function TrafficResults({
                         {formatAnalysisTime(post.publishedAt)}
                         {post.kind === "high" && post.author ? ` · ${post.author}` : ""}
                       </small>
-                      {post.kind === "high" && view === "high" ? (
-                        <small className="muted">
-                          回复 {formatAnalysisCount(post.replies)} · 获赞 {formatAnalysisCount(post.likes)} · 分享 {formatAnalysisCount(post.shares)}
-                        </small>
-                      ) : null}
                       <small className="muted">
                         {post.kind === "old" ? "老帖流量" : post.fromPotential ? "累计高流量 · 由潜力帖转入" : "累计高流量"}
                         {post.kind === "old" && resourceReady
@@ -297,18 +341,36 @@ export function TrafficResults({
                         </span>
                       ) : null}
                       <small className="muted">
-                        <time dateTime={new Date(post.checkedAt).toISOString()}
-                          title={post.kind === "high" ? `入库 ${formatAnalysisTime(post.archivedAt)}` : undefined}>
+                        <time dateTime={new Date(post.checkedAt).toISOString()}>
                           {formatAnalysisTime(post.checkedAt)}
                         </time>
                       </small>
+                      {post.archivedAt != null ? (
+                        <small className="muted">录入 {formatAnalysisTime(post.archivedAt)}</small>
+                      ) : null}
                     </td>
+                    {resourceMarkReady ? (
+                      <td className="tieba-traffic-mark">
+                        <Button
+                          size="compact"
+                          className="tieba-traffic-mark-button"
+                          aria-label={`已入库标记 ${post.title}`}
+                          aria-pressed={post.resourceRecorded === true}
+                          title={post.resourceRecorded ? "取消已入库标记" : "标为已入库"}
+                          disabled={loading || marking !== null || deleting === post.id}
+                          onClick={() => void markResource(post.id, !post.resourceRecorded)}
+                        >
+                          {post.resourceRecorded ? <Check size={14} aria-hidden="true" /> : null}
+                          {marking === post.id ? "保存中…" : post.resourceRecorded ? "已入库" : "标为已入库"}
+                        </Button>
+                      </td>
+                    ) : null}
                     {resourceAdmission ? (
                       <td className="tieba-traffic-action">
                         {post.kind === "old" ? <Button
                           quiet
                           size="compact"
-                          disabled={loading || deleting !== null}
+                          disabled={loading || deleting !== null || marking === post.id}
                           aria-label={`删除老帖 ${post.title}`}
                           onClick={() => void deletePost(post.id)}
                         >
@@ -331,14 +393,14 @@ export function TrafficResults({
               : view === "qualified"
                 ? "暂无实测达标老帖"
                 : view === "screened" ? "暂无通过初筛的老帖"
-                  : view === "high" ? "暂无累计高流量帖" : "暂无流量帖"
+                  : "暂无流量帖"
           }
           compact
         >
           {oldOnly && resource !== "all"
             ? "可切换到「全部内容」查看已入库帖子。"
-            : view === "high" || view === "all"
-              ? "达到累计浏览门槛的帖子会直接显示在这里。"
+            : view === "all"
+              ? "达到收录条件的帖子会显示在这里。"
               : result.tracked
               ? `两次读数相隔至少 ${oldTrafficObservationDays} 天后，按实际间隔计算日均新增。关闭应用期间的间隔也计入。`
               : `发帖满 ${oldTrafficMinimumAgeDays} 天的帖子需通过流量初筛${resourceCheckEnabled ? "和资源检查" : ""}。`}

@@ -28,6 +28,7 @@ import {
   type CatalogSummary,
   catalogResourcesSchema,
   catalogRemoveItemsSchema,
+  catalogExportWechatSchema,
   type CatalogResourceOption,
 } from "../shared/resource-catalog";
 import { xlsx } from "./export-formats";
@@ -201,6 +202,10 @@ export class ResourceCatalogs {
       null,
     links?: ResourceLinks,
     ai?: AiService,
+    private createWechatDraft?: (
+      catalogId: string,
+      snapshot: CatalogSnapshot,
+    ) => { articleId: string },
   ) {
     if (links) this.site = new CatalogLandings(repo, links, changed);
     if (ai) this.aiDrafts = new CatalogAiDrafts(repo, ai, changed);
@@ -1129,6 +1134,30 @@ export class ResourceCatalogs {
         `${name}.${format}`,
         format === "xlsx" ? xlsx(document.rows) : Buffer.from(document.md),
       );
+    });
+  }
+  exportWechat(raw: unknown) {
+    const input = catalogExportWechatSchema.parse(raw);
+    return this.exclusive(input.id, async () => {
+      const stored = this.load(input.id);
+      this.assertRevision(stored, input.expectedRevision);
+      const snapshot = await this.snapshot(stored.catalog);
+      if (snapshot.hash !== input.expectedHash)
+        throw new AppError(
+          "CATALOG_CHANGED",
+          "清单内容或分享已变化，请刷新资源后再导出。",
+        );
+      if (!snapshot.items.length)
+        throw new AppError(
+          "CATALOG_EMPTY",
+          "清单尚无可公开资源，请先完成本人分享核验。",
+        );
+      if (!this.createWechatDraft)
+        throw new AppError(
+          "CATALOG_WECHAT_UNAVAILABLE",
+          "请先应用后端更新，再导出公众号草稿。",
+        );
+      return this.createWechatDraft(input.id, snapshot);
     });
   }
 }

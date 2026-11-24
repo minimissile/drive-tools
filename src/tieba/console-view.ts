@@ -91,9 +91,10 @@ export function tiebaAutomationInitialRecommendation(
     snapshot.tasks.length
   )
     return null;
-  const targetIds = tiebaAvailableTargets(snapshot.targets, snapshot.accounts)
-    .slice(0, 5)
-    .map((target) => target.id);
+  const targetIds = tiebaAvailableTargets(
+    snapshot.targets,
+    snapshot.accounts,
+  ).map((target) => target.id);
   return targetIds.length ? { targetIds, mode: "draft", dailyLimit: 1 } : null;
 }
 

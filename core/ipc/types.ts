@@ -37,6 +37,8 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  setKeywordLookupBusy(active: boolean): void;
+  zhidaoWorkflow: import("../zhidao/publishing-workflow").ZhidaoPublishingWorkflow;
   systemLogs: import("../system-logs").SystemLogs;
   bilibili: import("../bilibili/content").BilibiliContent;
   tiebaParticipation: import("../tieba-participation/service").TiebaParticipation;
@@ -61,6 +63,7 @@ export interface HandlerServices {
   resourceCatalogs: import("../resource-catalog").ResourceCatalogs;
   shareCreation: import("../share-creation").ShareCreation;
   resourceDeletion: import("../resource-deletion").ResourceDeletion;
+  jianshu: import("../jianshu/service").JianshuArticles;
   smzdm: import("../smzdm/service").SmzdmArticles;
   wechat: import("../wechat/service").WechatArticles;
   distribution: import("../distribution").Distribution;
@@ -110,15 +113,18 @@ export interface HandlerServices {
     action: (account: Account, provider: DriveProvider) => Promise<T>,
   ): Promise<T>;
   assertNoActiveJobs(id: string): void;
+  accountBatches: import("../account-batches").AccountBatches;
   refreshCapacity(id: string): Promise<Account>;
   assertOwnCopy(copy: ResourceCopy): Account;
   checkShare(id: string): Promise<ShareCheck>;
   saveResource(
     input: ResourceInput,
+    mode?: "local-draft",
   ): Promise<{ resourceId: string; copyId: string; jobId: string | null }>;
   openBinding(
     binding: BrowserBinding,
     format?: ContentFormat,
+    newPage?: boolean,
   ): Promise<{ opened: boolean; url: string }>;
   contentPackage(
     draft: string,

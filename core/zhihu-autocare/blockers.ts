@@ -89,7 +89,7 @@ export function autocareBlockers(
         accountId,
         kind: "generation",
         message: job.message,
-        blocking: true,
+        blocking: false,
         jobId: job.id,
       });
     for (const activity of participation.activities.filter(

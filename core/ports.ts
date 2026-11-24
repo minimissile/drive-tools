@@ -1,6 +1,7 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
+  jianshu?: import("../shared/jianshu").JianshuPort;
   bilibili?: import("../shared/bilibili").BilibiliContentPort;
   localVideoBundlePath?: string;
   localVideoTemplateEntryPoint?: string;
@@ -15,7 +16,6 @@ export interface AppPorts {
   pipixFetch?(url: string, init: RequestInit): Promise<Response>;
   /** Independent music requests and CDN downloads, without account cookies. */
   musicFetch?(url: string, init: RequestInit): Promise<Response>;
-  wechatDiscoveryFetch?(url: string, init: RequestInit): Promise<Response>;
   readLandingDocument?(
     name: string,
   ): Promise<{ name: string; bytes: Uint8Array } | null>;
@@ -23,6 +23,13 @@ export interface AppPorts {
     open(
       platform: import("../shared/photo-posts").PhotoPlatform,
     ): Promise<void>;
+    isOpen(): boolean;
+    close(): void;
+  };
+  read5118PublicKeywords?(keyword: string, signal: AbortSignal): Promise<string[]>;
+  keywordWebBrowser?: {
+    check(signal: AbortSignal): Promise<void>;
+    open(): Promise<void>;
     isOpen(): boolean;
     close(): void;
   };
@@ -51,6 +58,7 @@ export interface AppPorts {
     port: import("../shared/wechat").WechatPort;
   };
   readWechatImage?(): Promise<{ name: string; bytes: Buffer } | null>;
+  readWechatClipboardImage?(): Promise<{ name: string; bytes: Buffer } | null>;
   readWechatRemoteImage?(url: string): Promise<{ bytes: Buffer }>;
   collectionWebSession?: {
     search(
@@ -110,7 +118,7 @@ export interface AppPorts {
     ): Promise<import("../shared/weibo-publishing").WeiboSubmitReceipt>;
   };
   readWeiboImages?(
-    platform?: "weibo" | "zhihu" | "tieba",
+    platform?: "weibo" | "zhihu" | "tieba" | "jianshu",
   ): Promise<{ name: string; bytes: Buffer }[] | null>;
   weiboStatistics?: {
     read(

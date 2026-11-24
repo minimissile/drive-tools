@@ -44,6 +44,7 @@ export interface TiebaAutocareTarget extends TiebaForumReading {
   uid: string;
   paused: boolean;
   pauseReason: string | null;
+  pauseCode?: string;
   syncedAt: string;
   followIntent?: TiebaFollowIntent;
 }
@@ -93,6 +94,14 @@ export interface TiebaAutocareRun {
   status: "running" | "ended" | "stopped";
 }
 export interface TiebaAutocareSnapshot {
+  startResult?: {
+    accounts: {
+      accountId: string;
+      status: "ready" | "failed";
+      targets: number;
+      message: string;
+    }[];
+  };
   addition?: {
     accountId: string;
     items: {
@@ -137,12 +146,19 @@ export const tiebaAutocareToggleSchema = z.object({
 export const tiebaAutocareSyncSchema = z.object({
   accountId: websiteAccountIdSchema,
 });
+export const tiebaAutocareStartSchema = z.object({
+  accountIds: z
+    .array(websiteAccountIdSchema)
+    .min(1)
+    .transform((ids) => [...new Set(ids)]),
+  revision: z.number().int().positive(),
+  confirmed: z.literal(true),
+});
 export const tiebaAutocareObserveSchema = z.object({
   accountId: websiteAccountIdSchema,
   forumNames: z
     .array(tiebaForumNameSchema)
     .min(1, "请选择至少一个观察吧")
-    .max(5, "一次最多添加5个观察吧")
     .transform((names) => [...new Set(names)]),
 });
 export const tiebaAutocareAddSchema = z.object({
@@ -150,7 +166,6 @@ export const tiebaAutocareAddSchema = z.object({
   forumNames: z
     .array(tiebaForumNameSchema)
     .min(1, "请选择至少一个贴吧")
-    .max(5, "一次最多添加5个贴吧")
     .transform((names) => {
       const seen = new Set<string>();
       return names.filter((name) => {
@@ -181,6 +196,7 @@ export interface TiebaAutocareContract {
   "tieba.autocare.snapshot": Contract<undefined>;
   "tieba.autocare.save": Contract<z.infer<typeof tiebaAutocareSaveSchema>>;
   "tieba.autocare.sync": Contract<z.infer<typeof tiebaAutocareSyncSchema>>;
+  "tieba.autocare.start": Contract<z.infer<typeof tiebaAutocareStartSchema>>;
   "tieba.autocare.observe": Contract<
     z.infer<typeof tiebaAutocareObserveSchema>
   >;

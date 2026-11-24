@@ -1,4 +1,6 @@
+import type { AccountMembership } from "./drive-membership";
 import type { AccountCapacity } from "./drive-capacity";
+import type { TiebaDiscoveryTask } from "./tieba-resource-discovery";
 export type Provider =
   "quark" | "baidu" | "uc" | "xunlei" | "guangya" | "pikpak";
 export type { Platform } from "./channels";
@@ -30,6 +32,7 @@ export interface Account {
   lastVerifiedAt: string | null;
   error: string | null;
   capacity?: AccountCapacity | null;
+  membership?: AccountMembership | null;
   resourceCopies?: number;
   browserEngine?: "electron" | "bitbrowser";
   browser?: Pick<
@@ -70,6 +73,7 @@ export interface ShareValidationResult {
 }
 export interface Resource {
   sourceKind?: "share" | "owned";
+  searchKeywords?: string[];
   id: string;
   title: string;
   sourceUrl: string;
@@ -355,6 +359,7 @@ export interface AppSnapshot {
   resourceTotals: ResourceTotals;
   shareChecks: ShareCheck[];
   jobs: Job[];
+  tiebaDiscoveryTasks?: TiebaDiscoveryTask[];
   pools: PoolSummary[];
   drafts: Draft[];
   bindings: BrowserBinding[];
@@ -379,6 +384,7 @@ export interface AiConnection {
   managementKey: boolean;
 }
 export interface ResourceInput {
+  searchKeywords?: string[];
   id?: string;
   copyId?: string;
   title: string;

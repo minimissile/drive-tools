@@ -7,6 +7,7 @@ import type {
   InsertionHistory,
 } from "./insertion";
 import type { z } from "zod";
+import type { localResourceDraftSchema } from "./schemas";
 import type { SettingsSecretKind, SettingsSecretPreview } from "./settings";
 import type {
   Account,
@@ -94,6 +95,8 @@ export interface PublicationPackage {
 
 /** Business command contracts shared by renderer adapters, never component-local casts. */
 export interface IpcCommands {
+  "resource.keywordBatch": Contract<import("zod").z.infer<typeof import("./resource-keywords").keywordBatchSchema>,import("./resource-keywords").KeywordBatch>;
+  "resource.keywordBatchStatus": Contract<{id:string},import("./resource-keywords").KeywordBatch|null>;
   "resource.intakeOptions": Contract<
     { accountId?: string },
     import("./intake").IntakeOptions
@@ -160,7 +163,7 @@ export interface IpcCommands {
     StartItems,
     { created: number; reused: number; skipped: number }
   >;
-  "binding.open": Contract<Id & { contentFormat: ContentFormat }>;
+  "binding.open": Contract<Id & { contentFormat: ContentFormat; newPage?: boolean }>;
   "binding.save": Contract<
     {
       id?: string;
@@ -234,9 +237,22 @@ export interface IpcCommands {
     { text: string; targets: Partial<Record<Provider, string>> },
     ImportPreview
   >;
+  "resource.keywordLookup": Contract<
+    { seeds: string[]; baiduAccountId?: string },
+    import("./resource-keywords").KeywordLookup
+  >;
+  "resource.keywordCheckSources": Contract<
+    { baiduAccountId?: string },
+    import("./resource-keywords").KeywordSourcesCheck
+  >;
+  "resource.keywordOpen5118": Contract<undefined, void>;
   "resource.save": Contract<
     ResourceInput,
     { resourceId: string; copyId: string; jobId: string | null }
+  >;
+  "resource.saveLocalDraft": Contract<
+    z.input<typeof localResourceDraftSchema>,
+    { resourceId: string; copyId: string; jobId: null }
   >;
   "resource.summaryFile": Contract<undefined, TextFile>;
   "resourceExport.article": Contract<

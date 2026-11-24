@@ -4,6 +4,7 @@ import type { ZhidaoAccount } from "../../shared/zhidao";
 import {
   zhidaoAccountLabel,
   zhidaoAnswerAccountLimit,
+  zhidaoAnswerPageLimit,
 } from "../../shared/zhidao";
 import { Button, Empty, Field, Status } from "../ui/primitives";
 import { ShieldCheck, Shuffle, UserRound } from "lucide-react";
@@ -189,7 +190,7 @@ export function AutoAnswerSettings({
       <div className="answer-sampling-note">
         <span>
           <Shuffle size={14} aria-hidden="true" />
-          多页采集，打乱抽题
+          前{zhidaoAnswerPageLimit}页内采集，打乱抽题
         </span>
         <span>
           <ShieldCheck size={14} aria-hidden="true" />

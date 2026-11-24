@@ -1,3 +1,7 @@
+import {
+  tiebaRunDurationMs,
+  tiebaReplySlotGapMs,
+} from "../../shared/tieba-timing";
 import type { z } from "zod";
 import { id, type Database } from "../database";
 import { AppError, safeMessage } from "../errors";
@@ -340,7 +344,7 @@ export class TiebaAutomation {
       today = day(this.time());
     if (!state.enabled || state.run?.day === today) return;
     const deadline = Math.min(
-      this.time() + 2 * 3600000,
+      this.time() + tiebaRunDurationMs,
       Date.parse(`${today}T16:00:00Z`),
     );
     state.run = {
@@ -362,7 +366,7 @@ export class TiebaAutomation {
         (entry) => entry.targetId === targetId,
       );
       if (!target || !authority) continue;
-      const planned = this.time() + i * 45 * 60000;
+      const planned = this.time() + i * tiebaReplySlotGapMs;
       const task: AutomationTaskRecord = {
         id: id("tiebaauto"),
         runId: state.run.id,

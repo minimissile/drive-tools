@@ -22,7 +22,7 @@ import {
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 42;
+export const databaseSchemaVersion = 43;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -90,11 +90,20 @@ export class Database {
     if (version > databaseSchemaVersion)
       throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 42) {
+      this.transaction(() => {
+        if (!this.get("SELECT 1 FROM pragma_table_info('resources') WHERE name='search_keywords'"))
+          this.db.exec("ALTER TABLE resources ADD COLUMN search_keywords TEXT NOT NULL DEFAULT '[]';");
+        this.db.exec("PRAGMA user_version=43;");
+      });
+      return;
+    }
     if (version === 41) {
       this.transaction(() => {
         migrateTiebaForumCache(this.db);
         this.db.exec("PRAGMA user_version=42;");
       });
+      this.migrate(false);
       return;
     }
     if (version === 40) {

@@ -245,12 +245,16 @@ export function createOperationsHandlers(
         throw new AppError("JOB_RUNNING", "任务仍在运行或已完成。");
       services.account(job.accountId);
       await services.ports.closeAccountWindow(job.accountId);
-      services.db.run(
-        "UPDATE jobs SET stage=?,error=NULL,attempts=attempts+1,updated_at=? WHERE id=?",
-        "queued",
+      // Another window may have resumed this job while the account window closed.
+      const resumed = services.db.run(
+        "UPDATE jobs SET stage='queued',error=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND stage=? AND attempts=?",
         now(),
         jobId,
+        job.stage,
+        job.attempts,
       );
+      if (!resumed.changes)
+        throw new AppError("JOB_RUNNING", "任务状态已变化，请查看最新进度。");
       services.changed();
       void services.queue.pump();
       return true;

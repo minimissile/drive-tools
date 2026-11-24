@@ -1,3 +1,4 @@
+import { supportsDriveBrowser } from "../shared/drive-browser";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isIP } from "node:net";
@@ -230,11 +231,11 @@ export class BrowserEnvironments {
         provider: string;
         uid: string | null;
       }>("SELECT alias,provider,uid FROM accounts WHERE id=?", ref.id);
-      if (row?.provider === "baidu")
+      if (row && supportsDriveBrowser(row.provider))
         return {
           alias: row.alias,
-          platform: "drive-baidu",
-          realm: "drive-baidu",
+          platform: `drive-${row.provider}`,
+          realm: `drive-${row.provider}`,
           uid: row.uid,
         };
     } else if (ref.kind === "zhidao") {
@@ -326,7 +327,7 @@ export class BrowserEnvironments {
     )
       throw new AppError(
         "DRIVE_PROFILE_EXCLUSIVE",
-        "百度网盘后台环境仅可与贴吧、知道和公众号共用，其他平台请选择独立环境。",
+        "网盘后台环境仅可与已支持的网盘、贴吧、知道和公众号共用，其他平台请选择独立环境。",
       );
     if (
       ["feishu", "tencent-docs", "shimo"].includes(info.platform) &&
@@ -387,7 +388,7 @@ export class BrowserEnvironments {
   private migrateLegacy() {
     this.db.transaction(() => {
       for (const row of this.db.all<{ id: string; alias: string }>(
-        "SELECT id,alias FROM accounts WHERE provider='baidu'",
+        "SELECT id,alias FROM accounts WHERE provider IN ('baidu','quark')",
       )) {
         const ref = { kind: "drive" as const, id: row.id };
         if (!this.linkRow(ref))
@@ -676,6 +677,7 @@ export class BrowserEnvironments {
     environmentId: string,
     action: () => Promise<T>,
     expectedRevision?: number,
+    options: { invalidate?: boolean } = {},
   ) {
     if (this.leases.has(environmentId) || this.queuedBusy(environmentId))
       throw new AppError(
@@ -698,12 +700,14 @@ export class BrowserEnvironments {
     } finally {
       // Even an uncertain close result must revoke prepared browser operations.
       try {
-        const current = this.get(environmentId);
-        this.persist({
-          ...current,
-          revision: current.revision + 1,
-          updatedAt: now(),
-        });
+        if (options.invalidate !== false) {
+          const current = this.get(environmentId);
+          this.persist({
+            ...current,
+            revision: current.revision + 1,
+            updatedAt: now(),
+          });
+        }
       } finally {
         this.leases.delete(environmentId);
         this.changed();

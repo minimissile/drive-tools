@@ -1,3 +1,4 @@
+import { pikpakMembership, xunleiMembership } from "./membership";
 import {
   gcid,
   credentials,
@@ -181,6 +182,9 @@ export class TokenDriveProvider implements DriveProvider {
       uid: String(uid),
       nickname: String(data.name ?? data.nickname ?? ""),
     };
+  }
+  async membership(account: Account) {
+    return this.id==="pikpak" ? pikpakMembership(await this.request(account,"privilege/vip"),account.uid) : xunleiMembership(await this.request(account,`https://${providerSpecs[this.id].apiHosts[1]}/v1/user/me`));
   }
   async capacity(account: Account) {
     const result = await this.request(account, "about");

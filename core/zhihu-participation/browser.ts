@@ -1,8 +1,10 @@
+import { createTemporaryPage, releaseTemporaryPage } from "../browser-page-lifecycle";
 import type { BrowserContext, Page } from "playwright-core";
 import type { WebsiteAccount } from "../../shared/website-accounts";
 import {
   canonicalZhihuParticipationUrl,
   zhihuParticipationUrlKind,
+  zhihuRecommendedQuestionsUrl,
   zhihuResearchHitSchema,
   zhihuResearchDocumentSchema,
   type ZhihuParticipationBrowserPort,
@@ -764,7 +766,12 @@ export function zhihuParticipationBrowser(
       url.searchParams.set("q", query);
       return withContext(account, async (context) => {
         await assertZhihuParticipationAccount(context, account);
-        const page = await context.newPage();
+        const page = await createTemporaryPage(
+          context,
+          input.source === "creator_recommend"
+            ? zhihuRecommendedQuestionsUrl
+            : url.href,
+        );
         try {
           if (input.source === "creator_recommend")
             return await readFeaturedQuestions(page, input.limit, async () => {
@@ -788,7 +795,7 @@ export function zhihuParticipationBrowser(
             { ...input, query },
           );
         } finally {
-          await page.close().catch(() => {});
+          await releaseTemporaryPage(page);
         }
       });
     },
@@ -798,7 +805,7 @@ export function zhihuParticipationBrowser(
         fail("仅可读取规范知乎官方内容链接。");
       return withContext(account, async (context) => {
         await assertZhihuParticipationAccount(context, account);
-        const page = await context.newPage();
+        const page = await createTemporaryPage(context, url);
         try {
           return parseZhihuDocumentSnapshot(
             await loadZhihuParticipationPage(
@@ -810,7 +817,7 @@ export function zhihuParticipationBrowser(
             url,
           );
         } finally {
-          await page.close().catch(() => {});
+          await releaseTemporaryPage(page);
         }
       });
     },
@@ -837,7 +844,7 @@ export async function openZhihuParticipationDocument(
       fail("官方内容页发生跳转，未打开其他内容。");
     await page.bringToFront();
   } catch (error) {
-    await page.close().catch(() => {});
+    await releaseTemporaryPage(page);
     throw error;
   }
 }

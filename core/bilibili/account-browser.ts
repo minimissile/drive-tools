@@ -1,3 +1,4 @@
+import { createTemporaryPage, releaseTemporaryPage } from "../browser-page-lifecycle";
 import type { BrowserContext } from "playwright-core";
 import type { WebsiteSessionState } from "../../shared/website-accounts";
 import { AppError } from "../errors";
@@ -8,7 +9,10 @@ import { bilibiliCurrentUser, bilibiliIdentityScript } from "./identity";
 export async function verifyBitBilibili(
   context: BrowserContext,
 ): Promise<WebsiteSessionState> {
-  const page = await context.newPage();
+  const page = await createTemporaryPage(
+    context,
+    "https://api.bilibili.com/x/web-interface/nav",
+  );
   let navigationBlocked = false;
   try {
     await page.route("**/*", async (route) => {
@@ -68,6 +72,6 @@ export async function verifyBitBilibili(
           : "哔哩哔哩身份检查未完成，请检查关联环境网络并完成官网验证后重试。",
     };
   } finally {
-    await page.close().catch(() => {});
+    await releaseTemporaryPage(page);
   }
 }

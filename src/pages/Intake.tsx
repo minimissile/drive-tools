@@ -1,3 +1,8 @@
+import {
+  IntakeKeywords,
+  initialIntakeKeywords,
+  intakeKeywordDraftSchema,
+} from "../resources/IntakeKeywords";
 import { IntakeHeader } from "../resources/IntakeHeader";
 import { IntakeOptionField } from "../resources/IntakeOptionField";
 import { useIntakeShare } from "../resources/useIntakeShare";
@@ -10,6 +15,10 @@ import {
 import { useIpcQuery } from "../api/useIpcQuery";
 import { QueryError } from "../ui/QueryError";
 import { defaultResourceCategories } from "../../shared/intake";
+import {
+  parseResourceKeywordText,
+  resourceKeywordLimit,
+} from "../../shared/resource-keywords";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { Workspace } from "../ui/Workspace";
@@ -76,6 +85,7 @@ export default function Intake() {
       title: existing?.title ?? "",
       category: existing?.category ?? "效率办公",
       tags: existing?.tags.join("，") ?? "",
+      keywords: initialIntakeKeywords(existing?.searchKeywords),
       summary: existing?.summary ?? "",
       directory:
         priorCopy?.directory.slice(0, priorCopy.directory.lastIndexOf("/")) ??
@@ -85,7 +95,14 @@ export default function Intake() {
         "/盘序资源",
       isOwnResource: priorOwnResource,
     },
-    parseIntakeDraft,
+    (value) => {
+      const parsed = parseIntakeDraft(value);
+      return {
+        ...parsed,
+        keywords:
+          parsed.keywords ?? initialIntakeKeywords(existing?.searchKeywords),
+      };
+    },
   );
   const {
     provider,
@@ -95,6 +112,7 @@ export default function Intake() {
     title,
     category,
     tags,
+    keywords,
     summary,
     directory,
     isOwnResource: draftOwnResource,
@@ -102,13 +120,17 @@ export default function Intake() {
   const hasAccounts = data!.accounts.some((account) => account.enabled);
   const intakeModeLocked = !!priorCopy && priorCopy.status !== "draft";
   const isOwnResource = intakeModeLocked ? priorOwnResource : draftOwnResource;
-  const [step, setStep] = useState<"info" | "files">("info");
+  const [step, setStep] = useState<"info" | "keywords" | "files">("info");
+  const [keywordSearching, setKeywordSearching] = useState(false);
+  const keywordWords = parseResourceKeywordText(keywords.text);
+  const tooManyKeywords = keywordWords.length > resourceKeywordLimit;
   const canTransfer = !isOwnResource && priorCopy?.status !== "ready";
-  const currentStep = canTransfer ? step : "info";
+  const currentStep = step === "files" && !canTransfer ? "keywords" : step;
   const stepRegion = useRef<HTMLDivElement>(null);
   const previousStep = useRef(currentStep);
   useEffect(() => {
-    if (!canTransfer) setStep("info");
+    if (!canTransfer)
+      setStep((value) => (value === "files" ? "keywords" : value));
   }, [canTransfer]);
   useEffect(() => {
     if (previousStep.current === currentStep) return;
@@ -144,6 +166,7 @@ export default function Intake() {
       { id: "0", name: "分享根目录" },
     ]);
   const inspectionRevision = useRef(0);
+  const inspectionPending = useRef(false);
   const [requestedCheckAccount, setRequestedCheckAccount] = useState("");
   const account = data!.accounts.find((a) => a.id === accountId);
   const duplicateCopy = !priorCopy
@@ -157,7 +180,7 @@ export default function Intake() {
     title,
     provider,
     excludeId: existing?.id,
-    originalTitle: priorCopy ? existing?.title : undefined,
+    originalTitle: priorCopy && existing?.category ? existing.title : undefined,
     invalidate: data?.resources,
   });
   const imageInput = useRef<HTMLInputElement>(null);
@@ -248,12 +271,19 @@ export default function Intake() {
     cursor?: string,
     nextParents?: ShareParent[],
   ) => {
-    const parsed = await link.parse();
-    if (!parsed || !mounted.current) return;
+    if (inspectionPending.current) return;
+    inspectionPending.current = true;
     const requestRevision = ++inspectionRevision.current;
     setInspectionLoading(true);
     setInspectionError("");
     try {
+      const parsed = await link.parse();
+      if (
+        !parsed ||
+        !mounted.current ||
+        requestRevision !== inspectionRevision.current
+      )
+        return;
       const result = await ipc("share.inspect", {
         accountId: parsed.accountId,
         sourceText: parsed.share.url,
@@ -285,6 +315,7 @@ export default function Intake() {
           error instanceof Error ? error.message : "读取分享失败，请重试。",
         );
     } finally {
+      inspectionPending.current = false;
       if (mounted.current && requestRevision === inspectionRevision.current)
         setInspectionLoading(false);
     }
@@ -306,25 +337,38 @@ export default function Intake() {
   const [submitting, setSubmitting] = useState(false);
   const nextInFlight = useRef(false);
   const [preparing, setPreparing] = useState(false);
+  const requiredDetailsHint =
+    !title.trim() || !sourceText.trim() || !accountId
+      ? "请填写资源标题和分享链接，并选择分类和账号。"
+      : !category.trim()
+        ? "请选择或填写资源分类。"
+        : "";
   const formBlocked =
     submitting ||
     preparing ||
+    (currentStep !== "info" && (tooManyKeywords || keywordSearching)) ||
     !!duplicateCopy ||
     similarity.blocked ||
     inspectionLoading ||
     imageDraft.loading ||
     busy > 0 ||
-    !title.trim() ||
-    !accountId ||
-    !sourceText.trim();
-  const next = async () => {
-    if (formBlocked || !canTransfer || nextInFlight.current) return;
+    !!requiredDetailsHint;
+  const next = async (target: "keywords" | "files") => {
+    if (
+      formBlocked ||
+      (target === "files" && !canTransfer) ||
+      nextInFlight.current
+    )
+      return;
     nextInFlight.current = true;
     setPreparing(true);
     try {
       // Moving steps only parses; the blur check never selects or transfers files.
       const parsed = await link.parse();
-      if (parsed && mounted.current) setStep("files");
+      if (parsed && mounted.current) {
+        setStep(target);
+        if (target === "files" && !inspection) void inspect();
+      }
     } finally {
       nextInFlight.current = false;
       if (mounted.current) setPreparing(false);
@@ -353,6 +397,7 @@ export default function Intake() {
           extractionCode: parsed.share.code || undefined,
           category,
           tags: parseResourceTagInput(tags),
+          searchKeywords: keywordWords,
           summary,
           coverData: cover,
           accountId: parsed.accountId,
@@ -383,6 +428,7 @@ export default function Intake() {
   };
   return (
     <Workspace
+      className={currentStep === "keywords" ? "intake-keyword-workspace" : ""}
       onPaste={(e) => {
         if (currentStep !== "info") return;
         const image = [...e.clipboardData.items]
@@ -399,9 +445,8 @@ export default function Intake() {
             label="资源保存操作"
             status={
               <>
-                {!title.trim() || !sourceText.trim() || !accountId
-                  ? "保存前请填写资源标题、分享链接并选择账号。"
-                  : duplicateCopy || similarity.duplicate
+                {requiredDetailsHint ||
+                  (duplicateCopy || similarity.duplicate
                     ? "此类网盘已有这份资源，请编辑已有记录。"
                     : similarity.loading
                       ? "正在检查名称相似的资源…"
@@ -409,15 +454,21 @@ export default function Intake() {
                         ? currentStep === "info"
                           ? "名称相似检查失败，请在标题下方重试后保存。"
                           : "名称相似检查失败，请重试读取后再提交。"
-                        : isOwnResource
-                          ? "自有资源直接入库，保留已有分享链接，不转存、不创建目录。"
-                          : !canTransfer
-                            ? "保存本次资料修改；网盘资源请在资源库中维护。"
-                            : currentStep === "info"
-                              ? "下一步选择需要转存的文件；也可先保存资料草稿。"
-                              : selected.length
-                                ? `已选 ${selected.length} / 100 项，可创建转存任务。`
-                                : "请点击读取分享内容，选择需要转存的文件。"}
+                        : currentStep === "info"
+                          ? "下一步可检索和编辑流量词。"
+                          : currentStep === "keywords"
+                            ? keywordSearching
+                              ? "正在读取检索来源…"
+                              : tooManyKeywords
+                                ? `最多可保留 ${resourceKeywordLimit} 个流量词，请删减后继续。`
+                                : keywordWords.length
+                                  ? `保留 ${keywordWords.length} 个流量词，将随资源保存。`
+                                  : "候选关键词可留空。"
+                            : selected.length
+                              ? `已选 ${selected.length} / 100 项，可创建转存任务。`
+                              : inspectionLoading
+                                ? "正在读取分享目录…"
+                                : "请选择需要转存的文件。")}
               </>
             }
           >
@@ -425,10 +476,10 @@ export default function Intake() {
               <>
                 <Button
                   disabled={submitting || preparing}
-                  onClick={() => setStep("info")}
+                  onClick={() => setStep("keywords")}
                 >
                   <ArrowLeft size={15} />
-                  上一步：资源信息
+                  上一步：流量词
                 </Button>
                 <Button
                   primary
@@ -439,8 +490,15 @@ export default function Intake() {
                   <ArrowDownToLine size={15} />
                 </Button>
               </>
-            ) : (
+            ) : currentStep === "keywords" ? (
               <>
+                <Button
+                  disabled={submitting || preparing}
+                  onClick={() => setStep("info")}
+                >
+                  <ArrowLeft size={15} />
+                  上一步：资源信息
+                </Button>
                 <Button
                   primary={!canTransfer}
                   disabled={formBlocked}
@@ -450,19 +508,30 @@ export default function Intake() {
                     ? "正在保存…"
                     : isOwnResource
                       ? "直接入库"
-                      : `保存资料${!existing ? "草稿" : ""}`}
+                      : existing
+                        ? "保存资料"
+                        : "保存资料草稿"}
                 </Button>
                 {canTransfer ? (
                   <Button
                     primary
                     disabled={formBlocked}
-                    onClick={() => void next()}
+                    onClick={() => void next("files")}
                   >
                     {preparing ? "正在识别链接…" : "下一步：选择文件"}
                     <ArrowRight size={15} />
                   </Button>
                 ) : null}
               </>
+            ) : (
+              <Button
+                primary
+                disabled={formBlocked}
+                onClick={() => void next("keywords")}
+              >
+                {preparing ? "正在识别链接…" : "下一步：检索流量词"}
+                <ArrowRight size={15} />
+              </Button>
             )}
           </ActionBar>
         ) : null
@@ -502,7 +571,13 @@ export default function Intake() {
             ref={stepRegion}
             tabIndex={-1}
             className="intake-step-region"
-            aria-label={currentStep === "info" ? "资源信息" : "选择转存文件"}
+            aria-label={
+              currentStep === "info"
+                ? "资源信息"
+                : currentStep === "keywords"
+                  ? "检索资源流量词"
+                  : "选择转存文件"
+            }
           >
             {currentStep === "info" ? (
               <div className="form-layout intake-info-layout">
@@ -945,6 +1020,26 @@ export default function Intake() {
                   </Panel>
                 </div>
               </div>
+            ) : currentStep === "keywords" ? (
+              <>
+                {link.error ? <Notice danger>{link.error}</Notice> : null}
+                <QueryError
+                  error={similarity.error}
+                  loading={similarity.loading}
+                  onRetry={similarity.reload}
+                  title="名称相似检查失败"
+                />
+                <IntakeKeywords
+                  layout="columns"
+                  title={title}
+                  value={keywords}
+                  onChange={(keywords) => draft.update({ keywords })}
+                  wordCount={keywordWords.length}
+                  locked={submitting || preparing}
+                  running={keywordSearching}
+                  onRunningChange={setKeywordSearching}
+                />
+              </>
             ) : (
               <>
                 <dl className="intake-transfer-summary" aria-label="待转存资源">
@@ -1014,6 +1109,7 @@ const parseIntakeDraft = (value: unknown) =>
       title: z.string(),
       category: z.string(),
       tags: z.string(),
+      keywords: intakeKeywordDraftSchema.optional(),
       summary: z.string(),
       directory: z.string(),
       isOwnResource: z.boolean().default(false),

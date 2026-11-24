@@ -8,6 +8,7 @@ import {
   type TiebaDiscoveryTrafficPost,
 } from "../../shared/tieba-resource-discovery";
 import type { Database } from "../database";
+import { oldResourceAdmission } from "./old-resource";
 import { awaitsMaturePotentialReading, inRecentGrowthWindow, qualifyingHourlyViews } from "./rules";
 
 export function migrateTiebaDiscoveryArchive(db: DatabaseSync) {
@@ -42,7 +43,7 @@ type SavedPost = Omit<TiebaDiscoveryPotentialPost, "active" | "awaitingMatureRea
 export function hasNoAdmittedOldPost(threadId: string, checkResources: boolean) {
   return `NOT EXISTS (
     SELECT 1 FROM tieba_discovery_old_traffic o
-    ${checkResources ? "JOIN tieba_discovery_old_resource r ON r.thread_id = o.thread_id AND r.admitted = 1" : ""}
+    ${checkResources ? `JOIN tieba_discovery_old_resource r ON r.thread_id = o.thread_id AND ${oldResourceAdmission}` : ""}
     WHERE o.thread_id = ${threadId} AND o.last_at IS NOT NULL
   )`;
 }
@@ -194,6 +195,11 @@ export function refreshPotentialPost(db: ArchiveDb, id: string, views: number | 
   db.db.prepare("UPDATE tieba_discovery_potential SET latest = ? WHERE thread_id = ?")
     .run(JSON.stringify({ ...post, views: views ?? post.views, checkedAt: views === null ? post.checkedAt : checkedAt, resource }), id);
   return true;
+}
+
+export function potentialMembership(db: ArchiveDb, rules: TiebaDiscoveryRules) {
+  const lookup = db.db.prepare(`SELECT 1 FROM tieba_discovery_potential p WHERE thread_id = ? AND ${currentPotential(rules)}`);
+  return (id: string) => !!lookup.get(id);
 }
 
 export function savePotentialPosts(db: ArchiveDb, posts: SavedPost[]) {

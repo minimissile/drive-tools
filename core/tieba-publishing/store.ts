@@ -7,6 +7,7 @@ export interface TiebaPublishingRecord extends TiebaPublishingDraft {
   stamp: EnvironmentStamp;
   payloadHash: string;
   lastMutationAt: string | null;
+  keyboardRequestHash?: string;
 }
 export class TiebaPublishingStore {
   constructor(private db: Database) {}
@@ -49,7 +50,7 @@ export function tiebaPublishingWriteState(
 ) {
   const drafts = new TiebaPublishingStore(db)
     .drafts()
-    .filter((draft) => draft.id !== excludeId);
+    .filter((draft) => draft.id !== excludeId && draft.uid === uid);
   return {
     uncertain: drafts.some(
       (draft) =>

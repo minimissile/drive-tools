@@ -32,10 +32,11 @@ export function createBindingsHandlers(
       return services.bit.windows();
     },
     "binding.open": async (object) => {
-      const { id: bindingId, contentFormat } = z
+      const { id: bindingId, contentFormat, newPage } = z
         .object({
           id: z.string(),
           contentFormat: contentFormatSchema.optional(),
+          newPage: z.boolean().optional(),
         })
         .parse(object);
       const binding = services.repo.bindings().find((b) => b.id === bindingId);
@@ -49,7 +50,7 @@ export function createBindingsHandlers(
           "CHANNEL_FORMAT_UNSUPPORTED",
           "此平台不支持所选内容形式。",
         );
-      return services.openBinding(binding, contentFormat);
+      return services.openBinding(binding, contentFormat, newPage);
     },
     "binding.save": async (object) => {
       const input = z

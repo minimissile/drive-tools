@@ -18,6 +18,9 @@ import {
   isOldResource,
   oldResourceEvidence,
 } from "../core/tieba-resource-discovery/old-resource";
+import { TiebaFilterAudit } from "../core/tieba-resource-discovery/filter-audit";
+import { recordRecycledPosts } from "../core/tieba-resource-discovery/recycled";
+import { fixture } from "./helpers";
 
 const discoveryExpansionInterval = 5 * 60_000;
 const fixedTimingDiscovery = (
@@ -32,6 +35,315 @@ const fixedTimingDiscovery = (
     now,
     () => 0.5,
   );
+
+test("主工作台可读取同时运行的巡查和老帖扫描，并在任务结束时移除", async () => {
+  const db = new Database(":memory:");
+  let finishSurvey!: () => void;
+  let finishHistory!: () => void;
+  const survey = new Promise<void>((resolve) => { finishSurvey = resolve; });
+  const history = new Promise<void>((resolve) => { finishHistory = resolve; });
+  const forumPage = {
+    id: "1", page: 1, url: "", name: "网盘资源", hasMore: false, threads: [],
+  };
+  const states: ReturnType<TiebaResourceDiscovery["activeTasks"]>[] = [];
+  const service = new TiebaResourceDiscovery(db, () => states.push(service.activeTasks()), {
+    forum: async () => {
+      await survey;
+      return forumPage;
+    },
+    oldForum: async () => {
+      await history;
+      return forumPage;
+    },
+    views: async () => assert.fail("空列表不复查浏览量"),
+    user: async () => assert.fail("空列表不检查作者"),
+    followed: async () => assert.fail("空列表不检查关注"),
+  });
+  try {
+    assert.deepEqual(service.activeTasks(), []);
+    service.scan();
+    service.scanOldForum();
+    assert.deepEqual(service.activeTasks(), [
+      { kind: "survey", forum: "网盘资源" },
+      { kind: "history", forum: "网盘资源", page: 1 },
+    ]);
+    finishHistory();
+    for (let i = 0; i < 50 && service.activeTasks().length > 1; i++) await sleep(5);
+    assert.deepEqual(service.activeTasks(), [{ kind: "survey", forum: "网盘资源" }]);
+    finishSurvey();
+    for (let i = 0; i < 50 && service.isBusy; i++) await sleep(5);
+    assert.deepEqual(service.activeTasks(), []);
+    assert.deepEqual(states.at(-1), []);
+  } finally {
+    service.dispose();
+    finishSurvey();
+    finishHistory();
+    db.close();
+  }
+});
+
+test("筛查抽查只收开始后的不同帖子，保留前 100 条并跨服务恢复", () => {
+  const db = new Database(":memory:");
+  const audit = new TiebaFilterAudit(db);
+  const reject = (id: string) => ({
+    post: {
+      id, title: `帖子 ${id}`, url: `https://tieba.baidu.com/p/${id}`,
+      forum: "网盘资源", publishedAt: "2026-11-01T00:00:00Z", views: 10,
+    },
+    reason: { kind: "oldResource" as const },
+  });
+  try {
+    audit.record([reject("900")], 1);
+    assert.equal(audit.summary(), null);
+    assert.equal(audit.start(2), true);
+    audit.record([reject("1"), reject("1"), reject("2")], 3);
+    assert.equal(audit.start(4), false);
+    const resumed = new TiebaFilterAudit(db);
+    resumed.record(Array.from({ length: 120 }, (_, index) => reject(String(index + 3))), 5);
+    resumed.record([reject("901")], 6);
+    assert.deepEqual(resumed.summary(), { batch: 1, startedAt: 2, count: 100 });
+    assert.equal(resumed.page(1).items[0].number, "SC-1-001");
+    assert.equal(resumed.page(1).items[1].post.id, "2");
+    assert.equal(resumed.page(11).page, 10);
+    assert.equal(resumed.page(10).items.at(-1)?.post.id, "100");
+    assert.equal(resumed.page(10).items.at(-1)?.number, "SC-1-100");
+    assert.equal(resumed.start(7), true);
+    assert.equal(resumed.page(1).total, 0);
+    resumed.record([reject("901")], 8);
+    assert.equal(resumed.page(1).items[0].number, "SC-2-001");
+  } finally {
+    db.close();
+  }
+});
+
+test("抽查 IPC 无需参数，满 100 条后可开始新一轮", async () => {
+  const { app, cleanup } = await fixture();
+  const read = () => app.invoke("tieba.discovery.filterAudit", { page: 1 });
+  const start = () => app.invoke("tieba.discovery.startFilterAudit");
+  try {
+    await start();
+    assert.deepEqual(await read(), { batch: 1, page: 1, total: 0, items: [] });
+
+    const audit = new TiebaFilterAudit(app.db);
+    audit.record(Array.from({ length: 100 }, (_, index) => ({
+      post: {
+        id: String(index + 1), title: "样本帖子", forum: "网盘资源",
+        url: `https://tieba.baidu.com/p/${index + 1}`,
+        publishedAt: "2026-11-01T00:00:00Z", views: 10,
+      },
+      reason: { kind: "recentResource" },
+    })), Date.now());
+    await assert.rejects(app.invoke("tieba.discovery.startFilterAudit", { batch: 2 }), { name: "ZodError" });
+    assert.equal(audit.summary()?.count, 100);
+    await start();
+    assert.deepEqual(await read(), { batch: 2, page: 1, total: 0, items: [] });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("抽查 IPC 对整轮样本排序后分页，缺失浏览量始终排在末尾", async () => {
+  const { app, cleanup } = await fixture();
+  const now = Date.parse("2026-11-20T00:00:00Z");
+  try {
+    await app.invoke("tieba.discovery.startFilterAudit");
+    const audit = new TiebaFilterAudit(app.db);
+    for (let index = 0; index < 13; index++) {
+      const id = String(index + 1);
+      audit.record([{
+        post: {
+          id, title: `样本 ${id}`, forum: "网盘资源",
+          url: `https://tieba.baidu.com/p/${id}`,
+          publishedAt: new Date(now - index * discoveryInterval).toISOString(),
+          views: index === 5 ? null : index * 10,
+        },
+        reason: { kind: "recentResource" },
+      }], now + index);
+    }
+    const read = async (sort: "sampledAt" | "publishedAt" | "views", direction: "asc" | "desc", page = 1) => {
+      const result = await app.invoke("tieba.discovery.filterAudit", { page, sort, direction }) as ReturnType<TiebaFilterAudit["page"]>;
+      return result.items.map(({ number }) => number);
+    };
+    assert.equal((await read("views", "desc"))[0], "SC-1-013");
+    assert.deepEqual(await read("views", "desc", 2), ["SC-1-002", "SC-1-001", "SC-1-006"]);
+    assert.deepEqual(await read("views", "asc", 2), ["SC-1-012", "SC-1-013", "SC-1-006"]);
+    assert.equal((await read("sampledAt", "asc"))[0], "SC-1-001");
+    assert.equal((await read("sampledAt", "desc"))[0], "SC-1-013");
+    assert.equal((await read("publishedAt", "desc"))[0], "SC-1-001");
+    assert.equal((await read("publishedAt", "asc"))[0], "SC-1-013");
+    await assert.rejects(app.invoke("tieba.discovery.filterAudit", { page: 1, sort: "unknown" }), { name: "ZodError" });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("筛查抽查记录真实过滤原因，命中资源和读取失败不计入", async () => {
+  const db = new Database(":memory:");
+  const now = Date.parse("2026-11-13T12:00:00Z");
+  const post = (id: string, age: number, views: number | null) => ({
+    id, forum: "网盘资源", title: `帖子 ${id}`, author: "", authorId: null,
+    url: `https://tieba.baidu.com/p/${id}`,
+    publishedAt: new Date(now - age * 24 * discoveryInterval).toISOString(),
+    views, replies: 0, likes: null, shares: null,
+  });
+  const forum = (threads: ReturnType<typeof post>[]) =>
+    ({ id: "1", page: 1, url: "", name: "网盘资源", hasMore: false, threads });
+  const service = fixedTimingDiscovery(db, {
+    forum: async () => forum([post("500", 1, 100)]),
+    oldForum: async () => forum([
+      post("501", 10, 80), post("502", 10, 1000),
+      post("503", 10, 1000), post("504", 10, null),
+    ]),
+    oldResource: async (id) => ({
+      linkSources: [], keywords: id === "503" ? ["链接"] : id === "502" ? ["资源"] : [],
+    }),
+    views: async () => null,
+    user: async () => assert.fail("样本无作者"),
+    followed: async () => assert.fail("样本无作者"),
+  }, () => now);
+  try {
+    service.startFilterAudit();
+    service.scan();
+    for (let i = 0; i < 100 && service.isBusy; i++) await sleep(5);
+    service.scanOldForum();
+    for (let i = 0; i < 150 && service.snapshot().oldResourcePending !== 1; i++) await sleep(10);
+    const items = service.filterAuditPage(1).items;
+    assert.deepEqual(items.map(({ post, reason }) => [post.id, reason.kind]), [
+      ["500", "recentResource"], ["501", "oldTraffic"], ["502", "oldResource"],
+    ]);
+    assert.deepEqual(items[1].reason, {
+      kind: "oldTraffic", dailyViews: 8, minViews: 1000, minDailyViews: 10,
+    });
+    assert.equal(service.oldTraffic(1, "screened").items[0]?.id, "503");
+  } finally {
+    service.dispose();
+    db.close();
+  }
+});
+
+test("回收贴 IPC 分页保留最新 500 个不同帖子，恢复入库后移出回收贴", async () => {
+  const { app, cleanup } = await fixture();
+  const makePost = (id: string) => ({
+    id, title: `样本 ${id}`, forum: "网盘资源", url: `https://tieba.baidu.com/p/${id}`,
+    publishedAt: "2026-11-01T00:00:00Z", views: 10,
+  });
+  try {
+    recordRecycledPosts(app.db, Array.from({ length: 502 }, (_, index) => ({
+      post: makePost(String(index + 1)), source: "pending", reason: "belowThreshold",
+    })), 1);
+    const read = async (page: number) => await app.invoke("tieba.discovery.recycled", { page }) as ReturnType<TiebaResourceDiscovery["recycledPage"]>;
+    assert.equal((await read(1)).total, 500);
+    assert.equal((await read(1)).items[0].post.id, "502");
+    assert.equal((await read(51)).items.at(-1)?.post.id, "3");
+    recordRecycledPosts(app.db, [{ post: makePost("3"), source: "traffic", reason: "resource" }], 2, ["4"]);
+    assert.equal((await read(1)).total, 499);
+    assert.equal((await read(1)).items[0].source, "traffic");
+    assert.equal((await read(1)).items[0].post.id, "3");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("SC-1-003：达到累计浏览门槛的帖子按详情里的回复链接收录", async () => {
+  const db = new Database(":memory:");
+  const now = Date.parse("2026-11-19T15:31:16.640Z");
+  const post = {
+    id: "11211312025",
+    title: "泰剧fool in love&你却爱着一个他 更13集",
+    url: "https://tieba.baidu.com/p/11211312025",
+    forum: "网盘资源",
+    author: "",
+    authorId: null,
+    publishedAt: "2026-11-19T13:34:32.000Z",
+    views: 792,
+    replies: 2,
+    likes: 1,
+    shares: null,
+  };
+  const checked: string[] = [];
+  const service = fixedTimingDiscovery(db, {
+    forum: async () => ({
+      id: "1", page: 1, url: "", name: "网盘资源", hasMore: false,
+      threads: [post, { ...post, id: "501" }, { ...post, id: "502" },
+        { ...post, id: "503", views: 199 }, { ...post, id: "504", title: "求资源链接" }],
+    }),
+    details: async (id) => {
+      checked.push(id);
+      if (id === "502") throw new AppError("TIEBA_ANALYSIS_NETWORK", "暂时断网");
+      return { views: 792, resource: {
+        linkSources: id === post.id ? ["回复"] : [],
+        keywords: ["链接"],
+      } };
+    },
+    views: async () => assert.fail("列表及详情已有浏览量"),
+    user: async () => assert.fail("样本无作者"),
+    followed: async () => assert.fail("样本无作者"),
+  }, () => now);
+  try {
+    service.saveRules({ ...defaultTiebaDiscoveryRules, trafficThreshold: 200 });
+    service.startFilterAudit();
+    service.scan();
+    for (let i = 0; i < 100 && service.isBusy; i++) await sleep(5);
+    assert.equal(service.isBusy, false);
+    assert.deepEqual(checked, [post.id, "501", "502"]);
+    assert.deepEqual(service.traffic(1).items.map(({ id, views, resource }) => ({
+      id, views, linkSources: resource?.linkSources,
+    })), [{ id: post.id, views: 792, linkSources: ["回复"] }]);
+    assert.deepEqual(service.filterAuditPage(1).items.map(({ post, reason }) => [post.id, reason.kind]), [
+      ["503", "recentResource"], ["504", "recentResource"], ["501", "recentDetailLink"],
+    ]);
+  } finally {
+    service.dispose();
+    db.close();
+  }
+});
+
+test("历史扫描可按30天累计浏览收录资源帖，且保留资源核验", async () => {
+  const db = new Database(":memory:");
+  const now = Date.parse("2026-11-20T04:00:00Z");
+  const post = (id: string, age: number) => ({
+    id, title: `帖子 ${id}`, forum: "网盘资源", author: "", authorId: null,
+    url: `https://tieba.baidu.com/p/${id}`,
+    publishedAt: new Date(now - age * 24 * discoveryInterval).toISOString(),
+    views: 560, replies: 0, likes: null, shares: null,
+  });
+  const checked: string[] = [];
+  const service = fixedTimingDiscovery(db, {
+    forum: async () => assert.fail("只运行历史扫描"),
+    oldForum: async () => ({
+      id: "1", page: 1, url: "", name: "网盘资源", hasMore: false,
+      threads: [
+        post("501", 7.47), post("502", 30), post("503", 30 + 1 / 24),
+        post("504", 8),
+      ],
+    }),
+    oldResource: async (id) => {
+      checked.push(id);
+      return { linkSources: id === "504" ? [] : ["正文"], keywords: [] };
+    },
+    views: async () => assert.fail("列表已有浏览量"),
+    user: async () => assert.fail("样本无作者"),
+    followed: async () => assert.fail("样本无作者"),
+  }, () => now);
+  try {
+    service.saveRules({
+      ...defaultTiebaDiscoveryRules, trafficThreshold: 200,
+      oldTrafficMinTotalViews: 800, oldTrafficMinLifetimeDailyViews: 2,
+    });
+    service.startFilterAudit();
+    service.scanOldForum();
+    for (let i = 0; i < 150 && service.filterAuditPage(1).total < 2; i++) await sleep(10);
+    assert.deepEqual(checked.sort(), ["501", "502", "504"]);
+    assert.deepEqual(service.traffic(1).items.map(({ id }) => id).sort(), ["501", "502"]);
+    assert.equal(service.oldTraffic(1, "screened").total, 0);
+    assert.deepEqual(service.filterAuditPage(1).items.map(({ post, reason }) => [post.id, reason.kind]), [
+      ["503", "oldTraffic"], ["504", "oldResource"],
+    ]);
+  } finally {
+    service.dispose();
+    db.close();
+  }
+});
 
 test("手动入库优先收录满七天的老帖，再判断高流量和潜力帖", async () => {
   const db = new Database(":memory:");
@@ -139,10 +451,22 @@ test("流量帖合并分页，去重后刷新两类记录且不会重新显示�
     assert.equal(discovery.trafficPosts(1, "high", "all").total, 11);
     assert.equal(discovery.trafficPosts(1, "qualified", "linked").total, 1);
     assert.equal(discovery.trafficPosts(1, "screened", "keywords").total, 0);
+    const archivedAt = first.items[0].archivedAt;
     assert.deepEqual(await discovery.refresh({ kind: "trafficPosts", ids: ["112", "111"] }),
       { updated: 2, failed: 0 });
     assert.deepEqual(discovery.trafficPosts(1, "all", "all").items.slice(0, 2).map(({ views }) => views),
       [20_112, 20_111]);
+    assert.equal(discovery.trafficPosts(1, "all", "all").items[0].archivedAt, archivedAt);
+    for (const sort of ["views", "lifetimeDailyViews"] as const) {
+      assert.deepEqual(discovery.trafficPosts(1, "all", "all", sort).items.slice(0, 2).map(({ id }) => id),
+        ["112", "111"]);
+      assert.deepEqual(discovery.trafficPosts(2, "all", "all", sort, "asc").items.map(({ id }) => id),
+        ["111", "112"]);
+    }
+    assert.deepEqual(discovery.trafficPosts(2, "all", "all", "archivedAt", "asc").items.map(({ id }) => id),
+      ["111", "112"]);
+    assert.equal(discovery.trafficPosts(1, "all", "all", "dailyAddedViews", "asc").items[0].id, "112");
+    assert.equal(discovery.trafficPosts(1, "qualified", "linked", "views").items[0].id, "112");
     discovery.deleteOldResource("112");
     assert.equal(discovery.trafficPosts(1, "all", "all").total, 11);
     assert.equal(db.get<{ count: number }>("SELECT count(*) count FROM tieba_discovery_traffic")?.count, 12);
@@ -150,6 +474,78 @@ test("流量帖合并分页，去重后刷新两类记录且不会重新显示�
   } finally {
     discovery.dispose();
     db.close();
+  }
+});
+
+test("流量帖复查未通过时按流量帖来源回收，缺读数不影响原列表", async () => {
+  const db = new Database(":memory:");
+  const now = Date.parse("2026-11-14T01:00:00Z");
+  const service = fixedTimingDiscovery(db, {
+    forum: async () => assert.fail("无需扫描贴吧"),
+    user: async () => assert.fail("无需查询作者"),
+    followed: async () => assert.fail("无需读取关注"),
+    views: async () => assert.fail("无需额外读取浏览量"),
+    details: async (id) => ({
+      views: id === "103" ? null : id === "102" ? 1500 : 30,
+      resource: { linkSources: [], keywords: id === "102" ? ["资源"] : [] },
+    }),
+  }, () => now);
+  const post = (id: string) => ({
+    id, title: `帖子 ${id}`, forum: "网盘资源", author: "", url: `https://tieba.baidu.com/p/${id}`,
+    publishedAt: new Date(now - 10 * 24 * discoveryInterval).toISOString(),
+    views: 15000, checkedAt: now - 1000,
+  });
+  try {
+    for (const id of ["101", "103"]) db.run("INSERT INTO tieba_discovery_traffic VALUES (?, ?, ?, ?)", id, now - 1000, 15000, JSON.stringify(post(id)));
+    db.run(`INSERT INTO tieba_discovery_old_traffic (thread_id, post, last_at, last_views, next_check_at) VALUES (?, ?, ?, ?, ?)`,
+      "102", JSON.stringify(post("102")), now - 1000, 15000, now);
+    db.run(`INSERT INTO tieba_discovery_old_resource (thread_id, evidence, status, checked_at, admitted) VALUES (?, ?, 'linked', ?, 1)`,
+      "102", '{"linkSources":["正文"],"keywords":[]}', now - 1000);
+    assert.deepEqual(await service.refresh({ kind: "trafficPosts", ids: ["101", "102", "103"] }), { updated: 2, failed: 1 });
+    assert.deepEqual(service.trafficPosts(1, "all", "all").items.map(({ id }) => id), ["103"]);
+    assert.deepEqual(service.recycledPage(1).items.map(({ post, source, reason }) => [post.id, source, reason]), [
+      ["102", "traffic", "resource"], ["101", "traffic", "belowThreshold"],
+    ]);
+  } finally {
+    service.dispose();
+    db.close();
+  }
+});
+
+test("流量帖手动入库标记按帖子保存，支持老帖、累计高流量和取消标记", async () => {
+  const { app, cleanup } = await fixture();
+  const now = Date.parse("2026-11-24T00:00:00Z");
+  const makePost = (id: string) => ({
+    id, title: `帖子 ${id}`, url: `https://tieba.baidu.com/p/${id}`, forum: "网盘资源",
+    publishedAt: "2026-11-14T00:00:00Z", checkedAt: now, views: 12000,
+  });
+  const list = async () => await app.invoke("tieba.discovery.trafficPosts", { page: 1, view: "all" }) as ReturnType<TiebaResourceDiscovery["trafficPosts"]>;
+  const mark = (id: string, recorded: boolean) => app.invoke("tieba.discovery.setResourceRecorded", { id, recorded });
+  try {
+    app.db.run("INSERT INTO tieba_discovery_traffic VALUES (?, ?, ?, ?)",
+      "101", now, 12000, JSON.stringify(makePost("101")));
+    app.db.run(`INSERT INTO tieba_discovery_old_traffic (thread_id, post, last_at, last_views, next_check_at)
+      VALUES (?, ?, ?, ?, ?)`, "102", JSON.stringify(makePost("102")), now, 12000, now + discoveryInterval);
+    app.db.run(`INSERT INTO tieba_discovery_old_resource (thread_id, evidence, status, checked_at, admitted)
+      VALUES (?, ?, 'linked', ?, 1)`, "102", '{"linkSources":["正文"],"keywords":[]}', now);
+    const marks = (posts: Awaited<ReturnType<typeof list>>) => posts.items.map(({ id, resourceRecorded }) => [id, resourceRecorded]).sort();
+    assert.deepEqual(marks(await list()), [["101", false], ["102", false]]);
+    await mark("101", true);
+    await mark("102", true);
+    await mark("102", true);
+    await assert.rejects(mark("999", true), { code: "TIEBA_DISCOVERY_POST_NOT_FOUND" });
+    const reopenedDb = new Database(app.db.path);
+    const reopened = fixedTimingDiscovery(reopenedDb);
+    try {
+      assert.deepEqual(marks(reopened.trafficPosts(1, "all", "all")), [["101", true], ["102", true]]);
+    } finally {
+      reopened.dispose();
+      reopenedDb.close();
+    }
+    await mark("102", false);
+    assert.deepEqual(marks(await list()), [["101", true], ["102", false]]);
+  } finally {
+    await cleanup();
   }
 });
 
@@ -346,6 +742,12 @@ test("资源信号区分分享与求资源，空值、计数回落不产生增�
   assert.equal(resourceEvidence("这里讨论网盘限速", "", []), undefined);
   assert.equal(resourceEvidence("资料合集 百度网盘", "", [])?.linked, false);
   assert.equal(
+    resourceEvidence("今天是太阳雨 超清画质 全集已完结 官方中字", "夸克链接", [])?.linked,
+    false,
+    "列表摘要只写「夸克」，标题提供分享线索时仍应纳入发现",
+  );
+  assert.equal(resourceEvidence("这里讨论夸克浏览器", "", []), undefined);
+  assert.equal(
     resourceEvidence("资料合集", "https://pan.baidu.com/s/abcde", [])?.linked,
     true,
   );
@@ -356,14 +758,46 @@ test("资源信号区分分享与求资源，空值、计数回落不产生增�
   assert.equal(observeViews(base, at + 300000, 45), base);
 });
 
-test("老帖资源校验匹配任一指定关键词和纯文本分享标记", () => {
+test("老帖资源校验排除单独的资源一词，接受其他指定关键词和分享标记", () => {
   const evidence = (text: string) => oldResourceEvidence([{ source: "正文", text }]);
-  for (const word of ["网盘", "云盘", "资源", "提取码", "百度", "夸克", "链接", "口令", "//pan."]) {
+  assert.equal(isOldResource(evidence("漫画里灭霸还有哪些资源？")), false);
+  assert.equal(isOldResource(evidence("网盘资源")), true);
+  for (const word of ["网盘", "云盘", "提取码", "百度", "夸克", "链接", "口令", "//pan."]) {
     assert.equal(isOldResource(evidence(`正文提到${word}即可命中`)), true, word);
   }
   const plainTextLink = evidence("//pan.baidu.com/s/example");
   assert.equal(plainTextLink.linkSources.length, 0);
   assert.equal(isOldResource(plainTextLink), true);
+});
+
+test("老帖列表排除已误收的仅资源关键词帖子，补上网盘证据后保留原浏览记录", () => {
+  const db = new Database(":memory:");
+  const service = fixedTimingDiscovery(db);
+  const id = "11176487422";
+  const at = Date.parse("2026-11-23T13:57:25Z");
+  try {
+    db.db.prepare(`
+      INSERT INTO tieba_discovery_old_traffic (thread_id, post, last_at, last_views, next_check_at)
+      VALUES (?, ?, ?, 2013, ?)
+    `).run(id, JSON.stringify({ id, publishedAt: "2026-11-07T18:54:24.000Z", archivedAt: at }), at, at);
+    db.db.prepare(`
+      INSERT INTO tieba_discovery_old_resource (thread_id, evidence, status, checked_at, admitted)
+      VALUES (?, '{"linkSources":[],"keywords":["资源"]}', 'keywords', ?, 1)
+    `).run(id, at);
+
+    assert.equal(service.snapshot().oldTraffic?.tracked, 0);
+    assert.equal(service.oldTraffic(1, "screened").total, 0);
+    assert.equal(service.trafficPosts(1, "all", "all").total, 0);
+
+    db.db.prepare(`
+      UPDATE tieba_discovery_old_resource SET evidence = '{"linkSources":["回复"],"keywords":["资源"]}',
+      status = 'linked' WHERE thread_id = ?
+    `).run(id);
+    assert.equal(service.oldTraffic(1, "screened").items[0]?.views, 2013);
+  } finally {
+    service.dispose();
+    db.close();
+  }
 });
 
 test("两轮扫描走完种子到作者再到新贴吧的路径，并用两次读数识别上涨", async () => {
@@ -529,7 +963,7 @@ test("旧配置保留观察期和高流量门槛，旧入库帖按最近的实�
   }
 });
 
-test("旧潜力帖在待观察到期后重新读取，保留首次读数且不再用早期速率判定", async () => {
+test("旧潜力帖在待观察到期后重新读取，未达标移入回收贴", async () => {
   const db = new Database(":memory:");
   const publishedAt = "2026-11-12T09:59:04.000Z";
   const published = Date.parse(publishedAt);
@@ -575,12 +1009,11 @@ test("旧潜力帖在待观察到期后重新读取，保留首次读数且不�
     now += discoveryInterval;
     await scan();
     assert.deepEqual(checked, [post.id]);
-    const [after] = service.potential(1).items;
-    assert.deepEqual(after.first, first);
-    assert.equal(after.checkedAt, now);
-    assert.equal(after.awaitingMatureReading, false);
-    assert.equal(after.active, false);
-    assert.equal(after.views, 12);
+    assert.equal(service.potential(1).total, 0);
+    const [after] = service.recycledPage(1).items;
+    assert.equal(after.post.id, post.id);
+    assert.equal(after.post.views, 12);
+    assert.equal(after.source, "potential");
   } finally {
     service.dispose();
     db.close();
@@ -630,7 +1063,7 @@ test("潜力帖移出贴吧列表后优先占用自动复查名额，并更新�
     assert.equal(service.isBusy, false);
   }
   try {
-    service.saveRules({ ...defaultTiebaDiscoveryRules, minHourlyViews: 75, pendingObservationHours: 1 });
+    service.saveRules({ ...defaultTiebaDiscoveryRules, minHourlyViews: 59, pendingObservationHours: 1 });
     service.setAuto(true);
     await advance(1);
     assert.equal(service.potential(1).total, 1);
@@ -640,9 +1073,9 @@ test("潜力帖移出贴吧列表后优先占用自动复查名额，并更新�
     const [post] = service.potential(1).items;
     assert.equal(post.first.views, 99);
     assert.equal(post.views, 120);
-    assert.equal(post.active, false);
+    assert.equal(post.active, true);
     await advance(discoveryInterval);
-    assert.deepEqual(checked, ["123"]);
+    assert.deepEqual(checked, ["123", "123"]);
     assert.equal(post.replies, 0);
     assert.equal(post.shares, null);
     assert.equal(service.potential(2).page, 1);
@@ -1067,7 +1500,7 @@ test("老帖同时通过两项初筛，离线后按实际读数间隔复查并�
           thread("700", 60, 2400), // Passes both gates without resource evidence.
           thread("701", 30, 999), // Only the daily average passes.
           thread("702", 120, 1000), // Only cumulative views pass.
-          thread("704", 20, 2500), // Traffic qualifies but content does not.
+          { ...thread("704", 20, 2500), title: "普通讨论" }, // Traffic qualifies but content does not.
           thread("703", 6.99, 5000), // Too new for this workflow.
         ] : [],
       };
@@ -1080,7 +1513,7 @@ test("老帖同时通过两项初筛，离线后按实际读数间隔复查并�
       }
       return id === "700"
         ? { linkSources: ["回复"], keywords: ["夸克"] }
-        : { linkSources: [], keywords: ["百度"] };
+        : { linkSources: [], keywords: [] };
     },
     user: async () => assert.fail("无需读取作者"),
     followed: async () => assert.fail("无需读取关注"),
@@ -1402,7 +1835,10 @@ test("新帖先待观察，到期用新读数晋级或移除，高流量直接�
     assert.deepEqual(service.traffic(1).items.map((item) => item.id), ["106", "104"]);
     await cycle(24);
     assert.equal(service.snapshot().pendingCount, 0);
-    assert.deepEqual(service.potential(1).items.map((item) => item.id), ["101", "105"]);
+    assert.deepEqual(service.potential(1).items.map((item) => item.id), ["101"]);
+    assert.deepEqual(service.recycledPage(1).items.map(({ post, source }) => [post.id, source]).sort(), [
+      ["103", "pending"], ["105", "potential"],
+    ]);
     const [promoted] = service.potential(1).items;
     assert.equal(promoted.first.views, 75);
     assert.equal(promoted.first.at, start + 24 * discoveryInterval);

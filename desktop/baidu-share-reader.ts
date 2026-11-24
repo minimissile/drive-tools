@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { AppPorts } from "../core/ports";
-import type { ShareInspection } from "../shared/types";
+import type { ShareInput, ShareInspection } from "../shared/types";
 import { AppError } from "../core/errors";
 import { createBackgroundBrowserWindow } from "./background-browser-window";
 import {
@@ -51,6 +51,7 @@ type Context = {
   window: BrowserWindow;
   source: string;
   meta?: { shareId: string; uk: string; title: string };
+  navigation?: Promise<void>;
 };
 const script = (fn: Function, input?: unknown) =>
   `(() => {const __name = fn => fn; return (${fn.toString()})(${input === undefined ? "" : JSON.stringify(input)})})()`;
@@ -171,6 +172,38 @@ export function createBaiduShareReader(
       "尚未识别到分享目录，请查看内置读取窗口，完成提取码或页面提示后重试。",
     );
   };
+  const navigate = (ctx: Context, source: ShareInput): Promise<void> => {
+    const identity = `${source.shareKey}:${source.code}`;
+    if (ctx.source === identity && ctx.window.webContents.getURL())
+      return ctx.navigation ?? Promise.resolve();
+    ctx.source = identity;
+    ctx.meta = undefined;
+    const url = new URL(source.url);
+    if (source.code) url.searchParams.set("pwd", source.code);
+    const contents = ctx.window.webContents;
+    let ready!: () => void;
+    const domReady = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    contents.once("dom-ready", ready);
+    const navigation = Promise.race([
+      domReady,
+      ctx.window.loadURL(url.href).catch((cause) => {
+        if (!(cause instanceof Error && cause.message.includes("ERR_ABORTED")))
+          throw cause;
+      }),
+    ])
+      .catch((cause) => {
+        ctx.source = "";
+        throw cause;
+      })
+      .finally(() => {
+        contents.removeListener("dom-ready", ready);
+        if (ctx.navigation === navigation) ctx.navigation = undefined;
+      });
+    ctx.navigation = navigation;
+    return navigation;
+  };
   return {
     isOpen: () =>
       busy ||
@@ -178,19 +211,20 @@ export function createBaiduShareReader(
         (ctx) => !ctx.window.isDestroyed() && ctx.window.isVisible(),
       ),
     async open(source) {
-      const ctx = contexts.get(workspaceKey());
+      const ctx = source ? context() : contexts.get(workspaceKey());
       if (!ctx || ctx.window.isDestroyed())
         throw new AppError(
           "SHARE_BROWSER_CLOSED",
           "读取会话已结束，请重新读取包内名称。",
         );
-      if (source && ctx.source !== `${source.shareKey}:${source.code}`)
+      if (busy && source && ctx.source !== `${source.shareKey}:${source.code}`)
         throw new AppError(
           "SHARE_BROWSER_CHANGED",
           "读取页面已切换，请先重新检查当前链接，再查看异常页面。",
         );
       ctx.window.show();
       ctx.window.focus();
+      if (source) await navigate(ctx, source);
     },
     async inspect(source, parentId, page): Promise<ShareInspection> {
       if (busy)
@@ -201,28 +235,13 @@ export function createBaiduShareReader(
       const ctx = context();
       busy = true;
       const win = ctx.window;
-      const identity = `${source.shareKey}:${source.code}`;
       const controller = new AbortController();
       const signal = controller.signal;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
           (async () => {
-            if (ctx.source !== identity || !win.webContents.getURL()) {
-              ctx.source = identity;
-              ctx.meta = undefined;
-              const url = new URL(source.url);
-              if (source.code) url.searchParams.set("pwd", source.code);
-              try {
-                await win.loadURL(url.href);
-              } catch (cause) {
-                if (!(
-                  cause instanceof Error &&
-                  cause.message.includes("ERR_ABORTED")
-                ))
-                  throw cause;
-              }
-            }
+            await navigate(ctx, source);
             signal.throwIfAborted();
             if (
               !ctx.meta ||

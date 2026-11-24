@@ -1,3 +1,4 @@
+import { BitBrowserPageControls } from "./BitBrowserPageControls";
 import { useIpcQuery } from "../api/useIpcQuery";
 import {
   Button,
@@ -27,7 +28,12 @@ export const environmentPlatformName = (platform: string) =>
   (isDocumentProvider(platform)
     ? documentPlatformSpecs[platform].name
     : undefined) ??
-  { "baidu-marketing": "百度营销", "baidu-zhidao": "百度知道", "drive-baidu": "百度网盘" }[platform] ??
+  {
+    "baidu-marketing": "百度营销",
+    "baidu-zhidao": "百度知道",
+    "drive-baidu": "百度网盘",
+    "drive-quark": "夸克网盘",
+  }[platform] ??
   platformSpecs.find((spec) => spec.id === platform)?.name ??
   platform;
 
@@ -168,6 +174,14 @@ export function BitBrowserDiagnostic({
               关闭前请核对已有操作：{query.data.pendingOperations.join("；")}。
             </Notice>
           ) : null}
+          <BitBrowserPageControls
+            key={`${command.connectorKey}:${command.profileId}`}
+            command={command}
+            disabled={
+              pending || !!environment?.busy || !!query.data.blockers.length
+            }
+            revision={`${readAt}:${environment?.busy}`}
+          />
           <div className="row spread">
             <h3>关联的平台账号</h3>
             {environment ? (

@@ -1,3 +1,4 @@
+import { createTemporaryPage, releaseTemporaryPage } from "./browser-page-lifecycle";
 import type { BrowserContext } from "playwright-core";
 import type { AppPorts } from "./ports";
 import type { BrowserEnvironments } from "./browser-environments";
@@ -27,6 +28,8 @@ import { isDocumentProvider } from "../shared/document-platforms";
 import { createZhidaoBrowserSession } from "./zhidao/browser-session";
 import { verifyBitTieba } from "./tieba/browser-session";
 import { verifyBitBilibili } from "./bilibili/account-browser";
+import { jianshuBrowser, verifyBitJianshu } from "./jianshu/browser";
+import type { ContentImage } from "../shared/content-sources";
 import { tiebaAutocareBrowser } from "./tieba/autocare-browser";
 import { tiebaParticipationBrowser } from "./tieba/participation-browser";
 import { tiebaTopicPublisher } from "./tieba/topic-browser";
@@ -49,6 +52,7 @@ export function createBrowserPlatformPorts(
   native: AppPorts,
   environments: BrowserEnvironments,
   bit: () => BitBrowser,
+  readJianshuImage?: (image: ContentImage) => Promise<Buffer>,
 ): AppPorts {
   const cache = new Map<string, WebsiteSessionState>();
   const profile = <T>(
@@ -79,6 +83,8 @@ export function createBrowserPlatformPorts(
           a,
         ).verify();
       else if (a.provider === "tieba") state = await verifyBitTieba(context);
+      else if (a.provider === "jianshu")
+        state = await verifyBitJianshu(context);
       else if (a.provider === "bilibili")
         state = await verifyBitBilibili(context);
       else if (a.provider === "zhihu") state = await verifyZhihu(context);
@@ -99,7 +105,7 @@ export function createBrowserPlatformPorts(
         };
       }
       cache.set(a.id, state);
-      return state;
+      return { ...state };
     });
   const verify = async (a: WebsiteAccount) => {
     try {
@@ -126,7 +132,33 @@ export function createBrowserPlatformPorts(
     file?: { name: string; bytes: Buffer },
   ) =>
     profile(webRef(a), (context) => bitBaiduExchange(context, a, spec, file));
+  const openJianshuEditor = (account: WebsiteAccount, url: string) =>
+    !isBit(webRef(account))
+      ? (native.jianshu?.openEditor ?? missing())(account, url)
+      : jianshuBrowser((a, action, visible) =>
+          profile(webRef(a), action, visible),
+        ).openEditor!(account, url);
   return Object.assign(Object.create(native) as AppPorts, {
+    jianshu: {
+      openEditor: openJianshuEditor,
+      prepare: (account, payload, onCheckpoint) =>
+        !isBit(webRef(account))
+          ? (native.jianshu ?? missing()).prepare(
+              account,
+              payload,
+              onCheckpoint,
+            )
+          : jianshuBrowser(
+              (a, action, visible) => profile(webRef(a), action, visible),
+              readJianshuImage,
+            ).prepare(account, payload, onCheckpoint),
+      checkResult: (account, url, payload) =>
+        !isBit(webRef(account))
+          ? (native.jianshu ?? missing()).checkResult(account, url, payload)
+          : jianshuBrowser((a, action, visible) =>
+              profile(webRef(a), action, visible),
+            ).checkResult(account, url, payload),
+    },
     wechat:
       native.wechat || native.wechatBrowserSession
         ? {
@@ -223,7 +255,10 @@ export function createBrowserPlatformPorts(
         if (!isBit(webRef(account)))
           return native.weiboStatistics?.read(account, url) ?? missing();
         return profile(webRef(account), async (context) => {
-          const page = await context.newPage();
+          const page = await createTemporaryPage(
+            context,
+            weiboReceiptUrl(url, account.uid!),
+          );
           try {
             const response = await page.goto(
               weiboReceiptUrl(url, account.uid!),
@@ -238,7 +273,7 @@ export function createBrowserPlatformPorts(
               await page.evaluate(weiboStatisticsScript(account.uid!, url)),
             );
           } finally {
-            await page.close().catch(() => {});
+            await releaseTemporaryPage(page);
           }
         });
       },
@@ -264,17 +299,19 @@ export function createBrowserPlatformPorts(
             const page = await pageFor(
               context,
               `panxu:${a.provider}:${a.id}`,
-              a.provider === "tieba"
-                ? "https://tieba.baidu.com/"
-                : a.provider === "wechat"
-                  ? "https://mp.weixin.qq.com/"
-                  : a.provider === "zhihu"
-                    ? "https://www.zhihu.com/"
-                    : a.provider === "weibo"
-                      ? "https://weibo.com/"
-                      : a.provider === "bilibili"
-                        ? "https://passport.bilibili.com/login"
-                        : "https://qingge.baidu.com/login",
+              a.provider === "jianshu"
+                ? "https://www.jianshu.com/sign_in"
+                : a.provider === "tieba"
+                  ? "https://tieba.baidu.com/"
+                  : a.provider === "wechat"
+                    ? "https://mp.weixin.qq.com/"
+                    : a.provider === "zhihu"
+                      ? "https://www.zhihu.com/"
+                      : a.provider === "weibo"
+                        ? "https://weibo.com/"
+                        : a.provider === "bilibili"
+                          ? "https://passport.bilibili.com/login"
+                          : "https://qingge.baidu.com/login",
             );
             await page.bringToFront();
           },
@@ -285,13 +322,15 @@ export function createBrowserPlatformPorts(
       status: async (a) =>
         !isBit(webRef(a))
           ? (native.websiteSessions ?? missing()).status(a)
-          : (cache.get(a.id) ?? {
-              unverified: true,
-              hasSession: false,
-              uid: null,
-              windowOpen: false,
-              error: "请点击检查登录，核实此指纹环境的平台身份。",
-            }),
+          : {
+              ...(cache.get(a.id) ?? {
+                unverified: true,
+                hasSession: false,
+                uid: null,
+                windowOpen: false,
+                error: "请点击检查登录，核实此指纹环境的平台身份。",
+              }),
+            },
       verify: (a) =>
         isBit(webRef(a))
           ? verify(a)
@@ -334,6 +373,10 @@ export function createBrowserPlatformPorts(
         });
       },
       openDocument: async (a, url) => {
+        if (a.provider === "jianshu") {
+          await openJianshuEditor(a, url);
+          return;
+        }
         if (a.provider === "zhihu" && isBit(webRef(a)))
           return profile(
             webRef(a),

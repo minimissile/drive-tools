@@ -1,14 +1,15 @@
+import { storageRequest } from "../core/providers/small-upload";
 import { runtimeDataPath } from "./runtime-paths";
 import { createVideoInputs } from "./video-inputs";
 import { landingDocumentExtensions } from "../shared/landing-document";
 import { resourceLinksTarget } from "./resource-links-network";
 import { pipixNetworkTarget } from "./pipix-network";
 import { musicNetworkTarget } from "../core/music/network";
-import { wechatDiscoveryPaths } from "../core/wechat/discovery";
 import { normalizeCover } from "./cover-image";
 import { watchDevParent } from "./dev-parent";
 import { loadProviderPage } from "./provider-navigation";
-import { WorkbenchWindows } from "./workbench-windows";
+import { WorkbenchWindows, type WorkbenchWindowIdentity } from "./workbench-windows";
+import { tiebaAnalysisPage, tiebaAnalysisTitle, tiebaAnalysisWindowId } from "../shared/workbench-windows";
 import type { DevUpdateState } from "../shared/dev-updates";
 import { allowDevelopmentWorkbenchReload } from "./workbench-navigation";
 import { devSessionIdSchema, type DevSession, type OpenDevSession } from "../shared/dev-sessions";
@@ -33,6 +34,7 @@ import { isAbsolute, join, basename } from "node:path";
 import { AppService, type AppPorts } from "../core/service";
 import { createZhidaoSession } from "./zhidao-session";
 import { createCollectionWebSession } from "./collection-web-session";
+import { createResourceKeywordWeb } from "./resource-keyword-web";
 import { createBaiduDiscoverySession } from "./baidu-discovery-session";
 import { createZhidaoPageDiscovery } from "./zhidao-page-discovery";
 import { createBaiduShareReader } from "./baidu-share-reader";
@@ -210,11 +212,21 @@ async function providerResponse(
 }
 const captureErrors = new Map<string, Error>();
 const transport: ProviderTransport = {
+  async storageRequest(accountId, url, init) {
+    if (service.driveBrowsers.isBound(accountId))
+      return service.driveBrowsers.storageRequest(accountId, url, init);
+    const account = service.repo.getAccount(accountId);
+    if (account.provider !== "quark" && account.provider !== "uc")
+      throw new AppError("UPLOAD_UNSUPPORTED", "此网盘不支持该存储传输方式。");
+    return storageRequest(account.provider, new URL(url), init);
+  },
   async fileBytes(accountId, address, maxBytes) {
     const account = service.repo.getAccount(accountId);
     const url = new URL(address);
     if (!documentDownloadAllowed(account.provider, address))
       throw new AppError("DOCUMENT_HOST_BLOCKED", `网盘文件地址不属于允许的下载服务（${url.hostname}）。`);
+    if (service.driveBrowsers.isBound(accountId))
+      return service.driveBrowsers.fileBytes(accountId, address, maxBytes);
     try {
       const response = await partition(accountId).fetch(url.href, {
         credentials: "include", redirect: "error", signal: AbortSignal.timeout(90_000),
@@ -263,6 +275,8 @@ const transport: ProviderTransport = {
   },
   async principalId(accountId, provider) {
     if (provider !== "quark" && provider !== "uc") return null;
+    if (service.driveBrowsers.isBound(accountId))
+      return service.driveBrowsers.principalId(accountId);
     const uid = (
       await partition(accountId).cookies.get({
         url: providerSpecs[provider].home,
@@ -472,22 +486,8 @@ function changed() {
 }
 const environmentSessions = createEnvironmentSessions((ref) => service.environments.forAccount(ref));
 const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
+const keywordWebBrowser = createResourceKeywordWeb(() => service.dataPath);
 const ports: AppPorts = {
-  wechatDiscoveryFetch(url, init) {
-    if (
-      init.method !== "POST" ||
-      !Object.values(wechatDiscoveryPaths).some((path) => url === `https://api.tikhub.io${path}`)
-    )
-      throw new AppError("WECHAT_DISCOVERY_TARGET", "数据源请求地址不受支持。");
-    return session
-      .fromPartition("panxu-wechat-discovery-network", { cache: false })
-      .fetch(url, {
-        ...init,
-        credentials: "omit",
-        redirect: "error",
-        bypassCustomProtocolHandlers: true,
-      });
-  },
   pipixFetch(url, init) {
     const target = pipixNetworkTarget(url, init.method ?? "GET");
     return session
@@ -524,6 +524,8 @@ const ports: AppPorts = {
       });
   },
   collectionWebSession: createCollectionWebSession(() => service.dataPath),
+  read5118PublicKeywords: keywordWebBrowser.read,
+  keywordWebBrowser,
   baiduDiscovery: createBaiduDiscoverySession(() => service.dataPath),
   zhidaoPages: createZhidaoPageDiscovery(() => service.dataPath),
   baiduShareReader: createBaiduShareReader(() => service.dataPath),
@@ -536,6 +538,7 @@ const ports: AppPorts = {
   zhidaoSession: createZhidaoSession((id) => environmentSessions.profile({ kind: "zhidao", id })),
   baiduKeywords: websiteSessions.baiduKeywords,
   websiteSessions: websiteSessions.sessions,
+  jianshu: websiteSessions.jianshu,
   bilibili: websiteSessions.bilibili,
   smzdm: websiteSessions.smzdm,
   wechat: websiteSessions.wechat,
@@ -543,6 +546,26 @@ const ports: AppPorts = {
   readWechatRemoteImage: websiteSessions.readWechatPreviewImage,
   weiboPublisher: websiteSessions.weiboPublisher,
   weiboStatistics: websiteSessions.weiboStatistics,
+  async readWechatClipboardImage() {
+    for (const item of await clipboard.read()) {
+      for (const [mime, extension] of [
+        ["image/png", "png"],
+        ["image/jpeg", "jpg"],
+        ["image/gif", "gif"],
+      ] as const) {
+        if (!item.types.includes(mime)) continue;
+        const image = await item.getType(mime);
+        if (!image.size) continue;
+        if (image.size > 10 * 1024 * 1024)
+          throw new AppError("WECHAT_IMAGE", "请使用不超过 10MB 的图片。");
+        return {
+          name: `剪贴板图片.${extension}`,
+          bytes: Buffer.from(await image.arrayBuffer()),
+        };
+      }
+    }
+    return null;
+  },
   async readWechatImage() {
     const result = await dialog.showOpenDialog(windows.owner(), {
       title: "选择公众号插图",
@@ -568,9 +591,9 @@ const ports: AppPorts = {
   },
   async readWeiboImages(platform = "weibo") {
     const result = await dialog.showOpenDialog(windows.owner(), {
-      title: `选择${platform === "tieba" ? "贴吧" : platform === "zhihu" ? "知乎" : "微博"}配图（最多 ${platform === "tieba" ? 6 : 9} 张）`,
+      title: `选择${platform === "jianshu" ? "简书" : platform === "tieba" ? "贴吧" : platform === "zhihu" ? "知乎" : "微博"}配图（最多 ${platform === "tieba" ? 6 : 9} 张）`,
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "内容图片", extensions: platform === "zhihu" || platform === "tieba" ? ["png", "jpg", "jpeg"] : ["png", "jpg", "jpeg", "gif"] }],
+      filters: [{ name: "内容图片", extensions: platform === "jianshu" || platform === "zhihu" || platform === "tieba" ? ["png", "jpg", "jpeg"] : ["png", "jpg", "jpeg", "gif"] }],
     });
     if (result.canceled) return null;
     const imageLimit = platform === "tieba" ? 6 : 9;
@@ -779,8 +802,8 @@ const ports: AppPorts = {
     return result.filePath;
   },
 };
-function createWindow(input: OpenDevSession = { label: "主工作台" }, restored?: DevSession) {
-  const info = windows.createInfo(input, restored);
+function createWindow(input: OpenDevSession = { label: "主工作台" }, identity?: WorkbenchWindowIdentity) {
+  const info = windows.createInfo(input, identity);
   const window = new BrowserWindow({
     show: false,
     width: 1320,
@@ -870,6 +893,7 @@ function createWindow(input: OpenDevSession = { label: "主工作台" }, restore
   });
   window.once("closed", () => {
     if (!windows.size) {
+      ports.keywordWebBrowser?.close();
       ports.baiduDiscovery?.close();
       ports.baiduShareReader?.close(true);
       ports.zhidaoPages?.close();
@@ -1131,6 +1155,17 @@ else {
                   "UPDATE_INSTALLING",
                   "正在准备重启安装更新，请稍候。",
                 );
+              if (request.method === "workbench.openTiebaAnalysis") {
+                if (args !== undefined)
+                  throw new AppError("INVALID_INPUT", "打开贴吧数据分析无需参数。");
+                if (!windows.focusIfOpen(tiebaAnalysisWindowId)) {
+                  createWindow(
+                    { label: tiebaAnalysisTitle, initialPage: tiebaAnalysisPage },
+                    { id: tiebaAnalysisWindowId },
+                  );
+                }
+                return { ok: true, value: true };
+              }
               if (request.method !== "snapshot") activeOperations++;
               try {
                 return {
@@ -1167,10 +1202,7 @@ else {
       } else createWindow({
         label: process.env.PANXU_DEV_LABEL || "主工作台",
         session: process.env.PANXU_DEV_SESSION || "",
-      }, {
-        id: "main", label: "主工作台", session: "", mode: "development",
-        status: "idle", createdAt: new Date().toISOString(),
-      });
+      }, { id: "main" });
       service.queue.start();
       updater.start();
       if (development && process.send) {
@@ -1274,6 +1306,7 @@ else {
     service?.tiebaAutocare.dispose();
     service?.tiebaParticipation.dispose();
     service?.baiduDiscovery.close();
+    ports.keywordWebBrowser?.close();
     service?.zhidaoPages.close();
     ports.baiduShareReader?.close(true);
     service?.distribution.close();

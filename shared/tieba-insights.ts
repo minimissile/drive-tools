@@ -64,11 +64,8 @@ export interface TiebaInsightsSnapshot {
   message: string;
 }
 export const tiebaInsightsRefreshSchema = z.object({
-  targetIds: z
-    .array(z.string().regex(/^tiebatarget_[\w-]+$/))
-    .max(5)
-    .optional(),
-  publicationIds: z.array(z.string().min(1).max(150)).max(5).optional(),
+  targetIds: z.array(z.string().regex(/^tiebatarget_[\w-]+$/)).optional(),
+  publicationIds: z.array(z.string().min(1).max(150)).optional(),
 });
 export const tiebaInsightsSaveSchema = z.object({
   revision: z.number().int().positive(),

@@ -24,6 +24,12 @@ export function ArticleComparison({
   onClose(): void;
 }) {
   const [error, setError] = useState("");
+  const sourceLabel =
+    source.kind === "resource-catalog"
+      ? "导出时的清单"
+      : source.kind === "keyboard-skins"
+        ? "初始合集"
+        : "原文";
   return (
     <Dialog
       title="全屏预览"
@@ -34,29 +40,31 @@ export function ArticleComparison({
       <div className="wechat-comparison">
         <section aria-labelledby="wechat-comparison-source">
           <header>
-            <h3 id="wechat-comparison-source">原文</h3>
-            <Button
-              quiet
-              size="compact"
-              onClick={() => {
-                setError("");
-                void ipc("system.external", { url: source.url }).catch(
-                  (cause) =>
-                    setError(
-                      cause instanceof Error
-                        ? cause.message
-                        : "无法打开原网页，请重试。",
-                    ),
-                );
-              }}
-            >
-              <ExternalLink size={14} /> 打开原网页
-            </Button>
+            <h3 id="wechat-comparison-source">{sourceLabel}</h3>
+            {source.url ? (
+              <Button
+                quiet
+                size="compact"
+                onClick={() => {
+                  setError("");
+                  void ipc("system.external", { url: source.url }).catch(
+                    (cause) =>
+                      setError(
+                        cause instanceof Error
+                          ? cause.message
+                          : "无法打开原网页，请重试。",
+                      ),
+                  );
+                }}
+              >
+                <ExternalLink size={14} /> 打开原网页
+              </Button>
+            ) : null}
           </header>
           <div
             className="wechat-comparison-scroll"
             tabIndex={0}
-            aria-label="原文内容"
+            aria-label={`${sourceLabel}内容`}
           >
             {error ? (
               <Notice danger>

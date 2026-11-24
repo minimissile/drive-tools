@@ -1,3 +1,8 @@
+import { latestTiebaSubmission } from "../tieba/submissions";
+import {
+  tiebaRunDurationMs as runDuration,
+  tiebaAccountMutationGapMs as taskGap,
+} from "../../shared/tieba-timing";
 import { tiebaFollowWriteState } from "../tieba-autocare/store";
 import { tiebaPublishingWriteState } from "../tieba-publishing/store";
 import type { z } from "zod";
@@ -14,6 +19,7 @@ import {
   tiebaAutocareObserveSchema,
   tiebaAutocareFollowSchema,
   tiebaAutocareAddSchema,
+  tiebaAutocareStartSchema,
   type TiebaAutocareSnapshot,
   type TiebaForumReading,
   type tiebaAutocareSaveSchema,
@@ -41,8 +47,6 @@ import {
   verifiedTiebaFollowState,
 } from "./follow-state";
 
-const runDuration = 2 * 60 * 60 * 1000;
-const taskGap = 60 * 1000;
 const ref = (id: string) => ({ kind: "website" as const, id });
 export const tiebaAutocareStateKey = "tiebaAutocare:v1";
 export function tiebaDay(time: number | string) {
@@ -71,10 +75,12 @@ export class TiebaAutocare {
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private working = false;
+  private executing = new Map<string, TaskRecord>();
   private operations = 0;
   private controllers = new Set<AbortController>();
   private following = new Set<string>();
   private adding = new Set<string>();
+  private preparing = false;
   constructor(private d: Dependencies) {
     this.logs = new RuntimeLog(d.db, d.dataPath, "tieba-autocare");
     this.store = new TiebaAutocareStore(d.db);
@@ -102,12 +108,19 @@ export class TiebaAutocare {
           "上次执行在提交前中断，保留原排期。",
         );
     }
+    this.upgradeSchedule();
     this.expirePending();
     // Reconcile persisted configuration with its queue after an interrupted save.
     if (this.store.state().enabled) this.d.db.transaction(() => this.plan());
   }
   get isBusy() {
-    return this.operations > 0 || this.working || this.adding.size > 0;
+    return (
+      this.preparing ||
+      this.operations > 0 ||
+      this.working ||
+      this.executing.size > 0 ||
+      this.adding.size > 0
+    );
   }
   private time() {
     return this.d.clock?.() ?? Date.now();
@@ -213,6 +226,15 @@ export class TiebaAutocare {
       .slice(0, 500)
       .map(({ stamp: _stamp, configSnapshot: _config, ...task }) => task);
     const today = tasks.filter((task) => task.day === day);
+    const completed =
+      state.config.targetIds.length > 0 &&
+      state.config.targetIds.every((targetId) =>
+        today.some(
+          (task) =>
+            task.targetId === targetId &&
+            ["verified", "already_signed"].includes(task.status),
+        ),
+      );
     const issues = today.some((task) =>
       ["uncertain", "failed"].includes(task.status),
     );
@@ -232,19 +254,21 @@ export class TiebaAutocare {
           ? this.isBusy
             ? "正在收尾，停止新的签到提交"
             : "已关闭，开启后按所选目标自动签到"
-          : issues
-            ? "部分任务需要处理，请查看具体原因，其他目标继续执行"
-            : allPaused
-              ? "所选目标均已暂停，请在目标行查看原因并恢复"
-              : this.isBusy
-                ? "正在核对账号和贴吧签到结果"
-                : state.run &&
-                    (state.run.status !== "running" ||
-                      Date.parse(state.run.deadlineAt) <= this.time())
-                  ? "本轮已结束，未完成任务保留原因，不集中补签"
-                  : pending
-                    ? "等待下一项签到任务"
-                    : "本轮签到已完成，等待下一业务日";
+          : completed
+            ? "今日所选目标均已签到，等待下一业务日"
+            : issues
+              ? "部分任务需要处理，请查看具体原因，其他目标继续执行"
+              : allPaused
+                ? "所选目标均已暂停，请在目标行查看原因并恢复"
+                : this.isBusy
+                  ? "正在核对账号和贴吧签到结果"
+                  : state.run &&
+                      (state.run.status !== "running" ||
+                        Date.parse(state.run.deadlineAt) <= this.time())
+                    ? "本轮已结束，未完成任务保留原因，不集中补签"
+                    : pending
+                      ? "等待下一项签到任务"
+                      : "本轮签到已完成，等待下一业务日";
     return {
       revision: state.revision,
       enabled: state.enabled,
@@ -352,6 +376,7 @@ export class TiebaAutocare {
     }
     target.paused = input.paused;
     target.pauseReason = input.paused ? "已手动暂停此目标贴吧" : null;
+    target.pauseCode = input.paused ? "TIEBA_MANUAL_PAUSE" : undefined;
     state.revision++;
     this.d.db.transaction(() => {
       this.store.saveTarget(target);
@@ -374,6 +399,158 @@ export class TiebaAutocare {
     );
     this.d.changed();
     return this.snapshot();
+  }
+  /** Explicitly enroll the current followed forums; ordinary sync never expands authority. */
+  async startFollowed(raw: z.input<typeof tiebaAutocareStartSchema>) {
+    this.assertAlive();
+    const input = tiebaAutocareStartSchema.parse(raw);
+    this.revision(input.revision);
+    if (this.isBusy)
+      throw new AppError(
+        "TIEBA_BUSY",
+        "当前贴吧操作正在执行，请完成后再同步启动。",
+      );
+    const results: NonNullable<
+      TiebaAutocareSnapshot["startResult"]
+    >["accounts"] = [];
+    const ready = new Set<string>();
+    this.preparing = true;
+    try {
+      for (const accountId of input.accountIds) {
+        this.revision(input.revision);
+        try {
+          await this.syncForums({ accountId });
+          this.revision(input.revision);
+          ready.add(accountId);
+          results.push({
+            accountId,
+            status: "ready",
+            targets: 0,
+            message: "已核实当前身份及完整关注列表。",
+          });
+        } catch (error) {
+          this.assertAlive();
+          this.revision(input.revision);
+          results.push({
+            accountId,
+            status: "failed",
+            targets: 0,
+            message: safeMessage(error),
+          });
+        }
+      }
+      const state = this.revision(input.revision);
+      if (!ready.size)
+        return { ...this.snapshot(), startResult: { accounts: results } };
+      this.d.db.transaction(() => {
+        const available = this.store.targets().filter((target) => {
+          if (!ready.has(target.accountId)) return false;
+          const account = this.account(target.accountId);
+          if (
+            account.uid !== target.uid ||
+            account.status !== "connected" ||
+            target.source === "observed" ||
+            target.followed !== true
+          )
+            return false;
+          this.d.environments.assertStamp(ref(account.id), target.stamp);
+          if (target.paused) {
+            // Recover only identity/login failures proven resolved by the fresh sync.
+            // Manual pauses and rate/security blocks retain their original reason.
+            const recoverable = target.pauseCode
+              ? /^(TIEBA_.*(?:LOGIN|IDENTITY|UID).*|ENVIRONMENT_CHANGED)$/.test(
+                  target.pauseCode,
+                )
+              : [
+                  "账号环境或登录身份已变化，请重新准备内容后再提交。",
+                  "贴吧当前身份已变化，已停止原账号任务，请重新核验账号。",
+                  "当前关注列表中已无此吧，请核实后重新同步",
+                ].includes(target.pauseReason ?? "");
+            if (!recoverable) return false;
+            target.paused = false;
+            target.pauseReason = null;
+            target.pauseCode = undefined;
+            this.store.saveTarget(target);
+          }
+          return true;
+        });
+        for (const result of results) {
+          result.targets = available.filter(
+            (target) => target.accountId === result.accountId,
+          ).length;
+          if (result.status === "ready")
+            result.message = result.targets
+              ? `已安排 ${result.targets} 个已关注贴吧。`
+              : "关注列表已同步，暂无可运行目标；手动暂停与安全限制保持原状态。";
+        }
+        const nextIds = [
+          ...state.config.targetIds.filter(
+            (targetId) =>
+              !ready.has(this.store.target(targetId)?.accountId ?? ""),
+          ),
+          ...available.map((target) => target.id),
+        ];
+        state.config = tiebaAutocareConfigSchema.parse({ targetIds: nextIds });
+        // Refresh only this request's verified authority, preserving other accounts.
+        state.authorities = [
+          ...state.authorities.filter(
+            (entry) =>
+              !ready.has(this.store.target(entry.targetId)?.accountId ?? ""),
+          ),
+          ...available.map((target) => ({
+            targetId: target.id,
+            uid: target.uid,
+            stamp: target.stamp,
+          })),
+        ];
+        state.revision++;
+        if (available.length) {
+          state.enabled = true;
+          // A deliberate start can open a new window; old submitted/unknown work is never replayed.
+          if (
+            !state.run ||
+            state.run.day !== tiebaDay(this.time()) ||
+            Date.parse(state.run.deadlineAt) <= this.time()
+          )
+            state.run = this.newRun();
+          for (const task of this.store.tasks()) {
+            if (
+              available.some((target) => target.id === task.targetId) &&
+              task.day === tiebaDay(this.time()) &&
+              !task.submittedAt &&
+              ["pending", "cancelled", "failed", "expired"].includes(
+                task.status,
+              )
+            ) {
+              task.deadlineAt = state.run!.deadlineAt;
+              this.finish(
+                task,
+                "cancelled",
+                "已重新核实关注与身份，等待新的排期；原记录未提交。",
+              );
+            }
+          }
+        }
+        this.store.saveState(state);
+        this.cancelUnselected(state);
+        this.plan(state);
+      });
+      for (const result of results)
+        this.logs.record({
+          event: "scheduler.account_prepared",
+          accountId: result.accountId,
+          level: result.status === "failed" ? "warning" : "info",
+          message: result.message,
+        });
+      this.event(
+        "scheduler.prepared",
+        "已同步并启动所选账号的关注吧签到；失败账号与暂停原因见各项结果。",
+      );
+      return { ...this.snapshot(), startResult: { accounts: results } };
+    } finally {
+      this.preparing = false;
+      if (!this.disposed) this.d.changed();
+    }
   }
   async syncForums(input: { accountId: string }) {
     this.assertAlive();
@@ -441,6 +618,7 @@ export class TiebaAutocare {
         )) {
           target.paused = true;
           target.pauseReason = "当前关注列表中已无此吧，请核实后重新同步";
+          target.followed = false;
           this.store.saveTarget(target);
         }
       });
@@ -1176,25 +1354,14 @@ export class TiebaAutocare {
     if (!state.enabled || this.disposed) return;
     const day = tiebaDay(this.time());
     if (!state.run || state.run.day !== day) {
-      state.run = {
-        id: id("tiebarun"),
-        day,
-        startedAt: this.now(),
-        deadlineAt: new Date(this.time() + runDuration).toISOString(),
-        status: "running",
-      };
+      state.run = this.newRun();
     } else if (Date.parse(state.run.deadlineAt) > this.time())
       state.run.status = "running";
     else state.run.status = "ended";
     this.store.saveState(state);
     if (state.run.status !== "running") return;
     const tasks = this.store.tasks();
-    let slot = Math.max(
-      this.time(),
-      ...tasks
-        .filter((task) => task.submittedAt)
-        .map((task) => Date.parse(task.submittedAt!) + taskGap),
-    );
+    const slots = new Map<string, number>();
     for (const targetId of state.config.targetIds) {
       const target = this.store.target(targetId);
       if (!target || target.paused || target.source === "observed") continue;
@@ -1211,6 +1378,9 @@ export class TiebaAutocare {
       if (previous && !["pending", "cancelled"].includes(previous.status))
         continue;
       if (previous?.submittedAt) continue;
+      const slot =
+        slots.get(target.uid) ??
+        Math.max(this.time(), this.mutationReadyAt(target.uid));
       const outOfWindow = slot >= Date.parse(state.run.deadlineAt);
       const task: TaskRecord = previous
         ? {
@@ -1219,9 +1389,8 @@ export class TiebaAutocare {
             configRevision: state.revision,
             configSnapshot: structuredClone(state.config),
             stamp: authority.stamp,
-            plannedAt: new Date(
-              Math.max(slot, Date.parse(previous.plannedAt)),
-            ).toISOString(),
+            plannedAt: new Date(slot).toISOString(),
+            deadlineAt: state.run.deadlineAt,
             updatedAt: this.now(),
             message: outOfWindow
               ? "本轮没有剩余排期时段，未提交签到，不集中补跑。"
@@ -1252,7 +1421,7 @@ export class TiebaAutocare {
             updatedAt: this.now(),
           };
       this.store.saveTask(task);
-      slot = Date.parse(task.plannedAt) + taskGap;
+      slots.set(target.uid, slot + taskGap);
     }
   }
   private cancelUnselected(state: AutocareState) {
@@ -1269,24 +1438,86 @@ export class TiebaAutocare {
       Date.parse(task.deadlineAt) <= this.time()
     );
   }
-  private deferForSubmissionGap(task: TaskRecord) {
-    const reply = this.d.db.get<{ submitted_at: string }>(
-      "SELECT submitted_at FROM (SELECT submitted_at FROM tieba_reply_drafts UNION ALL SELECT submitted_at FROM tieba_topic_drafts) WHERE submitted_at IS NOT NULL ORDER BY submitted_at DESC LIMIT 1",
-    );
-    const next = Math.max(
+  private mutationReadyAt(uid: string, excludeTaskId = "") {
+    return Math.max(
       0,
-      reply ? Date.parse(reply.submitted_at) + taskGap : 0,
       Date.parse(
-        tiebaPublishingWriteState(this.d.db, task.uid).lastMutationAt ?? "",
+        latestTiebaSubmission(this.d.db, uid, { checkin: excludeTaskId }) ?? "",
       ) + taskGap || 0,
       Date.parse(
-        tiebaFollowWriteState(this.d.db, task.uid).lastMutationAt ?? "",
+        tiebaPublishingWriteState(this.d.db, uid).lastMutationAt ?? "",
       ) + taskGap || 0,
-      ...this.store
-        .tasks()
-        .filter((other) => other.id !== task.id && other.submittedAt)
-        .map((other) => Date.parse(other.submittedAt!) + taskGap),
+      Date.parse(tiebaFollowWriteState(this.d.db, uid).lastMutationAt ?? "") +
+        taskGap || 0,
     );
+  }
+  private newRun(): NonNullable<AutocareState["run"]> {
+    const day = tiebaDay(this.time());
+    return {
+      id: id("tiebarun"),
+      day,
+      startedAt: this.now(),
+      deadlineAt: new Date(
+        Math.min(this.time() + runDuration, Date.parse(`${day}T16:00:00Z`)),
+      ).toISOString(),
+      status: "running",
+    };
+  }
+  private upgradeSchedule() {
+    const state = this.store.state();
+    if (state.planVersion === 2) return;
+    const day = tiebaDay(this.time()),
+      tasks = this.store.tasks();
+    const remaining = state.config.targetIds.filter((targetId) => {
+      const target = this.store.target(targetId);
+      const task = tasks.find(
+        (task) => task.targetId === targetId && task.day === day,
+      );
+      return (
+        target &&
+        !target.paused &&
+        target.source !== "observed" &&
+        (!task ||
+          (!task.submittedAt &&
+            ["pending", "cancelled", "expired"].includes(task.status)))
+      );
+    });
+    state.planVersion = 2;
+    if (state.enabled) {
+      state.run = this.newRun();
+      for (const task of tasks)
+        if (
+          remaining.includes(task.targetId) &&
+          task.day === day &&
+          !task.submittedAt
+        ) {
+          task.deadlineAt = state.run.deadlineAt;
+          task.plannedAt = this.now();
+          this.finish(
+            task,
+            "pending",
+            "已迁移至半小时并行排期，原未提交记录保留。",
+          );
+        }
+    } else if (
+      state.run &&
+      Date.parse(state.run.deadlineAt) - Date.parse(state.run.startedAt) >
+        runDuration
+    ) {
+      state.run.deadlineAt = new Date(
+        Date.parse(state.run.startedAt) + runDuration,
+      ).toISOString();
+      if (Date.parse(state.run.deadlineAt) <= this.time())
+        state.run.status = "ended";
+    }
+    this.store.saveState(state);
+    this.event(
+      "scheduler.upgraded",
+      "养号改为半小时窗口，多账号独立排期；已提交与未知记录保持原状。",
+    );
+  }
+  private deferForSubmissionGap(task: TaskRecord) {
+    const next = this.mutationReadyAt(task.uid, task.id);
     if (next <= this.time()) return false;
     task.plannedAt = new Date(next).toISOString();
     const outside =
@@ -1471,44 +1702,76 @@ export class TiebaAutocare {
     }
   }
   async tick() {
-    if (this.working || this.disposed) return;
+    if (this.working || this.preparing || this.disposed) return;
     this.working = true;
+    const started: Promise<void>[] = [];
     try {
       this.expirePending();
       const state = this.store.state();
       if (state.enabled && state.run?.day !== tiebaDay(this.time()))
         this.plan(state);
+      if (!state.enabled) return;
       const allTasks = this.store.tasks();
-      const task = allTasks
+      const due = allTasks
         .filter(
           (task) =>
             task.status === "pending" &&
-            Date.parse(task.plannedAt) <= this.time() &&
-            !allTasks.some(
-              (other) =>
-                other.accountId === task.accountId &&
-                other.day === task.day &&
-                ["uncertain", "submitting"].includes(other.status),
-            ) &&
-            !tiebaPublishingWriteState(this.d.db, task.uid).uncertain &&
-            !tiebaFollowWriteState(this.d.db, task.uid).uncertain &&
-            !this.d.db.get(
-              "SELECT id FROM tieba_reply_drafts WHERE status IN ('uncertain','submitting') AND json_extract(data,'$.accountId')=? LIMIT 1",
-              task.accountId,
-            ) &&
-            !this.d.db.get(
-              "SELECT id FROM tieba_topic_drafts WHERE status IN ('uncertain','submitting','pending_review') AND json_extract(data,'$.accountId')=? LIMIT 1",
-              task.accountId,
-            ),
+            Date.parse(task.plannedAt) <= this.time(),
         )
-        .sort((a, b) => a.plannedAt.localeCompare(b.plannedAt))[0];
-      if (!task || !state.enabled) return;
-      if (this.deferForSubmissionGap(task)) return;
-      task.status = "running";
-      task.startedAt = this.now();
-      task.updatedAt = this.now();
-      if (!this.store.claim(task)) return;
-      await this.execute(task);
+        .sort((a, b) => a.plannedAt.localeCompare(b.plannedAt));
+      for (const task of due) {
+        if (
+          [...this.executing.values()].some(
+            (other) =>
+              other.accountId === task.accountId ||
+              other.uid === task.uid ||
+              other.stamp.environmentId === task.stamp.environmentId,
+          )
+        )
+          continue;
+        if (
+          allTasks.some(
+            (other) =>
+              (other.accountId === task.accountId || other.uid === task.uid) &&
+              other.day === task.day &&
+              ["uncertain", "submitting"].includes(other.status),
+          ) ||
+          tiebaPublishingWriteState(this.d.db, task.uid).uncertain ||
+          tiebaFollowWriteState(this.d.db, task.uid).uncertain ||
+          this.d.db.get(
+            "SELECT id FROM tieba_reply_drafts WHERE status IN ('uncertain','submitting') AND (uid=? OR json_extract(data,'$.accountId')=?) LIMIT 1",
+            task.uid,
+            task.accountId,
+          ) ||
+          this.d.db.get(
+            "SELECT id FROM tieba_topic_drafts WHERE status IN ('uncertain','submitting','pending_review') AND (uid=? OR json_extract(data,'$.accountId')=?) LIMIT 1",
+            task.uid,
+            task.accountId,
+          )
+        )
+          continue;
+        if (this.deferForSubmissionGap(task)) continue;
+        task.status = "running";
+        task.startedAt = this.now();
+        task.updatedAt = this.now();
+        if (!this.store.claim(task)) continue;
+        this.executing.set(task.accountId, task);
+        started.push(
+          this.execute(task)
+            .catch((error) => {
+              if (!this.disposed)
+                this.logs.record({
+                  event: "scheduler.error",
+                  message: safeMessage(error),
+                  level: "error",
+                });
+            })
+            .finally(() => {
+              this.executing.delete(task.accountId);
+              if (!this.disposed) this.d.changed();
+            }),
+        );
+      }
     } catch (error) {
       if (!this.disposed)
         this.logs.record({
@@ -1520,6 +1783,7 @@ export class TiebaAutocare {
       this.working = false;
       if (!this.disposed) this.d.changed();
     }
+    await Promise.all(started);
   }
   private async execute(task: TaskRecord) {
     try {
@@ -1648,6 +1912,7 @@ export class TiebaAutocare {
           .filter((target) => target.accountId === task.accountId)) {
           target.paused = true;
           target.pauseReason = message;
+          target.pauseCode = error.code;
           this.store.saveTarget(target);
         }
       }

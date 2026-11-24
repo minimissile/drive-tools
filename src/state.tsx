@@ -2,6 +2,7 @@ import { windowStorage } from "./storage/window-storage";
 import { TaskFocusProvider } from "./tasks/TaskFocus";
 import { stableContext } from "./lib/stable-context";
 import type { IpcMethod, IpcArguments, IpcValue } from "../shared/ipc";
+import { tiebaAnalysisPage, tiebaAnalysisWindowId } from "../shared/workbench-windows";
 import { ipc } from "./api/client";
 import {
   FeedbackProvider,
@@ -13,6 +14,7 @@ import { useSnapshot } from "./state/useSnapshot";
 import {
   navigationHistory,
   parseNavigationHistory,
+  restoreNavigationPage,
   type NavigationHistory,
 } from "./state/navigation-history";
 import {
@@ -57,9 +59,11 @@ export type Page =
   | "accounts"
   | "website-accounts"
   | "smzdm-accounts"
+  | "jianshu-workflow"
+  | "jianshu-accounts"
   | "smzdm-workflow"
   | "wechat-workflow"
-  | "wechat-discovery"
+  | "keyboard-skins"
   | "wechat-accounts"
   | "browser-environments"
   | "intake"
@@ -199,8 +203,10 @@ const pages: Page[] = [
   "website-accounts",
   "smzdm-accounts",
   "smzdm-workflow",
+  "jianshu-workflow",
+  "jianshu-accounts",
   "wechat-workflow",
-  "wechat-discovery",
+  "keyboard-skins",
   "wechat-accounts",
   "browser-environments",
   "intake",
@@ -255,7 +261,7 @@ function savedUi(): {
     if (raw == null) return {};
     const data = JSON.parse(raw);
     return {
-      page: pages.includes(data.page) ? data.page : "workbench",
+      page: restoreNavigationPage(data.page, pages) ?? "workbench",
       editResourceId:
         typeof data.editResourceId === "string" ? data.editResourceId : null,
       editCopyId: typeof data.editCopyId === "string" ? data.editCopyId : null,
@@ -281,12 +287,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [saved] = useState(() => {
+  const [saved] = useState<ReturnType<typeof savedUi>>(() => {
     const saved = savedUi();
-    const initial = window.panxu?.initialPage;
-    return !saved.page && initial && pages.includes(initial as Page)
-      ? { ...saved, page: initial as Page }
-      : saved;
+    const initial = restoreNavigationPage(window.panxu?.initialPage, pages);
+    if (window.panxu?.windowId === tiebaAnalysisWindowId)
+      return { ...saved, page: tiebaAnalysisPage, navigation: undefined };
+    if (initial !== tiebaAnalysisPage) {
+      // Restore the page before an older in-window analysis visit, if available.
+      const history = saved.navigation;
+      const past = history?.past.filter(({ page }) => page !== tiebaAnalysisPage);
+      if (history && past) {
+        const current = history.current.page === tiebaAnalysisPage
+          ? past.pop() ?? { ...history.current, page: "workbench" as const }
+          : history.current;
+        return { ...saved, navigation: { ...history, current, past } };
+      }
+      if (saved.page === tiebaAnalysisPage) return { ...saved, page: "workbench" as const };
+    }
+    return !saved.page && initial ? { ...saved, page: initial } : saved;
   });
   const { notify, clearToast, begin, end } = useFeedbackActions();
   const [navigation, dispatchNavigation] = useReducer(
@@ -316,9 +334,20 @@ function WorkspaceProvider({ children }: { children: ReactNode }) {
   } = navigation.current;
   const navigationRequest = useRef(0);
   const navigate = useCallback((page: Page) => {
+    if (page === tiebaAnalysisPage) {
+      void ipc("workbench.openTiebaAnalysis").catch((error: Error & { code?: string }) =>
+        notify(
+          error.code === "UNKNOWN_METHOD"
+            ? "请点击「应用更新并重启」，再打开贴吧数据分析。"
+            : error.message,
+          "error",
+        ),
+      );
+      return;
+    }
     navigationRequest.current++;
     dispatchNavigation({ type: "navigate", patch: { page } });
-  }, []);
+  }, [notify]);
   const [extraResource, setExtraResource] = useState<Resource | null>(null),
     [activeAccounts, setActiveAccounts] = useState<Record<string, string>>(
       saved.activeAccounts ?? {},

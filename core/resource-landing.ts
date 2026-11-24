@@ -345,7 +345,11 @@ export class ResourceLanding {
             : shareCheck && shareCheck.status !== "valid"
               ? "最近的分享检查未通过，请先在资源详情检查有效性。"
               : null;
-    return { source, context, targetIssue, readings };
+    const searchKeywords = (resource.searchKeywords ?? [])
+      .map((term) => clean(term, 100))
+      .filter((term) => term && !term.includes("[联系方式已省略]") && !term.includes("[联系信息已省略]"))
+      .slice(0, 30);
+    return { source, context, targetIssue, readings, searchKeywords };
   }
   async readDocument(resourceId: string, evidenceId: string, local = false) {
     return this.exclusive(resourceId, async () => {
@@ -524,7 +528,7 @@ export class ResourceLanding {
           "先核对上次发布结果，再生成新内容。",
         );
       const sanitizedNotes = clean(notes),
-        { source, readings } = await this.source(resourceId, sanitizedNotes);
+        { source, readings, searchKeywords } = await this.source(resourceId, sanitizedNotes);
       if (!source.documents?.length)
         throw new AppError(
           "LANDING_SOURCE_REQUIRED",
@@ -569,7 +573,7 @@ export class ResourceLanding {
               : ""),
           {
             source,
-            searchBrief: landingSearchBrief(source),
+            searchBrief: landingSearchBrief(source, searchKeywords),
             reading: readings.map(({ name, pageCount, sampled, pages }) => ({
               name,
               pageCount,
@@ -601,7 +605,7 @@ export class ResourceLanding {
           },
         );
         draft = await this.completeDescription(draft, source, models.writer);
-        let review = await this.review(draft, source, readings);
+        let review = await this.review(draft, source, readings, searchKeywords);
         if (!landingQuality(draft, source, review).eligible) {
           draft = await this.d.ai.resourceExport(
             "resource_landing_write",
@@ -614,7 +618,7 @@ export class ResourceLanding {
               "\n请根据独立检查修订上一版，优先消除不受支持的事实和空泛内容。",
             {
               source,
-              searchBrief: landingSearchBrief(source),
+              searchBrief: landingSearchBrief(source, searchKeywords),
               reading: readings.map(({ name, pageCount, sampled, pages }) => ({
                 name,
                 pageCount,
@@ -638,7 +642,7 @@ export class ResourceLanding {
             },
           );
           draft = await this.completeDescription(draft, source, models.writer);
-          review = await this.review(draft, source, readings);
+          review = await this.review(draft, source, readings, searchKeywords);
         }
         if (
           (await this.source(resourceId, sanitizedNotes)).source.fingerprint !==
@@ -705,6 +709,7 @@ export class ResourceLanding {
     draft: LandingDraft,
     source: LandingSource,
     readings: LandingReading[],
+    searchKeywords: string[],
   ) {
     const result = await this.d.ai.resourceExport(
       "resource_landing_review",
@@ -717,7 +722,7 @@ export class ResourceLanding {
         "\n必须逐项检查上述边界；出现任何一个越界句子，即使其余内容有用也判revise。",
       {
         source,
-        searchBrief: landingSearchBrief(source),
+        searchBrief: landingSearchBrief(source, searchKeywords),
         article: draft,
         reading: readings.map(({ name, pageCount, sampled, pages }) => ({
           name,
@@ -786,7 +791,7 @@ export class ResourceLanding {
   async publish(resourceId: string, expectedDraftVersion: number) {
     return this.exclusive(resourceId, async () => {
       let record = this.record(resourceId);
-      const { source, context, targetIssue, readings } = await this.source(
+      const { source, context, targetIssue, readings, searchKeywords } = await this.source(
         resourceId,
         record.notes,
       );
@@ -813,7 +818,9 @@ export class ResourceLanding {
         );
       const draft = record.draft;
       if (record.reviewHash !== hash(record.draft) || record.review?.policyVersion !== landingSearchPolicyVersion) {
-        const review = await this.review(record.draft, source, readings);
+        const review = await this.review(
+          record.draft, source, readings, searchKeywords,
+        );
         record = { ...record, review, reviewHash: hash(record.draft) };
         this.store(resourceId, record);
       }

@@ -1,3 +1,4 @@
+import { tiebaAccountName } from "./account-label";
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 import {
@@ -75,10 +76,7 @@ export function TiebaAutomation({
     Math.max(1, Math.ceil(tasks.length / 5)),
   );
   const names = new Map(
-    s?.accounts.map((account) => [
-      account.id,
-      account.alias || account.nickname || "贴吧账号",
-    ]),
+    s?.accounts.map((account) => [account.id, tiebaAccountName(account)]),
   );
   return (
     <Panel
@@ -147,7 +145,7 @@ export function TiebaAutomation({
                     </small>
                   ) : (
                     <small>
-                      固定两小时批次；两条任务间隔45分钟，过期不补跑。
+                      固定半小时批次；两条任务间隔10分钟，过期不补跑。
                     </small>
                   )}
                 </div>
@@ -208,7 +206,7 @@ export function TiebaAutomation({
                           }),
                         (value) => ({
                           text: value.enabled
-                            ? "已明确开启本次两小时回帖批次"
+                            ? "已明确开启本次半小时回帖批次"
                             : value.message,
                           tone: value.enabled ? "success" : "warning",
                         }),
@@ -216,7 +214,7 @@ export function TiebaAutomation({
                     }
                     data-testid="tieba-automation-start"
                   >
-                    开启两小时批次
+                    开启半小时批次
                   </Button>
                 )}
               </div>
@@ -335,7 +333,7 @@ export function TiebaAutomation({
                 </>
               ) : (
                 <Empty compact title="暂无本轮回帖计划">
-                  保存目标与低频预设后，明确开启一次两小时批次；任务与原结果会留在这里。
+                  保存目标与低频预设后，明确开启一次半小时批次；任务与原结果会留在这里。
                 </Empty>
               )}
               {s.logs.items.length ? (
@@ -521,7 +519,7 @@ function AutomationSettings({
         </Field>
       </div>
       <p className="tieba-console-description">
-        全部账号与目标合计上限；固定两小时批次，两项间隔45分钟。先选择确实需要参与的目标贴吧。
+        全部账号与目标合计上限；固定半小时批次，两项间隔10分钟。先选择确实需要参与的目标贴吧。
       </p>
       <SearchField
         label="搜索自动回帖目标"
@@ -534,7 +532,7 @@ function AutomationSettings({
           {targets.slice((page - 1) * 8, page * 8).map((target) => (
             <CheckboxField
               key={target.id}
-              label={`${target.name}吧 · ${s.accounts.find((account) => account.id === target.accountId)?.alias ?? "贴吧账号"}`}
+              label={`${target.name}吧 · ${tiebaAccountName(s.accounts.find((account) => account.id === target.accountId))}`}
               hint={target.source === "observed" ? "待关注" : "关注同步"}
               disabled={busy}
               checked={config.targetIds.includes(target.id)}

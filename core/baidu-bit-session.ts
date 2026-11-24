@@ -1,3 +1,4 @@
+import { releaseTemporaryPage } from "./browser-page-lifecycle";
 import type { BrowserContext } from "playwright-core";
 import type { WebsiteAccount } from "../shared/website-accounts";
 import { buildBaiduResearchRequest } from "./baidu-research";
@@ -33,6 +34,8 @@ export async function bitBaiduExchange(
     host === "cdp.baidu.com"
       ? `https://${host}/static/?targetUserId=${a.uid}`
       : `https://${host}/fc/toolscenter/orientation/kr/user/${a.uid}`,
+    (page) => official(page, [host]),
+    "temporary",
   );
   if (!official(page, [host]))
     throw new AppError(
@@ -100,5 +103,6 @@ export async function bitBaiduExchange(
     };
   } finally {
     page.removeListener("request", capture);
+    await releaseTemporaryPage(page);
   }
 }

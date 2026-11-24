@@ -1,3 +1,4 @@
+import { withPageLifecycleFixture } from "./browser-page-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
@@ -7,6 +8,7 @@ import { verifyBitTieba } from "../core/tieba/browser-session";
 
 const modern = {
   is_login: true,
+  user_id: 1234567890,
   open_uid: 1234567890,
   user_name_show: "接口昵称甲",
   show_nickname: "接口昵称甲",
@@ -21,6 +23,7 @@ test("贴吧新版当前用户字段与旧PageData字段都能读取UID和昵称
   assert.deepEqual(
     tiebaCurrentUser({
       ...modern,
+      user_id: "1234567891",
       open_uid: "1234567891",
       user_name_show: "接口昵称乙",
     }),
@@ -34,9 +37,15 @@ test("贴吧新版当前用户字段与旧PageData字段都能读取UID和昵称
 
 test("open_uid只接受明确登录且格式有效的当前账号，退出或未知状态不授予身份", () => {
   for (const is_login of [false, 0, "0", undefined, "unknown"])
-    assert.equal(tiebaCurrentUser({ ...modern, is_login }), null);
+    assert.equal(
+      tiebaCurrentUser({ ...modern, user_id: undefined, is_login }),
+      null,
+    );
   for (const open_uid of [0, -1, "tb.opaque", Number.MAX_SAFE_INTEGER + 1])
-    assert.equal(tiebaCurrentUser({ ...modern, open_uid }), null);
+    assert.equal(
+      tiebaCurrentUser({ ...modern, user_id: undefined, open_uid }),
+      null,
+    );
   assert.equal(tiebaCurrentUser({ user_id: "111", is_login: false }), null);
   assert.equal(
     tiebaCurrentUser({ name: "个人主页展示名称", portrait: "其他人的头像" }),
@@ -72,6 +81,7 @@ test("指纹核验在首页无PageData时识别新版JSON，保留原代理上�
     pages = 0;
   const paths: string[] = [];
   const page = {
+    on: () => {},
     route: async () => {},
     goto: async (value: string) => {
       url = value;
@@ -101,7 +111,7 @@ test("指纹核验在首页无PageData时识别新版JSON，保留原代理上�
       return page;
     },
   } as unknown as BrowserContext;
-  const result = await verifyBitTieba(context);
+  const result = await verifyBitTieba(withPageLifecycleFixture(context));
   assert.equal(result.hasSession, true);
   assert.equal(result.uid, "1234567890");
   assert.equal(result.nickname, "接口昵称甲");
@@ -110,4 +120,21 @@ test("指纹核验在首页无PageData时识别新版JSON，保留原代理上�
   assert.deepEqual(paths, ["/", "/f/user/json_userinfo"]);
   assert.equal(pages, 1);
   assert.equal(closed, true);
+});
+
+test("指纹页面崩溃明确要求恢复环境，不把崩溃冒充退出登录或身份变化", async () => {
+  const context = {
+    newPage: async () => {
+      throw new Error("browserContext.newPage: Target crashed");
+    },
+  } as unknown as BrowserContext;
+  await assert.rejects(
+    () => verifyBitTieba(withPageLifecycleFixture(context)),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "TIEBA_BROWSER_CRASHED");
+      assert.match(error.message, /关闭并重新打开/);
+      assert.match(error.message, /保留登录状态/);
+      return true;
+    },
+  );
 });

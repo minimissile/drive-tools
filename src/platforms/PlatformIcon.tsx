@@ -14,7 +14,7 @@ export function PlatformIcon({
   decorative = true,
 }: {
   platform: string;
-  size?: "small" | "large";
+  size?: "small" | "medium" | "large";
   decorative?: boolean;
 }) {
   const source = sources[platform as keyof typeof sources];

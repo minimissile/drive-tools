@@ -1,8 +1,10 @@
 import {
+  isZhidaoQuestionBase,
   zhidaoQuestionPageSize,
   type ZhidaoQuestion,
   type ZhidaoQuestionPage,
 } from "../client";
+import { zhidaoAnswerPageLimit } from "../../../shared/zhidao";
 
 export function shuffled<T>(items: readonly T[], random = Math.random): T[] {
   const result = [...items];
@@ -13,14 +15,17 @@ export function shuffled<T>(items: readonly T[], random = Math.random): T[] {
   return result;
 }
 
-/** Read 3–5 pages before drawing questions. Only a bounded sample is fetched. */
+/** Read 3–5 pages before drawing questions, within the first 1000 pages. */
 export async function* sampledQuestions(
   loadPage: (base: number) => Promise<ZhidaoQuestionPage>,
   random = Math.random,
 ): AsyncGenerator<ZhidaoQuestion> {
   const first = await loadPage(0);
   const pageCount = first.total
-    ? Math.ceil(first.total / zhidaoQuestionPageSize)
+    ? Math.min(
+        zhidaoAnswerPageLimit,
+        Math.ceil(first.total / zhidaoQuestionPageSize),
+      )
     : null;
   const visited = new Set([0]);
   const seen = new Set<string>();
@@ -44,7 +49,7 @@ export async function* sampledQuestions(
       } else {
         if (!latest.hasMore) break;
         base = latest.nextBase;
-        if (!Number.isSafeInteger(base) || base < 0 || visited.has(base)) {
+        if (!isZhidaoQuestionBase(base) || visited.has(base)) {
           exhausted = true;
           break;
         }

@@ -5,6 +5,7 @@ import {
   Files,
   Fingerprint,
   FolderTree,
+  Keyboard,
   LayoutDashboard,
   Library,
   ListChecks,
@@ -102,6 +103,12 @@ export const contentOperations: WorkbenchEntry[] = [
     description: "审阅交付内容，打开窗口并回填链接",
     Icon: Send,
   },
+  {
+    page: "keyboard-skins",
+    title: "键盘皮肤分发",
+    description: "随机抽取键盘皮肤，制作分发合辑",
+    Icon: Keyboard,
+  },
 ];
 export const csdnOperations: WorkbenchEntry[] = [
   {
@@ -143,13 +150,15 @@ export const tiebaOperations: WorkbenchEntry[] = [
   {
     page: "tieba-analysis",
     title: "贴吧数据分析",
-    description: "查询指定用户的公开主题帖和浏览量",
+    description: "在独立窗口查询贴吧帖子、浏览量和发现结果",
     Icon: ChartNoAxesCombined,
   },
 ];
 export const wechatOperations: WorkbenchEntry[] = [
   { page: "wechat-workflow", title: "公众号草稿箱", description: "导入文章、替换资源与插图，发送到微信草稿箱", Icon: NotebookPen },
-  { page: "wechat-discovery", title: "发现爆款", description: "按主题搜索公众号文章，查看原文或导入草稿", Icon: Radar },
+];
+export const jianshuOperations: WorkbenchEntry[] = [
+  {page:"jianshu-workflow",title:"简书内容",description:"采集素材或关联资源，编辑文章并交接简书发布",Icon:NotebookPen},
 ];
 export const smzdmOperations: WorkbenchEntry[] = [
   {
@@ -170,6 +179,7 @@ export const workbenchEntries: readonly WorkbenchEntry[] = [
   ...zhihuOperations,
   ...tiebaOperations,
   ...smzdmOperations,
+  ...jianshuOperations,
   ...wechatOperations,
   ...contentOperations,
 ];
@@ -179,6 +189,7 @@ const accountPages: Page[] = [
   "website-accounts",
   "bilibili-accounts",
   "smzdm-accounts",
+  "jianshu-accounts",
   "wechat-accounts",
   "zhidao-accounts",
 ];

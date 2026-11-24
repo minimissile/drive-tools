@@ -497,19 +497,14 @@ export class TiebaInsights {
       const targetIds = [
         ...new Set(
           input.targetIds ??
-            (defaultScope
-              ? this.targets
-                  .targets()
-                  .slice(0, 5)
-                  .map((item) => item.id)
-              : []),
+            (defaultScope ? this.targets.targets().map((item) => item.id) : []),
         ),
       ];
       const sources = this.sources(),
         ids = [
           ...new Set(
             input.publicationIds ??
-              (defaultScope ? sources.slice(0, 5).map((item) => item.id) : []),
+              (defaultScope ? sources.map((item) => item.id) : []),
           ),
         ];
       for (const id of targetIds) {

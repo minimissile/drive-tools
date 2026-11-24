@@ -1,4 +1,4 @@
-import type { WechatArticle } from "../../shared/wechat";
+import type { WechatArticle, WechatSource } from "../../shared/wechat";
 
 /** Tracking parameters do not create a second source article. */
 export function wechatSourceIdentity(sourceUrl: string) {
@@ -17,6 +17,14 @@ export function wechatSourceIdentity(sourceUrl: string) {
   return url.href;
 }
 
+export function wechatSourceKey(source: WechatSource) {
+  if (source.kind === "resource-catalog")
+    return `panxu://resource-catalog/${source.catalogId}/${source.snapshotHash}`;
+  return source.kind === "keyboard-skins"
+    ? `panxu://keyboard-skins/${source.batchId}`
+    : wechatSourceIdentity(source.url);
+}
+
 export function wechatArticleFamilies(articles: readonly WechatArticle[]) {
   const families = new Map<string, WechatArticle[]>();
   const ordered = [...articles].sort(
@@ -26,7 +34,7 @@ export function wechatArticleFamilies(articles: readonly WechatArticle[]) {
       a.id.localeCompare(b.id),
   );
   for (const article of ordered) {
-    const key = wechatSourceIdentity(article.source.url);
+    const key = wechatSourceKey(article.source);
     const family = families.get(key) ?? [];
     family.push(article);
     families.set(key, family);

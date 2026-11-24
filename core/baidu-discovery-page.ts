@@ -1,5 +1,5 @@
 /** Read only the related-search module. This function is serialized into Baidu's page. */
-export function inspectBaiduRelated() {
+export function inspectBaiduRelated(target: "related" | "people" = "related") {
   const verification =
     /百度安全验证|访问验证|请输入验证码/.test(document.title) ||
     ["wappass.baidu.com", "passport.baidu.com"].includes(location.hostname) ||
@@ -26,7 +26,9 @@ export function inspectBaiduRelated() {
     return [...words];
   };
   for (const container of document.querySelectorAll(
-    '#rs, #rs_new, #rs_new_rs, [class*="rs-container"], [class*="rs_new"]',
+    target === "related"
+      ? '#rs, #rs_new, #rs_new_rs, [class*="rs-container"], [class*="rs_new"]'
+      : '[data-module="people-also-search"]',
   )) {
     const words = read(container);
     if (words.length) return { kind: "ready" as const, words };
@@ -34,7 +36,11 @@ export function inspectBaiduRelated() {
   // Current layouts vary their CSS hashes. Anchor the fallback on the exact module heading.
   const headings = document.querySelectorAll("h2,h3,h4,div,span");
   for (const heading of headings) {
-    if (heading.textContent?.trim() !== "相关搜索") continue;
+    if (
+      heading.textContent?.trim() !==
+      (target === "people" ? "大家还在搜" : "相关搜索")
+    )
+      continue;
     let parent: Element | null = heading.parentElement;
     for (
       let level = 0;

@@ -28,17 +28,23 @@ export function useAccountOperations() {
         await command(
           "account.check",
           { id: account.id },
-          "登录已核验；容量读取结果见账号卡片，原账号任务可继续执行。",
+          "登录已核验；容量和会员信息读取结果见账号列表，原账号任务可继续执行。",
         );
       else {
         const result = await command("account.capacity", { id: account.id });
-        if (result)
+        if (result) {
+          const legacy = result.membership === undefined;
           notify(
-            result.capacity?.error
-              ? "容量暂未更新，具体原因及上次数据已保留在账号卡片。"
-              : "网盘容量已更新。",
-            result.capacity?.error ? "warning" : "success",
+            legacy
+              ? "容量已刷新；会员信息需要应用更新并重启后读取。"
+              : result.capacity?.error || result.membership?.error
+                ? "部分账号信息暂未更新，具体原因及上次数据已保留在列表。"
+                : "网盘容量和会员信息已更新。",
+            legacy || result.capacity?.error || result.membership?.error
+              ? "warning"
+              : "success",
           );
+        }
       }
     } finally {
       setPending(null);

@@ -81,7 +81,6 @@ export function ZhihuOverview({
                     .sort((x, y) =>
                       x.scheduledAt.localeCompare(y.scheduledAt),
                     )[0];
-                  const p = a.plan.progress;
                   return (
                     <tr key={a.id}>
                       <td>
@@ -94,10 +93,7 @@ export function ZhihuOverview({
                         </small>
                       </td>
                       <td>
-                        <ZhihuCreatorProgress
-                          progress={p}
-                          targetLevel={a.plan.targetLevel}
-                        />
+                        <ZhihuCreatorProgress account={a} />
                       </td>
                       <td className="zhihu-usage">
                         <span>

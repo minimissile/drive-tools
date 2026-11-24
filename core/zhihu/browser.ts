@@ -1,3 +1,8 @@
+import {
+  createTemporaryPage,
+  expectTemporaryPageNavigation,
+  releaseTemporaryPage,
+} from "../browser-page-lifecycle";
 import type { BrowserContext, Page, Response } from "playwright-core";
 import type {
   WebsiteAccount,
@@ -47,7 +52,7 @@ export function parseZhihuCreatorLevel(levelLinks: string[], text: string) {
 export async function verifyZhihu(
   context: BrowserContext,
 ): Promise<WebsiteSessionState> {
-  const page = await context.newPage();
+  const page = await createTemporaryPage(context, "https://www.zhihu.com/");
   try {
     await page.goto("https://www.zhihu.com/", {
       waitUntil: "domcontentloaded",
@@ -78,7 +83,7 @@ export async function verifyZhihu(
       checkedAt: new Date().toISOString(),
     };
   } finally {
-    await page.close().catch(() => {});
+    await releaseTemporaryPage(page);
   }
 }
 async function assertIdentity(
@@ -238,52 +243,74 @@ async function openZhihuAnswerEditor(
   );
 }
 
-async function declareAi(
-  page: Page,
-  article: boolean,
-): Promise<() => Promise<boolean>> {
-  const legacy = page.getByRole("checkbox", {
-    name: /AI\s*辅助|人工智能辅助/i,
-  });
-  if ((await legacy.count()) === 1) {
-    await legacy.check();
-    return () => legacy.isChecked();
-  }
-  if (!article)
-    return blocked(
-      "请在官方编辑器确认 AI 辅助声明，当前页面无法自动核实。任务已暂停。",
-    );
-  const selected = page
-    .locator('button[role="combobox"]')
-    .filter({ hasText: /包含\s*AI\s*辅助创作/ });
-  if ((await selected.count()) !== 1) {
-    let declaration = page
-      .locator('button[role="combobox"]')
-      .filter({ hasText: /^无声明$/ });
-    if (!(await declaration.isVisible().catch(() => false))) {
-      const settings = page.getByRole("button", {
-        name: "发布设置",
-        exact: true,
-      });
-      if ((await settings.count()) !== 1)
-        return blocked("未找到创作声明入口，请核对官方编辑器。");
-      await settings.click();
+const aiDeclarationUnavailable = (): never => {
+  throw new AppError(
+    "ZHIHU_AI_DECLARATION_UNAVAILABLE",
+    "官方编辑器的 AI 辅助创作声明无法确认，原稿已保留。",
+  );
+};
+
+async function declareAi(page: Page): Promise<() => Promise<boolean>> {
+  const label = /^包含\s*(?:AI\s*辅助|人工智能辅助)\s*创作$/i;
+  const timeout = 8000;
+  const checkbox = page
+    .getByRole("checkbox", {
+      name: /^(?:包含\s*)?(?:AI\s*辅助|人工智能辅助)(?:\s*创作)?$/i,
+    })
+    .filter({ visible: true });
+  const combobox = page.getByRole("combobox").filter({ visible: true });
+  const selected = combobox.filter({ hasText: label });
+  const unselected = combobox.filter({ hasText: /^无声明$/ });
+  const controls = checkbox.or(selected).or(unselected);
+  const checkboxConfirmed = async () =>
+    (await controls.count()) === 1 &&
+    (await checkbox.count()) === 1 &&
+    (await checkbox.isChecked({ timeout }).catch(() => false));
+  const selectionConfirmed = async () =>
+    (await controls.count()) === 1 && (await selected.count()) === 1;
+
+  try {
+    if (!(await controls.count())) {
+      // Both editors may place the declaration under an asynchronously mounted
+      // settings panel. Only its exact, unambiguous button may open it.
+      const settings = page
+        .getByRole("button", { name: "发布设置", exact: true })
+        .filter({ visible: true });
+      await controls
+        .or(settings)
+        .first()
+        .waitFor({ state: "visible", timeout });
+      if (!(await controls.count())) {
+        if ((await settings.count()) !== 1 || !(await settings.isEnabled()))
+          aiDeclarationUnavailable();
+        await settings.click({ timeout });
+        await controls.first().waitFor({ state: "visible", timeout });
+      }
     }
-    // The settings panel mounts asynchronously after the click on a fresh editor.
-    await declaration.waitFor({ state: "visible", timeout: 10000 });
-    if ((await declaration.count()) !== 1)
-      return blocked("创作声明状态无法识别，停止提交。");
-    const option = page.getByRole("option", { name: /^包含\s*AI\s*辅助创作/ });
-    if (!(await option.isVisible().catch(() => false)))
-      await declaration.click();
-    await option.waitFor({ state: "visible", timeout: 10000 });
-    if ((await option.count()) !== 1)
-      return blocked("未找到唯一的 AI 辅助创作声明选项。");
-    await option.click();
-    await selected.waitFor({ state: "visible", timeout: 10000 });
+    if ((await controls.count()) !== 1) aiDeclarationUnavailable();
+    if ((await checkbox.count()) === 1) {
+      await checkbox.check({ timeout });
+      if (!(await checkboxConfirmed())) aiDeclarationUnavailable();
+      return checkboxConfirmed;
+    }
+    if ((await unselected.count()) === 1) {
+      await unselected.click({ timeout });
+      const option = page
+        .getByRole("option", { name: label })
+        .filter({ visible: true });
+      await option.first().waitFor({ state: "visible", timeout });
+      if ((await option.count()) !== 1 || !(await option.isEnabled()))
+        aiDeclarationUnavailable();
+      await option.click({ timeout });
+      await selected.first().waitFor({ state: "visible", timeout });
+    }
+    if (!(await selectionConfirmed())) aiDeclarationUnavailable();
+    return selectionConfirmed;
+  } catch {
+    // A platform challenge or a navigation away must retain its own blocker.
+    await assertPage(page);
+    return aiDeclarationUnavailable();
   }
-  return async () =>
-    (await selected.count()) === 1 && (await selected.isVisible());
 }
 
 /** Only a response to this editor's exact mutation may complete a publication. */
@@ -342,7 +369,10 @@ export function zhihuBrowser(
     progress: (account) =>
       withContext(account, async (context) => {
         await assertIdentity(context, account);
-        const page = await context.newPage();
+        const page = await createTemporaryPage(
+          context,
+          "https://www.zhihu.com/creator",
+        );
         try {
           await page.goto("https://www.zhihu.com/creator", {
             waitUntil: "domcontentloaded",
@@ -381,6 +411,10 @@ export function zhihuBrowser(
             import("../../shared/zhihu").ZhihuProgress["dimensions"]
           > = [];
           if (level !== null) {
+            expectTemporaryPageNavigation(
+              page,
+              "https://www.zhihu.com/creator/account/growth-level",
+            );
             await page.goto(
               "https://www.zhihu.com/creator/account/growth-level",
               {
@@ -441,7 +475,7 @@ export function zhihuBrowser(
                 : "页面未提供可可靠识别的等级，请查看官方页面后手动记录",
           };
         } finally {
-          await page.close().catch(() => {});
+          await releaseTemporaryPage(page);
         }
       }),
     publish: (account, payload, beforeSubmit, onEvent) =>
@@ -572,9 +606,9 @@ export function zhihuBrowser(
             );
           }
           const aiConfirmed = content.aiAssisted
-            ? await declareAi(page, content.kind === "article")
+            ? await declareAi(page)
             : async () => true;
-          if (!(await aiConfirmed())) blocked("AI 辅助声明未确认，停止提交。");
+          if (!(await aiConfirmed())) aiDeclarationUnavailable();
           if (content.aiAssisted)
             onEvent?.({
               event: "editor.ai-declared",
@@ -595,7 +629,7 @@ export function zhihuBrowser(
             if ((await editor.locator("img").count()) !== payload.images.length)
               blocked("编辑器配图数量与审核素材不一致，停止提交。");
             if (content.aiAssisted && !(await aiConfirmed()))
-              blocked("AI 辅助声明已变化，停止提交。");
+              aiDeclarationUnavailable();
             if (
               content.kind === "article" &&
               (await page

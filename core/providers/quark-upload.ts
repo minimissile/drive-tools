@@ -11,6 +11,7 @@ export async function uploadQuark(
   parent: string,
   asset: UploadAsset,
   request: (path: string, body: unknown) => Promise<JsonObject>,
+  send: typeof storageRequest = storageRequest,
 ) {
   const pre = await request("file/upload/pre", {
     ccp_hash_update: true,
@@ -85,7 +86,7 @@ export async function uploadQuark(
   ) {
     const query = `partNumber=${n}&uploadId=${encodeURIComponent(p.upload_id)}`;
     url.search = query;
-    const response = await storageRequest(provider, url, {
+    const response = await send(provider, url, {
       method: "PUT",
       headers: await auth("PUT", asset.mime, query),
       body: new Uint8Array(asset.bytes.subarray(offset, offset + partSize)),
@@ -103,7 +104,7 @@ export async function uploadQuark(
     callback = Buffer.from(JSON.stringify(p.callback)).toString("base64");
   const query = `uploadId=${encodeURIComponent(p.upload_id)}`;
   url.search = query;
-  const response = await storageRequest(provider, url, {
+  const response = await send(provider, url, {
     method: "POST",
     headers: {
       ...(await auth("POST", "application/xml", query, md5, callback)),

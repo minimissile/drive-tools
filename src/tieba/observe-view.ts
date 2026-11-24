@@ -43,12 +43,6 @@ export function tiebaObservePlan(
             : "吧名或首页链接无效。",
     };
   }
-  if (names.size > 5)
-    return {
-      forumNames: [],
-      existingNames: [],
-      issue: "每次最多读取5个贴吧，请减少选择或输入。",
-    };
   const existing = new Set(
     targets
       .filter(

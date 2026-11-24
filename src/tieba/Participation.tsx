@@ -1,3 +1,4 @@
+import { tiebaAccountName } from "./account-label";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { TiebaAutocareSnapshot } from "../../shared/tieba-autocare";
@@ -242,7 +243,7 @@ export function TiebaParticipation({
                       },
                       ...targets.map((target) => ({
                         value: target.id,
-                        label: `${target.name}吧${target.source === "observed" ? " · 待关注" : ""} · ${accounts.get(target.accountId)?.alias ?? "历史账号"}`,
+                        label: `${target.name}吧${target.source === "observed" ? " · 待关注" : ""} · ${tiebaAccountName(accounts.get(target.accountId), "历史账号")}`,
                       })),
                     ]}
                     onValueChange={(targetId) =>
@@ -306,8 +307,10 @@ export function TiebaParticipation({
                                   <strong>{candidate.title}</strong>
                                   <small>
                                     {candidate.forumName}吧 ·{" "}
-                                    {accounts.get(candidate.accountId)?.alias ??
-                                      "历史账号"}
+                                    {tiebaAccountName(
+                                      accounts.get(candidate.accountId),
+                                      "历史账号",
+                                    )}
                                     {candidate.replyCount === null
                                       ? ""
                                       : ` · ${candidate.replyCount}条回复`}
@@ -405,7 +408,10 @@ export function TiebaParticipation({
                     onFollowChange={setFollow}
                     context={(entry) =>
                       entry.accountId
-                        ? (accounts.get(entry.accountId)?.alias ?? "历史账号")
+                        ? tiebaAccountName(
+                            accounts.get(entry.accountId),
+                            "历史账号",
+                          )
                         : "系统"
                     }
                   />
@@ -423,9 +429,10 @@ export function TiebaParticipation({
                   (draft) => draft.candidateId === activeCandidate.id,
                 ) ?? null
               }
-              accountName={
-                accounts.get(activeCandidate.accountId)?.alias ?? "历史账号"
-              }
+              accountName={tiebaAccountName(
+                accounts.get(activeCandidate.accountId),
+                "历史账号",
+              )}
               busy={working || snapshot.busy}
               unavailable={!!query.error}
               error={error}

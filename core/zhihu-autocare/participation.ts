@@ -45,6 +45,7 @@ export interface AutocareParticipationHost {
   zhihu: ZhihuOperations;
   ai: AiService;
   guard(): void;
+  guardGeneration(): void;
   closed(): boolean;
   persist(): void;
   status(accountId: string, message: string, blocked?: boolean): void;
@@ -164,7 +165,7 @@ function interactionResearchNeeds(
     options,
   };
 }
-function recordResearchStop(
+export function recordResearchStop(
   h: AutocareParticipationHost,
   accountId: string,
   error: unknown,
@@ -1034,6 +1035,7 @@ export async function prepareAutocareAnswer(
       },
       () => guardAutocareRun(h),
     );
+    h.guardGeneration();
     h.ai.assertTextConfigured("copy");
     guardAutocareRun(h);
     job.status = "generating";
@@ -1045,7 +1047,7 @@ export async function prepareAutocareAnswer(
       h.ai,
       job.id,
       document,
-      () => guardAutocareRun(h),
+      () => h.guardGeneration(),
       domain,
     );
     if (h.closed()) return null;

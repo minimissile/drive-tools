@@ -1,3 +1,4 @@
+import { TiebaPublishingStore } from "./tieba-publishing/store";
 import type {
   WebsiteAccount,
   WebsiteAccountView,
@@ -14,6 +15,7 @@ import { AppError } from "./errors";
 import type { WeiboEditorPayload } from "../shared/weibo-publishing";
 import { weiboReceiptUrl } from "../shared/weibo-marketing";
 import { canonicalZhihuParticipationUrl } from "../shared/zhihu-participation";
+import { jianshuDraftUrl } from "../shared/jianshu";
 import type { BrowserEnvironments } from "./browser-environments";
 import {
   documentPlatformUrl,
@@ -89,10 +91,15 @@ export class WebsiteAccounts {
       );
     return this.ports.websiteSessions;
   }
-  async list() {
-    const ids = this.db.all<{ id: string }>(
-      "SELECT id FROM website_accounts ORDER BY created_at,id",
-    );
+  async list(provider?: WebsiteProvider) {
+    const ids = provider
+      ? this.db.all<{ id: string }>(
+          "SELECT id FROM website_accounts WHERE provider=? ORDER BY created_at,id",
+          provider,
+        )
+      : this.db.all<{ id: string }>(
+          "SELECT id FROM website_accounts ORDER BY created_at,id",
+        );
     return Promise.all(ids.map((row) => this.check(row.id)));
   }
   add(provider: WebsiteProvider, alias?: string, environmentId?: string) {
@@ -198,6 +205,66 @@ export class WebsiteAccounts {
         state.error = "此环境的登录或配置已变化，请检查当前平台身份后再使用。";
       if (state.hasSession) state.unverified = true;
       state.hasSession = false;
+    }
+    // Older Tieba connections accidentally stored open_uid as their UID. Correct
+    // only a proven alias on an unused connection; historical authorities stay immutable.
+    if (
+      fresh &&
+      account.provider === "tieba" &&
+      state.hasSession &&
+      !state.expired &&
+      !state.unverified &&
+      state.uid &&
+      state.uid !== account.uid &&
+      state.tiebaOpenUid === account.uid &&
+      /^[1-9]\d{0,19}$/.test(state.uid) &&
+      !this.db.get(
+        "SELECT id FROM website_accounts WHERE provider='tieba' AND uid=? AND id<>?",
+        state.uid,
+        account.id,
+      ) &&
+      !this.db.get(
+        "SELECT id FROM tieba_autocare_targets WHERE account_id=? LIMIT 1",
+        account.id,
+      ) &&
+      !this.db.get(
+        "SELECT id FROM tieba_reply_drafts WHERE json_extract(data,'$.accountId')=? LIMIT 1",
+        account.id,
+      ) &&
+      !this.db.get(
+        "SELECT id FROM tieba_topic_drafts WHERE json_extract(data,'$.accountId')=? LIMIT 1",
+        account.id,
+      ) &&
+      !this.db.get(
+        "SELECT id FROM browser_bindings WHERE website_account_id=? LIMIT 1",
+        account.id,
+      ) &&
+      !new TiebaPublishingStore(this.db)
+        .drafts()
+        .some((draft) => draft.accountId === account.id)
+    ) {
+      this.db.transaction(() => {
+        const link = this.environments?.link(ref);
+        if (link && link.uid !== account.uid)
+          throw new AppError(
+            "ENVIRONMENT_UID_MISMATCH",
+            "账号绑定在核验期间变化，请重新核实。",
+          );
+        if (link)
+          this.db.run(
+            "UPDATE browser_environment_accounts SET uid=? WHERE kind='website' AND account_id=? AND uid=?",
+            state.uid,
+            account.id,
+            account.uid,
+          );
+        this.db.run(
+          "UPDATE website_accounts SET uid=? WHERE id=? AND uid=?",
+          state.uid,
+          account.id,
+          account.uid,
+        );
+      });
+      account.uid = state.uid;
     }
     const mismatch = !!account.uid && !!state.uid && account.uid !== state.uid;
     const duplicate =
@@ -482,15 +549,34 @@ export class WebsiteAccounts {
   async openDocument(accountId: string, value: string) {
     const account = this.get(accountId);
     const url =
-      account.provider === "zhihu"
-        ? canonicalZhihuParticipationUrl(value)
-        : documentPlatformUrl(account.provider, value);
+      account.provider === "jianshu"
+        ? jianshuDraftUrl(value)
+        : account.provider === "zhihu"
+          ? canonicalZhihuParticipationUrl(value)
+          : documentPlatformUrl(account.provider, value);
     if (!url)
       throw new AppError(
         "DOCUMENT_URL_BLOCKED",
-        "文档地址必须属于所选账号的 HTTPS 官方平台。",
+        account.provider === "jianshu"
+          ? "简书草稿地址必须属于所选账号的 HTTPS 官方平台，并指向具体文章。"
+          : "文档地址必须属于所选账号的 HTTPS 官方平台。",
       );
     return this.use(accountId, account.provider, async (current) => {
+      if (current.provider === "jianshu") {
+        const open = this.ports.jianshu?.openEditor;
+        if (!open)
+          throw new AppError(
+            "JIANSHU_EDITOR_UNAVAILABLE",
+            "当前后端尚未加载简书原稿查看功能，请应用更新后重试。",
+          );
+        const result = await open(current, url);
+        if (!result.opened || jianshuDraftUrl(result.editorUrl) !== url)
+          throw new AppError(
+            "JIANSHU_EDITOR_ORIGIN",
+            "简书未能打开准确原稿，请检查官网窗口后重试。",
+          );
+        return { opened: true, url };
+      }
       const sessions = this.sessions();
       if (!sessions.openDocument)
         throw new AppError(

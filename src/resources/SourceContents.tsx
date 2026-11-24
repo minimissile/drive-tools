@@ -71,7 +71,7 @@ export function SourceContents({
       }
       extra={
         <div className="row">
-          <Button quiet disabled={!enabled || loading} onClick={onOpenOfficial}>
+          <Button quiet disabled={!enabled} onClick={onOpenOfficial}>
             <ExternalLink size={14} />
             打开官方分享
           </Button>

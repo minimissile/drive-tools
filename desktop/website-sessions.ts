@@ -17,6 +17,8 @@ import { tiebaIdentityScript } from "../core/tieba/identity";
 import { createSmzdmSession } from "./smzdm-session";
 import { createWechatSession } from "./wechat-session";
 import { createWechatBitSession } from "./wechat-bit-session";
+import { createJianshuSession } from "./jianshu-session";
+import { readContentImage } from "../core/content-assets";
 import { createDocumentSessions } from "./document-session";
 import { isDocumentProvider } from "../shared/document-platforms";
 import { browserSessionFetch } from "./browser-session-fetch";
@@ -468,6 +470,9 @@ export function createWebsiteSessions(
   const weiboSessions = createWeiboSessions(workspace, environmentProfile);
   const zhihuIdentity = createZhihuIdentitySession(context);
   const bilibiliIdentity = createBilibiliIdentitySession(context);
+  const jianshu = createJianshuSession(context, (image) =>
+    readContentImage(workspace(), image),
+  );
   const bilibiliContent = createBilibiliContent(context, bilibiliIdentity.verify);
   const tiebaIdentity = createWebsiteIdentitySession(context, {
     provider: "tieba",
@@ -495,10 +500,12 @@ export function createWebsiteSessions(
     account.provider === "weibo" ? weiboSessions : baiduSessions;
   const sessions: NonNullable<AppPorts["websiteSessions"]> = {
     isOpen: () =>
-      baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen() || bilibiliContent.isOpen(),
+      baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen() || bilibiliContent.isOpen() || jianshu.isOpen(),
     login: (account) => adapter(account).login(account),
     status: (account) =>
-      isDocumentProvider(account.provider)
+      account.provider === "jianshu"
+        ? Promise.resolve(jianshu.status(account))
+        : isDocumentProvider(account.provider)
         ? Promise.resolve(documents.status(account))
         : account.provider === "wechat"
           ? Promise.resolve(wechat.status(account))
@@ -513,7 +520,9 @@ export function createWebsiteSessions(
               : adapter(account).status(account),
     clear: (account) => adapter(account).clear(account),
     invalidate: async (account) =>
-      isDocumentProvider(account.provider)
+      account.provider === "jianshu"
+        ? jianshu.invalidate(account)
+        : isDocumentProvider(account.provider)
         ? documents.invalidate(account)
         : account.provider === "wechat"
           ? wechat.invalidate(account)
@@ -527,7 +536,9 @@ export function createWebsiteSessions(
               ? zhihuIdentity.invalidate(account)
               : adapter(account).invalidate(account),
     verify: (account) =>
-      isDocumentProvider(account.provider)
+      account.provider === "jianshu"
+        ? jianshu.verify(account)
+        : isDocumentProvider(account.provider)
         ? documents.verify(account)
         : account.provider === "wechat"
           ? wechat.verify(account)
@@ -566,6 +577,7 @@ export function createWebsiteSessions(
     weiboPublisher: weiboSessions.publisher,
     weiboStatistics: weiboSessions.statistics,
     smzdm: smzdm.port,
+    jianshu: jianshu.port,
     wechat: wechat.port,
     wechatBrowserSession: createWechatBitSession(workspace, smzdm.port.readArticle),
     bilibili: bilibiliContent.port,

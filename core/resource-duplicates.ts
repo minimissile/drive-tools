@@ -43,7 +43,7 @@ export function similarResources(db: Database, title: string, excludeId = "") {
   if (!normalizedResourceTitle(title)) return [];
   return db
     .all<Omit<SimilarResource, "similarity">>(
-      "SELECT id,title,provider FROM resources WHERE id!=?",
+      "SELECT id,title,provider FROM resources WHERE id!=? AND category<>''",
       excludeId,
     )
     .map((resource) => ({
@@ -67,7 +67,7 @@ export function exactTitleResource(
   if (!normalized) return undefined;
   return db
     .all<{ id: string; title: string }>(
-      "SELECT id,title FROM resources WHERE provider=? AND id!=? ORDER BY created_at",
+      "SELECT id,title FROM resources WHERE provider=? AND id!=? AND category<>'' ORDER BY created_at",
       provider,
       excludeId,
     )
@@ -75,9 +75,10 @@ export function exactTitleResource(
 }
 
 export function duplicateResourceError(title: string, provider: Provider) {
+  const name = title ? `“${title}”` : "这份未命名资源";
   return new AppError(
     "RESOURCE_PROVIDER_EXISTS",
-    `“${title}”已在${providerSpecs[provider].name}资源库中保存。同一资源在同类型网盘只保留一份，请打开已有资源编辑。`,
+    `${name}已在${providerSpecs[provider].name}资源库中保存。同一资源在同类型网盘只保留一份，请打开已有资源编辑。`,
   );
 }
 
@@ -91,6 +92,7 @@ export function assertResourceUnique(
     provider: Provider;
     accountId: string;
     copyId?: string;
+    provisionalTitle?: boolean;
   },
 ) {
   const bySource = db.get<{ id: string; title: string }>(
@@ -99,19 +101,27 @@ export function assertResourceUnique(
   );
   if (bySource && bySource.id !== input.resourceId)
     throw duplicateResourceError(bySource.title, input.provider);
-  const current = input.copyId
-    ? db.get<{ title: string }>(
-        "SELECT title FROM resources WHERE id=?",
+  if (!input.provisionalTitle) {
+    const current = input.copyId
+      ? db.get<{ title: string; category: string }>(
+          "SELECT title,category FROM resources WHERE id=?",
+          input.resourceId,
+        )
+      : undefined;
+    const unchanged =
+      current?.category &&
+      normalizedResourceTitle(current.title) ===
+        normalizedResourceTitle(input.title);
+    if (!unchanged) {
+      const byTitle = exactTitleResource(
+        db,
+        input.title,
+        input.provider,
         input.resourceId,
-      )
-    : undefined;
-  const byTitle =
-    current &&
-    normalizedResourceTitle(current.title) ===
-      normalizedResourceTitle(input.title)
-      ? undefined
-      : exactTitleResource(db, input.title, input.provider, input.resourceId);
-  if (byTitle) throw duplicateResourceError(byTitle.title, input.provider);
+      );
+      if (byTitle) throw duplicateResourceError(byTitle.title, input.provider);
+    }
+  }
   if (input.copyId) {
     const edited = db.get<{ resource_id: string; account_id: string }>(
       "SELECT resource_id,account_id FROM copies WHERE id=?",

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { id, now } from "./database";
 import { AppError } from "./errors";
+import type { AppPorts } from "./ports";
+import type { WebsiteAccounts } from "./website-accounts";
+import type { WebsiteAccount } from "../shared/website-accounts";
 import {
   baiduKeywordColumns,
   baiduKeywordSource,
@@ -12,6 +15,34 @@ import {
 // Verified against Baidu's toolsCenter /Kr/Keyword and @baidu/winds-ajax sources.
 export const baiduKeywordPath =
   "lightning/GET/KeywordSuggestService/getKeywordRecommendPassive";
+
+export async function readBaiduKeywords(
+  account: WebsiteAccount,
+  input: BaiduKeywordInput,
+  {
+    ports,
+    websiteAccounts,
+  }: {
+    ports: Pick<AppPorts, "baiduKeywords">;
+    websiteAccounts: Pick<WebsiteAccounts, "expire">;
+  },
+) {
+  if (!ports.baiduKeywords)
+    throw new AppError(
+      "BAIDU_SESSION_UNAVAILABLE",
+      "当前环境不支持百度检索，请使用桌面开发窗口。",
+    );
+  try {
+    return parseBaiduKeywordResponse(
+      input,
+      await ports.baiduKeywords.query(account, input),
+    );
+  } catch (error) {
+    if (error instanceof AppError && error.code === "BAIDU_LOGIN_REQUIRED")
+      await websiteAccounts.expire(account.id);
+    throw error;
+  }
+}
 
 export function buildBaiduKeywordRequest(input: BaiduKeywordInput) {
   const value = baiduKeywordInputSchema.parse(input);

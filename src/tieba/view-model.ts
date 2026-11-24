@@ -31,7 +31,7 @@ export function tiebaAvailableTargets(
 export function tiebaTargetRefreshIds(
   filtered: Pick<TiebaAutocareTarget, "id">[],
 ) {
-  return [...new Set(filtered.map((target) => target.id))].slice(0, 5);
+  return [...new Set(filtered.map((target) => target.id))];
 }
 export function tiebaStartingTarget(
   storedId: string,

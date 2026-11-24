@@ -1,3 +1,4 @@
+import { latestTiebaSubmission } from "../tieba/submissions";
 import { tiebaFollowWriteState } from "../tieba-autocare/store";
 import { tiebaPublishingWriteState } from "../tieba-publishing/store";
 import type { z } from "zod";
@@ -763,13 +764,7 @@ export class TiebaParticipation {
         "TIEBA_PUBLISHING_UNCERTAIN_BLOCK",
         "该账号仍有关注或资源发帖结果待核对，请先处理原记录。",
       );
-    const latest = this.d.db.get<{ at: string | null }>(
-      "SELECT MAX(at) at FROM (SELECT submitted_at at FROM tieba_reply_drafts WHERE submitted_at IS NOT NULL UNION ALL SELECT submitted_at at FROM tieba_autocare_tasks WHERE submitted_at IS NOT NULL" +
-        (hasTopics
-          ? " UNION ALL SELECT submitted_at at FROM tieba_topic_drafts WHERE submitted_at IS NOT NULL"
-          : "") +
-        ")",
-    )?.at;
+    const latest = latestTiebaSubmission(this.d.db, draft.uid);
     const lastMutation = Math.max(
       Date.parse(latest ?? "") || 0,
       Date.parse(resourcePosting.lastMutationAt ?? "") || 0,

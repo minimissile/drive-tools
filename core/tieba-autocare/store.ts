@@ -16,6 +16,7 @@ export interface TaskRecord extends TiebaAutocareTask {
   configSnapshot: TiebaAutocareConfig;
 }
 export interface AutocareState {
+  planVersion?: 2;
   revision: number;
   enabled: boolean;
   config: TiebaAutocareConfig;
@@ -27,6 +28,7 @@ export class TiebaAutocareStore {
   constructor(private db: Database) {}
   state(): AutocareState {
     return this.db.setting(key, {
+      planVersion: 2,
       revision: 1,
       enabled: false,
       config: { targetIds: [] },
@@ -108,7 +110,12 @@ export function tiebaFollowWriteState(
 ) {
   const targets = new TiebaAutocareStore(db)
     .targets()
-    .filter((target) => target.id !== excludeTargetId && target.followIntent);
+    .filter(
+      (target) =>
+        target.id !== excludeTargetId &&
+        target.uid === uid &&
+        target.followIntent,
+    );
   return {
     uncertain: targets.some(
       (target) =>

@@ -1,12 +1,19 @@
 import { z } from "zod";
 
-export const wechatRewriteStyleIds = [
+export const legacyWechatRewriteStyleIds = [
   "natural",
   "explain",
   "tutorial",
   "checklist",
   "commentary",
   "story",
+] as const;
+export const wechatRewriteStyleIds = [
+  ...legacyWechatRewriteStyleIds,
+  "problem",
+  "comparison",
+  "myth",
+  "qa",
 ] as const;
 export const wechatRewriteStyleSchema = z.enum(wechatRewriteStyleIds);
 export type WechatRewriteStyleId = z.infer<typeof wechatRewriteStyleSchema>;
@@ -49,6 +56,26 @@ export const wechatRewriteStyles = [
     id: "story",
     label: "故事共鸣",
     description: "围绕原文已有的人物、情节和场景组织表达。",
+  },
+  {
+    id: "problem",
+    label: "痛点切入",
+    description: "从读者的具体困扰开篇，尽早给出原文已有的解法和适用条件。",
+  },
+  {
+    id: "comparison",
+    label: "对比选型",
+    description: "按共同维度比较原文已有的选项，讲清各自适合谁、怎么选。",
+  },
+  {
+    id: "myth",
+    label: "误区拆解",
+    description: "澄清原文提到的误解或易混淆条件，说明结论和适用边界。",
+  },
+  {
+    id: "qa",
+    label: "问答速读",
+    description: "用原文能回答的读者问题组织正文，每问先给简短答案。",
   },
 ] as const satisfies readonly WechatRewriteStyleMeta[];
 

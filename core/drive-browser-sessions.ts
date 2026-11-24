@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BrowserContext, Page } from "playwright-core";
 import type { Repository } from "./repository";
@@ -21,6 +22,24 @@ import {
 import { browserPageRequest } from "./browser-page-request";
 import { findEnvironmentPage, officialBrowserPage } from "./browser-pages";
 import { initializeAccountAlias } from "./account-alias";
+import {
+  supportsDriveBrowser,
+  type DriveBrowserProvider,
+} from "../shared/drive-browser";
+import { quarkIdentity } from "./providers/quark-identity";
+import { storageUrl } from "./providers/small-upload";
+import { documentDownloadAllowed } from "./providers/document-download";
+import type { EnvironmentStamp } from "../shared/browser-environments";
+
+interface RequestScope {
+  accountId: string;
+  context: BrowserContext;
+  page: Page;
+  binding: DriveBrowserBinding;
+  stamp: EnvironmentStamp;
+  response: { status: number; body: string };
+  verifiedAt: number;
+}
 
 interface Dependencies {
   repo: Repository;
@@ -46,8 +65,9 @@ const key = (id: string) => `drive-browser:${id}`;
 const identityUrl =
   "https://pan.baidu.com/api/gettemplatevariable?fields=%5B%22uk%22%2C%22bdstoken%22%2C%22username%22%5D&clienttype=0&web=1";
 
-/** All bound Baidu traffic stays in the selected profile; failure never selects native transport. */
+/** All bound drive traffic stays in the selected profile; failure never selects native transport. */
 export class DriveBrowserSessions {
+  private requests = new AsyncLocalStorage<RequestScope>();
   private previews = new Map<string, PreviewRecord>();
   private newPreviews = new Map<string, NewPreviewRecord>();
   private active = 0;
@@ -95,7 +115,7 @@ export class DriveBrowserSessions {
     if (!b || !b.profileId || !b.uid || !b.environmentId)
       throw new AppError(
         "DRIVE_BINDING_UNVERIFIED",
-        "此百度账号的比特关联尚未核验，请在账号管理重新读取并关联环境。",
+        "此网盘账号的比特关联尚未核验，请在账号管理重新读取并关联环境。",
       );
     const env = this.d.environments.forAccount({
       kind: "drive",
@@ -109,19 +129,19 @@ export class DriveBrowserSessions {
     )
       throw new AppError(
         "DRIVE_ENVIRONMENT_CHANGED",
-        "百度账号的浏览器关联或比特连接已变化，请重新核验关联；不会改用内置会话。",
+        "网盘账号的浏览器关联或比特连接已变化，请重新核验关联；不会改用内置会话。",
       );
     return b;
   }
-  private assertBaidu(accountId: string) {
+  private assertDrive(accountId: string) {
     const a = this.d.repo.getAccount(accountId);
-    if (a.provider !== "baidu")
+    if (!supportsDriveBrowser(a.provider))
       throw new AppError(
-        "BAIDU_REQUIRED",
-        "本轮仅支持百度网盘关联比特无头环境。",
+        "DRIVE_BROWSER_UNSUPPORTED",
+        "此网盘暂不支持指纹浏览器。",
       );
     if (!a.enabled) throw new AppError("ACCOUNT_DISABLED", "请先启用此账号。");
-    return a;
+    return { ...a, provider: a.provider };
   }
   private assertNoPending(accountId: string) {
     this.d.assertIdle(accountId);
@@ -149,21 +169,61 @@ export class DriveBrowserSessions {
         "此账号存在尚未核对的网盘操作，请先处理结果，再改变浏览器关联。",
       );
   }
-  private async page(context: BrowserContext, accountId: string) {
+  private async page(
+    context: BrowserContext,
+    accountId: string,
+    provider: DriveBrowserProvider,
+  ) {
     const page = await findEnvironmentPage(
       context,
-      `panxu:baidu-drive:${accountId}`,
-      providerSpecs.baidu.home,
+      `panxu:${provider}-drive:${accountId}`,
+      providerSpecs[provider].home,
+      (page) => officialBrowserPage(page, [providerSpecs[provider].shareHost]),
+      "temporary",
     );
-    if (!officialBrowserPage(page, ["pan.baidu.com"]))
+    if (!officialBrowserPage(page, [providerSpecs[provider].shareHost]))
       throw new AppError(
         "AUTH_EXPIRED",
-        "百度网页要求重新登录，请打开关联环境的登录窗口处理。",
+        "网盘网页要求重新登录，请打开关联环境的登录窗口处理。",
       );
     return page;
   }
-  private async identity(page: Page) {
-    const response = await browserPageRequest(page, identityUrl);
+  private async readIdentity(
+    page: Page,
+    provider: DriveBrowserProvider,
+    context: BrowserContext,
+  ) {
+    const response = await browserPageRequest(
+      page,
+      provider === "quark"
+        ? "https://pan.quark.cn/account/info?fr=pc&platform=pc"
+        : identityUrl,
+    );
+    if (provider === "quark") {
+      let result;
+      try {
+        result = JSON.parse(response.body);
+      } catch {
+        throw new AppError(
+          "AUTH_EXPIRED",
+          "夸克未返回有效登录身份，请打开关联环境完成登录。",
+        );
+      }
+      if (response.status !== 200)
+        throw new AppError(
+          "AUTH_EXPIRED",
+          "夸克登录核验失败，请在关联环境完成登录。",
+        );
+      return {
+        identity: await quarkIdentity(result, "夸克", async () => {
+          const uid = (await context.cookies(providerSpecs.quark.home)).find(
+            (c) => c.name === "__uid",
+          )?.value;
+          return uid && /^[a-zA-Z0-9_-]{4,128}$/.test(uid) ? uid : null;
+        }),
+        response,
+      };
+    }
     let data: any;
     try {
       data = JSON.parse(response.body);
@@ -184,14 +244,24 @@ export class DriveBrowserSessions {
         "AUTH_EXPIRED",
         "此比特环境中的百度登录已失效，请完成官方登录后关闭窗口，再核验后台登录。",
       );
-    return { uid: String(value.uk), nickname: String(value.username ?? "") };
+    return {
+      identity: {
+        uid: String(value.uk),
+        nickname: String(value.username ?? ""),
+      },
+      response,
+    };
   }
-  private pin(accountId: string | undefined, uid: string) {
+  private pin(
+    accountId: string | undefined,
+    uid: string,
+    provider: DriveBrowserProvider,
+  ) {
     const a = accountId ? this.d.repo.getAccount(accountId) : undefined;
     if (a?.uid && a.uid !== uid)
       throw new AppError(
         "ACCOUNT_UID_MISMATCH",
-        "此比特环境中的百度 UID 与原账号不同，请选择原账号环境或新建账号记录。",
+        "此比特环境中的网盘 UID 与原账号不同，请选择原账号环境或新建账号记录。",
       );
     if (
       this.d.repo
@@ -199,22 +269,25 @@ export class DriveBrowserSessions {
         .some(
           (other) =>
             other.id !== accountId &&
-            other.provider === "baidu" &&
+            other.provider === provider &&
             other.uid === uid,
         )
     )
       throw new AppError(
         "DUPLICATE_ACCOUNT",
-        "此百度 UID 已有账号记录，请使用原记录关联环境。",
+        "此网盘 UID 已有账号记录，请使用原记录关联环境。",
       );
   }
   private async inspect(input: {
+    provider?: DriveBrowserProvider;
     accountId?: string;
     profileId: string;
     connectorKey: string;
     requireProxy: boolean;
   }) {
-    if (input.accountId) this.assertBaidu(input.accountId);
+    const provider = input.accountId
+      ? this.assertDrive(input.accountId).provider
+      : (input.provider ?? "baidu");
     if (input.connectorKey !== this.db.setting("bitUrl", ""))
       throw new AppError(
         "BIT_CONNECTION_CHANGED",
@@ -245,13 +318,14 @@ export class DriveBrowserSessions {
           .find((e) => e.id === existing.id)
           ?.accounts.some((r) =>
             r.kind === "drive"
-              ? r.id !== input.accountId
+              ? r.id !== input.accountId &&
+                (r.platform === `drive-${provider}` || !isDriveSharedMember(r))
               : !isDriveSharedMember(r),
           )
       )
         throw new AppError(
           "DRIVE_PROFILE_EXCLUSIVE",
-          "此环境已有百度网盘或不支持共用的平台账号，请选择空闲环境或仅关联贴吧、知道和公众号的环境。",
+          "此环境已关联同类网盘或不支持共用的平台账号，请选择其他环境。",
         );
     }
     const requireProxy =
@@ -279,13 +353,16 @@ export class DriveBrowserSessions {
         input.profileId,
         true,
         async (context, mode) => {
-          const identity = await this.identity(
+          const { identity } = await this.readIdentity(
             await this.page(
               context,
               input.accountId ?? `new:${input.profileId}`,
+              provider,
             ),
+            provider,
+            context,
           );
-          this.pin(input.accountId, identity.uid);
+          this.pin(input.accountId, identity.uid, provider);
           return {
             ...identity,
             exitIp: await browserExitIp(context),
@@ -320,7 +397,7 @@ export class DriveBrowserSessions {
     profileId: string,
     connectorKey: string,
   ) {
-    const a = this.assertBaidu(accountId);
+    const a = this.assertDrive(accountId);
     const b = this.db.setting<DriveBrowserBinding | null>(key(accountId), null);
     if (
       a.browserEngine !== "bitbrowser" ||
@@ -334,6 +411,7 @@ export class DriveBrowserSessions {
       );
   }
   previewNew(input: {
+    provider?: DriveBrowserProvider;
     profileId: string;
     connectorKey: string;
     requireProxy: boolean;
@@ -343,6 +421,7 @@ export class DriveBrowserSessions {
       for (const [token, p] of this.newPreviews)
         if (p.expires < Date.now()) this.newPreviews.delete(token);
       const view: NewDriveBrowserPreview = {
+        provider: input.provider ?? "baidu",
         token: randomUUID(),
         profileId: input.profileId,
         profileName: result.profileName,
@@ -358,10 +437,19 @@ export class DriveBrowserSessions {
       return view;
     });
   }
-  async createAccount(alias: string, token: string) {
+  async createAccount(
+    alias: string,
+    token: string,
+    provider: DriveBrowserProvider = "baidu",
+  ) {
     const preview = this.newPreviews.get(token);
     if (!preview)
-      throw new AppError("DRIVE_PREVIEW_EXPIRED", "请先读取要创建的百度账号。");
+      throw new AppError("DRIVE_PREVIEW_EXPIRED", "请先读取要创建的网盘账号。");
+    if ((preview.view.provider ?? "baidu") !== provider)
+      throw new AppError(
+        "DRIVE_PREVIEW_PROVIDER",
+        "读取结果与所选网盘不一致，请重新读取登录账号。",
+      );
     return this.withAccount(
       `drive-create:${preview.view.profileId}`,
       async () => {
@@ -385,7 +473,7 @@ export class DriveBrowserSessions {
         )
           throw new AppError(
             "DRIVE_PREVIEW_CHANGED",
-            "百度账号、出口或指纹配置已变化，请重新读取。",
+            "网盘账号、出口或指纹配置已变化，请重新读取。",
           );
         let env = this.db.get<{ id: string }>(
           "SELECT id FROM browser_environments WHERE engine='bitbrowser' AND profile_id=?",
@@ -401,7 +489,7 @@ export class DriveBrowserSessions {
           });
         const accountId = id("account"),
           time = now();
-        this.pin(undefined, v.uid);
+        this.pin(undefined, v.uid, provider);
         const binding: DriveBrowserBinding = {
           environmentId: env.id,
           profileId: v.profileId,
@@ -417,15 +505,15 @@ export class DriveBrowserSessions {
         this.db.transaction(() => {
           const isDefault = !this.d.repo
             .accounts()
-            .some((a) => a.provider === "baidu" && a.enabled);
+            .some((a) => a.provider === provider && a.enabled);
           this.db.run(
             "INSERT INTO accounts(id,provider,alias,uid,is_default,status,verified_at,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             accountId,
-            "baidu",
+            provider,
             initializeAccountAlias(
               this.db,
               accountId,
-              "baidu",
+              provider,
               alias,
               result.state.nickname,
             ),
@@ -469,6 +557,7 @@ export class DriveBrowserSessions {
       for (const [id, p] of this.previews)
         if (p.expires < Date.now()) this.previews.delete(id);
       const view: DriveBrowserPreview = {
+        provider: this.assertDrive(input.accountId).provider,
         token: randomUUID(),
         accountId: input.accountId,
         profileId: input.profileId,
@@ -533,7 +622,7 @@ export class DriveBrowserSessions {
         )
       )
         this.d.environments.registerAccount({ kind: "drive", id: v.accountId });
-      this.assertBaidu(v.accountId);
+      this.assertDrive(v.accountId);
       await this.d.environments.bind(
         { kind: "drive", id: v.accountId },
         env.id,
@@ -616,9 +705,15 @@ export class DriveBrowserSessions {
       context: BrowserContext,
       page: Page,
       b: DriveBrowserBinding,
+      response: { status: number; body: string },
     ) => Promise<T>,
   ) {
-    const a = this.assertBaidu(accountId),
+    const held = this.requests.getStore();
+    if (held) {
+      this.assertRequestScope(accountId, held);
+      return action(held.context, held.page, held.binding, held.response);
+    }
+    const a = this.assertDrive(accountId),
       b = this.binding(accountId);
     return this.d.environments.runEnvironment(
       b.environmentId,
@@ -646,18 +741,22 @@ export class DriveBrowserSessions {
           b.profileId,
           false,
           async (context) => {
-            const page = await this.page(context, accountId),
-              identity = await this.identity(page);
+            const page = await this.page(context, accountId, a.provider),
+              { identity, response } = await this.readIdentity(
+                page,
+                a.provider,
+                context,
+              );
             if (identity.uid !== b.uid || (a.uid && identity.uid !== a.uid))
               throw new AppError(
                 "ACCOUNT_UID_MISMATCH",
-                "比特环境已切换百度账号，已阻止此账号继续操作。",
+                "比特环境已切换网盘账号，已阻止此账号继续操作。",
               );
             this.d.environments.confirm(
               { kind: "drive", id: accountId },
               identity.uid,
             );
-            return action(context, page, b);
+            return action(context, page, b, response);
           },
           b.connectorKey,
         );
@@ -665,13 +764,86 @@ export class DriveBrowserSessions {
       { headless: true, requireProxy: b.requireProxy },
     );
   }
-  request(accountId: string, url: string, init: RequestInit = {}) {
-    if (!providerApiAllowed("baidu", url))
+  private assertRequestScope(accountId: string, scope: RequestScope) {
+    if (accountId !== scope.accountId)
       throw new AppError(
-        "PROVIDER_URL_BLOCKED",
-        "请求不属于百度网盘允许接口。",
+        "DRIVE_REQUEST_SCOPE",
+        "当前建链会话不能切换网盘账号。",
       );
-    return this.run(accountId, async (_context, page) => {
+    const binding = this.binding(accountId),
+      account = this.assertDrive(accountId);
+    this.d.environments.assertStamp(
+      { kind: "drive", id: accountId },
+      scope.stamp,
+    );
+    if (
+      binding.profileId !== scope.binding.profileId ||
+      binding.uid !== scope.binding.uid ||
+      account.uid !== scope.binding.uid ||
+      scope.page.isClosed() ||
+      !officialBrowserPage(scope.page, [
+        providerSpecs[account.provider].shareHost,
+      ])
+    )
+      throw new AppError(
+        "DRIVE_ENVIRONMENT_CHANGED",
+        "建链期间账号或浏览器环境已变化，请重新检查登录。",
+      );
+  }
+  /** A bounded business batch owns one environment/CDP connection; no process-global session cache. */
+  withRequestSession<T>(
+    accountId: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const held = this.requests.getStore();
+    if (held) {
+      this.assertRequestScope(accountId, held);
+      return action();
+    }
+    return this.run(accountId, (context, page, binding, response) =>
+      this.requests.run(
+        {
+          accountId,
+          context,
+          page,
+          binding,
+          response,
+          verifiedAt: Date.now(),
+          stamp: this.d.environments.stamp({ kind: "drive", id: accountId }),
+        },
+        action,
+      ),
+    );
+  }
+  async request(accountId: string, url: string, init: RequestInit = {}) {
+    const held = this.requests.getStore();
+    if (held) this.assertRequestScope(accountId, held);
+    const provider = this.assertDrive(accountId).provider;
+    if (!providerApiAllowed(provider, url))
+      throw new AppError("PROVIDER_URL_BLOCKED", "请求不属于此网盘允许接口。");
+    return this.run(accountId, async (context, page) => {
+      const scope = this.requests.getStore();
+      if (scope) {
+        if (Date.now() - scope.verifiedAt > 30_000) {
+          const latest = await this.readIdentity(page, provider, context);
+          if (latest.identity.uid !== scope.binding.uid)
+            throw new AppError(
+              "ACCOUNT_UID_MISMATCH",
+              "比特环境已切换网盘账号，已停止建链。",
+            );
+          scope.response = latest.response;
+          scope.verifiedAt = Date.now();
+        }
+        const target = new URL(url);
+        if (
+          (!init.method || init.method.toUpperCase() === "GET") &&
+          !init.body &&
+          provider === "baidu" &&
+          target.pathname === "/api/gettemplatevariable" &&
+          target.searchParams.get("fields") === '["uk","bdstoken","username"]'
+        )
+          return { ...scope.response };
+      }
       const headers = new Headers(init.headers);
       for (const name of [...headers.keys()])
         if (
@@ -689,8 +861,76 @@ export class DriveBrowserSessions {
       return browserPageRequest(page, url, { ...init, headers });
     });
   }
+  principalId(accountId: string) {
+    return this.run(accountId, async (_context, _page, binding) => binding.uid);
+  }
+  fileBytes(accountId: string, url: string, maxBytes: number) {
+    const provider = this.assertDrive(accountId).provider;
+    if (!documentDownloadAllowed(provider, url))
+      throw new AppError(
+        "DOCUMENT_HOST_BLOCKED",
+        "网盘文件地址不属于允许的下载服务。",
+      );
+    if (
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes <= 0 ||
+      maxBytes > 20 * 1024 * 1024
+    )
+      throw new AppError("DOCUMENT_READ_LIMIT", "文件读取上限无效。");
+    return this.run(accountId, async (_context, page) => {
+      try {
+        const response = await browserPageRequest(
+          page,
+          url,
+          {},
+          { binary: true, maxBytes },
+        );
+        if (response.status < 200 || response.status >= 300)
+          throw new Error("download");
+        return new Uint8Array(Buffer.from(response.body, "base64"));
+      } catch {
+        throw new AppError(
+          "DOCUMENT_READ_FAILED",
+          "文件读取失败或超过上限，请检查关联环境中的网盘登录。",
+        );
+      }
+    });
+  }
+  storageRequest(accountId: string, address: string, init: RequestInit) {
+    const provider = this.assertDrive(accountId).provider;
+    if (provider !== "quark")
+      throw new AppError("UPLOAD_UNSUPPORTED", "此网盘不支持该存储传输方式。");
+    const url = storageUrl(provider, address);
+    return this.run(accountId, async (_context, page) => {
+      try {
+        const response = await browserPageRequest(page, url.href, init, {
+          credentials: "omit",
+          responseHeaders: true,
+        });
+        if (response.status < 200 || response.status >= 300)
+          throw new Error("storage");
+        return new Response(
+          [204, 205, 304].includes(response.status) ? null : response.body,
+          {
+            status: response.status,
+            headers: response.headers,
+          },
+        );
+      } catch {
+        throw new AppError(
+          "UPLOAD_UNCERTAIN",
+          "浏览器存储请求未确认，请核对远端文件后再重试。",
+          true,
+        );
+      }
+    });
+  }
   setCookie(accountId: string, url: string, name: string, value: string) {
-    if (new URL(url).origin !== "https://pan.baidu.com" || name !== "BDCLND")
+    if (
+      this.assertDrive(accountId).provider !== "baidu" ||
+      new URL(url).origin !== "https://pan.baidu.com" ||
+      name !== "BDCLND"
+    )
       throw new AppError("COOKIE_SCOPE", "不支持向此环境写入该会话字段。");
     return this.run(accountId, async (context) => {
       await context.addCookies([
@@ -701,7 +941,7 @@ export class DriveBrowserSessions {
   /** Explicit user action: close this profile's windows, preserve cookies, then start in background. */
   background(accountId: string) {
     return this.withAccount(accountId, async () => {
-      this.assertBaidu(accountId);
+      this.assertDrive(accountId);
       this.assertNoPending(accountId);
       const b = this.binding(accountId);
       await this.d.environments.controlWindow(b.environmentId, async () => {
@@ -739,20 +979,22 @@ export class DriveBrowserSessions {
       return { headless: true as const };
     });
   }
-  async open(accountId: string, url = providerSpecs.baidu.home) {
-    if (!providerAuthAllowed("baidu", url))
-      throw new AppError("ACCOUNT_PAGE_BLOCKED", "此地址不属于百度官方页面。");
+  async open(accountId: string, address?: string) {
+    const provider = this.assertDrive(accountId).provider,
+      url = address ?? providerSpecs[provider].home;
+    if (!providerAuthAllowed(provider, url))
+      throw new AppError(
+        "ACCOUNT_PAGE_BLOCKED",
+        "此地址不属于该网盘官方页面。",
+      );
     const b = this.binding(accountId);
     return this.d.environments.controlWindow(b.environmentId, async () => {
+      await this.d.bit.keepWindow(b.profileId, b.connectorKey);
       await this.d.bit.stopDriveHeadless(b.profileId, b.connectorKey);
       await this.d.bit.withProfile(
         b.profileId,
         async (context) => {
-          const page = await context.newPage();
-          await page.goto(url, {
-            waitUntil: "domcontentloaded",
-            timeout: 30000,
-          });
+          const page = await findEnvironmentPage(context, `panxu:drive-open:${accountId}:${url}`, url);
           await page.bringToFront();
         },
         b.connectorKey,

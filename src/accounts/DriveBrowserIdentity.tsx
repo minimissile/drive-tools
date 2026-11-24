@@ -1,3 +1,4 @@
+import { providerSpecs } from "../../shared/providers";
 import type { NewDriveBrowserPreview } from "../../shared/drive-browser";
 import { Notice } from "../ui/primitives";
 
@@ -6,16 +7,20 @@ export function DriveBrowserIdentity({
 }: {
   preview: NewDriveBrowserPreview;
 }) {
+  const label = providerSpecs[preview.provider ?? "baidu"].name;
   return (
-    <section className="drive-browser-preview" aria-label="读取到的百度账号">
-      <h3>核对百度账号</h3>
+    <section
+      className="drive-browser-preview"
+      aria-label={`读取到的${label}账号`}
+    >
+      <h3>核对{label}账号</h3>
       <dl>
         <div>
           <dt>账号</dt>
           <dd>{preview.nickname || "—"}</dd>
         </div>
         <div>
-          <dt>百度 UID</dt>
+          <dt>{label} UID</dt>
           <dd>{preview.uid}</dd>
         </div>
         <div>

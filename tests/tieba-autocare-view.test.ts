@@ -26,10 +26,10 @@ test("贴吧账号核实：上次connected但本次unverified仍明确待核验�
   assert.equal(tiebaAccountNeedsVerification({ status: "disconnected" }), true);
 });
 
-test("目标资料刷新：只取当前筛选的前5个唯一ID，空筛选不扩大到其他目标", () => {
+test("目标资料刷新：读取当前筛选的全部唯一ID，空筛选不扩大到其他目标", () => {
   assert.deepEqual(tiebaTargetRefreshIds([]), []);
   const ids = ["a", "b", "a", "c", "d", "e", "f"].map((id) => ({ id }));
-  assert.deepEqual(tiebaTargetRefreshIds(ids), ["a", "b", "c", "d", "e"]);
+  assert.deepEqual(tiebaTargetRefreshIds(ids), ["a", "b", "c", "d", "e", "f"]);
   assert.deepEqual(
     tiebaTargetRefreshIds(ids.filter((item) => item.id === "f")),
     ["f"],
@@ -189,13 +189,14 @@ test("观察贴吧：首批5条可一次提交，官方链接与规范名去重�
   );
   assert.equal(result.issue, "");
   assert.deepEqual(result.forumNames, ["OFFICE技巧", "资料吧"]);
-  assert.ok(
+  assert.equal(
     tiebaObservePlan(
       { selectedNames: names, customText: "第六个" },
       "web_one",
       "111",
       [],
-    ).issue,
+    ).forumNames.length,
+    6,
   );
 });
 

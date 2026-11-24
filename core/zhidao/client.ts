@@ -4,12 +4,21 @@ import { readLimited } from "../http";
 import { assertSourcePage } from "./parsers";
 import { bulkData, publishingRights, quotaNumber } from "./publishing";
 import type { ZhidaoUploadTask } from "../../shared/zhidao-publishing";
+import { zhidaoAnswerPageLimit } from "../../shared/zhidao";
 
 export type SourceFetch = (
   url: string,
   signal?: AbortSignal,
 ) => Promise<string>;
 export const zhidaoQuestionPageSize = 8;
+export function isZhidaoQuestionBase(base: number): boolean {
+  // The entire requested page must fit within the first 1000 pages.
+  return (
+    Number.isSafeInteger(base) &&
+    base >= 0 &&
+    base <= (zhidaoAnswerPageLimit - 1) * zhidaoQuestionPageSize
+  );
+}
 export interface ZhidaoQuestion {
   qid: string | number;
   question: string;
@@ -163,6 +172,11 @@ export class ZhidaoClient {
     category: string,
     base: number,
   ): Promise<ZhidaoQuestionPage> {
+    if (!isZhidaoQuestionBase(base))
+      throw new AppError(
+        "QUESTION_PAGE_LIMIT",
+        `题库仅允许读取前${zhidaoAnswerPageLimit}页的问题。`,
+      );
     const value = await this.json(
       accountId,
       `/qa/api/query/result/category?${new URLSearchParams({ category, rn: String(zhidaoQuestionPageSize), base: String(base) })}`,

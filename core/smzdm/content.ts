@@ -3,7 +3,7 @@ import type {
   SmzdmIssue,
   SmzdmResourceLink,
 } from "../../shared/smzdm";
-import { parseShare } from "../links";
+import { parseShare, shareUrlWithCode } from "../links";
 import { id } from "../database";
 
 const urls = /https?:\/\/[^\s<>"'，。；）)\]]+/gi;
@@ -66,7 +66,7 @@ export function replaceArticleLinks(
     edits.push({
       start: occurrence.start,
       end: occurrence.end,
-      text: own.url + (own.code ? `?pwd=${encodeURIComponent(own.code)}` : ""),
+      text: shareUrlWithCode(own.url, own.code),
     });
     if (occurrence.codeStart !== null)
       edits.push({

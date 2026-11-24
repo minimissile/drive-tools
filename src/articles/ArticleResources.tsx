@@ -209,6 +209,10 @@ export function ArticleResources<T extends ResourceDetail>({
               const linked = !!link.copyId && row.status !== "missing";
               const ready = linked && row.status === "ready";
               const replaced = !!link.manual || (ready && !!link.ownUrl);
+              const linkedAccount = linked
+                ? row.candidates.find(({ copyId }) => copyId === link.copyId)
+                    ?.account
+                : undefined;
               const candidate =
                 row.candidates.find((c) => c.copyId === selected[link.id]) ??
                 row.candidates[0];
@@ -216,12 +220,22 @@ export function ArticleResources<T extends ResourceDetail>({
               const newResource = (
                 <div className="article-resource-new">
                   {matching.length > 1 ? (
-                    <Field label={`资源 ${i + 1} 目标网盘账号`}>
+                    <Field
+                      label={
+                        compact ? "目标账号" : `资源 ${i + 1} 目标网盘账号`
+                      }
+                    >
                       <Select
+                        aria-label={
+                          compact ? `资源 ${i + 1} 目标网盘账号` : undefined
+                        }
                         value={accountId}
                         disabled={busy || !!pending || !editable}
                         onValueChange={(v) =>
-                          setAccounts({ ...accounts, [link.id]: v })
+                          setAccounts((current) => ({
+                            ...current,
+                            [link.id]: v,
+                          }))
                         }
                         items={matching.map((a) => ({
                           value: a.id,
@@ -238,7 +252,7 @@ export function ArticleResources<T extends ResourceDetail>({
                   )}
                   {accountId ? (
                     <Button
-                      primary={!canReuse}
+                      primary={!compact && !canReuse}
                       disabled={busy || !!pending || !editable || !accountId}
                       onClick={() =>
                         void run(link.id, async () => {
@@ -303,10 +317,17 @@ export function ArticleResources<T extends ResourceDetail>({
                     </Status>
                   </div>
                   {linked ? (
-                    <small>
-                      {row.title}
-                      {!ready ? ` · ${row.message}` : ""}
-                    </small>
+                    compact ? (
+                      <small className="article-resource-meta">
+                        {row.title}
+                        {linkedAccount ? ` · ${linkedAccount}` : ""}
+                      </small>
+                    ) : (
+                      <small>
+                        {row.title}
+                        {!ready ? ` · ${row.message}` : ""}
+                      </small>
+                    )
                   ) : null}
                   {replaced && !compact ? (
                     <small className="article-own-url">{link.ownUrl}</small>
@@ -319,7 +340,9 @@ export function ArticleResources<T extends ResourceDetail>({
                   ) : (
                     <small className="article-resource-link">
                       {link.ownUrl ?? link.url}
-                      {link.manual && link.code ? ` · 提取码 ${link.code}` : ""}
+                      {link.code && (link.manual || (compact && !link.ownUrl))
+                        ? ` · 提取码 ${link.code}`
+                        : ""}
                     </small>
                   )}
                 </div>
@@ -343,22 +366,50 @@ export function ArticleResources<T extends ResourceDetail>({
                       : "查看网盘资源"}
                 </Button>
               );
+              const alternative = canReuse ? (
+                <details className="article-resource-alternative">
+                  <summary>改用新副本</summary>
+                  {newResource}
+                </details>
+              ) : null;
+              const intakeAction = canReuse
+                ? compact
+                  ? null
+                  : alternative
+                : newResource;
               const controls = (
                 <div className="article-resource-controls">
                   {!compact ? viewButton : null}
                   {canReuse ? (
                     <>
                       {row.candidates.length > 1 ? (
-                        <Field label={`资源 ${i + 1} 已有副本`}>
+                        <Field
+                          label={
+                            compact ? "已有副本" : `资源 ${i + 1} 已有副本`
+                          }
+                        >
                           <Select
+                            aria-label={
+                              compact ? `资源 ${i + 1} 已有副本` : undefined
+                            }
+                            title={
+                              compact
+                                ? `${candidate.account} · ${candidate.title}`
+                                : undefined
+                            }
                             value={candidate.copyId}
                             disabled={busy || !!pending || !editable}
                             onValueChange={(v) =>
-                              setSelected({ ...selected, [link.id]: v })
+                              setSelected((current) => ({
+                                ...current,
+                                [link.id]: v,
+                              }))
                             }
                             items={row.candidates.map((c) => ({
                               value: c.copyId,
-                              label: `${c.title} · ${c.account}`,
+                              label: compact
+                                ? `${c.account} · ${c.title}`
+                                : `${c.title} · ${c.account}`,
                             }))}
                           />
                         </Field>
@@ -368,7 +419,7 @@ export function ArticleResources<T extends ResourceDetail>({
                         </small>
                       )}
                       <Button
-                        primary
+                        primary={!compact}
                         disabled={busy || !!pending || !editable}
                         onClick={() =>
                           void run(link.id, async () => {
@@ -386,14 +437,7 @@ export function ArticleResources<T extends ResourceDetail>({
                     </>
                   ) : null}
                   {!linked ? (
-                    canReuse ? (
-                      <details className="article-resource-alternative">
-                        <summary>改用新副本</summary>
-                        {newResource}
-                      </details>
-                    ) : (
-                      newResource
-                    )
+                    intakeAction
                   ) : !ready ? (
                     <Button
                       disabled={busy || !!pending || !editable}
@@ -412,13 +456,28 @@ export function ArticleResources<T extends ResourceDetail>({
               return (
                 <article className="article-resource-row" key={link.id}>
                   {compact ? (
-                    <>
-                      <div className="article-resource-line">
+                    <div className="article-resource-line">
+                      <div className="article-resource-description">
                         {info}
+                        {linked && !ready ? (
+                          <small className="muted">{row.message}</small>
+                        ) : null}
+                        {!link.manual &&
+                        link.ownUrl &&
+                        link.ownUrl !== link.url ? (
+                          <details className="article-resource-source">
+                            <summary>原网盘链接</summary>
+                            <code>{link.sourceText}</code>
+                          </details>
+                        ) : null}
+                      </div>
+                      <div className="article-resource-operations">
+                        {!link.manual && !ready ? controls : null}
                         <div className="article-resource-actions">
                           {viewButton}
                           <Button
                             size="compact"
+                            quiet
                             disabled={busy || !!pending || !editable}
                             onClick={() => {
                               setError("");
@@ -432,22 +491,10 @@ export function ArticleResources<T extends ResourceDetail>({
                           >
                             手动替换
                           </Button>
+                          {!link.manual ? alternative : null}
                         </div>
                       </div>
-                      {!link.manual ? (
-                        <details className="article-resource-management">
-                          <summary>
-                            {ready
-                              ? "原网盘链接"
-                              : linked
-                                ? "归档操作"
-                                : "入库与关联"}
-                          </summary>
-                          {linked ? <code>{link.sourceText}</code> : null}
-                          {!ready ? controls : null}
-                        </details>
-                      ) : null}
-                    </>
+                    </div>
                   ) : (
                     <>
                       {info}

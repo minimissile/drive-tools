@@ -190,3 +190,14 @@ test("被容量限制阻止的环境保留原出口记录，未知出口和代�
   assert.equal(actions, 0);
   assert.deepEqual(f.environments.get(envs[3].id).network, previous);
 });
+
+test("临时页清理租约不触发环境准备或网络探测，也不撤销现有草稿修订", async (t) => {
+  const f = await fixture(t);
+  const env = await f.add();
+  const revision = f.environments.get(env.id).revision;
+  f.setFailure("清理不应启动浏览器探测网络");
+  assert.equal(await f.environments.controlWindow(env.id, async () => "cleaned", revision, { invalidate: false }), "cleaned");
+  assert.equal(f.environments.get(env.id).revision, revision);
+  await f.environments.controlWindow(env.id, async () => true, revision);
+  assert.equal(f.environments.get(env.id).revision, revision + 1);
+});

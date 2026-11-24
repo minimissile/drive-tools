@@ -1,3 +1,4 @@
+import { modernTiebaSnapshot } from "./modern-page";
 import { errors, type BrowserContext, type Page } from "playwright-core";
 import type { WebsiteAccount } from "../../shared/website-accounts";
 import type { TiebaForumReading } from "../../shared/tieba-autocare";
@@ -24,8 +25,11 @@ import {
   type TiebaAutocarePageSnapshot,
 } from "./autocare-page";
 
-const snapshot = (page: Page) =>
-  page.evaluate<TiebaAutocarePageSnapshot>(tiebaAutocarePageScript);
+const snapshot = async (page: Page) =>
+  modernTiebaSnapshot(
+    page,
+    await page.evaluate<TiebaAutocarePageSnapshot>(tiebaAutocarePageScript),
+  );
 const forumKey = (name: string) =>
   normalizeTiebaForumName(name).replace(/[A-Z]/gu, (c) => c.toLowerCase());
 type FollowedState = {
@@ -48,7 +52,7 @@ export function tiebaAutocareBrowser(
         : "value.listRecognized && (value.links.length > 0 || value.listEmpty)";
     try {
       await page.waitForFunction(
-        `(() => { const value = ${tiebaAutocarePageScript}; return value.challenge || value.login || /操作(?:太|过于|过)?频繁|请求(?:太|过于|过)?频繁|稍后再试/.test(value.statusText) || (${ready}); })()`,
+        `(() => { const value = ${tiebaAutocarePageScript}; return !!document.querySelector('.operate-btn.follow-sign') || value.challenge || value.login || /操作(?:太|过于|过)?频繁|请求(?:太|过于|过)?频繁|稍后再试/.test(value.statusText) || (${ready}); })()`,
         undefined,
         { timeout: options.pageTimeoutMs ?? 6000 },
       );
@@ -285,11 +289,14 @@ export function tiebaAutocareBrowser(
             tiebaCurrentUser(s.viewer)?.uid !== uid ||
             s.followButtonCount !== 1 ||
             !tiebaInertControlHref(s.followButtonHref ?? null) ||
-            s.followButtonClasses
-              ?.split(/\s+/u)
-              .filter(Boolean)
-              .sort()
-              .join(" ") !== "focus_btn islike_focus"
+            !(s.modern
+              ? s.followButtonText === "关注" &&
+                s.followButtonClasses?.split(/\s+/u).includes("follow-btn")
+              : s.followButtonClasses
+                  ?.split(/\s+/u)
+                  .filter(Boolean)
+                  .sort()
+                  .join(" ") === "focus_btn islike_focus")
           )
             throw new AppError(
               "TIEBA_FOLLOW_UNAVAILABLE",
@@ -414,12 +421,33 @@ export function tiebaAutocareBrowser(
                 true,
               );
             await button.click({ timeout: 10000 });
-            await page.waitForFunction(
-              `(() => { const value = ${tiebaAutocarePageScript}; return value.signed || value.challenge || value.login || /操作(?:太|过于|过)?频繁|请求(?:太|过于|过)?频繁|稍后再试/.test(value.statusText); })()`,
-              undefined,
-              { timeout: options.resultTimeoutMs ?? 12000 },
-            );
-            const after = await snapshot(page);
+            const until = Date.now() + (options.resultTimeoutMs ?? 12000);
+            while (Date.now() < until) {
+              const value = await snapshot(page);
+              if (
+                value.signed ||
+                value.challenge ||
+                value.login ||
+                /操作(?:太|过于|过)?频繁|稍后再试/.test(value.statusText)
+              )
+                break;
+              await page.waitForTimeout(250);
+            }
+            let after = await snapshot(page);
+            if (
+              after.modern &&
+              !after.signed &&
+              !after.challenge &&
+              !after.login
+            ) {
+              // The new UI can keep a stale label after a successful mutation.
+              // Reload only to read the original result; never click again.
+              await go(tiebaForumUrl(forum.name));
+              after = await settledSnapshot(page, "forum", {
+                followed: true,
+                stats: true,
+              });
+            }
             let result = parseTiebaForum(after, expectedUid, forum);
             if (!tiebaCurrentUser(after.viewer) || result.signed !== true)
               throw new AppError(

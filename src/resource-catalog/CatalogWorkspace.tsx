@@ -3,6 +3,7 @@ import {
   Archive,
   Download,
   FilePenLine,
+  FileOutput,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -29,6 +30,7 @@ export function CatalogWorkspace({
   onRemoved,
   onManageAccounts,
   onSettings,
+  onWechatDraft,
 }: {
   id: string;
   revision?: number;
@@ -37,6 +39,7 @@ export function CatalogWorkspace({
   onRemoved(): void;
   onManageAccounts(): void;
   onSettings(): void;
+  onWechatDraft(id: string): void;
 }) {
   const query = useIpcQuery(
     "resourceCatalog.get",
@@ -204,6 +207,26 @@ export function CatalogWorkspace({
           >
             <Download size={15} />
             {pending === "export" ? "正在导出…" : "导出 Excel"}
+          </Button>
+          <Button
+            size="compact"
+            disabled={!!pending || query.loading || !current.items.length}
+            title="导出到本地公众号草稿箱，检查封面后可送微信草稿"
+            aria-label="导出到公众号草稿箱"
+            onClick={() =>
+              void run("exportWechat", async () => {
+                const result = await ipc("resourceCatalog.exportWechat", {
+                  id,
+                  expectedRevision: catalog.revision,
+                  expectedHash: current.hash,
+                });
+                notify("已导出到本地公众号草稿箱，尚未发送到微信。", "success");
+                if (alive.current) onWechatDraft(result.articleId);
+              })
+            }
+          >
+            <FileOutput size={15} />
+            {pending === "exportWechat" ? "正在导出…" : "导出公众号"}
           </Button>
           <Button
             size="compact"

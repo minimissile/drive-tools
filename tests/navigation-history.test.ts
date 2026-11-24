@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   navigationHistory,
   parseNavigationHistory,
+  restoreNavigationPage,
   type NavigationHistory,
   type NavigationRoute,
 } from "../src/state/navigation-history";
@@ -21,6 +22,26 @@ const initial: NavigationHistory = {
   past: [],
   workspace: "/workspace/a",
 };
+
+test("已下架的公众号发现页从窗口暂存和返回历史恢复到草稿箱", () => {
+  const pages = ["workbench", "wechat-workflow", "wechat-accounts"] as const;
+  const retired = { ...route, page: "wechat-discovery" };
+  assert.equal(restoreNavigationPage(retired.page, pages), "wechat-workflow");
+  assert.deepEqual(
+    parseNavigationHistory(
+      { ...initial, current: retired, past: [{ ...route, page: "workbench" }] },
+      pages,
+    ),
+    { ...initial, past: [{ ...route, page: "workbench" }] },
+  );
+  assert.deepEqual(
+    parseNavigationHistory(
+      { ...initial, current: { ...route, page: "wechat-accounts" }, past: [retired] },
+      pages,
+    ),
+    { ...initial, current: { ...route, page: "wechat-accounts" }, past: [route] },
+  );
+});
 
 test("返回记录按实际访问顺序弹出，重复页面不记录，返回后新导航不会回到被弹出的页面", () => {
   const accounts = navigationHistory(initial, {

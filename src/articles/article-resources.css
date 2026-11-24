@@ -77,44 +77,95 @@
 }
 
 .article-resources-compact .article-resource-row {
-  gap: var(--space-1);
-  padding-block: var(--space-2);
+  gap: 0;
+}
+
+.article-resources-compact .article-resource-list {
+  container-type: inline-size;
 }
 
 .article-resource-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 42%);
   align-items: start;
-  gap: var(--space-3);
+  gap: var(--space-4);
+}
+
+.article-resource-description,
+.article-resource-operations {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.article-resource-description {
+  overflow-wrap: anywhere;
+}
+
+.article-resource-meta {
+  color: var(--text);
+}
+
+.article-resource-operations .article-resource-controls,
+.article-resource-operations .article-resource-new,
+.article-resource-actions {
+  justify-content: flex-end;
+}
+
+.article-resource-operations .article-resource-new {
+  width: 100%;
+}
+
+.article-resource-operations .field {
+  display: flex;
+  align-items: center;
+  flex-basis: 120px;
+}
+
+.article-resource-operations .field > span {
+  white-space: nowrap;
 }
 
 .article-resource-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
 }
 
-.article-resources-compact .article-resource-link,
-.article-resource-management {
+.article-resource-actions > .article-resource-alternative:not([open]) {
+  margin-inline-start: var(--space-1);
+}
+
+.article-resources-compact .article-resource-link {
   color: var(--muted);
 }
 
-.article-resource-management {
-  font-size: 12px;
-}
-
-.article-resource-management > summary {
-  width: fit-content;
-  cursor: pointer;
-}
-
-.article-resource-management[open] > :not(summary) {
+.article-resource-description .article-resource-source[open] > code {
   display: block;
+  white-space: pre-wrap;
   margin-top: var(--space-2);
 }
 
-.article-resource-management[open] > .article-resource-controls {
-  display: flex;
+.article-resource-operations .article-resource-alternative > summary {
+  margin-inline-start: auto;
+}
+
+@container (max-width: 600px) {
+  .article-resource-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .article-resource-operations .article-resource-controls,
+  .article-resource-operations .article-resource-new,
+  .article-resource-actions {
+    justify-content: flex-start;
+  }
+
+  .article-resource-operations .article-resource-alternative > summary {
+    margin-inline-start: 0;
+  }
 }
 
 .article-resource-replace {

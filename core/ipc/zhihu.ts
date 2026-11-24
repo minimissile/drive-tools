@@ -20,6 +20,16 @@ export function createZhihuHandlers({ zhihu }: Pick<HandlerServices, "zhihu">) {
         .parse(raw);
       return zhihu.review(v.id, v.version);
     },
+    "zhihu.content.original": (raw: unknown) => {
+      const v = identifier
+        .extend({
+          version: z.number().int().positive(),
+          accountId: websiteAccountIdSchema.nullable(),
+          confirmed: z.literal(true),
+        })
+        .parse(raw);
+      return zhihu.setOriginalDraft(v.id, v.version, v.accountId);
+    },
     "zhihu.content.images": (raw: unknown) =>
       zhihu.images(identifier.parse(raw).id),
     "zhihu.content.import": (raw: unknown) =>

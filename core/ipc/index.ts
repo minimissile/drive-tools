@@ -1,3 +1,4 @@
+import { createAccountBatchHandlers } from "./account-batch";
 import { createZhihuAutocareHandlers } from "./zhihu-autocare";
 import { createSystemLogHandlers } from "./system-logs";
 import { createTiebaAutocareHandlers } from "./tieba-autocare";
@@ -16,6 +17,8 @@ import { createResourceDeletionHandlers } from "./resource-deletion";
 import { createShareCreationHandlers } from "./share-creation";
 import { createResourceLinksHandlers } from "./resource-links";
 import { createResourceLandingHandlers } from "./resource-landing";
+import { createJianshuHandlers } from "./jianshu";
+import { createJianshuDeliveryHandlers } from "./jianshu-delivery";
 import { createSmzdmHandlers } from "./smzdm";
 import { createWechatHandlers } from "./wechat";
 import { createDriveFilesHandlers } from "./drive-files";
@@ -30,6 +33,7 @@ import { createBrowserEnvironmentHandlers } from "./browser-environments";
 import { createBitBrowserHandlers } from "./bitbrowser";
 import { createInsertionHandlers } from "./insertion";
 import { createZhidaoHandlers } from "./zhidao";
+import { createZhidaoWorkflowHandlers } from "./zhidao-workflow";
 import { createZhidaoPageDiscoveryHandlers } from "./zhidao-page-discovery";
 import { createIpcRegistry } from "./registry";
 import type { HandlerServices } from "./types";
@@ -63,6 +67,7 @@ import { createWeiboWorkspaceHandlers } from "./weibo-workspace";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createZhidaoWorkflowHandlers(services),
     createSystemLogHandlers(services),
     createTiebaAutomationHandlers(services),
     createTiebaTopicsHandlers(services),
@@ -86,6 +91,8 @@ export function createApplicationHandlers(services: HandlerServices) {
     createResourceDeletionHandlers(services),
     createShareCreationHandlers(services),
     createSmzdmHandlers(services),
+    createJianshuHandlers(services),
+    createJianshuDeliveryHandlers(services),
     createWechatHandlers(services),
     createDriveFilesHandlers(services),
     createDriveBrowserHandlers(services),
@@ -108,6 +115,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createResourceExportsHandlers(services),
     createOperationsHandlers(services),
     createInsertionHandlers(services),
+    createAccountBatchHandlers(services),
     createAccountHandlers(services),
     createSharingHandlers(services),
     createSettingsHandlers(services),

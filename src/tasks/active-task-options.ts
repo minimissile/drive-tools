@@ -1,16 +1,50 @@
 import type { Job } from "../../shared/types";
 import type { DiscoverySummary } from "../../shared/baidu-discovery";
+import type { TiebaDiscoveryTask } from "../../shared/tieba-resource-discovery";
+import {
+  tiebaAnalysisPage,
+  tiebaAnalysisTitle,
+} from "../../shared/workbench-windows";
 import { operationLabels, type OperationRun } from "../../shared/zhidao";
 import { stageName } from "../resources/labels";
 import { operationPage } from "../zhidao/navigation";
 import type { Page } from "../state";
 import type { TaskFocus } from "./TaskFocus";
+
+const tiebaTaskLabels: Record<TiebaDiscoveryTask["kind"], string> = {
+  survey: "资源巡查",
+  expand: "扩散扫描",
+  history: "老帖扫描",
+  resourceCheck: "资源线索核验",
+  refresh: "帖子核对",
+};
+
+interface ActiveTaskOption {
+  value: string;
+  label: string;
+  page: Page;
+  focus?: TaskFocus;
+}
+
 export function activeTaskOptions(
   runs: Omit<OperationRun, "config">[],
   jobs: Job[],
   discovery: DiscoverySummary[] = [],
-) {
+  tiebaTasks: TiebaDiscoveryTask[] = [],
+): ActiveTaskOption[] {
   return [
+    ...tiebaTasks.map<ActiveTaskOption>(({ kind, forum, page }) => ({
+      value: `tieba-discovery:${kind}`,
+      label: [
+        tiebaAnalysisTitle,
+        tiebaTaskLabels[kind],
+        forum && `「${forum}」`,
+        page !== undefined && `第 ${page} 页`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      page: tiebaAnalysisPage,
+    })),
     ...discovery
       .filter((run) => run.status === "running")
       .map((run) => ({

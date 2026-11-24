@@ -6,7 +6,7 @@ import {
   type BaiduKeywordResult,
 } from "../../shared/baidu-keywords";
 import { websiteAccountIdSchema } from "../../shared/website-accounts";
-import { parseBaiduKeywordResponse } from "../baidu-keywords";
+import { readBaiduKeywords } from "../baidu-keywords";
 import { AppError } from "../errors";
 import { csv } from "../csv";
 import type { HandlerMap, HandlerServices } from "./types";
@@ -104,25 +104,7 @@ export function createBaiduKeywordHandlers(
         input.accountId,
         "baidu-marketing",
         async (account) => {
-          if (!services.ports.baiduKeywords)
-            throw new AppError(
-              "BAIDU_SESSION_UNAVAILABLE",
-              "当前环境不支持百度检索，请使用桌面开发窗口。",
-            );
-          let result: BaiduKeywordResult;
-          try {
-            result = parseBaiduKeywordResponse(
-              input,
-              await services.ports.baiduKeywords.query(account, input),
-            );
-          } catch (error) {
-            if (
-              error instanceof AppError &&
-              error.code === "BAIDU_LOGIN_REQUIRED"
-            )
-              await services.websiteAccounts.expire(account.id);
-            throw error;
-          }
+          const result = await readBaiduKeywords(account, input, services);
           archive(result);
           try {
             services.db.run(

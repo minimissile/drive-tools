@@ -1,3 +1,5 @@
+import { useAccountBatch } from "./useAccountBatch";
+import { AccountBatchToolbar } from "./AccountBatchToolbar";
 import { useEffect, useId, useRef, useState } from "react";
 import { ipc } from "../api/client";
 import { environmentAllowsAccount } from "../../shared/browser-environment-sharing";
@@ -124,7 +126,7 @@ export default function OtherAccounts({
     [editing, setEditing] = useState<OtherAccount | null>(null),
     [alias, setAlias] = useState("");
   const run = async (id: string, action: () => Promise<unknown>) => {
-    if (lock.current) return;
+    if (lock.current || batch.active) return;
     lock.current = true;
     setPending(id);
     setFailure(null);
@@ -152,6 +154,7 @@ export default function OtherAccounts({
         .toLocaleLowerCase()
         .includes(needle),
   );
+  const batch=useAccountBatch({scope:"other",provider:filter==="all"?null:filter,accounts:accounts.data,visible:filtered,onFinished:accounts.reload});
   const changeProvider = (value: OtherProvider) => {
     setProvider(value);
     setCookie("");
@@ -276,6 +279,7 @@ export default function OtherAccounts({
           </Button>
           <Button
             primary={!adding}
+            disabled={batch.active}
             onClick={() => setAdding((open) => !open)}
             aria-expanded={adding}
             aria-controls={formId}
@@ -306,9 +310,9 @@ export default function OtherAccounts({
             environments={accounts.environments}
             environmentsReady={accounts.environmentsReady}
             hasSmzdm={hasSmzdm}
-            busy={!!pending}
+            busy={!!pending || batch.active}
             canAdd={
-              !pending &&
+              !pending && !batch.active &&
               accounts.ready &&
               !accounts.error &&
               (singleSmzdm
@@ -406,6 +410,7 @@ export default function OtherAccounts({
           />
         </div>
         <TabPanel value={filter}>
+          <AccountBatchToolbar batch={batch} providerName={filter==="all"?null:otherProviderName(filter)} disabled={!!pending||!accounts.ready}/>
           {filtered.length ? (
             <div className="website-account-list" aria-label="其他平台账号列表">
               <div className="website-account-column-head" aria-hidden="true">
@@ -417,6 +422,7 @@ export default function OtherAccounts({
                 <OtherAccountRow
                   key={account.key}
                   account={account}
+                  selection={{checked:batch.selected.includes(account.id),disabled:filter==="all"||batch.active||batch.submitting||!!pending,onChange:checked=>batch.select(account.id,checked)}}
                   environment={
                     accounts.environments.find(
                       (env) => env.id === account.environmentId,
@@ -431,7 +437,7 @@ export default function OtherAccounts({
                     )?.engine
                   }
                   environmentsReady={accounts.environmentsReady}
-                  pending={pending}
+                  pending={batch.active?"batch":pending}
                   failure={
                     failure?.id === account.key ? failure.text : undefined
                   }

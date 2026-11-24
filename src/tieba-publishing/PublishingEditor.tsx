@@ -1,3 +1,4 @@
+import { tiebaAccountLabel } from "../tieba/account-label";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { FileText, RefreshCw, Save, Send, Undo2 } from "lucide-react";
@@ -429,7 +430,7 @@ export function PublishingEditor({
               disabled={busy || submitted || !!draft}
               items={snapshot.accounts.map((account) => ({
                 value: account.id,
-                label: `${account.alias} · ${account.status === "connected" ? "已连接" : "待核验"}`,
+                label: `${tiebaAccountLabel(account)} · ${account.status === "connected" ? "已连接" : "待核验"}`,
               }))}
               onValueChange={(accountId) => {
                 update({ accountId, targetId: "" });

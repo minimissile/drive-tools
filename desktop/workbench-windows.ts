@@ -9,6 +9,10 @@ import {
   type DevSession,
   type OpenDevSession,
 } from "../shared/dev-sessions";
+import { tiebaAnalysisTitle, tiebaAnalysisWindowId } from "../shared/workbench-windows";
+
+export type WorkbenchWindowIdentity = Pick<DevSession, "id"> &
+  Partial<Pick<DevSession, "status" | "createdAt">>;
 
 /** One backend and Chromium profile; only renderer identity and UI state differ. */
 export class WorkbenchWindows {
@@ -27,24 +31,28 @@ export class WorkbenchWindows {
   list() {
     return [...this.entries.values()].map(({ info }) => ({ ...info }));
   }
-  createInfo(input: OpenDevSession, restored?: DevSession): DevSession {
+  createInfo(input: OpenDevSession, identity?: WorkbenchWindowIdentity): DevSession {
     const data = openDevSessionSchema.parse(input);
     return {
       ...data,
-      id: restored?.id ?? randomUUID(),
+      id: identity?.id ?? randomUUID(),
       status:
-        restored?.status ?? (data.mode === "automation" ? "paused" : "idle"),
-      createdAt: restored?.createdAt ?? new Date().toISOString(),
+        identity?.status ?? (data.mode === "automation" ? "paused" : "idle"),
+      createdAt: identity?.createdAt ?? new Date().toISOString(),
     };
   }
   add(window: BrowserWindow, info: DevSession) {
     this.entries.set(info.id, { window, info });
-    if (this.labeled) window.setTitle(devSessionTitle(info));
-    if (this.labeled)
+    if (this.labeled || info.id === tiebaAnalysisWindowId) {
+      const title = () => this.labeled
+        ? devSessionTitle(this.info(info.id))
+        : `盘序 · ${tiebaAnalysisTitle}`;
+      window.setTitle(title());
       window.on("page-title-updated", (event) => {
         event.preventDefault();
-        window.setTitle(devSessionTitle(this.info(info.id)));
+        window.setTitle(title());
       });
+    }
     window.once("closed", () => {
       this.entries.delete(info.id);
       this.publish();
@@ -120,6 +128,11 @@ export class WorkbenchWindows {
     window.show();
     window.focus();
     return true;
+  }
+  focusIfOpen(id: string) {
+    const entry = this.entries.get(id);
+    if (!entry || entry.window.isDestroyed()) return false;
+    return this.focus(id);
   }
   close(id: string) {
     this.info(id);

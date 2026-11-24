@@ -80,9 +80,26 @@ export function assertPublishingRights(
     );
 }
 
+function fittedColumnWidth(values: string[], minimum: number, maximum: number) {
+  let width = minimum;
+  for (const value of values) {
+    let lineWidth = 2;
+    for (const character of value) {
+      if (character === "\r" || character === "\n") {
+        lineWidth = 2;
+        continue;
+      }
+      lineWidth += character.charCodeAt(0) > 0xff ? 2 : 1;
+      width = Math.max(width, lineWidth);
+      if (width >= maximum) return maximum;
+    }
+  }
+  return width;
+}
+
 /** Official upload template: an empty qid creates a new question and answer. */
 export function publicationWorkbook(
-  items: Pick<OperationItem, "question" | "answer">[],
+  items: readonly Pick<OperationItem, "question" | "answer">[],
 ) {
   return xlsx(
     [
@@ -90,6 +107,21 @@ export function publicationWorkbook(
       ...items.map((item) => ["", item.question, item.answer]),
     ],
     "问答结果",
+    {
+      columnWidths: [
+        8,
+        fittedColumnWidth(
+          items.map((item) => item.question),
+          24,
+          46,
+        ),
+        fittedColumnWidth(
+          items.map((item) => item.answer),
+          48,
+          96,
+        ),
+      ],
+    },
   );
 }
 

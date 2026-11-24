@@ -140,7 +140,7 @@ export function ResourceDetail({
         <div className="resource-identity">
           <ResourceKindIcon files={copy.files} title={resource.title} />
           <div>
-            <h3 className="detail-title">{resource.title}</h3>
+            <h3 className="detail-title">{resource.title || "未命名资源"}</h3>
             <small className="resource-meta">
               <span className="resource-provider">
                 <ProviderIcon
@@ -153,7 +153,7 @@ export function ResourceDetail({
               <span className="resource-meta-separator" aria-hidden="true">
                 ·
               </span>
-              {resource.category}
+              {resource.category || "待分类"}
             </small>
             {inDialog ? <div className="row compact">{moreActions}</div> : null}
           </div>

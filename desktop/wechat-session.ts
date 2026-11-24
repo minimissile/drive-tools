@@ -17,7 +17,9 @@ import {
   initialWechatIdentity,
   staleWechatIdentity,
 } from "./wechat-login-state";
-import { readContentImage } from "../core/content-assets";
+import { readWechatLocalImage } from "../core/wechat/local-image";
+import { isWechatImageUrl } from "../shared/wechat-markup";
+import { normalizeCover } from "./cover-image";
 import { WechatImageUploads } from "./wechat-image-uploads";
 import { decodeWechatDraftReceipt } from "./wechat-draft-receipt";
 import {
@@ -305,20 +307,15 @@ export function createWechatBrowserSession(
   const imageBytes = async (raw: string) => {
     const url = new URL(raw);
     if (url.protocol === "panxu-media:") {
-      const file = url.pathname.slice(1);
-      if (
-        url.hostname !== "wechat" ||
-        url.search ||
-        url.hash ||
-        !/^[a-f0-9]{64}\.(png|jpg|gif)$/.test(file)
-      )
+      if (!isWechatImageUrl(url))
         throw new AppError("WECHAT_IMAGE", "本地图片地址无效，请重新上传。");
-      return readContentImage(workspace(), {
-        file,
-        sha256: file.split(".")[0],
-        name: file,
-        storage: "content-assets",
-      });
+      const image = await readWechatLocalImage(
+        workspace(),
+        url.pathname.slice(1),
+      );
+      return image.mime === "image/webp"
+        ? normalizeCover(image.bytes, "png")
+        : image.bytes;
     }
     return readRemoteImage(raw);
   };

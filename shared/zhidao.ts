@@ -174,6 +174,7 @@ const answerOptions = {
     instructions: text.max(2000).default(""),
 };
 export const zhidaoAnswerAccountLimit = 20;
+export const zhidaoAnswerPageLimit = 1000;
 export const autoAnswersStart = z.object({
   ...answerOptions,
   accountIds: z.array(text.min(1).max(100)).min(1, "请选择答题账号").max(zhidaoAnswerAccountLimit, "一次最多选择20个答题账号")

@@ -7,8 +7,10 @@ import {
   decodeTiebaForumUrlName,
 } from "../../shared/tieba-forums";
 
-export const tiebaSignSelector = "#signstar_wrapper .j_signbtn.j_cansign";
-export const tiebaFollowSelector = "#j_head_focus_btn.focus_btn.islike_focus";
+export const tiebaSignSelector =
+  "#signstar_wrapper .j_signbtn.j_cansign, .operate-btn.follow-sign";
+export const tiebaFollowSelector =
+  "#j_head_focus_btn.focus_btn.islike_focus, .bar-info .follow-btn";
 
 /** Read the signed-in viewer's widgets only; post bodies are never status evidence. */
 export const tiebaAutocarePageScript = String.raw`(() => {
@@ -76,6 +78,8 @@ export const tiebaAutocarePageScript = String.raw`(() => {
 })()`;
 
 export interface TiebaAutocarePageSnapshot {
+  modern?: boolean;
+  followButtonText?: string;
   url: string;
   viewer: unknown;
   forum: unknown;

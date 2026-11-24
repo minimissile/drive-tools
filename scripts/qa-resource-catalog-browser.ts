@@ -26,6 +26,7 @@ import {
   isDocumentProvider,
 } from "../shared/document-platforms";
 import type { WebsiteAccountView } from "../shared/website-accounts";
+import type { WechatDetail } from "../shared/wechat";
 
 const params = new URLSearchParams(location.search);
 const scenario = params.get("scenario") ?? "normal";
@@ -192,6 +193,7 @@ const baseItems: CatalogItem[] = Array.from({ length: 26 }, (_, i) => ({
 const details = new Map<string, CatalogDetail>();
 const frozenSnapshots = new Map<string, CatalogSnapshot>();
 const aiJobs = new Map<string, CatalogAiJob>();
+const wechatDrafts = new Map<string, WechatDetail>();
 const makeSnapshot = (catalog: CatalogDetail["catalog"]): CatalogSnapshot => {
   let items =
     scenario === "no-resources"
@@ -656,6 +658,70 @@ async function invoke(method: string, raw: unknown): Promise<unknown> {
     get(String(input.id));
     log(`模拟导出 ${String(input.format)}：未写入文件`);
     return `/仅内存模拟/资源清单.${String(input.format)}`;
+  }
+  if (method === "resourceCatalog.exportWechat") {
+    if (scenario === "wechat-error")
+      throw Error("模拟：草稿导出失败，未创建草稿。");
+    const detail = get(String(input.id));
+    const articleId = `wechat_catalog_preview_${detail.catalog.revision}`;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (!wechatDrafts.has(articleId)) {
+      const body = [
+        detail.current.introduction,
+        ...detail.current.items.map(
+          (item, index) =>
+            `## ${index + 1}. ${item.title}\n\n${item.summary}\n\n${item.links.map((link) => `${link.url} 提取码：${link.code}`).join("\n\n")}`,
+        ),
+      ].join("\n\n");
+      wechatDrafts.set(articleId, {
+        article: {
+          id: articleId,
+          title: detail.catalog.title.slice(0, 64),
+          body,
+          author: "",
+          digest: "资源清单内存示例",
+          coverUrl: "",
+          source: {
+            kind: "resource-catalog",
+            url: "",
+            catalogId: detail.catalog.id,
+            snapshotHash: detail.current.hash,
+            title: detail.catalog.title,
+            body,
+            author: "",
+            publishedAt: "",
+            imageCount: 0,
+            warnings: [],
+          },
+          links: [],
+          revision: 1,
+          aiAssisted: false,
+          stage: "editing",
+          message: "仅内存草稿，未发送微信。",
+          remote: null,
+          pendingAccount: null,
+          createdAt: date,
+          updatedAt: date,
+        },
+        issues: [
+          { severity: "error", text: "请为文章选择封面后发送到微信草稿箱。" },
+        ],
+        resources: [],
+      });
+    }
+    log("清单已导入内存公众号草稿箱；没有真实写入或远端操作");
+    return { articleId };
+  }
+  if (method === "wechat.list")
+    return [...wechatDrafts.values()].map(({ article }) => ({
+      ...article,
+      sentRevision: null,
+      sourceTitle: article.source.title,
+    }));
+  if (method === "wechat.get") {
+    const detail = wechatDrafts.get(String(input.id));
+    if (!detail) throw Error("内存草稿不存在。");
+    return detail;
   }
   if (method === "websiteAccounts.list") {
     if (failure === "account-error")

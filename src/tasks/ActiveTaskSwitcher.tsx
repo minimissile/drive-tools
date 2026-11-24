@@ -23,15 +23,15 @@ export function ActiveTaskSwitcher() {
     runs.data ?? [],
     data?.jobs ?? [],
     discovery.data ?? [],
+    data?.tiebaDiscoveryTasks,
   );
-  const label =
-    (runs.loading && !runs.data) || (discovery.loading && !discovery.data)
+  const label = options.length
+    ? `进行中任务（${options.length}）`
+    : (runs.loading && !runs.data) || (discovery.loading && !discovery.data)
       ? "正在读取任务…"
       : runs.error || discovery.error
         ? "任务读取失败"
-        : options.length
-          ? `进行中任务（${options.length}）`
-          : "暂无进行中任务";
+        : "暂无进行中任务";
   return (
     <div className="active-task-switcher">
       <Select
@@ -43,7 +43,7 @@ export function ActiveTaskSwitcher() {
         onValueChange={(value) => {
           const task = options.find((option) => option.value === value);
           if (!task) return;
-          request(task.focus);
+          if (task.focus) request(task.focus);
           navigate(task.page);
         }}
       />

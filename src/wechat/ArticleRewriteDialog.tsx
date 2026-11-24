@@ -1,3 +1,4 @@
+import { useId } from "react";
 import {
   wechatRewriteStyleMeta,
   wechatRewriteStyles,
@@ -12,6 +13,7 @@ import { TrafficWordPriority } from "./TrafficWordPriority";
 
 export function ArticleRewriteDialog({
   styleId,
+  supportedStyles,
   instruction,
   wordCount,
   wordPlan,
@@ -24,6 +26,7 @@ export function ArticleRewriteDialog({
   onClose,
 }: {
   styleId: WechatRewriteStyleId;
+  supportedStyles: readonly WechatRewriteStyleId[];
   instruction: string;
   wordCount: number;
   wordPlan: WechatTrafficWordPlan;
@@ -35,6 +38,12 @@ export function ArticleRewriteDialog({
   onRewrite(): void;
   onClose(): void;
 }) {
+  const descriptionId = useId();
+  const updateNoticeId = useId();
+  const requiresUpdate = wechatRewriteStyles.some(
+    ({ id }) => !supportedStyles.includes(id),
+  );
+  const unsupported = !supportedStyles.includes(styleId);
   return (
     <Dialog
       title="AI 改写文章"
@@ -45,7 +54,11 @@ export function ArticleRewriteDialog({
           <Button disabled={busy} onClick={onClose}>
             取消
           </Button>
-          <Button primary disabled={disabled} onClick={onRewrite}>
+          <Button
+            primary
+            disabled={disabled || unsupported}
+            onClick={onRewrite}
+          >
             {busy ? "正在改写…" : "开始改写"}
           </Button>
         </>
@@ -63,18 +76,31 @@ export function ArticleRewriteDialog({
       <Field label="改写风格" hint="默认推荐自然润色">
         <Select
           aria-label="改写风格"
+          aria-describedby={
+            requiresUpdate
+              ? `${descriptionId} ${updateNoticeId}`
+              : descriptionId
+          }
           value={styleId}
           disabled={disabled}
           items={wechatRewriteStyles.map(({ id, label }) => ({
             value: id,
             label,
+            disabled: !supportedStyles.includes(id),
           }))}
           onValueChange={(value) => onStyle(value as WechatRewriteStyleId)}
         />
       </Field>
-      <p className="wechat-editor-dialog-help muted">
+      <p id={descriptionId} className="wechat-editor-dialog-help muted">
         {wechatRewriteStyleMeta[styleId].description}
       </p>
+      {requiresUpdate ? (
+        <p id={updateNoticeId} className="wechat-editor-dialog-help muted">
+          {import.meta.env.DEV
+            ? "新增风格需点击顶部「应用更新并重启」后使用。"
+            : "新增风格需要更新客户端后使用。"}
+        </p>
+      ) : null}
       <Field label="补充要求" hint="可选">
         <input
           disabled={disabled}

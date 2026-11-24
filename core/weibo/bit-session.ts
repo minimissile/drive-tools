@@ -1,3 +1,4 @@
+import { createTemporaryPage, releaseTemporaryPage } from "../browser-page-lifecycle";
 import type { BrowserContext } from "playwright-core";
 import type {
   WebsiteAccount,
@@ -14,7 +15,7 @@ import {
 export const verifyBitWeibo = async (
   context: BrowserContext,
 ): Promise<WebsiteSessionState> => {
-  const page = await context.newPage();
+  const page = await createTemporaryPage(context, "https://weibo.com/");
   try {
     const response = await page.goto("https://weibo.com/", {
       waitUntil: "domcontentloaded",
@@ -36,7 +37,7 @@ export const verifyBitWeibo = async (
           : null,
     };
   } finally {
-    await page.close().catch(() => {});
+    await releaseTemporaryPage(page);
   }
 };
 

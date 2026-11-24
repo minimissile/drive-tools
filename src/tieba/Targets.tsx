@@ -25,6 +25,7 @@ import {
   tiebaTime,
 } from "./view-model";
 import { AddForums } from "./AddForums";
+import { tiebaAccountLabel, tiebaAccountName } from "./account-label";
 
 export function TiebaTargets({
   snapshot: s,
@@ -35,6 +36,7 @@ export function TiebaTargets({
   stale,
   onSelection,
   onSync,
+  onStart,
   onPause,
   onSave,
   onReset,
@@ -53,6 +55,7 @@ export function TiebaTargets({
   stale: boolean;
   onSelection(ids: string[]): void;
   onSync(accountId: string): void;
+  onStart(accountIds: string[]): void;
   onPause(target: TiebaAutocareTarget): void;
   onSave(): void;
   onReset(): void;
@@ -65,7 +68,7 @@ export function TiebaTargets({
 }) {
   const filters = useLocalDraft(
     `tieba-autocare-target-view:${workspace}`,
-    { accountId: s.accounts[0]?.id ?? "", search: "", page: 1 },
+    { accountId: "", search: "", page: 1 },
     (value) =>
       z
         .object({
@@ -109,6 +112,7 @@ export function TiebaTargets({
         <Field label="贴吧账号">
           <Select
             aria-label="选择贴吧账号"
+            title={account ? tiebaAccountLabel(account) : undefined}
             value={account?.id ?? ""}
             items={[
               {
@@ -117,7 +121,7 @@ export function TiebaTargets({
               },
               ...s.accounts.map((item) => ({
                 value: item.id,
-                label: `${item.alias || item.nickname || "贴吧账号"}${tiebaAccountNeedsVerification(item) ? " · 待核验" : ""}`,
+                label: `${tiebaAccountLabel(item)}${tiebaAccountNeedsVerification(item) ? " · 待核验" : ""}`,
               })),
             ]}
             disabled={busy || !s.accounts.length}
@@ -126,6 +130,15 @@ export function TiebaTargets({
             }}
           />
         </Field>
+        <Button
+          primary
+          disabled={busy || !s.accounts.length || changed}
+          data-testid="tieba-start-followed"
+          title="逐个核实全部贴吧账号，将已关注且未手动暂停的贴吧加入签到"
+          onClick={() => onStart(s.accounts.map((item) => item.id))}
+        >
+          全部账号同步并启动
+        </Button>
         <Button
           disabled={busy || !account}
           data-testid="tieba-verify-account"
@@ -151,7 +164,7 @@ export function TiebaTargets({
         <Button
           disabled={busy || !refreshIds.length}
           data-testid="tieba-refresh-profiles"
-          title="读取当前筛选前5个贴吧的官网资料，不关注或签到"
+          title="读取当前筛选全部贴吧的官网资料，不关注或签到"
           onClick={() => onRefreshProfiles(refreshIds)}
         >
           刷新资料
@@ -170,13 +183,13 @@ export function TiebaTargets({
         </Button>
       </div>
       <p className="tieba-target-refresh-scope">
-        读取当前筛选前5个贴吧的官网资料，不关注或签到。本次范围：
-        {refreshIds.length} / 5 个贴吧。
+        读取当前筛选全部贴吧的官网资料，不关注或签到。本次范围：
+        {refreshIds.length} 个贴吧。
       </p>
       {filters.error ? <Notice warning>{filters.error}</Notice> : null}
       {account?.uid && tiebaAccountNeedsVerification(account) ? (
         <Notice warning>
-          该账号保存了身份记录，但当前登录尚未核实。点击“核实账号”只读检查现有会话，成功后会恢复可用目标；不会弹出登录页或自动关注。
+          该账号的当前登录尚未核实。可点击“全部账号同步并启动”完成核验、同步与签到安排，或点击“核实账号”仅检查现有会话。
         </Notice>
       ) : null}
       {!s.accounts.length ? (
@@ -249,7 +262,7 @@ export function TiebaTargets({
                       <td>
                         <CheckboxField
                           label=""
-                          aria-label={`自动签到 ${target.name}吧 · ${owner?.alias ?? "历史账号"}`}
+                          aria-label={`自动签到 ${target.name}吧 · ${tiebaAccountName(owner, "历史账号")}`}
                           checked={selectedSet.has(target.id)}
                           disabled={
                             busy ||
@@ -285,9 +298,7 @@ export function TiebaTargets({
                               : "关注同步"}
                           </span>
                         </div>
-                        <small>
-                          {owner?.alias || owner?.nickname || "历史账号"}
-                        </small>
+                        <small>{tiebaAccountName(owner, "历史账号")}</small>
                         {target.memberCount != null ||
                         target.postCount != null ||
                         target.threadCount != null ? (

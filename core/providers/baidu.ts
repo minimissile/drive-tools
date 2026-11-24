@@ -1,3 +1,4 @@
+import { baiduMembership } from "./membership";
 import { digest, type UploadAsset } from "./small-upload";
 import { randomBytes } from "node:crypto";
 import type {
@@ -151,6 +152,9 @@ export class BaiduProvider implements DriveProvider {
   async identity(account: Account) {
     const data = await this.sessionData(account);
     return { uid: data.uid, nickname: data.nickname };
+  }
+  async membership(account: Account) {
+    const result=await this.request(account, "/rest/2.0/membership/user", {method:"query"}); return baiduMembership(result);
   }
   async capacity(account: Account) {
     const result = await this.request(account, "/api/quota", {
@@ -474,7 +478,10 @@ export class BaiduProvider implements DriveProvider {
       total,
     };
   }
-  private async ownRows(account: Account) {
+  private async ownRows(
+    account: Account,
+    found?: (row: JsonObject) => boolean,
+  ) {
     const rows: JsonObject[] = [];
     for (let page = 1; page <= 30; page++) {
       const result = await this.request(account, "/share/record", {
@@ -489,9 +496,15 @@ export class BaiduProvider implements DriveProvider {
           "未能读取百度本人分享记录。",
         );
       rows.push(...result.list);
+      if (found && result.list.some(found)) break;
       if (result.list.length < 100) break;
     }
     return rows;
+  }
+  private async ownRow(account: Account, shareId: string) {
+    const matches = (row: JsonObject) =>
+      String(row.shareId ?? row.shareid) === shareId;
+    return (await this.ownRows(account, matches)).find(matches);
   }
   private matches(row: JsonObject, files: RemoteFile[]) {
     const raw = row.fsIds ?? row.fs_ids ?? row.fid_list;
@@ -521,6 +534,7 @@ export class BaiduProvider implements DriveProvider {
     _title: string,
     options: ShareCreationOptions,
     onCreated?: ShareCreatedHandler,
+    verification: "full" | "receipt" = "full",
   ): Promise<OwnShare> {
     return this.createNewShare(
       account,
@@ -528,6 +542,7 @@ export class BaiduProvider implements DriveProvider {
       privateShareOptions(this.id, options),
       true,
       onCreated,
+      verification,
     );
   }
   private async createNewShare(
@@ -536,6 +551,7 @@ export class BaiduProvider implements DriveProvider {
     options: ReturnType<typeof privateShareOptions>,
     verifyOptions = false,
     onCreated?: ShareCreatedHandler,
+    verification: "full" | "receipt" = "full",
   ): Promise<OwnShare> {
     const session = await this.sessionData(account);
     const code = options.extractionCode;
@@ -576,13 +592,9 @@ export class BaiduProvider implements DriveProvider {
         ownerUid: session.uid,
       };
       await onCreated?.(share);
-      const row = (await this.ownRows(account)).find(
-        (item) =>
-          String(item.shareId ?? item.shareid) === shareId &&
-          this.matches(item, files) &&
-          Number(item.status ?? 0) === 0,
-      );
-      if (!row)
+      if (verification === "receipt") return share;
+      const row = await this.ownRow(account, shareId);
+      if (!row || !this.matches(row, files) || Number(row.status ?? 0) !== 0)
         throw new AppError(
           "OWNERSHIP_UNVERIFIED",
           "百度本人分享记录未确认所选文件，禁止分发。",
@@ -681,17 +693,18 @@ export class BaiduProvider implements DriveProvider {
     validateShareOptions(this.id, options);
     const identity = await this.identity(account);
     if (account.uid && account.uid !== identity.uid) return false;
-    const row = (await this.ownRows(account)).find(
-      (item) =>
-        String(item.shareId ?? item.shareid) === shareId &&
-        this.matches(item, files) &&
-        Number(item.status ?? 0) === 0,
-    );
+    const row = await this.ownRow(account, shareId);
     const expectedCode =
       options.extractionCode?.trim() ||
       code ||
       String(row?.passwd ?? row?.pwd ?? "");
-    if (!row || !/^[A-Za-z0-9]{4}$/.test(expectedCode)) return false;
+    if (
+      !row ||
+      !this.matches(row, files) ||
+      Number(row.status ?? 0) !== 0 ||
+      !/^[A-Za-z0-9]{4}$/.test(expectedCode)
+    )
+      return false;
     const parsed = parseShare(String(row.shortlink ?? row.link ?? ""));
     await this.configuredShareExpiry(
       account,
@@ -716,12 +729,8 @@ export class BaiduProvider implements DriveProvider {
     validateShareOptions(this.id, options);
     const identity = await this.identity(account);
     if (account.uid && account.uid !== identity.uid) return null;
-    const row = (await this.ownRows(account)).find(
-      (item) =>
-        String(item.shareId ?? item.shareid) === shareId &&
-        Number(item.status ?? 0) === 0,
-    );
-    if (!row) return null;
+    const row = await this.ownRow(account, shareId);
+    if (!row || Number(row.status ?? 0) !== 0) return null;
     const parsed = parseShare(String(row.shortlink ?? row.link ?? ""));
     if (parsed.provider !== this.id) return null;
     const actualCode =
@@ -805,11 +814,7 @@ export class BaiduProvider implements DriveProvider {
     };
   }
   async verifyShare(account: Account, shareId: string, files: RemoteFile[]) {
-    return (await this.ownRows(account)).some(
-      (r) =>
-        String(r.shareId ?? r.shareid) === shareId &&
-        this.matches(r, files) &&
-        Number(r.status ?? 0) === 0,
-    );
+    const row = await this.ownRow(account, shareId);
+    return !!row && this.matches(row, files) && Number(row.status ?? 0) === 0;
   }
 }

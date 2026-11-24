@@ -1,10 +1,10 @@
 import { AppError } from "../../errors";
-import { answerInput } from "../../../shared/zhidao";
+import { answerInput, zhidaoAnswerPageLimit } from "../../../shared/zhidao";
 import { wait } from "./context";
 import type { OperationRun } from "../../../shared/zhidao";
 import type { WorkerContext } from "./context";
 import { sampledQuestions, shuffled } from "./answer-questions";
-import { zhidaoQuestionPageSize } from "../client";
+import { isZhidaoQuestionBase, zhidaoQuestionPageSize } from "../client";
 import { answerHistory } from "../answer-history";
 import { generateAutoAnswer } from "./answer-generation";
 import { zhidaoAnswerIssue } from "../../../shared/zhidao-content";
@@ -53,6 +53,13 @@ export async function runAnswers(
             ["ready", "failed"].includes(i.status) && i.answer && i.questionId,
         ),
     )) {
+      if (!isZhidaoQuestionBase(item.questionBase ?? 0)) {
+        ctx.store.put(run.id, item.key, {
+          status: "skipped",
+          message: `题目来源不在前${zhidaoAnswerPageLimit}页采集范围内，保留已生成回答，本次不提交`,
+        });
+        continue;
+      }
       yield {
         qid: item.questionId,
         question: item.question,

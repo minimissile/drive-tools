@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { platformIds, contentFormatIds, linkPositionIds } from "./channels";
+import { resourceKeywordsSchema } from "./resource-keywords";
 import { providerIds } from "./providers";
 export const providerSchema = z.enum(providerIds);
 export const platformSchema = z.enum(platformIds);
@@ -26,6 +27,7 @@ export const resourceInputSchema = z.object({
   sourceText: z.string().min(1).max(8000),
   extractionCode: z.string().max(30).optional(),
   category: z.string().trim().min(1).max(60),
+  searchKeywords: resourceKeywordsSchema.optional(),
   tags: z.array(z.string().trim().min(1).max(60)).max(30),
   summary: z.string().max(30_000),
   coverData: z.string().max(12_000_000).nullable().optional(),
@@ -35,6 +37,12 @@ export const resourceInputSchema = z.object({
   selectedFiles: z.array(fileSchema).max(100).optional(),
   enqueue: z.boolean(),
   isOwnResource: z.boolean().optional(),
+});
+export const localResourceDraftSchema = resourceInputSchema.extend({
+  id: z.never().optional(),
+  copyId: z.never().optional(),
+  enqueue: z.literal(false).default(false),
+  isOwnResource: z.literal(false).optional(),
 });
 export const querySchema = z.object({
   endpoint: endpointSchema,

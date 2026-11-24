@@ -1,3 +1,4 @@
+import { guangyaMembership } from "./membership";
 import {
   digest,
   credentials,
@@ -154,6 +155,9 @@ export class GuangyaProvider implements DriveProvider {
       "https://account.guangyapan.com/v1/user/me",
     );
     return { uid: stringId(data.sub), nickname: String(data.name ?? "") };
+  }
+  async membership(account: Account) {
+    return guangyaMembership(await this.request(account,"/assets/v1/get_assets"));
   }
   async capacity(account: Account) {
     const data = await this.request(account, "/assets/v1/get_assets");

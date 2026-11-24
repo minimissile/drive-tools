@@ -1,5 +1,9 @@
 import { useRef, useState } from "react";
-import type { NewDriveBrowserPreview } from "../../shared/drive-browser";
+import { providerSpecs } from "../../shared/providers";
+import type {
+  DriveBrowserProvider,
+  NewDriveBrowserPreview,
+} from "../../shared/drive-browser";
 import { isDriveSharedMember } from "../../shared/browser-environment-sharing";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { ipc } from "../api/client";
@@ -12,6 +16,7 @@ import { DriveBrowserIdentity } from "./DriveBrowserIdentity";
 import "./drive-browser-binding.css";
 
 export function DriveBrowserCreation({
+  provider,
   profileId,
   onProfileChange,
   preview,
@@ -19,6 +24,7 @@ export function DriveBrowserCreation({
   disabled,
   onBusy,
 }: {
+  provider: DriveBrowserProvider;
   profileId: string;
   onProfileChange(value: string): void;
   preview: NewDriveBrowserPreview | null;
@@ -26,6 +32,7 @@ export function DriveBrowserCreation({
   disabled: boolean;
   onBusy(value: boolean): void;
 }) {
+  const label = providerSpecs[provider].name;
   const { data } = useAppData();
   const { openSettings } = useAppNavigation();
   const [enabled, setEnabled] = useState(false),
@@ -61,7 +68,8 @@ export function DriveBrowserCreation({
         </Button>
       </div>
       <p className="muted">
-        选择已登录本人百度网盘的环境，可与贴吧、知道和公众号共用。读取并核对账号后创建，创建后不能切换内置浏览器或改绑其他环境。
+        选择已登录本人{label}
+        网盘的环境，可与已支持的平台共用。读取并核对账号后创建，创建后不能切换内置浏览器或改绑其他环境。
       </p>
       {!data?.settings.bitUrl ? (
         <Button
@@ -99,7 +107,7 @@ export function DriveBrowserCreation({
                   setError("");
                 }}
                 items={[
-                  { value: "", label: "选择已登录百度网盘的环境" },
+                  { value: "", label: `选择已登录${label}网盘的环境` },
                   ...profiles.data.windows.map((p) => {
                     const related =
                       environments.data?.find(
@@ -107,11 +115,14 @@ export function DriveBrowserCreation({
                           e.engine === "bitbrowser" && e.profileId === p.id,
                       )?.accounts ?? [];
                     const used = related.some(
-                      (a) => a.kind === "drive" || !isDriveSharedMember(a),
+                      (a) =>
+                        (a.kind === "drive" &&
+                          a.platform === `drive-${provider}`) ||
+                        !isDriveSharedMember(a),
                     );
                     return {
                       value: p.id,
-                      label: `${p.seq == null ? "" : `#${p.seq} · `}${p.name}${used ? " · 已关联账号" : related.length ? " · 百度业务共用" : ""}`,
+                      label: `${p.seq == null ? "" : `#${p.seq} · `}${p.name}${used ? " · 已关联账号" : related.length ? " · 共用环境" : ""}`,
                       disabled: !!used,
                     };
                   }),
@@ -120,7 +131,7 @@ export function DriveBrowserCreation({
             </Field>
           ) : (
             <Empty compact title="没有可用的比特环境">
-              先在比特客户端创建独立环境并登录百度网盘。
+              先在比特客户端创建环境并登录{label}网盘。
             </Empty>
           )}
           <label className="checkbox">
@@ -156,10 +167,15 @@ export function DriveBrowserCreation({
               setError("");
               try {
                 const result = await ipc("driveBrowser.previewNew", {
+                  provider,
                   profileId,
                   connectorKey: profiles.data!.connectorKey,
                   requireProxy,
                 });
+                if ((result.provider ?? "baidu") !== provider)
+                  throw new Error(
+                    "后台尚未加载此网盘的指纹支持，请应用更新并重启后重试。",
+                  );
                 setRequireProxy(result.requireProxy);
                 onPreview(result);
               } catch (cause) {

@@ -1,3 +1,8 @@
+import {
+  createTemporaryPage,
+  expectTemporaryPageNavigation,
+  releaseTemporaryPage,
+} from "../browser-page-lifecycle";
 import type {
   BrowserContext,
   ElementHandle,
@@ -866,7 +871,7 @@ export function zhihuInteractionBrowser(
     input.guard?.();
     return withContext(account, async (context) => {
       await assertZhihuParticipationAccount(context, account);
-      const page = await context.newPage(),
+      const page = await createTemporaryPage(context, target.url),
         evidence = new Evidence(page, target);
       let submitted = false,
         fixedClick: ElementHandle<HTMLElement | SVGElement> | undefined;
@@ -1039,6 +1044,7 @@ export function zhihuInteractionBrowser(
           return await receipt("performed", id);
         }
         // A successful response plus this freshly loaded official page avoids accepting an optimistic toggle as a receipt.
+        expectTemporaryPageNavigation(page, target.url);
         const refreshed = parseZhihuDocumentSnapshot(
           await loadZhihuParticipationPage(
             page,
@@ -1074,7 +1080,7 @@ export function zhihuInteractionBrowser(
       } finally {
         evidence.close();
         await fixedClick?.dispose().catch(() => {});
-        await page.close().catch(() => {});
+        await releaseTemporaryPage(page);
       }
     });
   };

@@ -15,6 +15,9 @@ const resourceHosts = new Set([
   "www.guangyapan.com",
 ]);
 
+export const wechatImageFilePattern = /^[a-f0-9]{64}\.(png|jpg|gif)$/;
+export const wechatCoverFilePattern = /^cover\/([a-f0-9]{64})$/;
+
 /** Recognizes supported share URLs without importing backend parsing or state. */
 export function isWechatResourceUrl(url: URL) {
   return (
@@ -32,13 +35,15 @@ export function isWechatResourceUrl(url: URL) {
 
 export function isWechatImageUrl(url: URL) {
   if (url.username || url.password || url.port) return false;
-  if (url.protocol === "panxu-media:")
+  if (url.protocol === "panxu-media:") {
+    const file = url.pathname.slice(1);
     return (
       url.hostname === "wechat" &&
-      /^\/[a-f0-9]{64}\.(png|jpg|gif)$/.test(url.pathname) &&
+      (wechatImageFilePattern.test(file) || wechatCoverFilePattern.test(file)) &&
       !url.search &&
       !url.hash
     );
+  }
   return url.protocol === "https:";
 }
 export function wechatArticleImages(body: string) {

@@ -101,7 +101,7 @@ test("任务入口区分同页多个答题/上传任务，网盘任务按实际�
   const options = activeTaskOptions(runs, jobs);
   assert.equal(options.length, 4);
   assert.deepEqual(
-    options.map((o) => o.focus.id),
+    options.map((o) => o.focus?.id),
     ["answer1", "answer2", "publish1", "job1"],
   );
   assert.equal(options[0].page, "zhidao-qa");
@@ -110,4 +110,34 @@ test("任务入口区分同页多个答题/上传任务，网盘任务按实际�
   assert.equal(options[3].page, "tasks");
   assert.match(options[0].label, /2\/10/);
   assert.deepEqual(activeTaskOptions([], []), []);
+});
+
+test("贴吧数据分析任务显示采集类型和进度，选中后打开独立窗口", () => {
+  const options = activeTaskOptions(
+    [],
+    [],
+    [],
+    [
+      { kind: "survey", forum: "网盘资源" },
+      { kind: "history", forum: "学习资料", page: 3 },
+      { kind: "resourceCheck" },
+    ],
+  );
+  assert.deepEqual(options, [
+    {
+      value: "tieba-discovery:survey",
+      label: "贴吧数据分析 · 资源巡查 · 「网盘资源」",
+      page: "tieba-analysis",
+    },
+    {
+      value: "tieba-discovery:history",
+      label: "贴吧数据分析 · 老帖扫描 · 「学习资料」 · 第 3 页",
+      page: "tieba-analysis",
+    },
+    {
+      value: "tieba-discovery:resourceCheck",
+      label: "贴吧数据分析 · 资源线索核验",
+      page: "tieba-analysis",
+    },
+  ]);
 });

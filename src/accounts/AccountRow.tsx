@@ -1,3 +1,4 @@
+import { supportsDriveBrowser } from "../../shared/drive-browser";
 import { useEffect, useRef } from "react";
 import {
   ArrowRightLeft,
@@ -15,10 +16,12 @@ import { providerName } from "../resources/labels";
 import { formatTime } from "../lib/format";
 import { Button, Status } from "../ui/primitives";
 import Capacity from "./Capacity";
+import Membership from "./Membership";
 import type { AccountOperation } from "./useAccountOperations";
 
 export function AccountRow({
   account,
+  selection,
   current,
   focusLogin = false,
   busy,
@@ -31,6 +34,7 @@ export function AccountRow({
   onLoginFocused,
 }: {
   account: Account;
+  selection?: {checked:boolean;disabled:boolean;onChange(checked:boolean):void};
   current: boolean;
   focusLogin?: boolean;
   busy: boolean;
@@ -60,7 +64,8 @@ export function AccountRow({
       aria-label={account.alias}
       data-enabled={account.enabled}
     >
-      <div className="account-identity">
+      <div className={`account-identity ${selection?"account-identity-selectable":""}`}>
+        {selection?<input className="account-batch-check" type="checkbox" aria-label={`选择${account.alias}`} checked={selection.checked} disabled={selection.disabled} onChange={e=>selection.onChange(e.target.checked)}/>:null}
         <ProviderIcon provider={account.provider} />
         <div className="account-identity-content">
           <h3 title={account.alias}>{account.alias}</h3>
@@ -104,7 +109,7 @@ export function AccountRow({
                 : "尚未核验"}
             </span>
           </p>
-          {account.provider === "baidu" &&
+          {supportsDriveBrowser(account.provider) &&
           account.browserEngine === "bitbrowser" ? (
             <p className="account-identity-meta account-browser-status">
               <Fingerprint size={14} aria-hidden="true" />
@@ -112,7 +117,7 @@ export function AccountRow({
                 比特后台 · {account.browser?.profileName ?? "原环境待恢复"}
               </span>
             </p>
-          ) : account.provider === "baidu" ? (
+          ) : supportsDriveBrowser(account.provider) ? (
             <p className="account-identity-meta">内置浏览器 · 创建后固定</p>
           ) : null}
           {account.error ? (
@@ -121,6 +126,7 @@ export function AccountRow({
         </div>
       </div>
       <Capacity account={account} refreshing={pending === "capacity"} />
+      <Membership account={account} refreshing={pending === "capacity" || pending === "verify"} />
       <div className="account-action-cell">
         <div className="account-actions">
           {account.enabled ? (
@@ -167,8 +173,8 @@ export function AccountRow({
               className="account-icon-action"
               disabled={busy || !connected}
               onClick={() => onOperation("capacity")}
-              aria-label={pending === "capacity" ? "正在读取容量…" : "刷新容量"}
-              title={connected ? "刷新容量" : "登录并核验后可读取容量"}
+              aria-label={pending === "capacity" ? "正在刷新账号信息…" : "刷新容量和会员信息"}
+              title={connected ? "刷新容量和会员信息" : "登录并核验后可读取账号信息"}
             >
               <RefreshCw
                 size={14}
@@ -176,7 +182,7 @@ export function AccountRow({
                 aria-hidden="true"
               />
             </Button>
-            {account.provider === "baidu" &&
+            {supportsDriveBrowser(account.provider) &&
             account.browserEngine === "bitbrowser" ? (
               <Button
                 size="compact"

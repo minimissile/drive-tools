@@ -5,7 +5,7 @@ import type { BitBrowser } from "./bitbrowser";
 import { AppError } from "./errors";
 
 /** Caller holds the environment lease; visible opens additionally require window-control guards. */
-export function withEnvironmentBrowser<T>(
+export async function withEnvironmentBrowser<T>(
   environments: BrowserEnvironments,
   bit: BitBrowser,
   ref: EnvironmentAccountRef,
@@ -13,11 +13,13 @@ export function withEnvironmentBrowser<T>(
   visible = false,
 ): Promise<T> {
   const env = environments.forAccount(ref);
+
   if (env.engine !== "bitbrowser")
     throw new AppError(
       "ENVIRONMENT_ENGINE_MISMATCH",
       "此操作需要指纹浏览器环境。",
     );
+  if (visible) await bit.keepWindow(env.profileId, env.connectorKey);
   const sharesDrive = environments
     .list()
     .find((e) => e.id === env.id)

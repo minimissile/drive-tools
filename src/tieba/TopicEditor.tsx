@@ -25,6 +25,7 @@ import {
   type TiebaTopicForm,
 } from "./topic-view";
 import { tiebaTime } from "./view-model";
+import { tiebaAccountName } from "./account-label";
 
 type Run = (
   operation: () => Promise<TiebaTopicsSnapshot>,
@@ -159,9 +160,11 @@ export function TopicEditor({
         <>
           <span className="tieba-console-scope">
             {target.name}吧 ·{" "}
-            {snapshot.accounts.find(
-              (account) => account.id === target.accountId,
-            )?.alias ?? "贴吧账号"}
+            {tiebaAccountName(
+              snapshot.accounts.find(
+                (account) => account.id === target.accountId,
+              ),
+            )}
             {current?.submittedAt
               ? ` · 原提交 ${tiebaTime(current.submittedAt)}`
               : ""}

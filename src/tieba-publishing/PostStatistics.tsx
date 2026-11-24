@@ -1,3 +1,4 @@
+import { tiebaAccountLabel, tiebaAccountName } from "../tieba/account-label";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -154,7 +155,7 @@ export function PostStatistics() {
                 { value: "", label: "选择贴吧账号", disabled: true },
                 ...(snapshot?.accounts ?? []).map((account) => ({
                   value: account.id,
-                  label: account.alias,
+                  label: tiebaAccountLabel(account),
                 })),
               ]}
               onValueChange={(accountId) => {
@@ -431,9 +432,12 @@ export function PostStatistics() {
                             <strong>{post.title}</strong>
                             <small>
                               {post.forumName} ·{" "}
-                              {snapshot.accounts.find(
-                                (account) => account.id === post.accountId,
-                              )?.alias ?? "原账号"}
+                              {tiebaAccountName(
+                                snapshot.accounts.find(
+                                  (account) => account.id === post.accountId,
+                                ),
+                                "原账号",
+                              )}
                             </small>
                             {post.message ? (
                               <small>{post.message}</small>

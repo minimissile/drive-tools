@@ -1,3 +1,7 @@
+import { AccountBatches } from "./account-batches";
+import { providerSpecs } from "../shared/providers";
+import { websiteProviderSpecs } from "../shared/website-accounts";
+import { supportsDriveBrowser } from "../shared/drive-browser";
 import { TiebaPublishing } from "./tieba-publishing/service";
 import { TiebaResourceDiscovery } from "./tieba-resource-discovery/service";
 import { TiebaForumCache } from "./tieba/forum-cache";
@@ -23,6 +27,11 @@ import { BaiduDiscoveryQuestions } from "./baidu-discovery-questions";
 import { createBrowserPlatformPorts } from "./browser-platform-ports";
 import { DriveBrowserSessions } from "./drive-browser-sessions";
 import { PhotoPosts } from "./photo-posts";
+import { JianshuArticles } from "./jianshu/service";
+import { JianshuSourceCollector } from "./jianshu/sources";
+import { generateJianshuArticle } from "./jianshu/ai";
+import { jianshuHandoff } from "./jianshu/handoff";
+import { saveContentImage, readContentImage } from "./content-assets";
 import { SmzdmArticles } from "./smzdm/service";
 import { WechatArticles } from "./wechat/service";
 import { PipixSources } from "./pipix/service";
@@ -43,12 +52,17 @@ import { queryMethods } from "../shared/ipc";
 import { ShareCreation } from "./share-creation";
 import { ResourceLinks } from "./resource-links";
 import { ResourceLanding } from "./resource-landing";
-import { assertResourceUnique } from "./resource-duplicates";
+import {
+  assertResourceUnique,
+  duplicateResourceError,
+} from "./resource-duplicates";
+import { normalizeResourceKeywords } from "../shared/resource-keywords";
+import { ZhidaoPublishingWorkflow } from "./zhidao/publishing-workflow";
 import { resourceTags } from "./resource-tags";
 import { hasVerifiedShare } from "../shared/share-status";
 import { Distribution } from "./distribution";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
-import { coverFilePattern, saveResourceCover } from "./cover-assets";
+import { coverFilePattern, saveResourceCover, readResourceCover } from "./cover-assets";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
 import { WebsiteAccounts } from "./website-accounts";
@@ -101,6 +115,7 @@ import { SearchOperations } from "./search";
 import { ShareStatisticsService } from "./share-statistics";
 import { AppError, safeMessage } from "./errors";
 import { SystemLogs } from "./system-logs";
+import { driveMembershipSchema } from "../shared/drive-membership";
 import { driveCapacitySchema } from "../shared/drive-capacity";
 import { parseShare, validateOutgoingLinks } from "./links";
 import { normalizedDirectory, type DriveProvider } from "./providers/provider";
@@ -114,6 +129,7 @@ import type {
 } from "../shared/types";
 
 export class AppService {
+  private keywordLookupBusy = false;
   readonly photoPosts: PhotoPosts;
   readonly driveBrowsers: DriveBrowserSessions;
   readonly baiduDiscovery: BaiduDiscovery;
@@ -122,8 +138,10 @@ export class AppService {
   readonly resourceLinks: ResourceLinks;
   readonly resourceLanding: ResourceLanding;
   readonly shareCreation: ShareCreation;
+  readonly zhidaoWorkflow: ZhidaoPublishingWorkflow;
   readonly resourceDeletion: ResourceDeletion;
   readonly smzdm: SmzdmArticles;
+  readonly jianshu: JianshuArticles;
   readonly wechat: WechatArticles;
   readonly distribution: Distribution;
   readonly zhihu: ZhihuOperations;
@@ -180,6 +198,7 @@ export class AppService {
   readonly systemLogs: SystemLogs;
   private switchingWorkspace = false;
   private capacityRequests = new Map<string, Promise<Account>>();
+  readonly accountBatches: AccountBatches;
   readonly mutex = new AccountMutex();
   constructor(
     readonly dataPath: string,
@@ -211,6 +230,7 @@ export class AppService {
       ports,
       this.environments,
       () => this.bit,
+      (image) => readContentImage(dataPath, image),
     );
     this.ports = browserPorts;
     this.websiteAccounts = new WebsiteAccounts(
@@ -256,9 +276,37 @@ export class AppService {
       this.notes,
       this.mutex,
       changed,
-      (copyId) => this.resourceLinks.afterShareSaved(copyId),
+      (copyId) => this.resourceLinks.afterShareSaved(copyId, true),
+      (accountId, action) => this.driveBrowsers.isBound(accountId)
+        ? this.driveBrowsers.withRequestSession(accountId, action)
+        : action(),
     );
     this.ai = new AiService(this.repo, this.secrets, changed);
+    this.jianshu = new JianshuArticles({
+      repo: this.repo,
+      accounts: this.websiteAccounts,
+      collector: new JianshuSourceCollector(),
+      runInEnvironment: (accountId, action) => this.environments.run({kind:"website",id:accountId}, action),
+      resourceCover: async copyId => {
+        const resource = this.repo.getResource(this.repo.getCopy(copyId).resourceId);
+        if (!resource.coverId) return null;
+        const cover = await readResourceCover(dataPath,resource.coverId);
+        return saveContentImage(dataPath,await browserPorts.normalizeCover(cover.bytes),`${resource.title} · 封面`);
+      },
+      port: jianshuHandoff(browserPorts.jianshu, browserPorts),
+      assertOwnCopy: copy => this.assertOwnCopy(copy),
+      assertTarget: copyId => this.search.assertTarget(copyId, null),
+      environmentStamp: accountId => this.environments.stamp({kind:"website",id:accountId}),
+      generateText: input => generateJianshuArticle(this.ai,input),
+      readShareCode: copyId => this.secrets.get(`share:${copyId}`),
+      importImages: async () => {
+        if (!browserPorts.readWeiboImages) throw new AppError("JIANSHU_IMAGES", "当前窗口不支持选择配图，请使用源码桌面窗口。");
+        const files = await browserPorts.readWeiboImages("jianshu");
+        return files ? Promise.all(files.map(file => saveContentImage(dataPath,file.bytes,file.name))) : null;
+      },
+      validateImage: image => readContentImage(dataPath,image),
+      changed,
+    });
     this.smzdm = new SmzdmArticles({
       repo: this.repo,
       secrets: this.secrets,
@@ -279,13 +327,13 @@ export class AppService {
       accounts: this.websiteAccounts,
       port: browserPorts.wechat,
       dataPath,
-      discoveryFetch: browserPorts.wechatDiscoveryFetch,
       readImage: browserPorts.readWechatImage,
+      readClipboardImage: browserPorts.readWechatClipboardImage,
       readRemoteImage: browserPorts.readWechatRemoteImage,
       generateImage: (bytes, prompt) =>
         this.studio.generateReferenceImage(bytes, prompt),
       generateThemeImage: (prompt) => this.studio.generateThemeImage(prompt),
-      saveResource: (input) => this.saveResource(input),
+      saveResource: (input) => this.saveResource(input, "local-draft"),
       assertOwnCopy: (copy) => this.assertOwnCopy(copy),
       checkShare: (copyId) => this.checkShare(copyId),
       resourcePublishedUrls: (resourceId) =>
@@ -532,6 +580,8 @@ export class AppService {
       csdn: () => this.csdn.history(),
     });
     this.bitManagement = new BitBrowserManagement({
+      readIdlePolicy: (key) => this.db.setting<number>(`bitIdle:${key}`, 0),
+      saveIdlePolicy: (key, minutes) => { this.db.setSetting(`bitIdle:${key}`, minutes); changed(); },
       bit: this.bit,
       environments: this.environments,
       connector: () => this.db.setting("bitUrl", ""),
@@ -577,6 +627,8 @@ export class AppService {
       repo: this.repo,
       secrets: this.secrets,
       fetch: this.ports.resourceLinksFetch,
+      reportSyncError: (resourceId, error) =>
+        this.systemLogs.capture("resourceLinks.sync", error, { id: resourceId }),
       changed: () => this.changed(),
       authenticated: (accountId, action) =>
         this.authenticated(accountId, action),
@@ -603,6 +655,10 @@ export class AppService {
       changed,
     });
     this.shareCreation = new ShareCreation({
+      withSession: (accountId, action) =>
+        this.driveBrowsers.isBound(accountId)
+          ? this.driveBrowsers.withRequestSession(accountId, action)
+          : action(),
       repo: this.repo,
       secrets: this.secrets,
       driveFiles: this.driveFiles,
@@ -620,6 +676,16 @@ export class AppService {
       shares: this.shareCreation,
       changed,
     });
+    this.zhidaoWorkflow = new ZhidaoPublishingWorkflow({
+      repo: this.repo,
+      ai: this.ai,
+      ports: this.ports,
+      secrets: this.secrets,
+      saveResource: (input) => this.saveResource(input),
+      shareCreation: this.shareCreation,
+      checkShare: (id) => this.checkShare(id),
+      changed,
+    });
     this.resourceCatalogs = new ResourceCatalogs(
       this.repo,
       this.ports,
@@ -628,6 +694,7 @@ export class AppService {
       (key) => this.secrets.get(key),
       this.resourceLinks,
       this.ai,
+      (catalogId, snapshot) => this.wechat.createCatalogDraft(catalogId, snapshot),
     );
     this.zhihuParticipation = new ZhihuParticipation({
       db: this.db,
@@ -756,7 +823,28 @@ export class AppService {
       dataPath,
       changed,
     });
+    this.accountBatches = new AccountBatches({
+      db: this.db, changed,
+      resolve: (scope, accountId, provider) => {
+        const kind=scope==="drive"?"drive":provider==="baidu-zhidao"?"zhidao":"website";
+        const a=scope==="drive"?this.repo.getAccount(accountId):kind==="zhidao"?{...this.zhidao.store.account(accountId),provider:"baidu-zhidao"}:this.websiteAccounts.get(accountId);
+        const link=this.db.get<{environment_id:string}>("SELECT environment_id FROM browser_environment_accounts WHERE kind=? AND account_id=?",kind,accountId);
+        return {id:a.id,alias:a.alias,provider:a.provider,providerName:a.provider==="baidu-zhidao"?"百度知道":scope==="drive"?providerSpecs[a.provider as import("../shared/types").Provider].name:websiteProviderSpecs[a.provider as import("../shared/website-accounts").WebsiteProvider].name,enabled:!("enabled" in a)||!!a.enabled,environmentId:link?.environment_id??null,key:link?.environment_id??`${kind}:${a.id}`};
+      },
+      available: environmentId => this.environments.available([environmentId]),
+      perform: async (input, accountId) => {
+        if(input.scope==="drive"){
+          const account=await this.invoke(input.action==="verify"?"account.check":"account.capacity",{id:accountId}) as Account;
+          if(account.status!=="connected")throw new AppError("AUTH_EXPIRED",account.error||"账号登录已失效，请在原环境完成登录。");
+          return [...new Set([account.capacity?.error,account.membership?.error].filter(Boolean))].join("；")||null;
+        }
+        const account=await this.invoke(input.provider==="baidu-zhidao"?"zhidao.account.check":"websiteAccounts.check",{id:accountId}) as {status:string;message?:string;unverified?:boolean};
+        if(account.status!=="connected"||account.unverified)throw new AppError("AUTH_EXPIRED",account.message||"当前账号未通过登录核验，请在原环境完成登录。");
+        return null;
+      },
+    });
     this.handlers = createApplicationHandlers({
+      accountBatches: this.accountBatches,
       systemLogs: this.systemLogs,
       tiebaAutomation: this.tiebaAutomation,
       tiebaTopics: this.tiebaTopics,
@@ -783,6 +871,7 @@ export class AppService {
       shareCreation: this.shareCreation,
       resourceDeletion: this.resourceDeletion,
       smzdm: this.smzdm,
+      jianshu: this.jianshu,
       wechat: this.wechat,
       distribution: this.distribution,
       zhihu: this.zhihu,
@@ -798,6 +887,8 @@ export class AppService {
       websiteAccounts: this.websiteAccounts,
       driveFiles: this.driveFiles,
       zhidao: this.zhidao,
+      zhidaoWorkflow: this.zhidaoWorkflow,
+      setKeywordLookupBusy: (active) => { this.keywordLookupBusy = active; changed(); },
       zhidaoPages: this.zhidaoPages,
       db: this.db,
       repo: this.repo,
@@ -830,8 +921,8 @@ export class AppService {
       refreshCapacity: (id) => this.refreshCapacity(id),
       assertOwnCopy: (copy) => this.assertOwnCopy(copy),
       checkShare: (id) => this.checkShare(id),
-      saveResource: (input) => this.saveResource(input),
-      openBinding: (binding, format) => this.openBinding(binding, format),
+      saveResource: (input, mode) => this.saveResource(input, mode),
+      openBinding: (binding, format, newPage) => this.openBinding(binding, format, newPage),
       contentPackage: (draft, binding, includeLink, position) =>
         this.contentPackage(draft, binding, includeLink, position),
       hasRunningJobs: () => this.hasRunningJobs(),
@@ -849,11 +940,10 @@ export class AppService {
     this.music.start();
   }
   snapshot(resourceId?: string) {
-    return this.repo.snapshot(
-      (key) => this.secrets.has(key),
-      this.dataPath,
-      resourceId,
-    );
+    return {
+      ...this.repo.snapshot((key) => this.secrets.has(key), this.dataPath, resourceId),
+      tiebaDiscoveryTasks: this.tiebaResourceDiscovery.activeTasks(),
+    };
   }
   assertUpdateIdle(activeOperations = 0) {
     if (
@@ -899,7 +989,7 @@ export class AppService {
           "DUPLICATE_ACCOUNT",
           `此UID已绑定「${duplicate.alias}」，请使用该账号记录。`,
         );
-      if (account.provider === "baidu") {
+      if (supportsDriveBrowser(account.provider)) {
         if (
           !this.db.get(
             "SELECT account_id FROM browser_environment_accounts WHERE kind='drive' AND account_id=?",
@@ -952,6 +1042,32 @@ export class AppService {
       attemptedAt: now(),
       error: safeMessage(error),
     });
+    this.db.setSetting(`account:membership:${accountId}`, {
+      ownerUid: account.uid,
+      value: account.membership?.value ?? null,
+      updatedAt: account.membership?.updatedAt ?? null,
+      attemptedAt: now(),
+      error: safeMessage(error),
+    });
+    this.changed();
+  }
+  private async readMembership(account: Account) {
+    if (!account.uid || !account.enabled || account.status !== "connected") return;
+    const previous=account.membership;
+    try {
+      const provider=this.providers[account.provider];
+      const value=driveMembershipSchema.parse(provider.membership ? await provider.membership(account) : {status:"unknown",tier:null,expiresAt:null});
+      if (value.status === "unknown" && previous?.value && previous.value.status !== "unknown")
+        throw new AppError("MEMBERSHIP_UNAVAILABLE", "平台未返回可确认的会员状态，请稍后刷新。");
+      const current=this.repo.getAccount(account.id);
+      if (!current.enabled || current.uid!==account.uid) return;
+      const time=now();
+      this.db.setSetting(`account:membership:${account.id}`,{ownerUid:account.uid,value,updatedAt:time,attemptedAt:time,error:null});
+    } catch(error) {
+      const current=this.repo.getAccount(account.id);
+      if (!current.enabled || current.uid!==account.uid) return;
+      this.db.setSetting(`account:membership:${account.id}`,{ownerUid:account.uid,value:previous?.value??null,updatedAt:previous?.updatedAt??null,attemptedAt:now(),error:safeMessage(error)});
+    }
     this.changed();
   }
   private async readCapacity(account: Account) {
@@ -992,6 +1108,7 @@ export class AppService {
       }
       this.capacityError(account.id, error);
     }
+    await this.readMembership(this.repo.getAccount(account.id));
     return this.repo.getAccount(account.id);
   }
   private refreshCapacity(accountId: string): Promise<Account> {
@@ -1076,7 +1193,18 @@ export class AppService {
         "此账号有正在执行的任务，请先停止等待并核对远端结果。",
       );
   }
-  async saveResource(input: ResourceInput) {
+  async saveResource(input: ResourceInput, mode?: "local-draft") {
+    if (
+      mode === "local-draft" &&
+      (input.enqueue ||
+        input.isOwnResource ||
+        input.id !== undefined ||
+        input.copyId !== undefined)
+    )
+      throw new AppError(
+        "RESOURCE_LOCAL_DRAFT_ONLY",
+        "仅可将新的第三方资料存为本地草稿。",
+      );
     if (input.isOwnResource && input.enqueue)
       throw new AppError(
         "OWNED_TRANSFER_BLOCKED",
@@ -1094,13 +1222,18 @@ export class AppService {
         "SELECTION_REQUIRED",
         "开始转存前，请读取并选择需要保存的文件。",
       );
-    const existing = this.db.get<{ id: string }>(
-      "SELECT id FROM resources WHERE source_url=?",
+    const existing = this.db.get<{ id: string; title: string }>(
+      "SELECT id,title FROM resources WHERE source_url=?",
       source.url,
     );
+    if (mode === "local-draft" && existing)
+      throw duplicateResourceError(existing.title, account.provider);
     const resourceId = input.id ?? existing?.id ?? id("resource");
     this.resourceDeletion.assertMutable(resourceId);
-    if (input.id && this.repo.getResource(input.id).sourceUrl !== source.url)
+    const editedResource = input.id
+      ? this.repo.getResource(input.id)
+      : undefined;
+    if (editedResource && editedResource.sourceUrl !== source.url)
       throw new AppError(
         "SOURCE_IMMUTABLE",
         "已有资源的来源链接不能直接更换，请新建资源。",
@@ -1112,6 +1245,7 @@ export class AppService {
       provider: account.provider,
       accountId: account.id,
       copyId: input.copyId,
+      provisionalTitle: mode === "local-draft" && input.category === "",
     };
     assertResourceUnique(this.db, uniqueness);
     let coverId: string | null | undefined;
@@ -1138,28 +1272,44 @@ export class AppService {
     if (source.code)
       await this.secrets.set(`source:${resourceId}`, source.code);
     const resourceExists = !!existing || !!input.id;
-    let directory = input.isOwnResource
-      ? normalizedDirectory(input.directory || "/")
-      : normalizedDirectory(input.directory || account.defaultDirectory) +
-        "/" +
-        input.title
-          .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
-          .trim()
-          .slice(0, 40) +
-        "__" +
-        resourceId.slice(-8);
-    if (input.copyId) {
-      const editedCopy = this.repo.getCopy(input.copyId);
-      if (
-        editedCopy.resourceId !== resourceId ||
-        editedCopy.accountId !== account.id
-      )
-        throw new AppError(
-          "COPY_MISMATCH",
-          "编辑资料时不能改绑已有账号，请打开原账号的资源记录编辑。",
-        );
-      directory = editedCopy.directory;
-    }
+    const editedCopy = input.copyId
+      ? this.repo.getCopy(input.copyId)
+      : undefined;
+    if (
+      editedCopy &&
+      (editedCopy.resourceId !== resourceId ||
+        editedCopy.accountId !== account.id)
+    )
+      throw new AppError(
+        "COPY_MISMATCH",
+        "编辑资料时不能改绑已有账号，请打开原账号的资源记录编辑。",
+      );
+    const completingDraft =
+      !!input.title.trim() &&
+      !!input.category.trim() &&
+      editedResource?.category === "" &&
+      this.repo.getResource(editedResource.id).category === "";
+    // Use the confirmed title for the resource folder when completing the draft.
+    const draftParent =
+      completingDraft && !input.isOwnResource && editedCopy?.status === "draft"
+        ? editedCopy.directory.slice(0, editedCopy.directory.lastIndexOf("/")) ||
+          "/"
+        : undefined;
+    const parentDirectory =
+      draftParent ?? (input.directory || account.defaultDirectory);
+    const directory =
+      editedCopy && !draftParent
+        ? editedCopy.directory
+        : input.isOwnResource
+          ? normalizedDirectory(input.directory || "/")
+          : normalizedDirectory(parentDirectory) +
+            "/" +
+            input.title
+              .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
+              .trim()
+              .slice(0, 40) +
+            "__" +
+            resourceId.slice(-8);
     const priorCopy = input.copyId
       ? this.db.get<{ id: string; status: string }>(
           "SELECT id,status FROM copies WHERE id=?",
@@ -1263,6 +1413,12 @@ export class AppService {
           time,
           resourceId,
         );
+      if ((!resourceExists || input.id) && input.searchKeywords !== undefined)
+        this.db.run(
+          "UPDATE resources SET search_keywords=? WHERE id=?",
+          JSON.stringify(normalizeResourceKeywords(input.searchKeywords)),
+          resourceId,
+        );
       if (!priorCopy)
         this.db.run(
           "INSERT INTO copies(id,resource_id,account_id,directory,selected_files,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
@@ -1279,6 +1435,12 @@ export class AppService {
         this.db.run(
           "UPDATE copies SET selected_files=? WHERE id=?",
           JSON.stringify(input.selectedFiles),
+          copyId,
+        );
+      if (draftParent)
+        this.db.run(
+          "UPDATE copies SET directory=? WHERE id=?",
+          directory,
           copyId,
         );
       if (input.isOwnResource) {
@@ -1312,7 +1474,11 @@ export class AppService {
         }
       }
     });
-    if (!resourceExists)
+    if (
+      (!resourceExists || completingDraft) &&
+      mode !== "local-draft" &&
+      !input.enqueue
+    )
       await this.resourceLinks.afterResourceSaved(resourceId);
     if (input.id) await this.notes.flush();
     this.changed();
@@ -1326,6 +1492,7 @@ export class AppService {
   private async openBinding(
     binding: BrowserBinding,
     contentFormat?: ContentFormat,
+    newPage = false,
   ) {
     try {
       const result = binding.websiteAccountId
@@ -1333,7 +1500,7 @@ export class AppService {
         : await this.bit.open({
             ...binding,
             editorUrl: bindingEditorUrl(binding, contentFormat),
-          });
+          }, newPage);
       this.db.run(
         "UPDATE browser_bindings SET last_checked_at=?,last_opened_at=?,open_error=NULL WHERE id=?",
         now(),
@@ -1358,18 +1525,23 @@ export class AppService {
     ignoreDiscoveryQuestions = false,
   ) {
     return (
+      this.keywordLookupBusy ||
       this.photoPosts.isBusy ||
       !!this.ports.photoPostBrowser?.isOpen() ||
       (!ignoreAccountDeletion && this.accountDeletion?.isBusy) ||
       this.baiduDiscovery.isBusy ||
       (!ignoreDiscoveryQuestions && this.baiduDiscoveryQuestions?.isBusy) ||
+      (!ignoreDiscoveryQuestions && this.zhidaoWorkflow?.isBusy) ||
+      this.accountBatches?.isBusy ||
       this.driveBrowsers.isBusy ||
       !!this.ports.baiduDiscovery?.isOpen() ||
+      !!this.ports.keywordWebBrowser?.isOpen() ||
       !!this.ports.baiduShareReader?.isOpen() ||
       this.resourceLinks?.isBusy ||
       this.resourceLanding?.isBusy ||
       this.shareCreation?.isBusy ||
       this.smzdm.isBusy ||
+      this.jianshu.isBusy ||
       this.wechat.isBusy ||
       this.distribution.isBusy ||
       !!this.ports.distributionSessions?.isOpen() ||
@@ -1736,6 +1908,7 @@ export class AppService {
     return folder;
   }
   close() {
+    this.bitManagement.dispose();
     this.video.close();
     this.music.close();
     this.bilibili.close();
@@ -1751,9 +1924,11 @@ export class AppService {
     this.zhihuAutocare.close();
     this.intelligentOps.close();
     this.ports.photoPostBrowser?.close();
+    this.ports.keywordWebBrowser?.close();
     this.baiduDiscovery.close();
     this.ports.baiduShareReader?.close(true);
     this.smzdm.close();
+    this.jianshu.close();
     this.wechat.close();
     this.distribution.close();
     this.pipix.close();
@@ -1765,6 +1940,7 @@ export class AppService {
     this.zhidao.close();
     this.zhidaoPages.close();
     this.queue.stop();
+    this.accountBatches.close();
     this.environmentQueue.close();
     this.db.close();
   }

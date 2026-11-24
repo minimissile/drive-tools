@@ -11,22 +11,26 @@ import type {
   TiebaDiscoveryPotentialEvidence,
   TiebaDiscoveryRules,
 } from "../../shared/tieba-resource-discovery";
-import { defaultTiebaDiscoveryRules, oldTrafficMinimumAgeDays, pendingObservationMultiplier, recentGrowthMaxReadingHours } from "../../shared/tieba-resource-discovery";
+import { defaultTiebaDiscoveryRules, oldTrafficMinimumAgeDays, pendingObservationMultiplier, recentGrowthMaxReadingHours, tiebaCumulativeTrafficDays } from "../../shared/tieba-resource-discovery";
 import { tiebaBodyDriveLinks } from "../tieba-post-stats/links";
 
 const hour = 60 * 60 * 1000;
 export const discoveryInterval = hour;
-export const trafficLookback = 30 * 24 * hour;
+export const trafficLookback = tiebaCumulativeTrafficDays * 24 * hour;
 export const minReadingGap = hour / 2;
 const maxReadingGap = 3 * hour;
 const recentGrowthMaxReadingGap = recentGrowthMaxReadingHours * hour;
 const provider =
-  /网盘|云盘|百度盘|夸克盘|阿里盘|迅雷盘|115盘|pan\.baidu\.com|pan\.quark\.cn/iu;
+  /网盘|云盘|百度盘|夸克|阿里盘|迅雷盘|115盘|pan\.baidu\.com|pan\.quark\.cn/iu;
 const sharing = /分享|合集|整理|完整版|全集|高清|下载|资源|打包|附链|自取/iu;
 const seeking =
   /^(?:【[^】]{1,16}】\s*)?(?:求(?:个|一份|分享|资源|链接|补链|助|片|盘|大佬|\s|[^，。]{1,20}(?:资源|链接|网盘))|跪求|蹲(?:个|资源|链接|更新)|有(?:人|谁).{0,14}(?:吗|么|？|\?))/iu;
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+
+export function isResourceRequest(title: string) {
+  return seeking.test(title.normalize("NFKC").trim());
+}
 
 export function resourceEvidence(
   title: string,

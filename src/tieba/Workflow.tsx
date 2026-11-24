@@ -1,3 +1,5 @@
+import { tiebaRunWindowMinutes } from "../../shared/tieba-timing";
+import { tiebaAccountName } from "./account-label";
 import { useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -210,10 +212,7 @@ function TiebaControl({
       !enabled,
     );
   const names = new Map(
-    s.accounts.map((account) => [
-      account.id,
-      account.alias || account.nickname || "贴吧账号",
-    ]),
+    s.accounts.map((account) => [account.id, tiebaAccountName(account)]),
   );
   const disabled = busy || unavailable;
   return (
@@ -236,7 +235,10 @@ function TiebaControl({
               · 北京时间
             </small>
           ) : (
-            <small>开启后在2小时内安排，每个目标吧每日最多签到一次。</small>
+            <small>
+              开启后在{tiebaRunWindowMinutes}
+              分钟内按账号并行安排，每个目标吧每日最多签到一次。
+            </small>
           )}
         </div>
         <label className="tieba-power">
@@ -272,6 +274,28 @@ function TiebaControl({
               ? draft.value.baseTargetIds
               : s.config.targetIds,
           })
+        }
+        onStart={(accountIds) =>
+          void action(
+            () =>
+              ipc("tieba.autocare.start", {
+                accountIds,
+                revision: s.revision,
+                confirmed: true,
+              }),
+            (result) => {
+              const results = result.startResult?.accounts ?? [];
+              const failed = results.filter((item) => item.status === "failed");
+              const count = results.reduce(
+                (sum, item) => sum + item.targets,
+                0,
+              );
+              return {
+                text: `${results.length - failed.length}/${results.length} 个账号已同步，${count} 个贴吧已安排签到。${failed.map((item) => `${names.get(item.accountId) ?? "贴吧账号"}：${item.message}`).join("；")}`,
+                tone: failed.length || !count ? "warning" : "success",
+              };
+            },
+          )
         }
         onSync={(accountId) =>
           void action(

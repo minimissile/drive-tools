@@ -22,7 +22,7 @@ export function intakeOptions(
         ...db.setting<string[]>(categoryKey, []),
         ...db
           .all<{ category: string }>(
-            "SELECT DISTINCT category FROM resources ORDER BY category",
+            "SELECT DISTINCT category FROM resources WHERE category<>'' ORDER BY category",
           )
           .map((r) => r.category),
       ]),

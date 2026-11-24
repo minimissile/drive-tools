@@ -1,3 +1,4 @@
+import { createTemporaryPage, releaseTemporaryPage } from "./browser-page-lifecycle";
 import { isIP } from "node:net";
 import type { BrowserContext } from "playwright-core";
 import { AppError, safeMessage } from "./errors";
@@ -11,7 +12,7 @@ const sources = [
 export async function browserExitIp(context: BrowserContext) {
   const errors: string[] = [];
   for (const source of sources) {
-    const page = await context.newPage();
+    const page = await createTemporaryPage(context, source.url);
     const host = new URL(source.url).hostname;
     try {
       const response = await page.goto(source.url, {
@@ -38,7 +39,7 @@ export async function browserExitIp(context: BrowserContext) {
           .replace(/\u001b\[[\d;]*m/g, "")}`,
       );
     } finally {
-      await page.close().catch(() => {});
+      await releaseTemporaryPage(page);
     }
   }
   throw new AppError(

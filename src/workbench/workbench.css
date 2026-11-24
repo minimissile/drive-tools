@@ -48,9 +48,6 @@
   border: 1px solid var(--line);
   border-radius: var(--panel-radius);
 }
-.workbench-group--wide {
-  grid-column: 1 / -1;
-}
 .workbench-group--compact {
   grid-column: span 2;
 }
@@ -67,6 +64,12 @@
 .workbench .panel-heading h2 {
   font-size: 14px;
 }
+.workbench-group-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
 .workbench-group-heading .button {
   font-size: 11px;
   padding-inline: var(--space-2);
@@ -78,9 +81,6 @@
 }
 .workbench-entry-list--2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.workbench-entry-list--3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .workbench-entry {
   display: flex;
@@ -241,7 +241,6 @@
   .workbench-group--compact {
     grid-column: span 3;
   }
-  .workbench-entry-list--3,
   .operation-recent-list {
     grid-template-columns: minmax(0, 1fr);
   }

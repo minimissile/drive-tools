@@ -1,3 +1,4 @@
+import { tiebaAccountName } from "./account-label";
 import { z } from "zod";
 import type { TiebaAutocareSnapshot } from "../../shared/tieba-autocare";
 import { Button, Empty, Panel, Status } from "../ui/primitives";
@@ -44,10 +45,7 @@ export function TiebaTasks({
   const summary = tiebaTaskSummary(tasks);
   const currentPage = Math.min(page, Math.max(1, Math.ceil(tasks.length / 8)));
   const accounts = new Map(
-    s.accounts.map((account) => [
-      account.id,
-      account.alias || account.nickname || "贴吧账号",
-    ]),
+    s.accounts.map((account) => [account.id, tiebaAccountName(account)]),
   );
   return (
     <Panel

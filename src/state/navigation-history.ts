@@ -63,6 +63,16 @@ export function navigationHistory(
   };
 }
 
+export function restoreNavigationPage(
+  value: unknown,
+  pages: readonly Page[],
+): Page | undefined {
+  const page = value === "wechat-discovery" ? "wechat-workflow" : value;
+  return typeof page === "string" && pages.includes(page as Page)
+    ? (page as Page)
+    : undefined;
+}
+
 /** Only local route identifiers are persisted, scoped by the caller's window storage. */
 export function parseNavigationHistory(
   value: unknown,
@@ -70,8 +80,9 @@ export function parseNavigationHistory(
 ): NavigationHistory | undefined {
   const identifier = z.string().max(400);
   const route = z.object({
-    page: z.custom<Page>(
-      (value) => typeof value === "string" && pages.includes(value as Page),
+    page: z.preprocess(
+      (value) => restoreNavigationPage(value, pages),
+      z.custom<Page>((value) => value !== undefined),
     ),
     resourceId: identifier,
     copyId: identifier,

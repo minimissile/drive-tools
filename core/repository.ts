@@ -25,6 +25,7 @@ import { Database, now, parseJson } from "./database";
 import { AppError } from "./errors";
 import packageInfo from "../package.json" with { type: "json" };
 import { resolveAiModels } from "../shared/ai-models";
+import { accountMembershipSchema } from "../shared/drive-membership";
 import { accountCapacitySchema } from "../shared/drive-capacity";
 import { resourceTags } from "./resource-tags";
 export type Row = Record<string, any>;
@@ -35,6 +36,7 @@ export class Repository {
     const capacity = accountCapacitySchema.safeParse(
       this.db.setting(`account:capacity:${row.id}`, null),
     );
+    const membership = accountMembershipSchema.safeParse(this.db.setting(`account:membership:${row.id}`, null));
     return {
       id: row.id,
       provider: row.provider,
@@ -48,6 +50,7 @@ export class Repository {
       error: row.error,
       browserEngine: this.db.setting<"electron" | "bitbrowser">(`drive-browser-mode:${row.id}`, browser ? "bitbrowser" : "electron"),
       browser: browser ? { environmentId: browser.environmentId, profileId: browser.profileId, profileName: browser.profileName, exitIp: browser.exitIp, requireProxy: browser.requireProxy } : null,
+      membership: membership.success && membership.data.ownerUid === row.uid ? membership.data : null,
       capacity:
         capacity.success && capacity.data.ownerUid === row.uid
           ? capacity.data
@@ -103,6 +106,7 @@ export class Repository {
       provider: row.provider,
       category: row.category,
       tags: resourceTags(parseJson<string[]>(row.tags, [])),
+      searchKeywords: parseJson<string[]>(row.search_keywords, []),
       summary: row.summary,
       coverId: row.cover_id,
       revision: row.revision,
@@ -210,7 +214,7 @@ export class Repository {
       )!.n,
       categories: this.db
         .all<{ category: string }>(
-          "SELECT DISTINCT category FROM resources ORDER BY category",
+          "SELECT DISTINCT category FROM resources WHERE category<>'' ORDER BY category",
         )
         .map((r) => r.category),
     };

@@ -2,7 +2,36 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { publishingFixture } from "./zhidao-publish-fixture";
 import { publishInput } from "../shared/zhidao";
-import { publishingRights, uploadReceipt } from "../core/zhidao/publishing";
+import { xlsx } from "../core/export-formats";
+import { readXlsx } from "../core/table-files";
+import {
+  publicationWorkbook,
+  publishingRights,
+  uploadReceipt,
+} from "../core/zhidao/publishing";
+
+test("批量问答表保留原始 HTML 和空 qid，表头居中加粗，正文自动换行", () => {
+  const question = '=HYPERLINK("https://example.com","标题")';
+  const answer =
+    '<p><a href="https://pan.baidu.com/s/qa?pwd=5hc8">网盘链接</a></p>\n<p>练习资料介绍。</p>';
+  const workbook = publicationWorkbook([{ question, answer }]);
+  assert.deepEqual(readXlsx(workbook), [
+    ["qid", "问题标题", "回答内容"],
+    ["", question, answer],
+  ]);
+  const xml = workbook.toString();
+  assert.match(xml, /Target="styles\.xml"/);
+  assert.match(xml, /<font><b\/>/);
+  assert.match(xml, /<alignment horizontal="center" vertical="center"\/>/);
+  assert.match(xml, /<alignment vertical="top" wrapText="1"\/>/);
+  assert.match(xml, /<c r="B1" s="1" t="inlineStr">/);
+  assert.match(xml, /<c r="B2" s="2" t="inlineStr">/);
+  assert.match(xml, /<cols><col min="1" max="1" width="8"/);
+  assert.doesNotMatch(
+    xlsx([["普通导出"], ["内容"]]).toString(),
+    /styles\.xml|<cols>/,
+  );
+});
 
 test("发布契约兼容官方0/200与直接数据；权限、额度、封禁与大整数ID不混淆", () => {
   for (const code of [0, 200]) {

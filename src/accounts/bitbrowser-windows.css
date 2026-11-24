@@ -134,6 +134,22 @@
 .bit-windows-panel .pagination small .select-control {
   min-width: 120px;
 }
+.bit-page-controls {
+  display: grid;
+  gap: var(--space-3);
+  border-block: 1px solid var(--line);
+  padding-block: var(--space-4);
+}
+.bit-page-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.bit-page-control-actions .field {
+  margin-left: auto;
+  min-width: 180px;
+}
 @media (max-width: 1250px) {
   .bit-windows-toolbar {
     grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr);

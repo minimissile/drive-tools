@@ -1,11 +1,20 @@
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import {
   copyFile,
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
   realpath,
   rename,
   rm,
+  stat,
+  unlink,
   utimes,
-  symlink,
+  writeFile,
 } from "node:fs/promises";
 import {
   basename,
@@ -25,8 +34,42 @@ const registerBundle = (bundle) =>
     ["-f", bundle],
   );
 
-// app.setName() is internal to Electron; macOS reads these bundle fields.
-// Update only this project's npm runtime, never an installed/shared application.
+function assertProductName(productName) {
+  if (
+    !productName ||
+    /[\\/\x00-\x1f]/.test(productName) ||
+    [".", ".."].includes(productName)
+  )
+    throw new Error("开发应用名称无效。");
+}
+
+async function existingFile(path) {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+/** Restore the canonical install location left by older development branding. */
+export async function restoreMacElectronBundle({ root, productName }) {
+  assertProductName(productName);
+  const dist = join(root, "node_modules", "electron", "dist");
+  const canonical = join(dist, "Electron.app");
+  if (!(await existingFile(canonical))?.isSymbolicLink()) return;
+  const legacy = join(dist, `${productName}.app`);
+  if (resolve(dist, await readlink(canonical)) !== legacy)
+    throw new Error("Electron.app 指向未知位置，请检查 Electron 安装目录。");
+  const target = await existingFile(legacy);
+  if (target && (!target.isDirectory() || target.isSymbolicLink()))
+    throw new Error("旧开发应用目录异常，请检查 Electron 安装目录。");
+  await unlink(canonical);
+  if (target) await rename(legacy, canonical);
+}
+
+// app.setName() is internal to Electron; macOS reads the copied bundle's fields.
+// Keep npm's Electron.app intact so reinstalling never traverses a branding alias.
 export async function syncMacDevIdentity({
   root,
   executable,
@@ -34,43 +77,58 @@ export async function syncMacDevIdentity({
   appId,
   register = registerBundle,
 }) {
-  if (
-    !productName ||
-    /[\\/\x00-\x1f]/.test(productName) ||
-    [".", ".."].includes(productName)
-  )
-    throw new Error("开发应用名称无效。");
-  let bundle = await realpath(resolve(dirname(executable), "../.."));
-  const originalBundle = bundle;
+  assertProductName(productName);
+  const source = await realpath(resolve(dirname(executable), "../.."));
   const dependencies = await realpath(join(root, "node_modules"));
-  const within = relative(dependencies, bundle);
+  const within = relative(dependencies, source);
   if (
     !within ||
     within === ".." ||
     within.startsWith(`..${sep}`) ||
     isAbsolute(within) ||
-    !["Electron.app", `${productName}.app`].includes(basename(bundle))
+    !["Electron.app", `${productName}.app`].includes(basename(source))
   )
     throw new Error(
       "开发名称只能同步到当前项目 node_modules 内的 Electron.app。",
     );
 
-  // Dock can retain the Electron bundle filename even when the plist name is set.
-  // Keep the npm executable path valid with a relative alias; launch the real bundle.
-  let renamed = false;
-  if (basename(bundle) === "Electron.app") {
-    const destination = join(dirname(bundle), `${productName}.app`);
-    await rename(bundle, destination);
+  const sourceExecutable = await stat(join(source, "Contents/MacOS/Electron"));
+  const sourcePlist = await readFile(
+    join(source, "Contents/Info.plist"),
+    "utf8",
+  );
+  const fingerprint = JSON.stringify({
+    source,
+    size: sourceExecutable.size,
+    modified: sourceExecutable.mtimeMs,
+    plist: sourcePlist,
+  });
+  const cache = join(dependencies, ".cache", "panxu-dev-runtime");
+  await mkdir(cache, { recursive: true });
+  const bundle = join(cache, `${productName}.app`);
+  const resolvedExecutable = join(bundle, "Contents/MacOS/Electron");
+  const sourceRecord = join(cache, `${productName}.source.json`);
+  const recorded = (await existingFile(sourceRecord))
+    ? await readFile(sourceRecord, "utf8")
+    : "";
+  const copied =
+    recorded !== fingerprint || !(await existingFile(resolvedExecutable));
+  if (copied) {
+    const staging = await mkdtemp(join(cache, ".prepare-"));
     try {
-      await symlink(basename(destination), originalBundle);
-    } catch (error) {
-      await rename(destination, originalBundle);
-      throw error;
+      const next = join(staging, `${productName}.app`);
+      await cp(source, next, {
+        recursive: true,
+        verbatimSymlinks: true,
+        mode: constants.COPYFILE_FICLONE,
+      });
+      await rm(bundle, { recursive: true, force: true });
+      await rename(next, bundle);
+      await writeFile(sourceRecord, fingerprint);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
     }
-    bundle = destination;
-    renamed = true;
   }
-  const resolvedExecutable = join(bundle, "Contents", "MacOS", "Electron");
   const path = join(bundle, "Contents", "Info.plist");
   const { stdout } = await run("/usr/bin/plutil", [
     "-convert",
@@ -99,7 +157,7 @@ export async function syncMacDevIdentity({
     await utimes(bundle, now, now);
     await register(bundle);
     return {
-      changed: renamed,
+      changed: copied,
       bundle,
       executable: resolvedExecutable,
       ...expected,

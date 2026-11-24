@@ -941,6 +941,53 @@ test("自动答题先随机翻阅多页再生成，达到目标后不再取题�
   } finally { await f.cleanup(); }
 });
 
+test("自动答题恢复保留范围外回答但不复核或提交，第1000页保存回答仍可复用", async () => {
+  for (const questionBase of [7992, 8000]) {
+    for (const status of ["ready", "failed"] as const) {
+      const f = await operations();
+      try {
+        const run = f.op.store.create("answer", "继续回答", {
+          mode: "auto", accountId: account.id, count: 1, categories: ["emotion"],
+        }, 1);
+        const saved = f.op.store.put(run.id, "saved", {
+          questionId: "saved", question: "如何整理已经保存的资料？",
+          answer: "我会先核对目录，再按用途分类保存。", questionBase, status,
+        });
+        const bases: number[] = [], submitted: string[] = [];
+        f.op.client.questions = async (_account, _category, base) => {
+          bases.push(base);
+          return {
+            items: [{ qid: base === 7992 ? "saved" : "fresh", question: base === 7992 ? saved.question : "如何安排整理资料的时间？" }],
+            nextBase: base + 8, hasMore: false,
+          };
+        };
+        f.op.client.answer = async (_id, qid) => {
+          submitted.push(qid);
+          return { errno: 0, data: { aid: `aid-${qid}` } };
+        };
+        f.op.resume(run.id);
+        await f.op.settled(run.id);
+        const stored = f.op.store.item(saved.id);
+        assert.equal(stored.answer, saved.answer);
+        assert.equal(f.op.store.run(run.id).done, 1);
+        if (questionBase === 7992) {
+          assert.deepEqual(submitted, ["saved"]);
+          assert.deepEqual(bases, [7992]);
+          assert.equal(stored.status, "submitted");
+          assert.equal(f.calls(), 0);
+        } else {
+          assert.deepEqual(submitted, ["fresh"]);
+          assert.ok(bases.every((base) => base <= 7992));
+          assert.equal(stored.status, "skipped");
+          assert.match(stored.message, /前1000页采集范围/);
+          assert.ok(f.op.store.answerLogs(run.id).items.some((log) => log.message.includes("前1000页采集范围")));
+          assert.equal(f.calls(), 1);
+        }
+      } finally { await f.cleanup(); }
+    }
+  }
+});
+
 test("自动答题跨历史任务和账号按题号与内容去重，未知提交也不能重答", async () => {
   const f = await operations();
   try {

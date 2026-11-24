@@ -34,7 +34,9 @@ export default function Accounts() {
           ) : (
             <OtherAccounts
               initialProvider={
-                page === "bilibili-accounts"
+                page === "jianshu-accounts"
+                  ? "jianshu"
+                  : page === "bilibili-accounts"
                   ? "bilibili"
                   : page === "wechat-accounts"
                   ? "wechat"

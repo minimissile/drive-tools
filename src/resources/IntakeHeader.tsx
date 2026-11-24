@@ -1,8 +1,8 @@
-import { ArrowDownToLine, Check, History } from "lucide-react";
+import { Check, History } from "lucide-react";
 import { Header } from "../ui/primitives";
 import "./intake-header.css";
 
-const stages = ["资源信息", "校验与转存", "本人分享", "本地归档"];
+const stages = ["资源信息", "检索流量词", "校验与转存", "本人分享", "本地归档"];
 
 export function IntakeHeader({
   editing,
@@ -12,20 +12,21 @@ export function IntakeHeader({
   needsFileRead,
 }: {
   editing: boolean;
-  step: "info" | "files";
+  step: "info" | "keywords" | "files";
   mode: "transfer" | "owned" | "edit" | "setup";
   restored: boolean;
   needsFileRead: boolean;
 }) {
-  const active = step === "info" ? 0 : 1;
+  const active = step === "info" ? 0 : step === "keywords" ? 1 : 2;
+  const labels = mode === "transfer" ? stages : stages.slice(0, 2);
   return (
     <div className="intake-header">
       <Header
         title={editing ? "继续整理这份资源。" : "录入一份资源。"}
         action={
-          mode === "transfer" ? (
+          mode !== "setup" ? (
             <ol className="intake-progress" aria-label="资源归档流程">
-              {stages.map((label, index) => (
+              {labels.map((label, index) => (
                 <li
                   key={label}
                   data-state={
@@ -44,13 +45,6 @@ export function IntakeHeader({
                 </li>
               ))}
             </ol>
-          ) : mode === "owned" ? (
-            <span className="intake-header-mode">
-              <ArrowDownToLine size={14} aria-hidden="true" />
-              自有资源 · 直接入库
-            </span>
-          ) : mode === "edit" ? (
-            <span className="intake-header-mode">文件与分享在资源库中维护</span>
           ) : null
         }
       />

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { id, now } from "../database";
 import { AppError } from "../errors";
 import { normalizedDirectory } from "../providers/provider";
+import { supportsDriveBrowser } from "../../shared/drive-browser";
 import { providerSchema } from "../../shared/schemas";
 import {
   initializeAccountAlias,
@@ -46,14 +47,15 @@ export function createAccountHandlers(
         accountId = id("account"),
         time = now();
       if (input.browser.engine === "bitbrowser") {
-        if (input.provider !== "baidu")
+        if (!supportsDriveBrowser(input.provider))
           throw new AppError(
-            "BAIDU_REQUIRED",
-            "指纹浏览器当前仅支持百度网盘。",
+            "DRIVE_BROWSER_UNSUPPORTED",
+            "此网盘暂不支持指纹浏览器。",
           );
         return services.driveBrowsers.createAccount(
           input.alias,
           input.browser.previewToken,
+          input.provider,
         );
       }
       const isDefault = !services.repo
@@ -74,7 +76,7 @@ export function createAccountHandlers(
           time,
           time,
         );
-        if (input.provider === "baidu")
+        if (supportsDriveBrowser(input.provider))
           services.environments.registerAccount({
             kind: "drive",
             id: accountId,

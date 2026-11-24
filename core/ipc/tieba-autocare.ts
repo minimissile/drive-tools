@@ -1,6 +1,7 @@
 import {
   tiebaAutocareSaveSchema,
   tiebaAutocareSyncSchema,
+  tiebaAutocareStartSchema,
   tiebaAutocareObserveSchema,
   tiebaAutocareFollowSchema,
   tiebaAutocareAddSchema,
@@ -20,6 +21,8 @@ export function createTiebaAutocareHandlers({
       tiebaAutocare.save(tiebaAutocareSaveSchema.parse(raw)),
     "tieba.autocare.sync": (raw) =>
       tiebaAutocare.syncForums(tiebaAutocareSyncSchema.parse(raw)),
+    "tieba.autocare.start": (raw) =>
+      tiebaAutocare.startFollowed(tiebaAutocareStartSchema.parse(raw)),
     "tieba.autocare.observe": (raw) =>
       tiebaAutocare.observe(tiebaAutocareObserveSchema.parse(raw)),
     "tieba.autocare.follow": (raw) =>

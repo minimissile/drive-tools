@@ -98,7 +98,7 @@ test("低回复候选：必须至少3个真实样本且零回复不少于一半�
     false,
   );
 });
-test("添加贴吧：初始空选择不授权，跨来源去重且仍受5条上限约束", () => {
+test("添加贴吧：初始空选择不授权，跨来源去重且允许超过5条", () => {
   assert.deepEqual(
     tiebaAddPlan({ selectedNames: [], customText: "" }, "one", "111", [])
       .forumNames,
@@ -116,13 +116,14 @@ test("添加贴吧：初始空选择不授权，跨来源去重且仍受5条上�
   );
   assert.equal(result.issue, "");
   assert.deepEqual(result.forumNames, ["OFFICE技巧", "电子书pdf"]);
-  assert.ok(
+  assert.equal(
     tiebaAddPlan(
       { selectedNames: ["一", "二", "三", "四", "五"], customText: "六" },
       "one",
       "111",
       [],
-    ).issue,
+    ).forumNames.length,
+    6,
   );
 });
 test("添加逐项结果：仅同账号明确followed移除，unknown/失败/未执行原文字保留", () => {

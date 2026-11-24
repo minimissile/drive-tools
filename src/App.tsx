@@ -19,6 +19,7 @@ import { WorkbenchNavigation } from "./workbench/WorkbenchNavigation";
 import { SessionWindows } from "./dev/SessionWindows";
 import { DevUpdateBanner } from "./dev/DevUpdateBanner";
 import { OperationsFocusProvider } from "./operations/OperationsFocus";
+import { tiebaAnalysisWindowId } from "../shared/workbench-windows";
 const Workbench = lazy(() => import("./pages/Workbench"));
 const PhotoPosts = lazy(() => import("./pages/PhotoPosts"));
 const BaiduDiscovery = lazy(() => import("./pages/BaiduDiscovery"));
@@ -49,6 +50,8 @@ const TiebaPublishingWorkflow = lazy(() => import("./tieba-publishing/Workflow")
 const TiebaAnalysis = lazy(() => import("./tieba/Analysis"));
 const IntelligentOperations = lazy(() => import("./operations/Workflow"));
 const WechatWorkflow = lazy(() => import("./wechat/Workflow"));
+const KeyboardSkins = lazy(() => import("./keyboard-skins/KeyboardSkins"));
+const JianshuWorkflow = lazy(() => import("./jianshu/Workflow"));
 const SmzdmWorkflow = lazy(() => import("./smzdm/Workflow"));
 const Settings = lazy(() => import("./pages/Settings"));
 const ExceptionLogs = lazy(() => import("./system-logs/ExceptionLogs"));
@@ -86,8 +89,10 @@ const surfaces = {
   "bilibili-accounts": Accounts,
   "smzdm-accounts": Accounts,
   "smzdm-workflow": SmzdmWorkflow,
+  "jianshu-workflow": JianshuWorkflow,
+  "jianshu-accounts": Accounts,
   "wechat-workflow": WechatWorkflow,
-  "wechat-discovery": WechatWorkflow,
+  "keyboard-skins": KeyboardSkins,
   "wechat-accounts": Accounts,
   "browser-environments": FingerprintBrowser,
   intake: Intake,
@@ -120,8 +125,7 @@ export default function App() {
     { page, navigate, editResourceId, editCopyId, openSearch } =
       useAppNavigation();
   const Surface = surfaces[page];
-  // Keep workflow state and discovery results across the two WeChat pages.
-  const surfaceKey = page === "wechat-discovery" ? "wechat-workflow" : page;
+  const analysisWindow = window.panxu?.windowId === tiebaAnalysisWindowId;
   const pendingJobs =
     data?.jobs.filter((job) => !["completed", "cancelled"].includes(job.stage))
       .length ?? 0;
@@ -149,7 +153,7 @@ export default function App() {
     );
   return (
     <OperationsFocusProvider key={data.dataPath}>
-      <div className="app-shell">
+      <div className={analysisWindow ? "app-shell app-shell--analysis" : "app-shell"}>
         <a
           className="skip-link"
           href="#main-content"
@@ -160,7 +164,7 @@ export default function App() {
         >
           跳到主要内容
         </a>
-        <aside className="sidebar">
+        <aside className="sidebar" hidden={analysisWindow}>
           <div className="brand">
             <img
               className="brand-mark"
@@ -214,19 +218,23 @@ export default function App() {
           </footer>
         </aside>
         <div className="app-body">
-          <div className="topbar">
-            <div>
-              <WorkbenchNavigation />
+          {(!analysisWindow || import.meta.env.DEV) && (
+            <div className="topbar">
+              {!analysisWindow && (
+                <div>
+                  <WorkbenchNavigation />
+                </div>
+              )}
+              <div className="topbar-task-actions">
+                <SessionWindows />
+                {!analysisWindow && <ActiveTaskSwitcher />}
+                <BusyStatus />
+              </div>
             </div>
-            <div className="topbar-task-actions">
-              <SessionWindows />
-              <ActiveTaskSwitcher />
-              <BusyStatus />
-            </div>
-          </div>
+          )}
           <DevUpdateBanner />
           <main
-            key={surfaceKey}
+            key={page}
             id="main-content"
             tabIndex={-1}
             className="main-content"
@@ -244,7 +252,7 @@ export default function App() {
                 key={
                   page === "intake"
                     ? `${editResourceId ?? "new"}:${editCopyId ?? "new"}`
-                    : surfaceKey
+                    : page
                 }
               />
             </Suspense>

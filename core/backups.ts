@@ -1,4 +1,5 @@
 import { stopTiebaPublishingForBackup } from "./tieba-publishing/store";
+import { readJianshuBackupSettings } from "./jianshu/backup";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
@@ -166,6 +167,8 @@ export async function inspectBackup(folder: string) {
     accounts = Number(db.prepare("SELECT COUNT(*) n FROM accounts").get()!.n);
     drafts = Number(db.prepare("SELECT COUNT(*) n FROM drafts").get()!.n);
     requiredMusic = readMusicBackupSettings(db).required;
+    for (const image of readJianshuBackupSettings(db).required)
+      (image.storage === "zhihu-assets" ? requiredZhihu : requiredContent).push(image.file);
     required = db
       .prepare(
         "SELECT DISTINCT cover_id FROM resources WHERE cover_id IS NOT NULL",
@@ -391,6 +394,7 @@ export async function stageRestore(
           "SELECT key,value FROM settings WHERE key LIKE 'studio:working:%'",
         );
         const musicSettings = readMusicBackupSettings(db.db).settings;
+        const jianshuSettings = readJianshuBackupSettings(db.db, true).settings;
         const sourcePosts = db
           .all<{ data: string }>(
             "SELECT data FROM content_source_exports WHERE channel='weibo'",
@@ -477,6 +481,7 @@ export async function stageRestore(
         stopTiebaPublishingForBackup(db);
         stopTiebaInsightsForBackup(db);
         db.run("DELETE FROM settings");
+        for (const row of jianshuSettings) db.setSetting(row.key, row.value);
         for (const row of musicSettings) db.setSetting(row.key, row.value);
         stopMusicForBackup(db);
         restoreAutocareState(db, autocareState);
@@ -578,7 +583,7 @@ export async function stageRestore(
           "UPDATE zhihu_contents SET data=json_set(data,'$.reviewed',json('false'))",
         );
         db.run(
-          "UPDATE zhihu_plans SET data=json_remove(json_set(data,'$.active',json('false'),'$.progress',NULL,'$.message','备份恢复后请重新检查身份和等级'),'$.environment','$.uid')",
+          "UPDATE zhihu_plans SET data=json_remove(json_set(data,'$.active',json('false'),'$.progress',NULL,'$.message','备份恢复后请重新检查身份和等级'),'$.environment','$.uid','$.lastOfficialScore','$.officialProgressFailedAt')",
         );
         db.run(
           "UPDATE zhihu_tasks SET data=json_set(data,'$.status','attention','$.message','从备份恢复，请核对原账号发布结果后处理') WHERE json_extract(data,'$.status') IN ('queued','running','submitting')",

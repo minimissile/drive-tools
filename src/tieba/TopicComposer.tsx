@@ -1,3 +1,4 @@
+import { tiebaAccountName } from "./account-label";
 import { z } from "zod";
 import type { TiebaTopicsSnapshot } from "../../shared/tieba-topics";
 import { useIpcQuery } from "../api/useIpcQuery";
@@ -178,7 +179,7 @@ export function TiebaTopicComposer({
                       },
                       ...starting.available.map((target) => ({
                         value: target.id,
-                        label: `${target.name}吧 · ${s.accounts.find((account) => account.id === target.accountId)?.alias ?? "贴吧账号"}`,
+                        label: `${target.name}吧 · ${tiebaAccountName(s.accounts.find((account) => account.id === target.accountId))}`,
                       })),
                     ]}
                     onValueChange={(targetId) =>
@@ -234,9 +235,12 @@ export function TiebaTopicComposer({
                               <strong>{draft.title || "未命名主题"}</strong>
                               <small>
                                 {draft.forumName}吧 ·{" "}
-                                {s.accounts.find(
-                                  (account) => account.id === draft.accountId,
-                                )?.alias ?? "历史账号"}
+                                {tiebaAccountName(
+                                  s.accounts.find(
+                                    (account) => account.id === draft.accountId,
+                                  ),
+                                  "历史账号",
+                                )}
                               </small>
                             </td>
                             <td>

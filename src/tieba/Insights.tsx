@@ -41,8 +41,8 @@ export function TiebaInsights({
           expanded: z.boolean(),
           tab: z.enum(["metrics", "publications", "recommendations"]),
           page: z.number().int().positive(),
-          targetIds: z.array(z.string()).max(5),
-          publicationIds: z.array(z.string()).max(5),
+          targetIds: z.array(z.string()),
+          publicationIds: z.array(z.string()),
         })
         .parse(value),
   );
@@ -146,19 +146,19 @@ export function TiebaInsights({
                         view.update(
                           view.value.tab === "metrics"
                             ? {
-                                targetIds: targets
-                                  .slice(0, 5)
-                                  .map((target) => target.targetId),
+                                targetIds: targets.map(
+                                  (target) => target.targetId,
+                                ),
                               }
                             : {
-                                publicationIds: publications
-                                  .slice(0, 5)
-                                  .map((item) => item.id),
+                                publicationIds: publications.map(
+                                  (item) => item.id,
+                                ),
                               },
                         )
                       }
                     >
-                      选择前5
+                      选择全部
                       {view.value.tab === "metrics" ? "个目标" : "条记录"}
                     </Button>
                     <Button
@@ -166,7 +166,7 @@ export function TiebaInsights({
                       onClick={() => void refresh()}
                       data-testid="tieba-insights-refresh"
                     >
-                      读取所选官网进度（{ids.length}/5）
+                      读取所选官网进度（{ids.length}）
                     </Button>
                   </>
                 ) : null}
@@ -225,18 +225,13 @@ export function TiebaInsights({
                                     label=""
                                     aria-label={`刷新进度 ${target.name}吧`}
                                     checked={ids.includes(target.targetId)}
-                                    disabled={
-                                      disabled ||
-                                      (ids.length >= 5 &&
-                                        !ids.includes(target.targetId))
-                                    }
+                                    disabled={disabled}
                                     onChange={(event) =>
                                       view.update({
                                         targetIds: updateSelection(
                                           view.value.targetIds,
                                           [target.targetId],
                                           event.target.checked,
-                                          5,
                                         ),
                                       })
                                     }
@@ -351,18 +346,13 @@ export function TiebaInsights({
                                     label=""
                                     aria-label={`复查可见性 ${item.title}`}
                                     checked={ids.includes(item.id)}
-                                    disabled={
-                                      disabled ||
-                                      (ids.length >= 5 &&
-                                        !ids.includes(item.id))
-                                    }
+                                    disabled={disabled}
                                     onChange={(event) =>
                                       view.update({
                                         publicationIds: updateSelection(
                                           view.value.publicationIds,
                                           [item.id],
                                           event.target.checked,
-                                          5,
                                         ),
                                       })
                                     }

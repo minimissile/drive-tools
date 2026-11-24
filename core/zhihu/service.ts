@@ -6,8 +6,10 @@ import type { BrowserEnvironments } from "../browser-environments";
 import type { BrowserEnvironmentQueue } from "../browser-environment-queue";
 import type { AppPorts } from "../ports";
 import {
+  hasZhihuOfficialScore,
   zhihuContentInput,
   zhihuWarmingHasPromotion,
+  zhihuTaskClaimsContent,
   zhihuContentForAccount,
   zhihuPolicyInput,
   zhihuQuestionId,
@@ -95,20 +97,27 @@ export class ZhihuOperations {
     this.logs = new RuntimeLog(d.db, d.dataPath, "zhihu");
     this.time = d.clock ?? Date.now;
     for (const task of this.tasks()) {
-      // This legacy error is thrown before the answer editor is opened. Keep
-      // the failed attempt, but do not treat it as an unknown submission.
+      // Both legacy answer errors were emitted before the submission checkpoint.
+      const legacyFailureCode =
+        task.message === "未找到唯一的写回答入口，可能已回答或页面结构变化。"
+          ? "ZHIHU_ANSWER_ENTRY_UNAVAILABLE"
+          : task.message ===
+              "请在官方编辑器确认 AI 辅助声明，当前页面无法自动核实。任务已暂停。"
+            ? "ZHIHU_AI_DECLARATION_UNAVAILABLE"
+            : null;
       if (
+        task.kind === "answer" &&
         task.status === "attention" &&
         !task.submittedAt &&
         !task.failure &&
-        task.message === "未找到唯一的写回答入口，可能已回答或页面结构变化。"
+        legacyFailureCode
       )
         this.saveTask({
           ...task,
           failure: {
             phase: "before_submit",
-            code: "ZHIHU_ANSWER_ENTRY_UNAVAILABLE",
-            at: now(),
+            code: legacyFailureCode,
+            at: task.attemptedAt ?? now(),
           },
         });
       if (["running", "submitting"].includes(task.status))
@@ -211,6 +220,7 @@ export class ZhihuOperations {
   snapshot(): ZhihuSnapshot {
     const tasks = this.tasks();
     return {
+      originalDraftsSupported: true,
       running: this.running,
       busy: this.executing,
       lastHeartbeatAt: this.lastHeartbeatAt,
@@ -301,9 +311,53 @@ export class ZhihuOperations {
     this.store.save("zhihu_contents", contentId, {
       ...content,
       reviewed: true,
+      // Restore and image replacement require a new review and new approval.
+      autocareOriginal: content.reviewed ? content.autocareOriginal : undefined,
     });
     this.d.changed();
     return this.store.get("zhihu_contents", contentId);
+  }
+  setOriginalDraft(contentId: string, version: number, accountId: string | null) {
+    const content = this.store.get("zhihu_contents", contentId);
+    if (content.version !== version) fail("素材版本已变化，请刷新后操作。");
+    const tasks = this.tasks().filter((task) => task.contentId === contentId);
+    if (tasks.some((task) => ["running", "submitting"].includes(task.status)))
+      fail("此稿正在发布，请待任务结束后处理。");
+    let next: ZhihuContent;
+    if (accountId === null) {
+      next = { ...content, autocareOriginal: undefined };
+    } else {
+      if (
+        !content.reviewed ||
+        content.source ||
+        content.kind !== "article" ||
+        content.purpose !== "warming" ||
+        zhihuWarmingHasPromotion(`${content.title}\n${content.body}`)
+      )
+        fail("仅当前版本已审核的无推广本地原创文章可作为备用稿。");
+      if (tasks.some(zhihuTaskClaimsContent))
+        fail("此稿已有排期或发布尝试，请查看原任务。");
+      if (content.accountId && content.accountId !== accountId)
+        fail("此稿已绑定原账号，不能改派其他账号。");
+      const account = this.account(accountId);
+      if (!account.uid || !this.d.environments.identityCurrent(ref(accountId)))
+        return fail("请先在账号管理核验知乎登录身份。");
+      next = {
+        ...content,
+        accountId,
+        autocareOriginal: { version, uid: account.uid },
+      };
+    }
+    this.store.save("zhihu_contents", contentId, next);
+    this.logs.record({
+      level: "info",
+      event: accountId ? "content.original_approved" : "content.original_revoked",
+      message: accountId ? "已授权当前审核版本作为原创备用稿" : "已移出原创备用稿",
+      accountId: next.accountId,
+      details: { contentId, version },
+    });
+    this.d.changed();
+    return next;
   }
   importDraft(draftId: string) {
     const draft = this.d.db.get<{ title: string; body: string }>(
@@ -343,6 +397,7 @@ export class ZhihuOperations {
       ...current,
       images,
       reviewed: false,
+      autocareOriginal: undefined,
       version: current.version + 1,
       updatedAt: now(),
     };
@@ -436,12 +491,41 @@ export class ZhihuOperations {
   private recordProgress(accountId: string, progress: ZhihuProgress) {
     const account = this.account(accountId),
       plan = this.plan(accountId);
+    const sameIdentity = !!account.uid && plan.uid === account.uid;
+    const previousScore = hasZhihuOfficialScore(plan.progress)
+      ? plan.progress
+      : plan.lastOfficialScore;
     return this.savePlan({
       ...plan,
       progress,
+      lastOfficialScore: hasZhihuOfficialScore(progress)
+        ? progress
+        : sameIdentity
+          ? previousScore
+          : undefined,
+      officialProgressFailedAt:
+        sameIdentity && progress.source === "manual"
+          ? plan.officialProgressFailedAt
+          : undefined,
       environment: this.d.environments.stamp(ref(accountId)),
       uid: account.uid ?? undefined,
     }).progress!;
+  }
+  private recordProgressFailure(accountId: string, uid: string | null) {
+    const current = this.d.db.get<{ uid: string | null }>(
+      "SELECT uid FROM website_accounts WHERE id=?",
+      accountId,
+    );
+    if (!uid || uid !== current?.uid) return;
+    const plan = this.plan(accountId);
+    if (uid !== plan.uid) return;
+    this.savePlan({
+      ...plan,
+      lastOfficialScore: hasZhihuOfficialScore(plan.progress)
+        ? plan.progress
+        : plan.lastOfficialScore,
+      officialProgressFailedAt: now(),
+    });
   }
   record(accountId: string, creator: boolean, level: number, note: string) {
     if (this.executing) fail("请等待当前任务结束再记录等级。");
@@ -459,6 +543,7 @@ export class ZhihuOperations {
   async checkProgress(accountId: string, canContinue?: () => void) {
     canContinue?.();
     if (!this.d.ports.zhihu) fail("知乎浏览器适配不可用。");
+    const requestedUid = this.account(accountId).uid;
     this.logs.record({
       level: "info",
       event: "progress.checking",
@@ -473,11 +558,29 @@ export class ZhihuOperations {
           canContinue?.();
           const progress = await this.d.ports.zhihu!.progress(account);
           canContinue?.();
-          return this.recordProgress(accountId, progress);
+          if (!account.uid || this.account(accountId).uid !== account.uid)
+            return fail("读取期间账号身份已变化，请重新检查创作进度。");
+          const saved = this.recordProgress(accountId, progress);
+          if (saved.creator !== false && !hasZhihuOfficialScore(saved))
+            this.logs.record({
+              level: "warning",
+              event: "progress.partial",
+              message: "本次未读取到官方创作分。",
+              accountId,
+            });
+          return saved;
         },
         "检查知乎创作者状态",
       );
     } catch (e) {
+      let active = true;
+      try {
+        canContinue?.();
+      } catch {
+        active = false;
+      }
+      if (active && !(e instanceof AppError && e.code === "WEBSITE_ACCOUNT_BUSY"))
+        this.recordProgressFailure(accountId, requestedUid);
       this.logs.record({
         level: "error",
         event: "progress.failed",
@@ -803,8 +906,17 @@ export class ZhihuOperations {
               const c = this.store.get("zhihu_contents", task.contentId);
               if (!zhihuContentForAccount(c, task.accountId))
                 fail("素材指定账号与当前任务不一致。");
+              // Manual review does not replace the exact authority for a rule-owned task.
               if (
-                !this.approved(c, task.accountId) ||
+                managed?.ruleOwned &&
+                !this.ruleAuthority?.approved(c, task.accountId)
+              )
+                throw new AppError(
+                  "ZHIHU_CONTENT_AUTHORIZATION_CHANGED",
+                  "本次自动发文的素材授权或版本已变化，未继续提交。",
+                );
+              if (
+                (!managed?.ruleOwned && !this.approved(c, task.accountId)) ||
                 c.version !== task.contentVersion
               )
                 fail("内容已被修改，请核对后重新排队。");
@@ -961,6 +1073,7 @@ export class ZhihuOperations {
           [
             "ZHIHU_ANSWER_ENTRY_UNAVAILABLE",
             "ZHIHU_ANSWER_ALREADY_PRESENT",
+            "ZHIHU_AI_DECLARATION_UNAVAILABLE",
             "AUTH_EXPIRED",
             "ZHIHU_LOGIN_REQUIRED",
             "WEBSITE_LOGIN_REQUIRED",

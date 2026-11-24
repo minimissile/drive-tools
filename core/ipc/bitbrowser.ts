@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { bitProfileCommandSchema } from "../../shared/bitbrowser";
+import {
+  bitProfileCommandSchema,
+  bitIdlePolicySchema,
+} from "../../shared/bitbrowser";
 import { environmentAccountSchema } from "../../shared/browser-environments";
 import type { HandlerMap, HandlerServices } from "./types";
 
@@ -7,6 +10,12 @@ export function createBitBrowserHandlers(
   s: Pick<HandlerServices, "bitManagement">,
 ) {
   return {
+    "bit.pages": (input) =>
+      s.bitManagement.pages(bitProfileCommandSchema.parse(input)),
+    "bit.cleanPages": (input) =>
+      s.bitManagement.cleanPages(bitProfileCommandSchema.parse(input)),
+    "bit.idlePolicy": (input) =>
+      s.bitManagement.idlePolicy(bitIdlePolicySchema.parse(input)),
     "bit.profiles": () => s.bitManagement.list(),
     "bit.diagnose": (input) =>
       s.bitManagement.diagnose(bitProfileCommandSchema.parse(input)),

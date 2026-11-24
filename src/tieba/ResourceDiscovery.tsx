@@ -48,6 +48,8 @@ import { PostExposureCell } from "./PostExposureCell";
 import { TrafficResults } from "./TrafficResults";
 import { formatDiscoveryResource } from "./discovery-resource-label";
 import { DiscoveryPageRefresh } from "./DiscoveryPageRefresh";
+import { FilterAuditResults } from "./FilterAuditResults";
+import { RecycledResults } from "./RecycledResults";
 import "./resource-discovery.css";
 
 const maxSeedInputLength = 10_004;
@@ -137,6 +139,8 @@ const resultsTabSchema = z.enum([
   "potential",
   "pending",
   "traffic",
+  "recycled",
+  "filterAudit",
   "sources",
   "logs",
 ]);
@@ -457,9 +461,9 @@ export function ResourceDiscovery({
                           </label>
                           <small className="muted">
                             {ruleInputs.oldResourceCheckEnabled
-                              ? "开启：老帖先通过流量初筛，再检查标题、正文和最近 20 条回复；出现网盘、云盘、资源、链接、提取码、口令、百度、夸克或 //pan. 中任一关键词即可通过，不要求文本能解析成有效链接。"
+                              ? "开启后，历史扫描会检查流量达标帖的标题、正文和最近最多 20 条回复。识别到网盘分享链接，或命中网盘、云盘、链接、提取码、口令、百度、夸克、//pan. 中任一关键词，即可通过。"
                               : "关闭：跳过资源筛查，老帖达到流量门槛即可进入流量帖库。"}{" "}
-                            此开关只影响老帖流量；高流量帖仍可直接入库。点“保存规则”后生效。开启时待核验记录由后台复查；未通过的记录会从列表隐藏但不会删除，关闭校验后可再次看到。
+                            此开关适用于历史扫描。点“保存规则”后生效。开启时待核验记录由后台复查；未通过的记录会从列表隐藏但不会删除，关闭校验后可再次看到。
                             两次实测读数至少间隔 {oldTrafficObservationDays} 天，按实际间隔计算新增浏览量。
                           </small>
                         </>
@@ -497,6 +501,8 @@ export function ResourceDiscovery({
               !monitoringRulesReady || state.busy || pending || draft.value.seeds !== null
             }
             onScan={() => void action(() => ipc("tieba.discovery.scan"))}
+            onStartFilterAudit={() => void action(() => ipc("tieba.discovery.startFilterAudit"))}
+            actionPending={pending}
             onScanOld={() => void action(() => ipc("tieba.discovery.scanOldForum"))}
             onStopOld={() => void action(() => ipc("tieba.discovery.auto", { enabled: false }))}
             scanOldDisabled={pending || draft.value.seeds !== null}
@@ -514,6 +520,8 @@ function DiscoveryResults({
   state,
   scanDisabled,
   onScan,
+  onStartFilterAudit,
+  actionPending,
   onScanOld,
   onStopOld,
   scanOldDisabled,
@@ -524,6 +532,8 @@ function DiscoveryResults({
   state: TiebaDiscoverySnapshot;
   scanDisabled: boolean;
   onScan: () => void;
+  onStartFilterAudit: () => void;
+  actionPending: boolean;
   onScanOld: () => void;
   onStopOld: () => void;
   scanOldDisabled: boolean;
@@ -594,6 +604,8 @@ function DiscoveryResults({
                   ? "流量帖"
                   : `流量帖 ${formatAnalysisCount(state.trafficCount + state.oldTraffic.tracked)}`,
               ],
+              ["recycled", state.recycledCount === undefined ? "回收贴" : `回收贴 ${state.recycledCount}`],
+              ["filterAudit", state.filterAudit?.count ? `筛查抽查 ${state.filterAudit.count}` : "筛查抽查"],
               ["sources", `扩散路径 ${state.sources.length}`],
               ["logs", "扫描日志"],
             ]}
@@ -625,7 +637,6 @@ function DiscoveryResults({
         <TabPanel value="traffic" keepMounted>
           <TrafficResults
             result={state.oldTraffic}
-            highCount={state.trafficCount}
             resourceReady={state.oldResourceReady === true}
             resourceAdmission={state.oldResourceAdmission === true}
             resourcePending={state.oldResourcePending}
@@ -638,6 +649,20 @@ function DiscoveryResults({
             scanDisabled={scanOldDisabled}
             onScan={onScanOld}
             onStop={state.auto ? undefined : onStopOld}
+          />
+        </TabPanel>
+        <TabPanel value="recycled">
+          <RecycledResults count={state.recycledCount} />
+        </TabPanel>
+        <TabPanel value="filterAudit">
+          <FilterAuditResults
+            key={state.filterAudit?.batch ?? "not-started"}
+            audit={state.filterAudit}
+            auto={state.auto}
+            starting={actionPending}
+            sortReady={state.filterAuditSortReady === true}
+            onStart={onStartFilterAudit}
+            refreshSnapshot={refreshSnapshot}
           />
         </TabPanel>
         <TabPanel value="sources" keepMounted>

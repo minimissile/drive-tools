@@ -12,7 +12,13 @@ export function createWebsiteAccountHandlers(
   const id = z.object({ id: websiteAccountIdSchema });
   const alias = z.string().trim().min(1).max(60);
   return {
-    "websiteAccounts.list": () => services.websiteAccounts.list(),
+    "websiteAccounts.list": (object) =>
+      services.websiteAccounts.list(
+        z
+          .object({ provider: websiteProviderSchema.optional() })
+          .optional()
+          .parse(object)?.provider,
+      ),
     "websiteAccounts.add": (object) => {
       const value = z
         .object({

@@ -1,6 +1,12 @@
 import { AiIcon } from "../ui/AiIcon";
 import { useEffect, useId, useRef, useState } from "react";
-import { Image as ImageIcon, ImagePlus, Maximize2, Upload } from "lucide-react";
+import {
+  ClipboardPaste,
+  Image as ImageIcon,
+  ImagePlus,
+  Maximize2,
+  Upload,
+} from "lucide-react";
 import {
   wechatImageBatchLimit,
   type WechatImageGenerationMode,
@@ -15,6 +21,7 @@ import {
 import { wechatArticleImages } from "../../shared/wechat-markup";
 import { ipc } from "../api/client";
 import { updateSelection } from "../lib/selection";
+import { useAppActions } from "../state";
 import { Dialog } from "../ui/Dialog";
 import { Select } from "../ui/Select";
 import { wechatImagePreviewUrl } from "./image-preview";
@@ -52,7 +59,9 @@ type ImageRequest = {
   description: string;
 };
 type Position = Targets[number]["position"];
-type UploadTarget = "body" | "cover" | ArticleImage;
+type ImageTarget = "body" | "cover" | ArticleImage;
+const targetKey = (target: ImageTarget) =>
+  typeof target === "string" ? target : target.index;
 const selectionKey = ({ position, url }: Targets[number]) =>
   `${position}:${url}`;
 const imageLabel = (position: Position) =>
@@ -248,6 +257,7 @@ export function ArticleImages({
   onBusy(busy: boolean): void;
   onRegenerate(request: ImageRequest): Promise<WechatRegenerateImagesResult>;
 }) {
+  const { notify } = useAppActions();
   const images = wechatArticleImages(body);
   const coverIndex = images.findIndex((image) => image.url === coverUrl);
   const [error, setError] = useState("");
@@ -330,41 +340,66 @@ export function ArticleImages({
     onBody(`${body}\n\n![${alt}](${url})\n`);
     if (!coverUrl) onCover(url);
   };
-  const upload = async (target: UploadTarget) => {
+  const loadImage = async (target: ImageTarget, pasteLabel?: string) => {
     if (lock.current || disabled) return;
     lock.current = true;
-    setPending(typeof target === "string" ? target : target.index);
+    setPending(pasteLabel ? `paste:${targetKey(target)}` : targetKey(target));
     onBusy(true);
     setError("");
     try {
-      const image = await ipc("wechat.pickImage", { id });
-      if (!image || !mounted.current) return;
-      if (target === "cover") {
-        onCover(image.url);
+      const image = await ipc(
+        pasteLabel ? "wechat.pasteImage" : "wechat.pickImage",
+        { id },
+      );
+      if (!mounted.current) return;
+      if (!image) {
+        if (pasteLabel)
+          notify(
+            "剪贴板里没有可用的图片。请在微信原文中复制图片后再试。",
+            "warning",
+          );
         return;
       }
-      const alt = (
-        (typeof target === "string" ? "" : target.alt) ||
-        image.name ||
-        "文章配图"
-      ).replace(/[\[\]\n]/g, "");
-      if (target === "body") append(image.url, alt);
-      else {
+      if (target === "cover") {
+        onCover(image.url);
+      } else if (target === "body") {
+        append(image.url, image.name.replace(/[\[\]\n]/g, "") || "文章配图");
+      } else {
+        const alt = pasteLabel
+          ? target.alt
+          : (target.alt || image.name || "文章配图").replace(/[\[\]\n]/g, "");
         replace(target.index, target.markup, `![${alt}](${image.url})`);
         if (!coverUrl || target.url === coverUrl) onCover(image.url);
       }
+      if (pasteLabel) notify(`已更新${pasteLabel}。`, "success");
     } catch (cause) {
-      if (mounted.current)
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "图片读取失败，请重新选择图片。",
-        );
+      if (mounted.current) {
+        const message = cause instanceof Error ? cause.message : "";
+        if (pasteLabel)
+          notify(message || "图片读取失败，请重新复制后再试。", "error");
+        else setError(message || "图片读取失败，请重新选择图片。");
+      }
     } finally {
       lock.current = false;
       if (mounted.current) setPending(null);
       onBusy(false);
     }
+  };
+  const pasteButton = (target: "cover" | ArticleImage, label: string) => {
+    const action = target === "cover" && !coverUrl ? "粘贴封面" : "粘贴替换";
+    const pasting = pending === `paste:${targetKey(target)}`;
+    return (
+      <Button
+        size="compact"
+        disabled={blocked}
+        aria-label={`${pasting ? "正在粘贴…" : action}（${label}）`}
+        title="使用剪贴板里的图片"
+        onClick={() => void loadImage(target, label)}
+      >
+        <ClipboardPaste size={14} aria-hidden="true" />
+        {pasting ? "正在粘贴…" : action}
+      </Button>
+    );
   };
   const openPreview = (src: string, label: string) => {
     setPreviewFailed(false);
@@ -562,10 +597,11 @@ export function ArticleImages({
               ) : null}
               {!batch ? (
                 <>
+                  {pasteButton("cover", "文章封面")}
                   <Button
                     size="compact"
                     disabled={blocked}
-                    onClick={() => void upload("cover")}
+                    onClick={() => void loadImage("cover")}
                   >
                     {pending === "cover"
                       ? "正在选图…"
@@ -626,7 +662,7 @@ export function ArticleImages({
             ) : null}
             <Button
               disabled={blocked || batch}
-              onClick={() => void upload("body")}
+              onClick={() => void loadImage("body")}
             >
               <Upload size={14} aria-hidden="true" />
               {pending === "body" ? "正在选图…" : "添加本地图片"}
@@ -681,11 +717,12 @@ export function ArticleImages({
                           >
                             <AiIcon size={14} /> AI 换图
                           </Button>
+                          {pasteButton(image, label)}
                           <Button
                             size="compact"
                             disabled={blocked}
                             aria-label={`更换图片（${label}）`}
-                            onClick={() => void upload(image)}
+                            onClick={() => void loadImage(image)}
                           >
                             {pending === image.index ? "正在选图…" : "更换图片"}
                           </Button>

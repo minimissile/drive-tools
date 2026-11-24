@@ -1,3 +1,10 @@
+import {
+  createTemporaryPage,
+  expectTemporaryPageNavigation,
+  releaseTemporaryPage,
+} from "../browser-page-lifecycle";
+import { captureTiebaModernPage } from "./modern-page";
+import { tiebaPageError } from "./page-errors";
 import type { BrowserContext } from "playwright-core";
 import type { WebsiteSessionState } from "../../shared/website-accounts";
 import { officialBrowserPage } from "../browser-pages";
@@ -7,7 +14,14 @@ import { tiebaCurrentUser, tiebaHomeIdentityScript } from "./identity";
 export async function verifyBitTieba(
   context: BrowserContext,
 ): Promise<WebsiteSessionState> {
-  const page = await context.newPage();
+  const page = await createTemporaryPage(
+    context,
+    "https://tieba.baidu.com/",
+  ).catch((error) => {
+    throw tiebaPageError(error);
+  });
+  const modern = captureTiebaModernPage(page);
+  let tiebaOpenUid: string | undefined;
   let blockedOrigin = "";
   try {
     // Identity reads must never follow a legacy redirect that downgrades login
@@ -28,6 +42,7 @@ export async function verifyBitTieba(
       await route.fallback();
     });
     const read = async (path: "/dc/common/tbs" | "/f/user/json_userinfo") => {
+      expectTemporaryPageNavigation(page, `https://tieba.baidu.com${path}`);
       const response = await page.goto(`https://tieba.baidu.com${path}`, {
         waitUntil: "domcontentloaded",
         timeout: 20000,
@@ -63,7 +78,9 @@ export async function verifyBitTieba(
              if ([false, 0, '0'].includes(data.is_login)) return false;
              throw Error('贴吧登录状态响应已变化，请稍后重试');`
           : `const currentUser = (${tiebaCurrentUser.toString()});
-             return currentUser(data.data?.user) ?? currentUser(data.data);`
+             const user = data.data?.user ?? data.data;
+             const identity = currentUser(user);
+             return identity && { ...identity, openUidOnly: !currentUser({ ...user, open_uid: undefined }) };`
       }
     })()`);
     };
@@ -95,6 +112,45 @@ export async function verifyBitTieba(
         viewerError = error;
       }
     }
+    if (
+      identity &&
+      (identity as typeof identity & { openUidOnly?: boolean }).openUidOnly
+    ) {
+      const alias = identity.uid;
+      // open_uid is not PageData/user.id. Observe the forum's own current-viewer
+      // response, then recheck the alias in the same browser session.
+      expectTemporaryPageNavigation(
+        page,
+        "https://tieba.baidu.com/f?kw=%E8%B4%B4%E5%90%A7&ie=utf-8",
+      );
+      const response = await page.goto(
+        "https://tieba.baidu.com/f?kw=%E8%B4%B4%E5%90%A7&ie=utf-8",
+        { waitUntil: "domcontentloaded", timeout: 30000 },
+      );
+      if (!response?.ok() || !officialBrowserPage(page, ["tieba.baidu.com"]))
+        throw new AppError(
+          "TIEBA_UID_UNAVAILABLE",
+          "未能核实贴吧原始用户UID，请完成官网验证后重试。",
+        );
+      const forum = await modern.wait();
+      const canonical =
+        forum?.viewer ??
+        modern.viewer() ??
+        (await page.evaluate(`(() => {
+        const user = window.PageData?.user;
+        return (${tiebaCurrentUser.toString()})({ ...user, open_uid: undefined });
+      })()`));
+      const repeated = (await read("/f/user/json_userinfo")) as {
+        uid?: string;
+      } | null;
+      if (!canonical || repeated?.uid !== alias)
+        throw new AppError(
+          "TIEBA_IDENTITY_UNVERIFIED",
+          "贴吧身份核验未取得一致的原始UID与开放标识，已保留原账号，请稍后重试。",
+        );
+      identity = canonical;
+      tiebaOpenUid = alias;
+    }
     // This endpoint has no target user parameter: a valid UID belongs to the
     // signed-in viewer. The auxiliary TBS endpoint must not gate this proof.
     if (!identity) {
@@ -114,6 +170,7 @@ export async function verifyBitTieba(
       }
     }
     return {
+      ...(tiebaOpenUid ? { tiebaOpenUid } : {}),
       hasSession: !!identity,
       uid: identity?.uid ?? null,
       nickname: identity?.nickname ?? null,
@@ -132,12 +189,13 @@ export async function verifyBitTieba(
           ? "贴吧旧身份接口要求使用 HTTP，已停止读取。请在官方 HTTPS 首页完成登录后重试。"
           : "贴吧要求重新登录或安全验证，请在官方窗口完成后重试。",
       );
-    if (error instanceof AppError) throw error;
+    const classified = tiebaPageError(error);
+    if (classified instanceof AppError) throw classified;
     throw new AppError(
       "TIEBA_IDENTITY_FAILED",
       "贴吧身份检查未完成，请检查此指纹环境的网络并在官方窗口完成登录或安全验证后重试。",
     );
   } finally {
-    await page.close().catch(() => {});
+    await releaseTemporaryPage(page);
   }
 }

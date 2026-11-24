@@ -9,10 +9,13 @@ import type {
   TiebaDiscoveryRules,
   TiebaDiscoveryTrafficPost,
   TiebaDiscoverySnapshot,
+  TiebaDiscoveryTask,
   TiebaDiscoverySource,
   TiebaOldTrafficView,
   TiebaOldResourceFilter,
   TiebaTrafficPostsView,
+  TiebaTrafficSort,
+  TiebaTrafficSortDirection,
   TiebaDiscoveryRefresh,
   TiebaDiscoveryImportKind,
 } from "../../shared/tieba-resource-discovery";
@@ -33,6 +36,7 @@ import {
   refreshPotentialPost,
   refreshTrafficPost,
   savePotentialPosts,
+  potentialMembership,
   saveTrafficPosts,
   trafficCount,
   trafficMembership,
@@ -54,6 +58,7 @@ import {
   forumExposure,
   groupResources,
   inRecentGrowthWindow,
+  isResourceRequest,
   meetsDiscoveryRule,
   minReadingGap,
   observePostViews,
@@ -78,6 +83,7 @@ import {
 import {
   admitOldResource,
   isOldResource,
+  oldResourceAdmission,
   nextOldResourceCheck,
   pendingOldResourceCount,
   queueOldResource,
@@ -87,14 +93,18 @@ import {
 } from "./old-resource";
 import { tiebaDiscoveryStateKey as storageKey } from "./migration";
 import { tiebaThreadUrl } from "../tieba/participation-page";
+import { TiebaFilterAudit, type FilterRejection } from "./filter-audit";
+import { recordRecycledPosts, recycledPage, recycledPosts, type RecycledPost } from "./recycled";
 const autoKey = "tieba.resourceDiscovery.auto";
 const rulesKey = "tieba.resourceDiscovery.rules";
 const logsKey = "tieba.resourceDiscovery.logs";
+const trafficResourceMarkKey = (id: string) => `tieba.resourceDiscovery.resourceRecorded:${id}`;
 const additionalForumsPerScan = 3;
 const recentPagesPerForum = 3;
 const recentGrowthPageSize = 50;
 const recentGrowthProbesPerRun = 12;
 const recentGrowthDetailReadsPerSurvey = 20;
+const cumulativeTrafficDetailReadsPerRun = 12;
 const historyKey = "tieba.resourceDiscovery.history";
 const historyRetryGap = 5 * 60_000;
 const historyRescanGap = 7 * 24 * discoveryInterval;
@@ -178,6 +188,11 @@ const recent = (
   return time <= now && now - time <= within;
 };
 
+function passesCumulativeTraffic(reading: OldTrafficReading, rules: TiebaDiscoveryRules) {
+  return reading.views !== null && reading.views >= rules.trafficThreshold &&
+    recent(reading.post, reading.at, trafficLookback);
+}
+
 function postReading(post: Post): TiebaDiscoveryReadingPost {
   const { id, title, url, forum, author, publishedAt, views, checkedAt, interactions } = post;
   return {
@@ -194,6 +209,13 @@ function pendingPosts(state: Stored, now: number, rules: TiebaDiscoveryRules) {
     post.pendingSince !== undefined &&
     recent(post, now, rules.lookbackHours * discoveryInterval),
   );
+}
+
+function belowPotentialThreshold(post: Pick<TiebaDiscoveryReadingPost, "publishedAt" | "views" | "checkedAt">, rules: TiebaDiscoveryRules) {
+  return post.views !== null && post.views < rules.trafficThreshold &&
+    recent(post, post.checkedAt, rules.lookbackHours * discoveryInterval) &&
+    !awaitsMaturePotentialReading(post, rules) &&
+    qualifyingHourlyViews(post, post.checkedAt, rules) === null;
 }
 
 function candidates(posts: Post[], now: number, lookback: number) {
@@ -270,10 +292,12 @@ const readers: TiebaDiscoveryReaders = {
 };
 
 export class TiebaResourceDiscovery {
+  private filterAudit: TiebaFilterAudit;
   private auto: boolean;
   private nextAt: number | null = null;
   private nextMode?: ScanMode;
   private scanningForum?: string;
+  private scanMode: ScanMode = "survey";
   private timer: ReturnType<typeof setTimeout> | undefined;
   private active: AbortController | undefined;
   private closed = false;
@@ -298,6 +322,7 @@ export class TiebaResourceDiscovery {
     private now = Date.now,
     private random = Math.random,
   ) {
+    this.filterAudit = new TiebaFilterAudit(db);
     this.auto = this.db.setting<boolean>(autoKey, false) === true;
     this.historyProgress = this.describeHistory(this.history());
     if (this.auto) {
@@ -310,6 +335,16 @@ export class TiebaResourceDiscovery {
 
   get isBusy() {
     return !!this.active || !!this.historyActive || !!this.refreshActive;
+  }
+
+  activeTasks(): TiebaDiscoveryTask[] {
+    if (this.closed) return [];
+    const tasks: TiebaDiscoveryTask[] = [];
+    if (this.active) tasks.push({ kind: this.scanMode, forum: this.scanningForum });
+    if (this.historyActive) tasks.push({ kind: "history", ...this.historyPage });
+    if (this.resourceActive) tasks.push({ kind: "resourceCheck" });
+    if (this.refreshActive) tasks.push({ kind: "refresh" });
+    return tasks;
   }
 
   private stored() {
@@ -366,6 +401,9 @@ export class TiebaResourceDiscovery {
       oldResourceAdmission: true,
       oldResourcePending: rules.oldResourceCheckEnabled ? pendingOldResourceCount(this.db) : 0,
       historyProgress: this.historyProgress,
+      filterAudit: this.filterAudit.summary(),
+      filterAuditSortReady: true,
+      recycledCount: recycledPosts(this.db).length,
       rules,
       lastRun: state.lastRun,
       ...candidates(
@@ -403,8 +441,44 @@ export class TiebaResourceDiscovery {
     return oldTrafficPage(this.db, page, this.rules(), view, resource);
   }
 
-  trafficPosts(page: number, view: TiebaTrafficPostsView, resource: TiebaOldResourceFilter) {
-    return trafficPostsPage(this.db, page, this.rules(), view, resource);
+  trafficPosts(
+    page: number,
+    view: TiebaTrafficPostsView,
+    resource: TiebaOldResourceFilter,
+    sort: TiebaTrafficSort = "archivedAt",
+    direction: TiebaTrafficSortDirection = "desc",
+  ) {
+    const result = trafficPostsPage(this.db, page, this.rules(), view, resource, sort, direction);
+    if (!result.items.length) return result;
+    const keys = result.items.map(({ id }) => trafficResourceMarkKey(id));
+    const marked = new Set(this.db.all<{ key: string }>(
+      `SELECT key FROM settings WHERE key IN (${keys.map(() => "?").join(", ")})`,
+      ...keys,
+    ).map(({ key }) => key));
+    return { ...result, items: result.items.map((post, index) => ({ ...post, resourceRecorded: marked.has(keys[index]) })) };
+  }
+
+  setResourceRecorded(id: string, recorded: boolean) {
+    if (!this.trafficRefreshKind(id))
+      throw new AppError("TIEBA_DISCOVERY_POST_NOT_FOUND", "这条帖子已移出流量贴，请刷新后再试。");
+    const key = trafficResourceMarkKey(id);
+    const write = recorded
+      ? this.db.db.prepare("INSERT OR IGNORE INTO settings(key, value) VALUES (?, 'true')")
+      : this.db.db.prepare("DELETE FROM settings WHERE key = ?");
+    if (write.run(key).changes) this.changed();
+  }
+
+  filterAuditPage(...args: Parameters<TiebaFilterAudit["page"]>) {
+    return this.filterAudit.page(...args);
+  }
+
+  recycledPage(page: number) {
+    return recycledPage(this.db, page);
+  }
+
+  startFilterAudit() {
+    if (this.filterAudit.start(this.now())) this.changed();
+    return this.snapshot();
   }
 
   async importPost(id: string): Promise<{
@@ -416,6 +490,7 @@ export class TiebaResourceDiscovery {
       throw new AppError("TIEBA_DISCOVERY_BUSY", "请等当前巡查或刷新结束后再试。");
     const controller = new AbortController();
     this.refreshActive = controller;
+    this.changed();
     const { signal } = controller;
     try {
       const send: typeof fetch = (input, options) => fetch(input, {
@@ -447,6 +522,7 @@ export class TiebaResourceDiscovery {
       if (views >= rules.trafficThreshold) {
         this.db.transaction(() => {
           saveTrafficPosts(this.db, new Map([[id, { ...reading, fromPotential: archivedPotential }]]), rules);
+          recordRecycledPosts(this.db, [], at, [id]);
           if (existing) {
             state.posts = state.posts.filter((post) => post.id !== id);
             this.db.setSetting(storageKey, state);
@@ -490,6 +566,7 @@ export class TiebaResourceDiscovery {
               ...reading, first: post.potential, confirmedAt: potential?.recentGrowth ? at : null,
               ...(potential?.recentGrowth ? { confirmedGrowth: potential.recentGrowth } : {}),
             }]);
+          if (stage !== "growthWatch") recordRecycledPosts(this.db, [], at, [id]);
           return {
             kind: stage,
             already: archivedPotential || (stage === "pending" && existing?.pendingSince !== undefined),
@@ -519,7 +596,7 @@ export class TiebaResourceDiscovery {
       return !!this.db.get(
         `SELECT 1 FROM tieba_discovery_old_traffic t
          LEFT JOIN tieba_discovery_old_resource r USING (thread_id)
-         WHERE t.thread_id = ? AND t.last_at IS NOT NULL AND (? = 0 OR r.admitted = 1)`,
+         WHERE t.thread_id = ? AND t.last_at IS NOT NULL AND (? = 0 OR (${oldResourceAdmission}))`,
         id, Number(rules.oldResourceCheckEnabled),
       );
     };
@@ -544,6 +621,7 @@ export class TiebaResourceDiscovery {
         if (!isOldResource(resource)) return "no-resource";
       }
       saveOldTraffic(this.db, [reading], [], this.now(), latest, latest.oldResourceCheckEnabled ? resource : undefined);
+      recordRecycledPosts(this.db, [], reading.at, [id]);
       this.db.db.prepare("DELETE FROM tieba_discovery_old_resource_queue WHERE thread_id = ?").run(id);
       return "saved";
     });
@@ -554,6 +632,7 @@ export class TiebaResourceDiscovery {
       throw new AppError("TIEBA_DISCOVERY_BUSY", "请等当前巡查或刷新结束后再试。");
     const controller = new AbortController();
     this.refreshActive = controller;
+    this.changed();
     const { signal } = controller;
     const send: typeof fetch = (url, options) => fetch(url, {
       ...options,
@@ -616,7 +695,7 @@ export class TiebaResourceDiscovery {
     if (this.db.get(`
       SELECT 1 FROM tieba_discovery_old_traffic t
       ${oldResourceCheckEnabled ? "JOIN tieba_discovery_old_resource r USING (thread_id)" : ""}
-      WHERE t.thread_id = ? AND t.last_at IS NOT NULL ${oldResourceCheckEnabled ? "AND r.admitted = 1" : ""}
+      WHERE t.thread_id = ? AND t.last_at IS NOT NULL ${oldResourceCheckEnabled ? `AND ${oldResourceAdmission}` : ""}
     `, id)) return "oldTraffic";
     if (this.db.get(`
       SELECT 1 FROM tieba_discovery_traffic t
@@ -639,6 +718,20 @@ export class TiebaResourceDiscovery {
     }
   }
 
+  private dropOldTrafficBelowThreshold(reading: OldTrafficReading, rules: TiebaDiscoveryRules) {
+    if (reading.views === null || passesOldTrafficScreen(reading, rules) || passesCumulativeTraffic(reading, rules)) return false;
+    const { id } = reading.post;
+    const removed = this.db.db.prepare(`
+      DELETE FROM tieba_discovery_old_traffic WHERE thread_id = ?
+        AND max(last_at, coalesce(json_extract(post, '$.latestReading.at'), last_at)) <= ?
+    `).run(id, reading.at);
+    if (!removed.changes) return false;
+    this.db.db.prepare("DELETE FROM tieba_discovery_old_resource_queue WHERE thread_id = ?").run(id);
+    if (!this.trafficRefreshKind(id) && !potentialMembership(this.db, rules)(id))
+      recordRecycledPosts(this.db, [{ post: { ...reading.post, views: reading.views }, source: "traffic", reason: "belowThreshold" }], reading.at);
+    return true;
+  }
+
   private saveRefreshedPost(
     kind: Exclude<TiebaDiscoveryRefresh["kind"], "sources" | "trafficPosts">,
     id: string,
@@ -648,18 +741,50 @@ export class TiebaResourceDiscovery {
     const rules = this.rules();
     if (kind === "oldTraffic") {
       if (!this.hasRefreshPost(kind, id)) return false;
+      const wasVisible = this.trafficRefreshKind(id) === "oldTraffic";
+      const before = this.db.get<{ post: string; last_views: number }>(
+        "SELECT post, last_views FROM tieba_discovery_old_traffic WHERE thread_id = ?", id,
+      );
+      if (wasVisible && before && this.dropOldTrafficBelowThreshold({ post: JSON.parse(before.post), views, at }, rules)) return true;
       if (views !== null) refreshOldTrafficReading(this.db, id, at, views, rules);
       if (saveOldResource(this.db, id, resource, at, true)) {
         this.db.db.prepare("DELETE FROM tieba_discovery_old_resource_queue WHERE thread_id = ?").run(id);
-        // A refresh updates the evidence on an existing record. Admission is
-        // evaluated on discovery, so the refreshed row stays reviewable.
+        if (wasVisible && rules.oldResourceCheckEnabled && !isOldResource(resource) && before) {
+          admitOldResource(this.db, id, false);
+          if (!this.trafficRefreshKind(id) && !potentialMembership(this.db, rules)(id))
+            recordRecycledPosts(this.db, [{
+              post: { ...JSON.parse(before.post), views: views ?? before.last_views },
+              source: "traffic", reason: "resource",
+            }], at);
+        }
       }
       return true;
     }
-    if (kind === "traffic") return refreshTrafficPost(this.db, id, views, at, resource);
+    if (kind === "traffic") {
+      const saved = refreshTrafficPost(this.db, id, views, at, resource);
+      if (saved && views !== null && views < rules.trafficThreshold) {
+        const removed = this.db.get<{ reading: string }>(
+          "DELETE FROM tieba_discovery_traffic WHERE thread_id = ? RETURNING reading", id,
+        );
+        if (removed && !potentialMembership(this.db, rules)(id))
+          recordRecycledPosts(this.db, [{ post: JSON.parse(removed.reading), source: "traffic", reason: "belowThreshold" }], at);
+      }
+      return saved;
+    }
     const archived = refreshPotentialPost(this.db, id, views, at, resource, rules);
     const state = this.stored();
     const post = state.posts.find((item) => item.id === id);
+    if (kind === "potential" && archived && views !== null) {
+      const row = this.db.get<{ latest: string }>("SELECT latest FROM tieba_discovery_potential WHERE thread_id = ?", id);
+      if (row) {
+        const reading = JSON.parse(row.latest) as TiebaDiscoveryReadingPost;
+        if (belowPotentialThreshold(reading, rules)) {
+          this.db.db.prepare("DELETE FROM tieba_discovery_potential WHERE thread_id = ?").run(id);
+          if (post) post.potential = undefined;
+          recordRecycledPosts(this.db, [{ post: reading, source: "potential", reason: "belowThreshold" }], at);
+        }
+      }
+    }
     if (!post || post.checkedAt > at) return archived;
     post.resource = resource;
     post.linked = resource.linkSources.length > 0;
@@ -671,9 +796,28 @@ export class TiebaResourceDiscovery {
     return true;
   }
 
+  private saveHistoricalCumulativeTraffic(
+    reading: OldTrafficReading,
+    rules: TiebaDiscoveryRules,
+    resource = reading.resource,
+  ) {
+    const { at, views } = reading;
+    if (views === null || !passesCumulativeTraffic(reading, rules)) return false;
+    const { id, title, url, forum, publishedAt, author = "" } = reading.post;
+    saveTrafficPosts(this.db, new Map([[id, {
+      id, title, url, forum, publishedAt, author, views, checkedAt: at,
+      replies: null, likes: null, shares: null, resource,
+      fromPotential: this.hasRefreshPost("potential", id),
+    }]]), rules);
+    return true;
+  }
+
   private stageOldResources(readings: Iterable<OldTrafficReading>, rules: TiebaDiscoveryRules) {
+    const rejected: FilterRejection[] = [];
+    const recycled = new Set(recycledPosts(this.db).map(({ post }) => post.id));
+    const reconsidered: string[] = [];
     const get = this.db.db.prepare(
-      "SELECT admitted, checked_at FROM tieba_discovery_old_resource WHERE thread_id = ?",
+      `SELECT (${oldResourceAdmission}) AS admitted, checked_at FROM tieba_discovery_old_resource r WHERE thread_id = ?`,
     );
     const deleted = this.db.db.prepare(
       "SELECT 1 FROM tieba_discovery_old_resource_deleted WHERE thread_id = ?",
@@ -684,11 +828,17 @@ export class TiebaResourceDiscovery {
     const clearQueued = this.db.db.prepare(
       "DELETE FROM tieba_discovery_old_resource_queue WHERE thread_id = ?",
     );
+    const archived = trafficMembership(this.db);
     for (const reading of readings) {
       const id = reading.post.id;
       if (deleted.get(id)) continue;
+      if (recycled.has(id)) reconsidered.push(id);
+      const passesOld = passesOldTrafficScreen(reading, rules);
       if (!rules.oldResourceCheckEnabled && reading.views !== null) {
-        saveOldTraffic(this.db, [reading], [], this.now(), rules);
+        if (passesOld || hasBaseline.get(id))
+          saveOldTraffic(this.db, [reading], [], this.now(), rules);
+        else if (!archived(id) && !this.saveHistoricalCumulativeTraffic(reading, rules))
+          rejected.push(oldTrafficRejection(reading, reading.views, rules));
         clearQueued.run(id);
         continue;
       }
@@ -697,9 +847,20 @@ export class TiebaResourceDiscovery {
         saveOldTraffic(this.db, [reading], [], this.now(), rules);
         continue;
       }
-      if (reading.views !== null && !passesOldTrafficScreen(reading, rules)) continue;
+      if (reading.views !== null && !passesOld) {
+        if (archived(id)) {
+          clearQueued.run(id);
+          continue;
+        }
+        if (!passesCumulativeTraffic(reading, rules)) {
+          rejected.push(oldTrafficRejection(reading, reading.views, rules));
+          continue;
+        }
+      }
       if (reading.views !== null && reading.resource?.linkSources.length) {
-        if (hasBaseline.get(id)) {
+        if (!passesOld) {
+          this.saveHistoricalCumulativeTraffic(reading, rules);
+        } else if (hasBaseline.get(id)) {
           saveOldResource(this.db, id, reading.resource, this.now());
           admitOldResource(this.db, id);
           saveOldTraffic(this.db, [reading], [], this.now(), rules);
@@ -711,6 +872,9 @@ export class TiebaResourceDiscovery {
         queueOldResource(this.db, reading);
       }
     }
+    if (reconsidered.length)
+      recordRecycledPosts(this.db, [], this.now(), reconsidered.filter((id) => this.trafficRefreshKind(id)));
+    this.filterAudit.record(rejected, this.now());
   }
 
   private scheduleOldResources() {
@@ -738,12 +902,14 @@ export class TiebaResourceDiscovery {
     if (this.closed || !read || this.resourceActive) return;
     const controller = new AbortController();
     this.resourceActive = controller;
+    this.changed();
     const { signal } = controller;
     const send: typeof fetch = (input, options) => fetch(input, {
       ...options,
       signal: options?.signal ? AbortSignal.any([signal, options.signal]) : signal,
     });
     try {
+      const archived = trafficMembership(this.db);
       for (const { reading, legacy } of dueOldResourceChecks(this.db, this.now(), 8, this.rules().oldResourceCheckEnabled)) {
         signal.throwIfAborted();
         const id = reading.post.id;
@@ -755,18 +921,24 @@ export class TiebaResourceDiscovery {
             if (reading.views === null) throw new Error("暂未读到浏览量");
           }
           signal.throwIfAborted();
-          if (!passesOldTrafficScreen(reading, this.rules())) {
+          const currentRules = this.rules();
+          const passesOld = passesOldTrafficScreen(reading, currentRules);
+          if (!passesOld && (archived(id) || !passesCumulativeTraffic(reading, currentRules))) {
+            if (reading.views !== null && !archived(id))
+              this.filterAudit.record([oldTrafficRejection(reading, reading.views, currentRules)], this.now());
             if (legacy)
               this.finishOldResourceCheck(id, true, { linkSources: [], keywords: [] }, null);
             else
               this.db.db.prepare("DELETE FROM tieba_discovery_old_resource_queue WHERE thread_id = ?").run(id);
             continue;
           }
-          const currentRules = this.rules();
           if (!currentRules.oldResourceCheckEnabled) {
             this.db.transaction(() => {
               if (this.db.get("SELECT 1 FROM tieba_discovery_old_resource_deleted WHERE thread_id = ?", id)) return;
-              if (!legacy) saveOldTraffic(this.db, [reading], [], this.now(), currentRules);
+              if (!legacy) {
+                if (passesOld) saveOldTraffic(this.db, [reading], [], this.now(), currentRules);
+                else this.saveHistoricalCumulativeTraffic(reading, currentRules);
+              }
               this.db.db.prepare("DELETE FROM tieba_discovery_old_resource_queue WHERE thread_id = ?").run(id);
             });
             continue;
@@ -794,9 +966,14 @@ export class TiebaResourceDiscovery {
             );
             if (latest?.checked_at != null && latest.checked_at > startedAt) return;
             const rules = this.rules();
-            const accepted = passesOldTrafficScreen(reading, rules) && isOldResource(evidence);
+            const views = reading.views;
+            const passesOld = passesOldTrafficScreen(reading, rules);
+            const passesTraffic = passesOld || passesCumulativeTraffic(reading, rules);
+            const accepted = passesTraffic && isOldResource(evidence);
             if (accepted) {
-              if (legacy) {
+              if (!passesOld) {
+                this.saveHistoricalCumulativeTraffic(reading, rules, evidence);
+              } else if (legacy) {
                 saveOldResource(this.db, id, evidence, this.now());
                 admitOldResource(this.db, id);
               } else {
@@ -804,6 +981,17 @@ export class TiebaResourceDiscovery {
               }
             }
             this.finishOldResourceCheck(id, legacy, evidence, null, accepted);
+            if (accepted && this.trafficRefreshKind(id)) recordRecycledPosts(this.db, [], this.now(), [id]);
+            if (!accepted && views !== null) {
+              const rejected: FilterRejection = passesTraffic
+                ? { post: { ...reading.post, views }, reason: { kind: "oldResource" } }
+                : oldTrafficRejection(reading, views, rules);
+              this.filterAudit.record([rejected], this.now());
+              if (legacy && !this.trafficRefreshKind(id) && !potentialMembership(this.db, rules)(id))
+                recordRecycledPosts(this.db, [{
+                  post: rejected.post, source: "traffic", reason: passesTraffic ? "resource" : "belowThreshold",
+                }], this.now());
+            }
           });
         } catch (error) {
           signal.throwIfAborted();
@@ -858,7 +1046,14 @@ export class TiebaResourceDiscovery {
 
   saveRules(rules: TiebaDiscoveryRules) {
     const checkChanged = this.rules().oldResourceCheckEnabled !== rules.oldResourceCheckEnabled;
-    this.db.setSetting(rulesKey, rules);
+    this.db.transaction(() => {
+      this.db.setSetting(rulesKey, rules);
+      if (checkChanged && !rules.oldResourceCheckEnabled) {
+        const restored = recycledPosts(this.db).flatMap(({ post: { id } }) =>
+          this.trafficRefreshKind(id) ? [id] : []);
+        recordRecycledPosts(this.db, [], this.now(), restored);
+      }
+    });
     if (checkChanged) {
       this.resourceActive?.abort();
       clearTimeout(this.resourceTimer);
@@ -932,6 +1127,7 @@ export class TiebaResourceDiscovery {
     this.clearTimer();
     const controller = new AbortController();
     this.active = controller;
+    this.scanMode = mode;
     this.log(mode === "expand" ? "开始扩散扫描" : "开始巡查");
     void this.run(controller.signal, mode)
       .catch((error: unknown) => {
@@ -1240,6 +1436,7 @@ export class TiebaResourceDiscovery {
     const state = this.stored(),
       now = this.now();
     const rules = this.rules();
+    const previousPending = state.posts.filter((post) => post.pendingSince !== undefined);
     const lookback = rules.lookbackHours * discoveryInterval;
     const growthCandidate = (post: Pick<TiebaAnalysisThread, "publishedAt" | "views">, at: number) =>
       post.publishedAt !== null && (post.views ?? 0) < rules.trafficThreshold &&
@@ -1357,57 +1554,77 @@ export class TiebaResourceDiscovery {
       if (reading.growth?.to !== post.growth?.to) advanced.add(post.id);
       posts.set(post.id, { ...post, ...reading, views, checkedAt: at });
     };
-    const ingestForumPage = (source: StoredSource, result: Awaited<ReturnType<typeof queryTiebaAnalysisForumPosts>>) => {
+    type ForumPage = Awaited<ReturnType<typeof queryTiebaAnalysisForumPosts>>;
+    type ListedThread = ForumPage["threads"][number] & { publishedAt: string };
+    const detailCandidates = new Map<
+      string, { source: StoredSource; item: ListedThread & { views: number } }
+    >();
+    const readDetails = this.read.details;
+    const ingestListedPost = (
+      source: StoredSource,
+      item: ListedThread,
+      evidence?: OldTrafficReading["resource"],
+    ) => {
+      const old = posts.get(item.id);
+      listed.add(item.id);
+      source.lastUsefulAt = this.now();
+      const post: Post = {
+        id: item.id,
+        title: item.title,
+        url: item.url,
+        forum: item.forum,
+        uid: item.authorId ?? old?.uid ?? null,
+        author: item.author || old?.author || "",
+        publishedAt: item.publishedAt,
+        linked: !!evidence?.linkSources.length || item.resource?.linked || old?.linked || false,
+        keys: [
+          ...new Set([...(old?.keys ?? []), ...(item.resource?.keys ?? [])]),
+        ],
+        views: old?.views ?? null,
+        checkedAt: old?.checkedAt ?? 0,
+        baseline: old?.baseline ?? null,
+        growth: old?.growth ?? null,
+        streak: old?.streak ?? 0,
+        interactions: {
+          replies: item.replies,
+          likes: item.likes,
+          shares: item.shares,
+        },
+        potential: old?.potential,
+        pendingSince: old?.pendingSince,
+        manualGrowthWatch: old?.manualGrowthWatch,
+        oldHandoffAttemptAt: old?.oldHandoffAttemptAt,
+        resource: evidence ?? old?.resource,
+      };
+      if (item.views === null) {
+        posts.set(item.id, post);
+        missingListViews.add(item.id);
+      } else {
+        missingListViews.delete(item.id);
+        record(post, item.views);
+      }
+    };
+    const ingestForumPage = (source: StoredSource, result: ForumPage) => {
+      const rejected: FilterRejection[] = [];
       for (const item of result.threads) {
         if (!item.publishedAt || seen.has(item.id) || archived(item.id))
           continue;
-        const fresh = recent(item, this.now(), lookback);
-        if (
-          !fresh && !growthCandidate(item, this.now()) &&
-          ((item.views ?? 0) < rules.trafficThreshold ||
-            !recent(item, this.now(), trafficLookback))
-        )
+        const at = this.now();
+        const qualifiesCumulative =
+          item.views !== null && item.views >= rules.trafficThreshold &&
+          recent(item, at, trafficLookback);
+        if (!recent(item, at, lookback) && !growthCandidate(item, at) && !qualifiesCumulative)
           continue;
-        const old = posts.get(item.id);
-        if (!item.resource && !old) continue;
-        listed.add(item.id);
-        source.lastUsefulAt = this.now();
-        const post: Post = {
-          id: item.id,
-          title: item.title,
-          url: item.url,
-          forum: result.name,
-          uid: item.authorId ?? old?.uid ?? null,
-          author: item.author || old?.author || "",
-          publishedAt: item.publishedAt,
-          linked: item.resource?.linked || old?.linked || false,
-          keys: [
-            ...new Set([...(old?.keys ?? []), ...(item.resource?.keys ?? [])]),
-          ],
-          views: old?.views ?? null,
-          checkedAt: old?.checkedAt ?? 0,
-          baseline: old?.baseline ?? null,
-          growth: old?.growth ?? null,
-          streak: old?.streak ?? 0,
-          interactions: {
-            replies: item.replies,
-            likes: item.likes,
-            shares: item.shares,
-          },
-          potential: old?.potential,
-          pendingSince: old?.pendingSince,
-          manualGrowthWatch: old?.manualGrowthWatch,
-          oldHandoffAttemptAt: old?.oldHandoffAttemptAt,
-          resource: old?.resource,
-        };
-        if (item.views === null) {
-          posts.set(item.id, post);
-          missingListViews.add(item.id);
+        const post = { ...item, forum: result.name, publishedAt: item.publishedAt };
+        if (item.resource || posts.has(item.id)) {
+          ingestListedPost(source, post);
+        } else if (readDetails && item.views !== null && qualifiesCumulative && !isResourceRequest(item.title)) {
+          detailCandidates.set(item.id, { source, item: { ...post, views: item.views } });
         } else {
-          missingListViews.delete(item.id);
-          record(post, item.views);
+          rejected.push({ post, reason: { kind: "recentResource" } });
         }
       }
+      this.filterAudit.record(rejected, this.now());
     };
     const readPage = async (source: StoredSource, page: number) => {
       const result = await attempt(source.name, () =>
@@ -1511,6 +1728,22 @@ export class TiebaResourceDiscovery {
       this.scanningForum = undefined;
       this.log("正在核对帖子和作者");
       this.changed();
+    }
+
+    if (readDetails) {
+      const candidates = [...detailCandidates.values()]
+        .filter(({ item }) => !listed.has(item.id) && !archived(item.id))
+        .sort((a, b) => b.item.views - a.item.views)
+        .slice(0, cumulativeTrafficDetailReadsPerRun);
+      for (const { source, item } of candidates) {
+        const details = await attempt(`${item.forum}高流量帖资源核验`, () => readDetails(item.id, send));
+        if (!details) continue;
+        const post = { ...item, views: details.views ?? item.views };
+        if (details.resource.linkSources.length)
+          ingestListedPost(source, post, details.resource);
+        else
+          this.filterAudit.record([{ post, reason: { kind: "recentDetailLink" } }], this.now());
+      }
     }
 
     const recheckAt = this.now();
@@ -1763,6 +1996,15 @@ export class TiebaResourceDiscovery {
     const oldReadings = this.db.transaction(() => {
       this.stageOldResources(oldHandoffs, this.rules());
       saveTrafficPosts(this.db, highTraffic, this.rules());
+      const currentRules = this.rules();
+      const isPotential = potentialMembership(this.db, currentRules);
+      const rejected: RecycledPost[] = [];
+      for (const post of observations) {
+        if (!post.potential || !seen.has(post.id) || !belowPotentialThreshold(post, currentRules) || !isPotential(post.id)) continue;
+        this.db.db.prepare("DELETE FROM tieba_discovery_potential WHERE thread_id = ?").run(post.id);
+        post.potential = undefined;
+        rejected.push({ post, source: "potential", reason: "belowThreshold" });
+      }
       savePotentialPosts(
         this.db,
         observations.flatMap((post) => {
@@ -1781,11 +2023,25 @@ export class TiebaResourceDiscovery {
       );
       const updated = saveOldTraffic(
         this.db,
-        oldCandidates,
+        oldCandidates.filter((reading) => !this.dropOldTrafficBelowThreshold(reading, currentRules)),
         oldRetries,
         this.now(),
         rules,
       );
+      const waiting = new Set(pendingPosts(state, rankedAt, currentRules).map(({ id }) => id));
+      const latest = new Map(observations.map((post) => [post.id, post]));
+      const rejectedIds = new Set(rejected.map(({ post }) => post.id));
+      for (const post of previousPending) {
+        if (rejectedIds.has(post.id) || waiting.has(post.id) || isPotential(post.id) || this.trafficRefreshKind(post.id)) continue;
+        const reading = latest.get(post.id);
+        rejected.push({
+          post: reading ?? post, source: "pending",
+          reason: recent(post, rankedAt, currentRules.lookbackHours * discoveryInterval) ? "belowThreshold" : "observationExpired",
+        });
+      }
+      const reAdmitted = recycledPosts(this.db).flatMap(({ post: { id } }) =>
+        waiting.has(id) || isPotential(id) || this.trafficRefreshKind(id) ? [id] : []);
+      recordRecycledPosts(this.db, rejected, rankedAt, reAdmitted);
       this.db.setSetting(storageKey, state);
       return updated;
     });
@@ -1798,4 +2054,20 @@ export class TiebaResourceDiscovery {
       `本批结束，读到 ${readForums} 个贴吧，查看 ${probed} 位作者，发现 ${added} 个新贴吧`,
     );
   }
+}
+
+function oldTrafficRejection(
+  { post, at }: OldTrafficReading,
+  views: number,
+  rules: TiebaDiscoveryRules,
+): FilterRejection {
+  return {
+    post: { ...post, views },
+    reason: {
+      kind: "oldTraffic",
+      dailyViews: views / oldTrafficAge(post.publishedAt, at),
+      minViews: rules.oldTrafficMinTotalViews,
+      minDailyViews: rules.oldTrafficMinLifetimeDailyViews,
+    },
+  };
 }

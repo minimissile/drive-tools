@@ -66,7 +66,23 @@ function zip(files: Record<string, string>): Buffer {
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...entries, directory, end]);
 }
-export function xlsx(rows: string[][], sheetName = "资源清单"): Buffer {
+const wrappedSheetStyles = [
+  '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+  '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>',
+  '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>',
+  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>',
+  '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>',
+  '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>',
+  '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>',
+  '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>',
+  '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+].join("");
+
+export function xlsx(
+  rows: string[][],
+  sheetName = "资源清单",
+  layout?: { columnWidths: readonly number[] },
+): Buffer {
   if (rows.some((row) => row.some((v) => v.length > 32767)))
     throw new AppError(
       "EXPORT_CELL_TOO_LONG",
@@ -79,21 +95,28 @@ export function xlsx(rows: string[][], sheetName = "资源清单"): Buffer {
     return s;
   };
   const cells = rows
-    .map(
-      (row, r) =>
-        `<row r="${r + 1}">${row.map((v, c) => `<c r="${letter(c)}${r + 1}" t="inlineStr"><is><t xml:space="preserve">${xml(v.slice(0, 32767))}</t></is></c>`).join("")}</row>`,
-    )
+    .map((row, r) => {
+      const style = layout ? ` s="${r === 0 ? 1 : 2}"` : "";
+      return `<row r="${r + 1}">${row.map((v, c) => `<c r="${letter(c)}${r + 1}"${style} t="inlineStr"><is><t xml:space="preserve">${xml(v)}</t></is></c>`).join("")}</row>`;
+    })
     .join("");
+  const columns = layout
+    ? `<cols>${layout.columnWidths.map((width, i) => `<col min="${i + 1}" max="${i + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>`
+    : "";
+  const stylesType = layout
+    ? '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+    : "";
+  const stylesRelationship = layout
+    ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    : "";
   return zip({
-    "[Content_Types].xml":
-      '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>${stylesType}</Types>`,
     "_rels/.rels":
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
-    "xl/workbook.xml":
-      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xml(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
-    "xl/_rels/workbook.xml.rels":
-      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
-    "xl/worksheets/sheet1.xml": `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultColWidth="26"/><sheetData>${cells}</sheetData><autoFilter ref="A1:${letter(rows[0].length - 1)}${rows.length}"/></worksheet>`,
+    "xl/workbook.xml": `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xml(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>${stylesRelationship}</Relationships>`,
+    "xl/worksheets/sheet1.xml": `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultColWidth="26"/>${columns}<sheetData>${cells}</sheetData><autoFilter ref="A1:${letter(rows[0].length - 1)}${rows.length}"/></worksheet>`,
+    ...(layout ? { "xl/styles.xml": wrappedSheetStyles } : {}),
   });
 }
 export function formatResourceExport(

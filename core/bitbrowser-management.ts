@@ -16,6 +16,8 @@ import { now } from "./database";
 /** Coordinates explicit controls without letting a window list mutate account state. */
 export class BitBrowserManagement {
   private active = new Set<string>();
+  private timer: ReturnType<typeof setInterval>;
+  private sweeping = false;
   constructor(
     private deps: {
       bit: BitBrowser;
@@ -23,9 +25,19 @@ export class BitBrowserManagement {
       connector(): string;
       accountState(ref: EnvironmentAccountRef): BitBrowserAccountState;
       pendingOperations(refs: EnvironmentAccountRef[]): string[];
+      readIdlePolicy(key: string): number;
+      saveIdlePolicy(key: string, minutes: number): void;
       openAccount(ref: EnvironmentAccountRef): Promise<unknown>;
     },
-  ) {}
+  ) {
+    this.timer = setInterval(() => {
+      void this.sweepIdle();
+    }, 60_000);
+    this.timer.unref();
+  }
+  dispose() {
+    clearInterval(this.timer);
+  }
 
   get isBusy() {
     return this.active.size > 0;
@@ -134,8 +146,113 @@ export class BitBrowserManagement {
     }
   }
 
+  private pageKey(input: BitProfileCommand) {
+    return this.deps.bit.lifecycle.key(input.connectorKey, input.profileId);
+  }
+  async pages(input: BitProfileCommand) {
+    this.assertConnector(input.connectorKey);
+    this.assertEnvironmentConnector(this.environment(input.profileId));
+    const key = this.pageKey(input);
+    const info = this.deps.bit.lifecycle.info(key);
+    const counts = info.busy
+      ? { temporary: 0, protected: 0, closed: 0, connected: false }
+      : await this.deps.bit.lifecycle.inspect(key);
+    this.assertConnector(input.connectorKey);
+    return { ...counts, ...info, idleMinutes: this.deps.readIdlePolicy(key) };
+  }
+  idlePolicy(input: BitProfileCommand & { idleMinutes: number }) {
+    this.assertConnector(input.connectorKey);
+    this.assertEnvironmentConnector(this.environment(input.profileId));
+    this.deps.saveIdlePolicy(this.pageKey(input), input.idleMinutes);
+    this.deps.bit.lifecycle.touch(this.pageKey(input));
+    return true;
+  }
+  cleanPages(input: BitProfileCommand) {
+    return this.control(input, async () => {
+      const env = this.environment(input.profileId);
+      const clean = async () => {
+        const key = this.pageKey(input);
+        const result = await this.deps.bit.lifecycle.inspect(key, true);
+        return {
+          ...result,
+          ...this.deps.bit.lifecycle.info(key),
+          idleMinutes: this.deps.readIdlePolicy(key),
+        };
+      };
+      if (env?.busy)
+        throw new AppError(
+          "ENVIRONMENT_BUSY",
+          "环境有执行中或排队的任务，请稍后清理。",
+        );
+      for (const ref of env?.accounts ?? [])
+        this.deps.environments.assertAccountIdle(ref);
+      return env
+        ? this.deps.environments.controlWindow(env.id, clean, env.revision, {
+            invalidate: false,
+          })
+        : clean();
+    });
+  }
+  async sweepIdle(clock = Date.now()) {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      for (const key of this.deps.bit.lifecycle.candidates()) {
+        try {
+          const [connectorKey, profileId] = JSON.parse(key) as [string, string];
+          if (connectorKey !== this.deps.connector()) continue;
+          const input = { connectorKey, profileId };
+          const minutes = this.deps.readIdlePolicy(key);
+          const info = this.deps.bit.lifecycle.info(key);
+          if (
+            !minutes ||
+            info.owner !== "panxu" ||
+            info.busy ||
+            !info.lastUsed ||
+            clock - info.lastUsed < minutes * 60_000
+          )
+            continue;
+          const env = this.environment(profileId);
+          if (
+            !env ||
+            env.busy ||
+            this.deps.pendingOperations(env.accounts).length
+          )
+            continue;
+          const eligible = await this.deps.bit.lifecycle.inspect(key);
+          if (!eligible.connected || eligible.protected) continue;
+          await this.control(input, () =>
+            this.deps.environments.controlWindow(
+              env.id,
+              async () => {
+                // Recheck under the environment control lease; no checks may open a browser.
+                const current = this.deps.bit.lifecycle.info(key);
+                if (
+                  current.owner !== "panxu" ||
+                  current.busy ||
+                  !current.lastUsed ||
+                  clock - current.lastUsed < minutes * 60_000
+                )
+                  return;
+                const pages = await this.deps.bit.lifecycle.inspect(key);
+                if (pages.connected && !pages.protected)
+                  await this.deps.bit.closeProfile(profileId, connectorKey);
+              },
+              env.revision,
+            ),
+          );
+        } catch {
+          /* Fail closed: network, ownership or business uncertainty retains the window. */
+        }
+      }
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
   open(input: BitProfileCommand) {
     return this.control(input, async () => {
+      await this.deps.bit.keepWindow(input.profileId, input.connectorKey);
       const env = this.environment(input.profileId);
       const drive = env?.accounts.find((a) => a.kind === "drive");
       if (drive) {
@@ -185,6 +302,7 @@ export class BitBrowserManagement {
           "账号关联的窗口已变化，请刷新列表后操作。",
         );
       this.assertEnvironmentConnector({ ...env, accounts: [], busy: false });
+      await this.deps.bit.keepWindow(input.profileId, input.connectorKey);
       await this.deps.openAccount(input.account);
       return true;
     });

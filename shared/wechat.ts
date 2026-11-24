@@ -6,6 +6,11 @@ import type {
   SmzdmIssue,
 } from "./smzdm";
 import type { WebsiteAccount } from "./website-accounts";
+import type {
+  WechatArticleModule,
+  WechatDeleteArticleModuleInput,
+  WechatSaveArticleModuleInput,
+} from "./wechat-article-modules";
 import { isWechatImageUrl } from "./wechat-markup";
 import { wechatImageStyleSchema } from "./wechat-image-styles";
 import {
@@ -23,11 +28,11 @@ import type {
 } from "./wechat-traffic-words";
 import type { WechatRewriteStyleId } from "./wechat-rewrite";
 import type {
-  WechatDiscoverySearchResult,
-  WechatDiscoveryStatsResult,
-  wechatDiscoverySearch,
-  wechatDiscoveryStatsInput,
-} from "./wechat-discovery";
+  KeyboardSkinDraftInput,
+  KeyboardSkinOverview,
+  KeyboardSkinSample,
+  KeyboardSkinSampleInput,
+} from "./keyboard-skins";
 
 export { wechatArticleUrl } from "./smzdm";
 export const wechatTextInput = z.object({
@@ -87,9 +92,23 @@ export interface WechatEditionSummary {
   rewriteStyleId?: WechatRewriteStyleId;
   deliveries: WechatDeliveryRecord[];
 }
+export type WechatSource =
+  | (SmzdmSource & { kind?: never })
+  | (Omit<SmzdmSource, "url"> & {
+      kind: "keyboard-skins";
+      url: "";
+      batchId: string;
+      resourceIds: string[];
+    })
+  | (Omit<SmzdmSource, "url"> & {
+      kind: "resource-catalog";
+      url: "";
+      catalogId: string;
+      snapshotHash: string;
+    });
 export interface WechatArticle extends WechatText {
   id: string;
-  source: SmzdmSource;
+  source: WechatSource;
   links: SmzdmResourceLink[];
   revision: number;
   aiAssisted: boolean;
@@ -115,6 +134,7 @@ export interface WechatDetail {
   article: WechatArticle;
   templateSupport?: true;
   supportedTemplates?: readonly WechatTemplateId[];
+  supportedRewriteStyles?: readonly WechatRewriteStyleId[];
   readMoreEntries?: WechatReadMoreEntry[];
   trafficWordPlan?: WechatTrafficWordPlan;
   editions?: WechatEditionSummary[];
@@ -218,6 +238,24 @@ type Contract<A, V> = { args: A; value: V };
 export interface WechatContract {
   "wechat.list": Contract<undefined, WechatSummary[]>;
   "wechat.get": Contract<{ id: string }, WechatDetail>;
+  "wechat.listModules": Contract<undefined, WechatArticleModule[]>;
+  "wechat.saveModule": Contract<
+    WechatSaveArticleModuleInput,
+    WechatArticleModule[]
+  >;
+  "wechat.deleteModule": Contract<
+    WechatDeleteArticleModuleInput,
+    WechatArticleModule[]
+  >;
+  "wechat.keyboardSkinsOverview": Contract<undefined, KeyboardSkinOverview>;
+  "wechat.sampleKeyboardSkins": Contract<
+    KeyboardSkinSampleInput,
+    KeyboardSkinSample
+  >;
+  "wechat.createKeyboardSkinsDraft": Contract<
+    KeyboardSkinDraftInput,
+    WechatDetail
+  >;
   "wechat.delete": Contract<{ id: string; revision: number }, WechatSummary[]>;
   "wechat.replaceLink": Contract<
     {
@@ -241,15 +279,6 @@ export interface WechatContract {
       accountId?: string;
     },
     WechatDetail
-  >;
-  "wechat.discoveryConfig": Contract<undefined, { configured: boolean }>;
-  "wechat.discover": Contract<
-    z.input<typeof wechatDiscoverySearch>,
-    WechatDiscoverySearchResult
-  >;
-  "wechat.discoveryStats": Contract<
-    z.input<typeof wechatDiscoveryStatsInput>,
-    WechatDiscoveryStatsResult
   >;
   "wechat.import": Contract<{ url: string }, WechatDetail>;
   "wechat.save": Contract<
@@ -279,6 +308,10 @@ export interface WechatContract {
     string[]
   >;
   "wechat.pickImage": Contract<
+    { id: string },
+    { url: string; name: string } | null
+  >;
+  "wechat.pasteImage": Contract<
     { id: string },
     { url: string; name: string } | null
   >;

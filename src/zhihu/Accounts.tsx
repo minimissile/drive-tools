@@ -134,7 +134,7 @@ function AccountPlan({
           本周 {a.week} / {a.plan.weeklyLimit}
         </span>
       </div>
-      <ZhihuCreatorProgress progress={p} targetLevel={a.plan.targetLevel} />
+      <ZhihuCreatorProgress account={a} />
       <p className="muted">
         {a.environmentName} · 出口 {a.ip || "尚未检查"} ·{" "}
         {a.status === "connected" ? "身份已核实" : "需要检查登录"}
@@ -176,7 +176,7 @@ function AccountPlan({
           onClick={() =>
             void run(
               () => ipc("zhihu.progress.check", { accountId: a.id }),
-              "官方创作进度已读取",
+              "已检查官方创作进度",
             )
           }
         >

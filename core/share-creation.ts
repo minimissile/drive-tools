@@ -1,5 +1,6 @@
 import { now } from "./database";
 import { randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AppError, ProviderHttpError, safeMessage } from "./errors";
 import { parseShare } from "./links";
 import {
@@ -23,6 +24,7 @@ import type { DriveFiles } from "./drive-files";
 import type { DriveProvider, OwnShare } from "./providers/provider";
 
 interface Dependencies {
+  withSession?<T>(accountId: string, action: () => Promise<T>): Promise<T>;
   repo: Repository;
   secrets: SecretStore;
   driveFiles: DriveFiles;
@@ -37,6 +39,7 @@ interface Dependencies {
 }
 
 interface CreationRecord {
+  receiptOnly?: boolean;
   accountId: string;
   ownerUid: string;
   provider: Provider;
@@ -93,14 +96,44 @@ const publicFailure = (error: unknown, codes: (string | undefined)[]) => {
 
 /** Independent explicit creation. Journal entries never become resource copies. */
 export class ShareCreation {
+  private batches = new Set<string>();
+  private scope = new AsyncLocalStorage<{
+    accountId: string;
+    copyId: string;
+  }>();
   private active = new Set<string>();
   get isBusy() {
-    return this.active.size > 0;
+    return this.active.size > 0 || this.batches.size > 0;
   }
   busyAccount(accountId: string) {
-    return this.active.has(accountId);
+    return this.active.has(accountId) || this.batches.has(accountId);
   }
   constructor(private d: Dependencies) {}
+  async withIndependentSession<T>(copyId: string, action: () => Promise<T>) {
+    const copy = this.d.repo.getCopy(copyId),
+      accountId = copy.accountId,
+      held = this.scope.getStore();
+    if (held) {
+      if (held.copyId !== copyId)
+        throw new AppError("SHARE_BATCH_SCOPE", "同一建链批次不能切换资源。");
+      return action();
+    }
+    if (this.busyAccount(accountId) || this.d.hasRunningJobs())
+      throw new AppError(
+        "ACTIVE_JOBS",
+        "此账号仍有任务正在执行，请稍后继续准备。",
+      );
+    this.d.assertIdle(accountId);
+    this.batches.add(accountId);
+    try {
+      return await this.scope.run({ accountId, copyId }, () =>
+        this.d.withSession ? this.d.withSession(accountId, action) : action(),
+      );
+    } finally {
+      this.batches.delete(accountId);
+      this.d.changed();
+    }
+  }
   private get db() {
     return this.d.repo.db;
   }
@@ -266,7 +299,11 @@ export class ShareCreation {
       this.store(record);
       return this.receipt(record);
     }
-    if (this.active.has(record.accountId) || this.d.hasRunningJobs())
+    if (
+      this.active.has(record.accountId) ||
+      (this.scope.getStore()?.copyId !== record.receipt.copyId &&
+        (this.batches.has(record.accountId) || this.d.hasRunningJobs()))
+    )
       throw new AppError(
         "ACTIVE_JOBS",
         "仍有任务正在执行，请稍后核对新分享结果。",
@@ -313,7 +350,12 @@ export class ShareCreation {
                 );
               code = (await this.rememberReturned(record, recovered)) || code;
             }
-            if (record.codeRequired && !code && record.receipt.url) {
+            if (
+              !record.receiptOnly &&
+              record.codeRequired &&
+              !code &&
+              record.receipt.url
+            ) {
               const recovered = await provider.recoverOwnShare(
                 account,
                 parseShare(record.receipt.url!),
@@ -335,30 +377,33 @@ export class ShareCreation {
                 "SHARE_CODE_UNAVAILABLE",
                 "新分享链接或提取码未完整读取，请在官网核对。",
               );
-            valid = provider.verifyShareWithOptions
-              ? await provider.verifyShareWithOptions(
-                  account,
-                  record.shareId!,
-                  record.files,
-                  options,
-                  code,
-                )
-              : record.settingsConfirmed &&
-                (await provider.verifyShare(
-                  account,
-                  record.shareId!,
-                  record.files,
-                  code,
-                ));
+            valid = record.receiptOnly
+              ? true
+              : provider.verifyShareWithOptions
+                ? await provider.verifyShareWithOptions(
+                    account,
+                    record.shareId!,
+                    record.files,
+                    options,
+                    code,
+                  )
+                : record.settingsConfirmed &&
+                  (await provider.verifyShare(
+                    account,
+                    record.shareId!,
+                    record.files,
+                    code,
+                  ));
           } catch {
             // A read failure never releases the operation or triggers a new creation.
           }
           if (valid) {
             await this.d.secrets.set(resultSecret(operationId), code);
-            record.settingsConfirmed = true;
+            record.settingsConfirmed = !record.receiptOnly;
             record.receipt.state = "success";
-            record.receipt.message =
-              "已只读核对新分享及创建设置，原资源记录未修改。";
+            record.receipt.message = record.receiptOnly
+              ? "已读取新分享返回结果，原资源记录未修改。"
+              : "已只读核对新分享及创建设置，原资源记录未修改。";
           } else {
             record.receipt.message =
               "新分享或设置仍未核对成功，请在原账号官网查看；不会再次创建。";
@@ -400,6 +445,18 @@ export class ShareCreation {
     return this.receipt(record);
   }
   async create(input: ShareCreateInput): Promise<ShareCreationReceipt> {
+    return this.createInternal(input, false);
+  }
+  /** Publishing variants reuse the already verified copy; only create and journal the new receipt. */
+  async createIndependent(
+    input: ShareCreateInput,
+  ): Promise<ShareCreationReceipt> {
+    return this.createInternal(input, true);
+  }
+  private async createInternal(
+    input: ShareCreateInput,
+    receiptOnly: boolean,
+  ): Promise<ShareCreationReceipt> {
     const previous = this.record(input.operationId);
     if (previous) {
       await this.assertSameRequest(previous, input);
@@ -418,7 +475,14 @@ export class ShareCreation {
         "SHARE_CREATION_PENDING",
         "这份资源上次创建分享的结果仍待核对，请先查看原记录；不会再次创建。",
       );
-    if (this.active.has(account.id) || this.d.hasRunningJobs())
+    const scoped =
+      receiptOnly &&
+      this.scope.getStore()?.copyId === copy.id &&
+      this.scope.getStore()?.accountId === account.id;
+    if (
+      this.active.has(account.id) ||
+      (!scoped && (this.batches.has(account.id) || this.d.hasRunningJobs()))
+    )
       throw new AppError(
         "ACTIVE_JOBS",
         "仍有任务正在执行，请完成后再创建新分享。",
@@ -428,8 +492,10 @@ export class ShareCreation {
     this.active.add(account.id);
     try {
       // This read supports directly recorded own resources with no saved folderId.
-      const location = await this.d.driveFiles.locateCopy(copy.id);
-      if (location.directory.pending)
+      const location = receiptOnly
+        ? null
+        : await this.d.driveFiles.locateCopy(copy.id);
+      if (location?.directory.pending)
         throw new AppError(
           "WRITE_PENDING",
           "资源目录仍有待核对的写入，请先处理原操作。",
@@ -456,14 +522,15 @@ export class ShareCreation {
               "SHARE_OPTIONS_UNSUPPORTED",
               "此网盘暂不支持可配置的新分享创建。",
             );
-          const actual = await provider.list(
-            currentAccount,
-            location.directory.folderId,
-          );
-          const files = copy.files.map((expected) =>
-            actual.find((file) => matchesFile(expected, file)),
-          );
-          if (files.some((file) => !file))
+          const actual = receiptOnly
+            ? copy.files
+            : await provider.list(currentAccount, location!.directory.folderId);
+          const files = receiptOnly
+            ? copy.files
+            : copy.files.map((expected) =>
+                actual.find((file) => matchesFile(expected, file)),
+              );
+          if (!receiptOnly && files.some((file) => !file))
             throw new AppError(
               "FILES_CHANGED",
               "原目录中的资源文件已变化，未创建新分享。",
@@ -496,6 +563,7 @@ export class ShareCreation {
             }),
           );
           const record: CreationRecord = {
+            ...(receiptOnly ? { receiptOnly: true } : {}),
             accountId: account.id,
             ownerUid: currentAccount.uid!,
             provider: account.provider,
@@ -528,24 +596,28 @@ export class ShareCreation {
               this.d.repo.getResource(copy.resourceId).title,
               effectiveOptions,
               saveReturned,
+              receiptOnly ? "receipt" : "full",
             );
-            record.settingsConfirmed = true;
+            record.settingsConfirmed = !receiptOnly;
             await saveReturned(share);
             const parsed = parseShare(share.url, share.code);
             if (
               (record.codeRequired && !returnedCode) ||
               share.ownerUid !== currentAccount.uid ||
               (effectiveCode && effectiveCode !== parsed.code) ||
-              !(await provider.verifyShare(
-                currentAccount,
-                share.id,
-                files as RemoteFile[],
-                parsed.code,
-              ))
+              (!receiptOnly &&
+                !(await provider.verifyShare(
+                  currentAccount,
+                  share.id,
+                  files as RemoteFile[],
+                  parsed.code,
+                )))
             )
               throw new AppError(
                 "SHARE_UNVERIFIED",
-                "新分享尚未通过本人归属或文件核验。",
+                receiptOnly
+                  ? "创建回执缺少正确的分享ID、链接或提取码。"
+                  : "新分享尚未通过本人归属或文件核验。",
               );
             record.receipt.state = "success";
             record.receipt.message =

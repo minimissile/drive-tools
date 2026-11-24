@@ -40,6 +40,7 @@ export type OtherAccountAction =
 
 export function OtherAccountRow({
   account,
+  selection,
   environment,
   environmentEngine,
   environmentsReady,
@@ -50,6 +51,7 @@ export function OtherAccountRow({
   children,
 }: {
   account: OtherAccount;
+  selection?:{checked:boolean;disabled:boolean;onChange(checked:boolean):void};
   environment: string;
   environmentEngine?: "electron" | "bitbrowser";
   environmentsReady: boolean;
@@ -143,7 +145,8 @@ export function OtherAccountRow({
   menu.push({ action: "rename", label: "修改备注", icon: <Pencil /> });
   return (
     <article className="website-account-row">
-      <div className="website-account-identity">
+      <div className={`website-account-identity ${selection?"website-account-identity-selectable":""}`}>
+        {selection?<input className="account-batch-check" type="checkbox" aria-label={`选择${account.alias}`} checked={selection.checked} disabled={selection.disabled} onChange={e=>selection.onChange(e.target.checked)}/>:null}
         <PlatformIcon platform={account.provider} />
         <div>
           <h3>{account.nickname || account.alias}</h3>

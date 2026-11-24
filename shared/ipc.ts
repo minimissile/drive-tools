@@ -1,3 +1,4 @@
+import type { AccountBatchContract } from "./account-batch";
 import type { PhotoPostContract } from "./photo-posts";
 import type { SystemLogContract } from "./system-logs";
 import type { VideoContract } from "./video-jobs";
@@ -6,6 +7,7 @@ import type { BilibiliContract } from "./bilibili";
 import type { ResourceCatalogContract } from "./resource-catalog";
 import type { BaiduDiscoveryContract } from "./baidu-discovery";
 import type { DevSessionContract } from "./dev-sessions";
+import type { WorkbenchWindowContract } from "./workbench-windows";
 import type { DevUpdateContract } from "./dev-updates";
 import type { ResourceAnswerContract } from "./resource-answers";
 import type { ResourceDeletionContract } from "./resource-deletion";
@@ -13,6 +15,7 @@ import type { ShareCreationContract } from "./share-creation";
 import type { ResourceLinksContract } from "./resource-links";
 import type { ResourceLandingContract } from "./resource-landing";
 import type { AccountDeletionContract } from "./account-deletion";
+import type { JianshuContract } from "./jianshu";
 import type { SmzdmContract } from "./smzdm";
 import type { WechatContract } from "./wechat";
 import type { DistributionContract } from "./distribution";
@@ -39,6 +42,7 @@ import type { IpcCommands } from "./ipc-commands";
 import type { DriveFilesContract } from "./drive-files";
 import type { DriveBrowserContract } from "./drive-browser";
 import type { ZhidaoContract } from "./zhidao-ipc";
+import type { ZhidaoWorkflowContract } from "./zhidao-workflow";
 import type { PageDiscoveryContract } from "./zhidao-page-discovery";
 import type { BaiduKeywordContract } from "./baidu-keywords";
 import type { BaiduResearchContract } from "./baidu-research";
@@ -109,6 +113,7 @@ export type SplitSummary = {
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
 export interface IpcContract
   extends
+    AccountBatchContract,
     PhotoPostContract,
     SystemLogContract,
     VideoContract,
@@ -116,9 +121,11 @@ export interface IpcContract
     BilibiliContract,
     BaiduDiscoveryContract,
     DevSessionContract,
+    WorkbenchWindowContract,
     DevUpdateContract,
     ResourceCatalogContract,
     SmzdmContract,
+    JianshuContract,
     WechatContract,
     DriveFilesContract,
     DriveBrowserContract,
@@ -150,6 +157,7 @@ export interface IpcContract
     AccountDeletionContract,
     IpcCommands,
     ZhidaoContract,
+    ZhidaoWorkflowContract,
     PageDiscoveryContract,
     BaiduKeywordContract,
     BaiduResearchContract,
@@ -260,6 +268,10 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "accountBatch.current",
+  "jianshu.list", "jianshu.get", "jianshu.sources", "jianshu.matches", "jianshu.image",
+  "zhidao.workflow.get",
+  "zhidao.workflow.resources",
   "systemLogs.list",
   "zhihu.participation.snapshot",
   "zhihu.participation.logs",
@@ -286,7 +298,8 @@ export const queryMethods = [
   "smzdm.get",
   "wechat.list",
   "wechat.get",
-  "wechat.discoveryConfig",
+  "wechat.listModules",
+  "wechat.keyboardSkinsOverview",
   "distribution.overview",
   "distribution.list",
   "distribution.history",
@@ -321,6 +334,8 @@ export const queryMethods = [
   "tieba.discovery.traffic",
   "tieba.discovery.oldTraffic",
   "tieba.discovery.trafficPosts",
+  "tieba.discovery.filterAudit",
+  "tieba.discovery.recycled",
   "zhihu.autocare.logs",
   "zhihu.logs",
   "intelligentOps.snapshot",
@@ -331,6 +346,7 @@ export const queryMethods = [
   "intelligentOps.brain.cycles",
   "bit.profiles",
   "bit.diagnose",
+  "bit.pages",
   "environments.list",
   "environments.jobs",
   "binding.list",
@@ -377,6 +393,7 @@ export const queryMethods = [
   "resource.similar",
   "resource.deletePreview",
   "resource.intakeOptions",
+  "resource.keywordBatchStatus",
   "resource.page",
   "cover.get",
   "batch.candidates",

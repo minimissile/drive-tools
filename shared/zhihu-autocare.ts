@@ -141,6 +141,7 @@ export const autocareStateSchema = z.object({
     )
     .default({}),
   nextResearchAt: z.record(z.string(), z.iso.datetime()).default({}),
+  progressCheckRuns: z.record(z.string(), z.string()).default({}),
   nextRecommendationAt: z.record(z.string(), z.iso.datetime()).default({}),
   recommendationUids: z.record(z.string(), z.string()).default({}),
   recommendationAttemptUids: z.record(z.string(), z.string()).default({}),

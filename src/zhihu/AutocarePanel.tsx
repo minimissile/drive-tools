@@ -409,7 +409,7 @@ function AutocareControl({
                     </small>
                   </div>
                   <ZhihuCreatorProgress
-                    progress={a.plan.progress}
+                    account={a}
                     targetLevel={s.config.targetLevel}
                   />
                 </div>

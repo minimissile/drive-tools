@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { providerIds, providerSpecs } from "../../shared/providers";
 import type { Account, Provider } from "../../shared/types";
+import { supportsDriveBrowser } from "../../shared/drive-browser";
 import type { NewDriveBrowserPreview } from "../../shared/drive-browser";
 import { DriveBrowserCreation } from "./DriveBrowserCreation";
 import {
@@ -26,8 +27,10 @@ const accountInput = z.object({
 
 export function AddAccountForm({
   onAdded,
+  blocked = false,
 }: {
   onAdded(account: Account): void;
+  blocked?: boolean;
 }) {
   const { command } = useAppActions();
   const { busy } = useAppActivity();
@@ -52,10 +55,15 @@ export function AddAccountForm({
   const [adding, setAdding] = useState(false);
   const [reading, setReading] = useState(false);
   const [preview, setPreview] = useState<NewDriveBrowserPreview | null>(null);
-  const fingerprint = provider === "baidu" && browserEngine === "bitbrowser";
+  const fingerprint =
+    supportsDriveBrowser(provider) && browserEngine === "bitbrowser";
   const validPreview =
-    fingerprint && preview?.profileId === profileId ? preview : null;
-  const disabled = busy > 0 || adding || reading;
+    fingerprint &&
+    preview?.profileId === profileId &&
+    (preview.provider ?? "baidu") === provider
+      ? preview
+      : null;
+  const disabled = blocked || busy > 0 || adding || reading;
   const hintId = useId();
   return (
     <form
@@ -142,7 +150,7 @@ export function AddAccountForm({
               {
                 value: "bitbrowser",
                 label: "比特指纹浏览器",
-                disabled: provider !== "baidu",
+                disabled: !supportsDriveBrowser(provider),
               },
             ]}
           />
@@ -156,8 +164,10 @@ export function AddAccountForm({
           {adding ? "正在添加…" : "添加账号"}
         </Button>
       </div>
-      {fingerprint ? (
+      {fingerprint && supportsDriveBrowser(provider) ? (
         <DriveBrowserCreation
+          key={provider}
+          provider={provider}
           profileId={profileId}
           onProfileChange={(profileId) => editor.update({ profileId })}
           preview={validPreview}

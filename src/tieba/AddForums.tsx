@@ -33,6 +33,7 @@ import {
 } from "./add-forums-view";
 import { tiebaAccountNeedsVerification, tiebaTime } from "./view-model";
 import { tiebaBackendError } from "./useTiebaAction";
+import { tiebaAccountLabel } from "./account-label";
 
 export interface AddForumsProps {
   snapshot: TiebaAutocareSnapshot;
@@ -159,7 +160,7 @@ function AddForumsDialog({
     (value) =>
       z
         .object({
-          selectedNames: z.array(z.string().max(100)).max(5),
+          selectedNames: z.array(z.string().max(100)),
           customText: z.string().max(12000),
           mode: z.enum(["find", "manual"]),
           keyword: z.string().max(80),
@@ -177,7 +178,7 @@ function AddForumsDialog({
     (value) =>
       z
         .object({
-          selectedNames: z.array(z.string().max(100)).max(5),
+          selectedNames: z.array(z.string().max(100)),
           customText: z.string().max(12000),
         })
         .parse(value),
@@ -232,7 +233,7 @@ function AddForumsDialog({
     if (!checked) draft.update(tiebaAddRemaining(draft.value, [name]));
     else if (!selectedKeys.has(tiebaForumKey(name)))
       draft.update({
-        selectedNames: [...draft.value.selectedNames, name].slice(0, 5),
+        selectedNames: [...draft.value.selectedNames, name],
       });
   };
   const find = async () => {
@@ -352,9 +353,7 @@ function AddForumsDialog({
         data-testid="tieba-forum-candidate"
         data-forum-name={name}
         checked={checked}
-        disabled={
-          disabled || !account || (!checked && plan.forumNames.length >= 5)
-        }
+        disabled={disabled || !account}
         onChange={(event) => toggle(name, event.target.checked)}
       />
     );
@@ -368,7 +367,7 @@ function AddForumsDialog({
       footer={
         <>
           <span className="tieba-add-scope">
-            本次 {plan.forumNames.length}/5 个；添加会关注，不自动签到或发言。
+            本次 {plan.forumNames.length} 个；添加会关注，不自动签到或发言。
             {plan.forumNames.length ? (
               <small>已选：{plan.forumNames.join("、")}</small>
             ) : null}
@@ -446,13 +445,14 @@ function AddForumsDialog({
         <Field label="贴吧账号">
           <Select
             aria-label="添加贴吧使用账号"
+            title={account ? tiebaAccountLabel(account) : undefined}
             value={account?.id ?? ""}
             disabled={busy}
             items={[
               { value: "", label: "选择一个贴吧账号" },
               ...snapshot.accounts.map((item) => ({
                 value: item.id,
-                label: `${item.alias || item.nickname || "贴吧账号"}${!item.uid || tiebaAccountNeedsVerification(item) ? " · 待核验" : ""}`,
+                label: `${tiebaAccountLabel(item)}${!item.uid || tiebaAccountNeedsVerification(item) ? " · 待核验" : ""}`,
               })),
             ]}
             onValueChange={onAccount}
@@ -475,7 +475,7 @@ function AddForumsDialog({
       </div>
       <div className="tieba-add-selection">
         <span>
-          已选择 {plan.forumNames.length}/5 个
+          已选择 {plan.forumNames.length} 个
           {!plan.forumNames.length ? "；请选择候选或手动输入" : ""}
         </span>
         {plan.forumNames.length ? (
@@ -659,7 +659,7 @@ function AddForumsDialog({
       ) : (
         <Field
           label="贴吧名称或官方首页链接"
-          hint="每行一个；支持 https://tieba.baidu.com/f?kw=吧名，与候选勾选合计最多5个。"
+          hint="每行一个；支持 https://tieba.baidu.com/f?kw=吧名，可与候选勾选合并添加。"
         >
           <textarea
             aria-label="添加贴吧名称或官网链接"
@@ -694,18 +694,14 @@ function AddForumsDialog({
               clearFeedback();
             }}
           >
-            选择这5个推荐
+            选择全部推荐
           </Button>
         </div>
         <div className="tieba-add-preset-list">
           {tiebaInitialForums.map((item) => candidate(item.name, item.topic))}
         </div>
       </fieldset>
-      {plan.issue ? (
-        <Notice warning>
-          {plan.issue.replace("最多读取5个", "最多添加5个")}
-        </Notice>
-      ) : null}
+      {plan.issue ? <Notice warning>{plan.issue}</Notice> : null}
       {plan.existingNames.length ? (
         <p className="tieba-add-note">
           已在当前账号列表：{plan.existingNames.join("、")}

@@ -8,6 +8,7 @@ export function createDriveBrowserHandlers(
       s.driveBrowsers.previewNew(
         z
           .object({
+            provider: z.enum(["baidu", "quark"]).default("baidu"),
             profileId: z.string().min(1).max(200),
             connectorKey: z.string().min(1).max(300),
             requireProxy: z.boolean(),

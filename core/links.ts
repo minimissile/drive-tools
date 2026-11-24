@@ -66,6 +66,12 @@ export function parseShare(text: string, explicitCode = ""): ShareInput {
     "支持百度、夸克、UC、迅雷、光鸭和 PikPak 分享链接。",
   );
 }
+export function shareUrlWithCode(rawUrl: string, code: string) {
+  if (!code) return rawUrl;
+  const url = new URL(rawUrl);
+  url.searchParams.set(hosts[url.hostname] === "guangya" ? "code" : "pwd", code);
+  return url.href;
+}
 export function validateEditorUrl(platform: Platform, text: string): string {
   const spec = platformSpecs.find((p) => p.id === platform);
   const url = new URL(text);

@@ -2,7 +2,7 @@ import { AiIcon } from "../ui/AiIcon";
 import { windowStorage } from "../storage/window-storage";
 import { useState } from "react";
 import { ListChecks, Plus, RefreshCw } from "lucide-react";
-import { useAppData, useAppNavigation } from "../state";
+import { useAppActions, useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
 import type {
   ResourceCatalog as Catalog,
@@ -21,12 +21,14 @@ import { Select } from "../ui/Select";
 import { CatalogEditor } from "../resource-catalog/CatalogEditor";
 import { CatalogWorkspace } from "../resource-catalog/CatalogWorkspace";
 import { CatalogAiDialog } from "../resource-catalog/CatalogAiDialog";
+import { selectSavedWechatDraft } from "../wechat/draft-selection";
 import "../resource-catalog/resource-catalog.css";
 import "../ui/workspace.css";
 
 export default function ResourceCatalog() {
   const { data } = useAppData();
   const { navigate } = useAppNavigation();
+  const { notify } = useAppActions();
   const workspace = data!.dataPath;
   const selectionKey = `panxu-catalog-selection:${workspace}`;
   const [selected, setSelected] = useState(() => {
@@ -217,6 +219,14 @@ export default function ResourceCatalog() {
                 }}
                 onManageAccounts={() => navigate("website-accounts")}
                 onSettings={() => navigate("settings")}
+                onWechatDraft={(id) => {
+                  if (!selectSavedWechatDraft(workspace, id))
+                    notify(
+                      "草稿已保存，请在公众号草稿箱列表中打开。",
+                      "warning",
+                    );
+                  navigate("wechat-workflow");
+                }}
               />
             ) : (
               <Empty title="选择一份清单">

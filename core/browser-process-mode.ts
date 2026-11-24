@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, basename } from "node:path";
 
 const execute = promisify(execFile);
 export interface BrowserProcessMode {
@@ -15,6 +15,7 @@ export async function browserProcessMode(
   profileId: string,
   debugPort: number,
   debugPath: string,
+  ownerToken?: string,
 ): Promise<BrowserProcessMode | null> {
   if (
     !Number.isSafeInteger(pid) ||
@@ -67,6 +68,19 @@ export async function browserProcessMode(
         ),
       ].map((m) => [m[1], m[2] ?? m[3] ?? ""]),
     );
+    const directory = command
+      .match(
+        /(?:^|\s)--user-data-dir=(.*?)(?=\s(?:--[\w-]+(?:=|\s|$)|[a-zA-Z][\w+.-]*:)|$)/,
+      )?.[1]
+      ?.trim()
+      .replace(/^"|"$/g, "");
+    if (
+      ownerToken &&
+      (!directory ||
+        !isAbsolute(directory) ||
+        basename(directory) !== profileId)
+    )
+      return null;
     const port = Number(flags.get("remote-debugging-port"));
     if (port === 0) {
       // Chromium chooses a port at launch and writes the actual endpoint in its profile.
@@ -92,7 +106,11 @@ export async function browserProcessMode(
     } else if (port !== debugPort) return null;
     return {
       headless: flags.has("headless"),
-      owned: flags.has("panxu-drive-headless"),
+      owned:
+        ownerToken !== undefined
+          ? `--panxu-window-owner=${flags.get("panxu-window-owner")}` ===
+            ownerToken
+          : flags.has("panxu-drive-headless"),
     };
   } catch {
     return null;

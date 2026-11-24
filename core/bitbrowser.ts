@@ -6,13 +6,26 @@ import { fetchJson } from "./http";
 import { platformSpecs } from "../shared/platforms";
 import { createHash } from "node:crypto";
 import { browserExitIp } from "./browser-exit-ip";
-import { browserProcessMode, type BrowserProcessMode } from "./browser-process-mode";
+import {
+  browserProcessMode,
+  type BrowserProcessMode,
+} from "./browser-process-mode";
 import { existingBitBrowserEndpoint } from "./bitbrowser-existing";
-import type { BitBrowserProfile, BitProfileConfiguration } from "../shared/bitbrowser";
+import type {
+  BitBrowserProfile,
+  BitProfileConfiguration,
+} from "../shared/bitbrowser";
+
+import { BitBrowserLifecycle } from "./bitbrowser-lifecycle";
+import { freezePageLedger } from "./browser-page-lifecycle";
+import { findEnvironmentPage, environmentPageStatus } from "./browser-pages";
 
 // BitBrowser retains extraction settings on custom proxies too. Only proxyMethod=3
 // activates them; the switch alone does not mean a SOCKS/HTTP proxy rotates on launch.
-const changesProxyOnLaunch = (profile: { proxyMethod?: unknown; isDynamicIpChangeIp?: unknown }) =>
+const changesProxyOnLaunch = (profile: {
+  proxyMethod?: unknown;
+  isDynamicIpChangeIp?: unknown;
+}) =>
   String(profile.proxyMethod) === "3" && profile.isDynamicIpChangeIp === true;
 
 export function assertEditorPage(
@@ -61,15 +74,31 @@ export function assertEditorPage(
     );
 }
 export class BitBrowser {
+  readonly lifecycle = new BitBrowserLifecycle();
+  async keepWindow(profileId: string, expectedUrl?: string) {
+    const config = await this.config();
+    if (expectedUrl && config.url !== expectedUrl)
+      throw new AppError(
+        "BIT_CONNECTION_CHANGED",
+        "比特连接已变化，请刷新后重试。",
+      );
+    this.lifecycle.keep(this.lifecycle.key(config.url, profileId));
+  }
   constructor(
     private config: () => Promise<{ url: string; key: string | null }>,
     private requestJson = fetchJson,
-    private lease?: <T>(binding: BrowserBinding, action: () => Promise<T>) => Promise<T>,
+    private lease?: <T>(
+      binding: BrowserBinding,
+      action: () => Promise<T>,
+    ) => Promise<T>,
   ) {}
   private async call(path: string, data: unknown = {}, expectedUrl?: string) {
     const config = await this.config();
     if (expectedUrl !== undefined && config.url !== expectedUrl)
-      throw new AppError("BIT_CONNECTION_CHANGED", "比特连接地址已变化，请重新读取窗口列表后操作。");
+      throw new AppError(
+        "BIT_CONNECTION_CHANGED",
+        "比特连接地址已变化，请重新读取窗口列表后操作。",
+      );
     const base = validateLoopback(config.url);
     if (base.pathname !== "/" && base.pathname !== "")
       throw new AppError(
@@ -87,7 +116,19 @@ export class BitBrowser {
         body: JSON.stringify(data),
       },
       30_000,
-    );
+    ).catch((error: unknown) => {
+      if (
+        !(error instanceof AppError) &&
+        error instanceof Error &&
+        (/fetch failed|failed to fetch|networkerror/i.test(error.message) ||
+          ["AbortError", "TimeoutError"].includes(error.name))
+      )
+        throw new AppError(
+          "BIT_CONNECTION_UNAVAILABLE",
+          "无法连接比特浏览器本地服务。请启动比特客户端并开启本地 API，核对连接地址后重试；账号与本地资源已保留。",
+        );
+      throw error;
+    });
     if (result.success === false)
       throw new AppError(
         "BIT_ERROR",
@@ -102,8 +143,17 @@ export class BitBrowser {
   async profileDetails(profileId: string): Promise<BitProfileConfiguration> {
     const response = await this.call("/browser/detail", { id: profileId });
     const data = response.data;
-    if (!data || data.id !== profileId || !data.browserFingerPrint || typeof data.browserFingerPrint !== "object" || Array.isArray(data.browserFingerPrint))
-      throw new AppError("BIT_PROFILE_INVALID", "比特未返回完整配置，请确认窗口仍存在且具有访问权限。");
+    if (
+      !data ||
+      data.id !== profileId ||
+      !data.browserFingerPrint ||
+      typeof data.browserFingerPrint !== "object" ||
+      Array.isArray(data.browserFingerPrint)
+    )
+      throw new AppError(
+        "BIT_PROFILE_INVALID",
+        "比特未返回完整配置，请确认窗口仍存在且具有访问权限。",
+      );
     // Only return display fields. Detail responses also contain cookies and credentials.
     return {
       proxyType: String(data.proxyType ?? "unknown").slice(0, 40),
@@ -113,18 +163,31 @@ export class BitBrowser {
       stopWhileNetError: data.stopWhileNetError === true,
       randomFingerprint: data.randomFingerprint === true,
       os: String(data.browserFingerPrint.os ?? "").slice(0, 80),
-      coreVersion: String(data.browserFingerPrint.version ?? data.coreVersion ?? "").slice(0, 80),
+      coreVersion: String(
+        data.browserFingerPrint.version ?? data.coreVersion ?? "",
+      ).slice(0, 80),
     };
   }
   async runningProfiles(ids: string[]): Promise<Set<string>> {
     if (!ids.length) return new Set();
     const parse = (data: unknown) => {
       if (!data || typeof data !== "object" || Array.isArray(data))
-        throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "比特未返回有效的窗口进程状态，请刷新重试。");
+        throw new AppError(
+          "BIT_PROFILE_STATUS_UNKNOWN",
+          "比特未返回有效的窗口进程状态，请刷新重试。",
+        );
       const running = new Set<string>();
       for (const [id, pid] of Object.entries(data)) {
-        if ((typeof pid !== "number" && typeof pid !== "string") || !String(pid).trim() || !Number.isSafeInteger(Number(pid)) || Number(pid) < 0)
-          throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "窗口进程状态无法识别，请检查比特客户端版本。");
+        if (
+          (typeof pid !== "number" && typeof pid !== "string") ||
+          !String(pid).trim() ||
+          !Number.isSafeInteger(Number(pid)) ||
+          Number(pid) < 0
+        )
+          throw new AppError(
+            "BIT_PROFILE_STATUS_UNKNOWN",
+            "窗口进程状态无法识别，请检查比特客户端版本。",
+          );
         if (Number(pid) > 0) running.add(id);
       }
       return running;
@@ -134,33 +197,103 @@ export class BitBrowser {
     } catch {
       const running = new Set<string>();
       for (let start = 0; start < ids.length; start += 100)
-        for (const id of parse((await this.call("/browser/pids", { ids: ids.slice(start, start + 100) })).data))
+        for (const id of parse(
+          (
+            await this.call("/browser/pids", {
+              ids: ids.slice(start, start + 100),
+            })
+          ).data,
+        ))
           running.add(id);
       return running;
     }
   }
   async closeProfile(profileId: string, expectedUrl?: string) {
     await this.call("/browser/close", { id: profileId }, expectedUrl);
+    this.lifecycle.forget(
+      this.lifecycle.key(expectedUrl ?? (await this.config()).url, profileId),
+    );
     return true;
   }
   async environmentConfiguration(profileId: string) {
     const response = await this.call("/browser/detail", { id: profileId });
     const data = response.data;
-    if (!data || data.id !== profileId || !data.browserFingerPrint || typeof data.browserFingerPrint !== "object") throw new AppError("BIT_PROFILE_INVALID", "比特未返回完整环境配置，请确认配置仍存在且具有访问权限。");
-    if (changesProxyOnLaunch(data)) throw new AppError("BIT_ROTATING_PROXY", "此环境使用提取 IP，且每次打开都会提取新 IP。请在比特客户端关闭该环境的每次打开提取新 IP 后重试。");
+    if (
+      !data ||
+      data.id !== profileId ||
+      !data.browserFingerPrint ||
+      typeof data.browserFingerPrint !== "object"
+    )
+      throw new AppError(
+        "BIT_PROFILE_INVALID",
+        "比特未返回完整环境配置，请确认配置仍存在且具有访问权限。",
+      );
+    if (changesProxyOnLaunch(data))
+      throw new AppError(
+        "BIT_ROTATING_PROXY",
+        "此环境使用提取 IP，且每次打开都会提取新 IP。请在比特客户端关闭该环境的每次打开提取新 IP 后重试。",
+      );
     // Whitelist configuration only: never retain or return profile cookies or saved website credentials.
-    const fingerprint = Object.fromEntries(Object.entries(data.browserFingerPrint).filter(([key]) => !["id", "seq", "browserId", "createdBy", "createdTime", "updateBy", "updateTime"].includes(key)).sort(([a], [b]) => a.localeCompare(b)));
-    const config = { proxyMethod: data.proxyMethod, proxyType: data.proxyType, host: data.host, port: data.port, proxyUserName: data.proxyUserName, proxyPassword: data.proxyPassword, dynamicIpUrl: data.dynamicIpUrl, isGlobalProxyInfo: data.isGlobalProxyInfo, fingerprint };
-    return { signature: createHash("sha256").update(JSON.stringify(config)).digest("hex"), proxy: data.proxyType === "noproxy" ? "direct" as const : "configured" as const, stopWhileNetError: data.stopWhileNetError === true };
+    const fingerprint = Object.fromEntries(
+      Object.entries(data.browserFingerPrint)
+        .filter(
+          ([key]) =>
+            ![
+              "id",
+              "seq",
+              "browserId",
+              "createdBy",
+              "createdTime",
+              "updateBy",
+              "updateTime",
+            ].includes(key),
+        )
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    const config = {
+      proxyMethod: data.proxyMethod,
+      proxyType: data.proxyType,
+      host: data.host,
+      port: data.port,
+      proxyUserName: data.proxyUserName,
+      proxyPassword: data.proxyPassword,
+      dynamicIpUrl: data.dynamicIpUrl,
+      isGlobalProxyInfo: data.isGlobalProxyInfo,
+      fingerprint,
+    };
+    return {
+      signature: createHash("sha256")
+        .update(JSON.stringify(config))
+        .digest("hex"),
+      proxy:
+        data.proxyType === "noproxy"
+          ? ("direct" as const)
+          : ("configured" as const),
+      stopWhileNetError: data.stopWhileNetError === true,
+    };
   }
   async environmentExitIp(profileId: string, headless = false) {
     const read = (context: BrowserContext) => browserExitIp(context);
-    return headless ? this.withDriveProfile(profileId, false, read) : this.withProfile(profileId, read);
+    return headless
+      ? this.withDriveProfile(profileId, false, read)
+      : this.withProfile(profileId, read);
   }
   async assertProfileIdle(profileId: string) {
     const response = await this.call("/browser/pids", { ids: [profileId] });
-    if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) throw new AppError("BIT_PROFILE_STATUS_UNKNOWN", "无法确认指纹环境是否已关闭，请检查比特连接后重试。");
-    if (Number(response.data[profileId]) > 0) throw new AppError("ENVIRONMENT_WINDOW_OPEN", "请先关闭此指纹环境的浏览器窗口，再修改配置或迁移账号；登录状态会保留。");
+    if (
+      !response.data ||
+      typeof response.data !== "object" ||
+      Array.isArray(response.data)
+    )
+      throw new AppError(
+        "BIT_PROFILE_STATUS_UNKNOWN",
+        "无法确认指纹环境是否已关闭，请检查比特连接后重试。",
+      );
+    if (Number(response.data[profileId]) > 0)
+      throw new AppError(
+        "ENVIRONMENT_WINDOW_OPEN",
+        "请先关闭此指纹环境的浏览器窗口，再修改配置或迁移账号；登录状态会保留。",
+      );
   }
   async profiles(): Promise<BitBrowserProfile[]> {
     const windows: BitBrowserProfile[] = [];
@@ -174,22 +307,25 @@ export class BitBrowser {
       if (!Array.isArray(rows))
         throw new AppError("BIT_SCHEMA_CHANGED", "比特窗口列表格式无法识别。");
       for (const r of rows as Record<string, any>[]) {
-          if (!r || typeof r.id !== "string" || !r.id.trim())
-            throw new AppError(
-              "BIT_SCHEMA_CHANGED",
-              "比特窗口缺少有效ID，未建立账号映射。",
-            );
-          if (seen.has(r.id))
-            throw new AppError("BIT_LIST_CHANGED", "读取期间窗口列表发生变化或分页重复，请重新刷新；未展示不完整结果。");
-          seen.add(r.id);
-          windows.push({
-            id: r.id,
-            name: String(r.name || r.id).slice(0, 300),
-            seq: typeof r.seq === "number" ? r.seq : null,
-            groupId: String(r.groupId ?? "").slice(0, 200),
-            groupName: String(r.groupName ?? "").slice(0, 200),
-            remark: String(r.remark ?? "").slice(0, 2000),
-          });
+        if (!r || typeof r.id !== "string" || !r.id.trim())
+          throw new AppError(
+            "BIT_SCHEMA_CHANGED",
+            "比特窗口缺少有效ID，未建立账号映射。",
+          );
+        if (seen.has(r.id))
+          throw new AppError(
+            "BIT_LIST_CHANGED",
+            "读取期间窗口列表发生变化或分页重复，请重新刷新；未展示不完整结果。",
+          );
+        seen.add(r.id);
+        windows.push({
+          id: r.id,
+          name: String(r.name || r.id).slice(0, 300),
+          seq: typeof r.seq === "number" ? r.seq : null,
+          groupId: String(r.groupId ?? "").slice(0, 200),
+          groupName: String(r.groupName ?? "").slice(0, 200),
+          remark: String(r.remark ?? "").slice(0, 2000),
+        });
       }
       if (rows.length < 100) return windows;
     }
@@ -199,105 +335,248 @@ export class BitBrowser {
     );
   }
   async windows() {
-    return (await this.profiles()).map(({ id, name, seq }) => ({ id, name, seq }));
+    return (await this.profiles()).map(({ id, name, seq }) => ({
+      id,
+      name,
+      seq,
+    }));
   }
-  async open(binding: BrowserBinding) {
+  async open(binding: BrowserBinding, newPage = false) {
+    await this.keepWindow(binding.windowId);
     const editor = validateEditorUrl(binding.platform, binding.editorUrl);
     await this.withContext(binding, async (context) => {
-      // Leave existing editors and unsaved drafts untouched.
-      const page = await context.newPage();
-      const navigation = await page.goto(editor, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
+      // Reuse the editor without navigating away from an existing draft.
+      const page = await findEnvironmentPage(
+        context,
+        `panxu:editor:${binding.id}:${new URL(editor).pathname}${newPage ? `:${Date.now()}:${Math.random()}` : ""}`,
+        editor,
+      );
+      const navigation = await environmentPageStatus(context, page);
       await page.bringToFront();
       const current = page.url();
       const extensionText =
         new URL(current).protocol === "chrome-extension:"
-          ? await page.locator("body").innerText({ timeout: 3000 }).catch(() => "")
+          ? await page
+              .locator("body")
+              .innerText({ timeout: 3000 })
+              .catch(() => "")
           : "";
-      assertEditorPage(editor, current, extensionText.slice(0, 12000), navigation?.status());
+      assertEditorPage(
+        editor,
+        current,
+        extensionText.slice(0, 12000),
+        navigation,
+      );
     });
     return { opened: true, url: editor };
   }
-  async withContext<T>(binding: BrowserBinding, action: (context: BrowserContext) => Promise<T>): Promise<T> {
+  async withContext<T>(
+    binding: BrowserBinding,
+    action: (context: BrowserContext) => Promise<T>,
+  ): Promise<T> {
     validateEditorUrl(binding.platform, binding.editorUrl);
     const run = () => this.withProfile(binding.windowId, action);
     return this.lease ? this.lease(binding, run) : run();
   }
-  async withProfile<T>(profileId: string, action: (context: BrowserContext) => Promise<T>, expectedUrl?: string): Promise<T> {
-    let endpoint: string;
+  async withProfile<T>(
+    profileId: string,
+    action: (context: BrowserContext) => Promise<T>,
+    expectedUrl?: string,
+  ): Promise<T> {
+    const connector = expectedUrl ?? (await this.config()).url;
+    const key = this.lifecycle.key(connector, profileId);
+    this.lifecycle.begin(key);
     try {
-      const response = await this.call("/browser/open", {
-        id: profileId,
-        loadExtensions: true,
-      }, expectedUrl);
-      endpoint = String(response.data?.ws ?? "");
-    } catch (error) {
-      if (!(error instanceof AppError) || error.code !== "BIT_ERROR" || !error.message.includes("打开窗口失败")) throw error;
-      // A browser may outlive the client's registry. Only reconnect to the
-      // locally attested process of this exact profile; retain all auth errors.
-      const existing = await existingBitBrowserEndpoint(profileId);
-      if (!existing) throw error;
-      endpoint = existing;
-    }
-    const debug = validateLoopback(endpoint, true);
-    if (!["ws:", "wss:"].includes(debug.protocol))
-      throw new AppError(
-        "BIT_DEBUG_ADDRESS",
-        "比特未返回本机WebSocket调试地址。",
-      );
-    const browser = await chromium.connectOverCDP(endpoint, {
-      timeout: 15_000,
-    });
-    try {
-      const context = browser.contexts()[0];
-      if (!context)
-        throw new AppError("BIT_CONTEXT_MISSING", "未连接到指定指纹窗口。");
-      return await action(context);
+      let endpoint: string;
+      try {
+        const response = await this.call(
+          "/browser/open",
+          {
+            id: profileId,
+            loadExtensions: true,
+            args: [this.lifecycle.token],
+          },
+          connector,
+        );
+        endpoint = String(response.data?.ws ?? "");
+      } catch (error) {
+        if (
+          !(error instanceof AppError) ||
+          error.code !== "BIT_ERROR" ||
+          !error.message.includes("打开窗口失败")
+        )
+          throw error;
+        // A browser may outlive the client's registry. Only reconnect to the
+        // locally attested process of this exact profile; retain all auth errors.
+        const existing = await existingBitBrowserEndpoint(profileId);
+        if (!existing) throw error;
+        endpoint = existing;
+      }
+      const debug = validateLoopback(endpoint, true);
+      if (!["ws:", "wss:"].includes(debug.protocol))
+        throw new AppError(
+          "BIT_DEBUG_ADDRESS",
+          "比特未返回本机WebSocket调试地址。",
+        );
+      const browser = await chromium.connectOverCDP(endpoint, {
+        timeout: 15_000,
+      });
+      try {
+        const context = browser.contexts()[0];
+        if (!context)
+          throw new AppError("BIT_CONTEXT_MISSING", "未连接到指定指纹窗口。");
+        await this.lifecycle.attach(key, endpoint, context, async () => {
+          const pids = (
+            await this.call("/browser/pids", { ids: [profileId] }, connector)
+          ).data;
+          const mode = await browserProcessMode(
+            Number(pids?.[profileId]),
+            profileId,
+            Number(debug.port),
+            debug.pathname,
+            this.lifecycle.token,
+          );
+          return mode?.owned === true;
+        });
+        return await action(context);
+      } finally {
+        for (const context of browser.contexts())
+          await freezePageLedger(context).catch(() => {});
+        await browser.close();
+      } // CDP disconnects the client; the existing BitBrowser window is not closed.
     } finally {
-      await browser.close();
-    } // CDP disconnects the client; the existing BitBrowser window is not closed.
+      this.lifecycle.end(key);
+    }
   }
   /** Never replace an already-open user's window or silently use headful mode for drive requests. */
-  async withDriveProfile<T>(profileId: string, allowHeadful: boolean, action: (context: BrowserContext, mode: { headless: boolean; owned: boolean }) => Promise<T>, expectedUrl?: string): Promise<T> {
-    const profile = (await this.call("/browser/detail", { id: profileId }, expectedUrl)).data;
-    if (!profile || profile.id !== profileId) throw new AppError("BIT_PROFILE_INVALID", "未读取到所选比特环境。");
-    if (profile.randomFingerprint === true || profile.clearCookiesBeforeLaunch === true) throw new AppError("BIT_DRIVE_PROFILE_UNSTABLE", "后台环境需要保留登录态与固定指纹，请在比特中关闭每次启动随机指纹及启动清理 Cookie。");
-    const response = await this.call("/browser/open", {
-      id: profileId,
-      args: ["--headless", "--enable-automation", "--panxu-drive-headless"],
-      loadExtensions: true,
-      ignoreDefaultUrls: true,
-    }, expectedUrl);
-    const endpoint = String(response.data?.ws ?? "");
-    const debug = validateLoopback(endpoint, true);
-    if (!["ws:", "wss:"].includes(debug.protocol)) throw new AppError("BIT_DEBUG_ADDRESS", "比特未返回有效的本机调试地址。");
-    const browser = await chromium.connectOverCDP(endpoint, { timeout: 15000, noDefaults: true });
+  async withDriveProfile<T>(
+    profileId: string,
+    allowHeadful: boolean,
+    action: (
+      context: BrowserContext,
+      mode: { headless: boolean; owned: boolean },
+    ) => Promise<T>,
+    expectedUrl?: string,
+  ): Promise<T> {
+    const connector = expectedUrl ?? (await this.config()).url;
+    const key = this.lifecycle.key(connector, profileId);
+    this.lifecycle.begin(key);
     try {
-      const cdp = await browser.newBrowserCDPSession();
-      let mode: BrowserProcessMode | null = null;
+      const profile = (
+        await this.call("/browser/detail", { id: profileId }, expectedUrl)
+      ).data;
+      if (!profile || profile.id !== profileId)
+        throw new AppError("BIT_PROFILE_INVALID", "未读取到所选比特环境。");
+      if (
+        profile.randomFingerprint === true ||
+        profile.clearCookiesBeforeLaunch === true
+      )
+        throw new AppError(
+          "BIT_DRIVE_PROFILE_UNSTABLE",
+          "后台环境需要保留登录态与固定指纹，请在比特中关闭每次启动随机指纹及启动清理 Cookie。",
+        );
+      const response = await this.call(
+        "/browser/open",
+        {
+          id: profileId,
+          args: [
+            "--headless",
+            "--enable-automation",
+            "--panxu-drive-headless",
+            this.lifecycle.token,
+          ],
+          loadExtensions: true,
+          ignoreDefaultUrls: true,
+        },
+        expectedUrl,
+      );
+      const endpoint = String(response.data?.ws ?? "");
+      const debug = validateLoopback(endpoint, true);
+      if (!["ws:", "wss:"].includes(debug.protocol))
+        throw new AppError(
+          "BIT_DEBUG_ADDRESS",
+          "比特未返回有效的本机调试地址。",
+        );
+      const browser = await chromium.connectOverCDP(endpoint, {
+        timeout: 15000,
+        noDefaults: true,
+      });
       try {
-        const args = (await cdp.send("Browser.getBrowserCommandLine")).arguments;
-        mode = { headless: args.some((v) => v === "--headless" || v.startsWith("--headless=")), owned: args.includes("--panxu-drive-headless") };
+        const cdp = await browser.newBrowserCDPSession();
+        let mode: BrowserProcessMode | null = null;
+        try {
+          const args = (await cdp.send("Browser.getBrowserCommandLine"))
+            .arguments;
+          mode = {
+            headless: args.some(
+              (v) => v === "--headless" || v.startsWith("--headless="),
+            ),
+            owned: args.includes("--panxu-drive-headless"),
+          };
+        } catch {
+          const processes = (
+            await this.call("/browser/pids", { ids: [profileId] }, expectedUrl)
+          ).data;
+          mode = await browserProcessMode(
+            Number(processes?.[profileId]),
+            profileId,
+            Number(debug.port),
+            debug.pathname,
+          );
+        } finally {
+          await cdp.detach().catch(() => {});
+        }
+        if (!mode && !allowHeadful)
+          throw new AppError(
+            "BIT_HEADLESS_UNKNOWN",
+            "无法读取此比特环境的运行状态，请在浏览器环境中选择关闭窗口并转为后台，再核验登录。",
+          );
+        mode ??= { headless: false, owned: false };
+        if (!allowHeadful && !mode.headless)
+          throw new AppError(
+            "BIT_HEADFUL_OPEN",
+            "此比特环境的可见窗口仍在运行。完成登录后请手动关闭该环境，再核验后台登录；盘序不会替你关闭窗口。",
+          );
+        const context = browser.contexts()[0];
+        if (!context)
+          throw new AppError("BIT_CONTEXT_MISSING", "未连接到指定比特环境。");
+        await this.lifecycle.attach(key, endpoint, context, async () => {
+          const pids = (
+            await this.call("/browser/pids", { ids: [profileId] }, connector)
+          ).data;
+          const mode = await browserProcessMode(
+            Number(pids?.[profileId]),
+            profileId,
+            Number(debug.port),
+            debug.pathname,
+            this.lifecycle.token,
+          );
+          return mode?.owned === true;
+        });
+        return await action(context, mode);
+      } finally {
+        for (const context of browser.contexts())
+          await freezePageLedger(context).catch(() => {});
+        await browser.close();
       }
-      catch {
-        const processes = (await this.call("/browser/pids", { ids: [profileId] }, expectedUrl)).data;
-        mode = await browserProcessMode(Number(processes?.[profileId]), profileId, Number(debug.port), debug.pathname);
-      }
-      finally { await cdp.detach().catch(() => {}); }
-      if (!mode && !allowHeadful) throw new AppError("BIT_HEADLESS_UNKNOWN", "无法读取此比特环境的运行状态，请在浏览器环境中选择关闭窗口并转为后台，再核验登录。");
-      mode ??= { headless: false, owned: false };
-      if (!allowHeadful && !mode.headless) throw new AppError("BIT_HEADFUL_OPEN", "此比特环境的可见窗口仍在运行。完成登录后请手动关闭该环境，再核验后台登录；盘序不会替你关闭窗口。");
-      const context = browser.contexts()[0];
-      if (!context) throw new AppError("BIT_CONTEXT_MISSING", "未连接到指定比特环境。");
-      return await action(context, mode);
-    } finally { await browser.close(); }
+    } finally {
+      this.lifecycle.end(key);
+    }
   }
   async stopDriveHeadless(profileId: string, expectedUrl?: string) {
     if (!(await this.runningProfiles([profileId])).has(profileId)) return;
-    const mode = await this.withDriveProfile(profileId, true, async (_context, mode) => mode, expectedUrl);
-    if (mode.headless && !mode.owned) throw new AppError("BIT_HEADLESS_NOT_OWNED", "此环境由其他程序以无头模式运行，请先在比特中关闭，再打开登录窗口。");
-    if (mode.headless && mode.owned) await this.closeProfile(profileId, expectedUrl);
+    const mode = await this.withDriveProfile(
+      profileId,
+      true,
+      async (_context, mode) => mode,
+      expectedUrl,
+    );
+    if (mode.headless && !mode.owned)
+      throw new AppError(
+        "BIT_HEADLESS_NOT_OWNED",
+        "此环境由其他程序以无头模式运行，请先在比特中关闭，再打开登录窗口。",
+      );
+    if (mode.headless && mode.owned)
+      await this.closeProfile(profileId, expectedUrl);
   }
 }

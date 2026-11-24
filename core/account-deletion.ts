@@ -206,8 +206,9 @@ export class AccountDeletion {
             `drive-auth:${provider}:${accountId}`,
           );
           this.db.run(
-            "DELETE FROM settings WHERE key IN (?,?,?)",
+            "DELETE FROM settings WHERE key IN (?,?,?,?)",
             `account:capacity:${accountId}`,
+            `account:membership:${accountId}`,
             `intake:directories:${accountId}`,
             pendingAccountAliasKey(accountId),
           );

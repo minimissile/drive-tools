@@ -101,6 +101,8 @@ export interface BaiduDiscoveryPort {
     keyword: string,
     signal: AbortSignal,
   ): Promise<string[]>;
+  readSearchWords?(keyword: string, signal: AbortSignal): Promise<{ related: string[]; people: string[] }>;
+  check?(signal: AbortSignal): Promise<void>;
   open(keyword?: string): Promise<void>;
   isOpen(): boolean;
   close(): void;

@@ -4,6 +4,7 @@ import {
   tiebaPublishingSaveSchema,
   tiebaPublishingSubmitSchema,
   tiebaPublishingReconcileSchema,
+  tiebaKeyboardSkinDraftSchema,
 } from "../../shared/tieba-publishing";
 import type { TiebaPublishing } from "../tieba-publishing/service";
 import type { HandlerMap } from "./types";
@@ -20,6 +21,10 @@ export function createTiebaPublishingHandlers({
       tiebaPublishing.resources(tiebaPublishingQuerySchema.parse(raw)),
     "tieba.publishing.save": (raw) =>
       tiebaPublishing.save(tiebaPublishingSaveSchema.parse(raw)),
+    "tieba.publishing.saveKeyboardSkins": (raw) =>
+      tiebaPublishing.saveKeyboardSkins(
+        tiebaKeyboardSkinDraftSchema.parse(raw),
+      ),
     "tieba.publishing.submit": (raw) =>
       tiebaPublishing.submit(tiebaPublishingSubmitSchema.parse(raw)),
     "tieba.publishing.reconcile": (raw) =>

@@ -4,6 +4,9 @@
   height: 100dvh;
   overflow: hidden;
 }
+.app-shell.app-shell--analysis {
+  grid-template-columns: minmax(0, 1fr);
+}
 .sidebar {
   background: var(--sidebar);
   border-right: 1px solid var(--line);
@@ -11,6 +14,9 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.sidebar[hidden] {
+  display: none;
 }
 .brand {
   display: flex;
@@ -180,8 +186,8 @@
   background: var(--green);
 }
 .main-content {
-  padding: var(--page-padding) var(--page-padding)
-    calc(var(--space-8) + var(--floating-control-clearance, 0px));
+  padding: calc(var(--page-padding) * 2 / 3) var(--page-padding)
+    calc(var(--space-8) * 2 / 3 + var(--floating-control-clearance, 0px));
   overflow: auto;
   min-height: 0;
   flex: 1;

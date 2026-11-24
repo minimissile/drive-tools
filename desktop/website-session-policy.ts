@@ -9,6 +9,11 @@ export const websiteLoginSpecs: Record<
   WebsiteProvider,
   { home: string; title: string; hosts: readonly string[] }
 > = {
+  jianshu: {
+    home: "https://www.jianshu.com/sign_in",
+    title: "简书 · 官方登录",
+    hosts: ["www.jianshu.com", "jianshu.com"],
+  },
   bilibili: {
     home: "https://passport.bilibili.com/login",
     title: "哔哩哔哩 · 官方扫码登录",

@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import { now } from "./database";
 import { AppError } from "./errors";
+import { resourceLinkNetworkError } from "./resource-link-errors";
 import { readLimited } from "./http";
 import { parseShare } from "./links";
 import { hasVerifiedShare } from "../shared/share-status";
@@ -24,6 +25,7 @@ interface Dependencies {
   secrets: SecretStore;
   fetch?(url: string, init: RequestInit): Promise<Response>;
   changed(): void;
+  reportSyncError?(resourceId: string, error: unknown): void;
   assertMutable(resourceId: string): void;
   assertIdle(accountId: string): void;
   authenticated<T>(
@@ -389,15 +391,16 @@ export class ResourceLinks {
     method: string,
     payload: unknown,
     token: string,
-  ) {
+  ): Promise<unknown> {
     let response: Response;
     let text: string;
+    const signal = AbortSignal.timeout(15_000);
     try {
       response = await (this.d.fetch ?? fetch)(baseUrl + path, {
         method,
         credentials: "omit",
         redirect: "error",
-        signal: AbortSignal.timeout(15_000),
+        signal,
         headers: {
           Authorization: `Bearer ${token}`,
           ...(payload ? { "Content-Type": "application/json" } : {}),
@@ -407,14 +410,20 @@ export class ResourceLinks {
       text = await readLimited(response, path.startsWith("/api/catalogs/") ? 4_194_304 : path.startsWith("/api/pages/") ? 262_144 : 32_768);
     } catch (cause) {
       if (cause instanceof AppError) throw cause;
-      const error = new AppError(
-        "RESOURCE_LINK_NETWORK",
-        method === "GET"
-          ? "无法连接固定入口服务，请检查系统代理和网络后重试。"
-          : "固定入口服务连接中断，暂时无法确认同步结果。请检查系统代理和网络后核对原操作。",
-        method !== "GET",
-      );
-      Object.defineProperty(error, "cause", { value: cause });
+      const error = resourceLinkNetworkError(cause, method, path, signal);
+      // A lost response can follow a committed write. Reconcile by reading once;
+      // never replay a mutation or accept an unrelated operation's receipt.
+      const operationId = payload && typeof payload === "object" && "operationId" in payload
+        ? payload.operationId : null;
+      if (method === "PUT" && typeof operationId === "string" && /^\/api\/(links|pages)\//.test(path)) {
+        try {
+          const remote = await this.requestUsingToken(baseUrl, path, "GET", undefined, token);
+          if (remote && typeof remote === "object" && "lastOperationId" in remote && remote.lastOperationId === operationId)
+            return remote;
+        } catch {
+          // Retain the original write's uncertainty, even if the read also fails.
+        }
+      }
       throw error;
     }
     let value: unknown;
@@ -860,6 +869,7 @@ export class ResourceLinks {
           ? `${error.message}${rejected ? " 上次同步仍可能已提交，请读取云端状态核对。" : ""}`
           : "同步未完成或结果待核对。资源已保留，请重试原操作或读取云端状态。";
       this.store(record);
+      this.d.reportSyncError?.(record.resourceId, error);
     }
   }
   private async savedTarget(resource: Resource) {
@@ -900,12 +910,15 @@ export class ResourceLinks {
       /* The committed resource is never reported as a failed intake. */
     }
   }
-  async afterShareSaved(copyId: string) {
+  async afterShareSaved(copyId: string, createIfMissing = false) {
     try {
       if (!this.config().enabled || !this.d.secrets.has(tokenKey)) return;
       const copy = this.d.repo.getCopy(copyId);
       const record = this.record(copy.resourceId);
-      if (!record) return;
+      if (!record) {
+        if (createIfMissing) await this.ensure(copy.resourceId);
+        return;
+      }
       if (
         !record.enabled ||
         record.targetUrl ||
@@ -1049,6 +1062,13 @@ export class ResourceLinks {
           "同步记录不匹配，请读取云端状态。",
         );
       await this.send(record, input);
+      const settled = this.record(resourceId)!;
+      // Initial creation may have failed before archival finished. Complete the
+      // existing auto-binding intent after replaying that exact original request.
+      if (input.expectedRevision === 0 && !input.targetUrl && !settled.operationId && settled.state === "synced" && settled.enabled && !settled.targetUrl) {
+        const target = await this.savedTarget(this.d.repo.getResource(resourceId));
+        if (target.url) await this.queueWrite(settled, target, true);
+      }
       return this.context(resourceId);
     });
   }
@@ -1094,13 +1114,17 @@ export class ResourceLinks {
     });
   }
   async copy(resourceId: string, kind: "landing" | "redirect" = "landing") {
-    const { link } = await this.context(resourceId);
-    if (!link || !link.enabled || link.revision < 1 || !link.syncedAt)
+    this.d.repo.getResource(resourceId);
+    const link = this.record(resourceId);
+    if (!link || link.state !== "synced" || link.operationId || !link.enabled || link.revision < 1 || !link.syncedAt)
       throw new AppError(
         "RESOURCE_LINK_NOT_READY",
         "固定入口尚未同步或已停用，请先完成维护。",
       );
-    const url = new URL(link.url);
+    if (kind === "redirect" && !link.targetUrl)
+      throw new AppError("RESOURCE_LINK_TARGET_REQUIRED", "固定入口尚未绑定本人分享，暂不能复制直达链接。");
+    // Copying a confirmed public address needs neither network nor keychain access.
+    const url = new URL(`${link.baseUrl}/r/${link.slug}`);
     if (kind === "redirect") url.pathname = `/go/${link.slug}`;
     return { text: url.toString() };
   }

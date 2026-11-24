@@ -70,6 +70,8 @@ export interface ZhihuContent extends z.output<typeof zhihuContentInput> {
   reviewed: boolean;
   images: ZhihuImage[];
   source?: ContentProvenance;
+  /** The reviewed version and account identity explicitly approved for fallback. */
+  autocareOriginal?: { version: number; uid: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -104,10 +106,35 @@ export interface ZhihuProgress {
   source: "official" | "manual";
   note: string;
 }
+export type ZhihuOfficialScore = ZhihuProgress & {
+  creator: true;
+  source: "official";
+  score: number;
+  level: number;
+};
+export function hasZhihuOfficialScore(
+  progress: ZhihuProgress | null | undefined,
+): progress is ZhihuOfficialScore {
+  return (
+    progress?.source === "official" &&
+    progress.creator === true &&
+    typeof progress.level === "number" &&
+    Number.isInteger(progress.level) &&
+    progress.level >= 0 &&
+    progress.level <= 10 &&
+    typeof progress.score === "number" &&
+    Number.isSafeInteger(progress.score) &&
+    progress.score >= 0
+  );
+}
+export const zhihuOfficialScoreRefreshMs = 6 * 60 * 60 * 1000;
 export interface ZhihuPlan extends z.output<typeof zhihuPolicyInput> {
   active: boolean;
   message: string;
   progress: ZhihuProgress | null;
+  /** Display history for the same verified UID. Never used to authorize a task. */
+  lastOfficialScore?: ZhihuOfficialScore;
+  officialProgressFailedAt?: string;
   environment?: EnvironmentStamp;
   uid?: string;
 }
@@ -141,6 +168,9 @@ export interface ZhihuTask {
   networkKey?: string;
   createdAt: string;
 }
+export function zhihuTaskClaimsContent(task: ZhihuTask): boolean {
+  return task.status !== "cancelled" || !!task.attemptedAt || !!task.submittedAt;
+}
 /** Only a proven pre-submission failure may leave the rest of this account runnable. */
 export function zhihuTaskNeedsReconciliation(task: ZhihuTask) {
   return (
@@ -149,6 +179,7 @@ export function zhihuTaskNeedsReconciliation(task: ZhihuTask) {
   );
 }
 export interface ZhihuSnapshot {
+  originalDraftsSupported?: true;
   accounts: (WebsiteAccount & {
     environmentName: string;
     engine: string;
@@ -189,6 +220,10 @@ export interface ZhihuContract {
   "zhihu.content.save": Contract<ZhihuContentInput, ZhihuContent>;
   "zhihu.content.review": Contract<
     { id: string; version: number; confirmed: true },
+    ZhihuContent
+  >;
+  "zhihu.content.original": Contract<
+    { id: string; version: number; accountId: string | null; confirmed: true },
     ZhihuContent
   >;
   "zhihu.content.images": Contract<{ id: string }, ZhihuContent>;

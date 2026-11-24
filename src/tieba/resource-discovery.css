@@ -211,8 +211,31 @@
   width: 37%;
 }
 
-.tieba-traffic-table:has(.tieba-traffic-action) :is(th, td):last-child {
+.tieba-traffic-table:has(.tieba-traffic-mark) :is(th, td):first-child {
+  width: 34%;
+}
+
+.tieba-traffic-table .tieba-traffic-action {
   width: 72px;
+}
+
+.tieba-traffic-table .tieba-traffic-mark {
+  width: 112px;
+}
+
+.button.tieba-traffic-mark-button {
+  white-space: nowrap;
+}
+
+.button.tieba-traffic-mark-button[aria-pressed="true"] {
+  color: var(--green);
+  background: var(--green-bg);
+  border-color: var(--green);
+}
+
+.button.tieba-traffic-mark-button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--green-bg);
+  filter: brightness(0.96);
 }
 
 .tieba-discovery-post-table :is(th, td):not(:first-child) {
@@ -222,6 +245,35 @@
 
 .tieba-discovery-post-table td small {
   display: block;
+}
+
+.tieba-filter-audit-table :is(th, td):first-child {
+  width: 37%;
+}
+
+.tieba-filter-audit-table :is(th, td):nth-child(2) {
+  width: 35%;
+  text-align: left;
+}
+
+.tieba-filter-audit-table :is(th, td):last-child {
+  width: 176px;
+}
+
+.tieba-recycled-table :is(th, td):is(:nth-child(2), :nth-child(3)) {
+  text-align: left;
+}
+
+.tieba-recycled-table :is(th, td):first-child {
+  width: 46%;
+}
+
+.tieba-recycled-table :is(th, td):nth-child(3) {
+  width: 19%;
+}
+
+.tieba-recycled-table :is(th, td):last-child {
+  width: 176px;
 }
 
 .tieba-discovery-post-facts {

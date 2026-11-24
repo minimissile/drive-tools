@@ -274,6 +274,10 @@ export function createSharingHandlers(
         source.code =
           (await services.secrets.get(`source:${input.resourceId}`)) ?? "";
       services.assertNoActiveJobs(account.id);
+      if (source.provider === "baidu" && services.ports.baiduShareReader) {
+        await services.ports.baiduShareReader.open(source);
+        return true;
+      }
       const url = new URL(source.url);
       if (source.code)
         url.searchParams.set(
@@ -303,6 +307,19 @@ export function createSharingHandlers(
       )
         source.code =
           (await services.secrets.get(`source:${input.resourceId}`)) ?? "";
+      if (source.provider === "baidu" && services.ports.baiduShareReader) {
+        const account = services.account(input.accountId);
+        if (account.provider !== source.provider)
+          throw new AppError(
+            "CROSS_PROVIDER_UNSUPPORTED",
+            "请使用与分享相同网盘的目标账号。",
+          );
+        return services.ports.baiduShareReader.inspect(
+          source,
+          input.parentId,
+          input.page,
+        );
+      }
       return services.authenticated(input.accountId, async (a, p) => {
         if (a.provider !== source.provider)
           throw new AppError(

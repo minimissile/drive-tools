@@ -561,11 +561,12 @@ test("贴吧观察：名称严格规范、去重和首批候选，网址仅经�
     }).forumNames,
     ["测试101"],
   );
-  assert.throws(() =>
+  assert.equal(
     tiebaAutocareObserveSchema.parse({
       accountId: "web_test",
-      forumNames: Array(6).fill("测试"),
-    }),
+      forumNames: Array.from({ length: 12 }, (_, i) => `测试${i}`),
+    }).forumNames.length,
+    12,
   );
 });
 
@@ -1028,7 +1029,7 @@ test("贴吧：提交前环境身份修订变化阻断，不因原账号UID相�
   }
 });
 
-test("贴吧：跨午夜或超过两小时均停止新的签到提交，旧日期状态不冒充今日已签", async () => {
+test("贴吧：跨午夜或超过半小时均停止新的签到提交，旧日期状态不冒充今日已签", async () => {
   const f = await fixture();
   try {
     f.time = Date.parse("2026-11-07T15:59:00Z");
@@ -2329,5 +2330,587 @@ test("资源发帖未知阻断签到，已核实的发帖仍遵守真实提交�
     assert.equal(f.submissions, 1);
   } finally {
     await f.close();
+  }
+});
+
+test("贴吧同步并启动：三账号完整关注吧全部入队，超过5项且按UID隔离，每项每日不重复提交", async () => {
+  const f = await fixture();
+  try {
+    const checked = new Set<string>();
+    const checkIn = f.ports.tieba!.checkIn;
+    f.ports.tieba!.readForum = async (_account, uid, forum) => ({
+      ...f.reading(forum.forumId),
+      signed: checked.has(`${uid}:${forum.forumId}`),
+    });
+    f.ports.tieba!.checkIn = async (...args) => {
+      const result = await checkIn(...args);
+      checked.add(`${args[1]}:${args[2].forumId}`);
+      return result;
+    };
+    const ids = [f.account.id];
+    for (let i = 2; i <= 3; i++) {
+      const env = await f.environments.save({
+        name: `贴吧环境${i}`,
+        engine: "bitbrowser",
+        profileId: `tieba-start-${i}`,
+      });
+      const account = f.accounts.add("tieba", `账号${i}`, env.id);
+      f.identities.set(account.id, `tieba-owner-${i}`);
+      ids.push(account.id);
+    }
+    const result = await f.service.startFollowed({
+      accountIds: ids,
+      revision: 1,
+      confirmed: true,
+    });
+    assert.deepEqual(
+      result.startResult?.accounts.map((a) => [a.status, a.targets]),
+      [
+        ["ready", 2],
+        ["ready", 2],
+        ["ready", 2],
+      ],
+    );
+    assert.equal(result.config.targetIds.length, 6);
+    assert.equal(result.tasks.length, 6);
+    assert.equal(result.enabled, true);
+    assert.equal(f.follows, 0);
+    for (let i = 0; i < 6; i++) {
+      await f.service.tick();
+      f.time += 60000;
+    }
+    assert.equal(f.submissions, 6);
+    assert.equal(
+      f.service.snapshot().tasks.filter((t) => t.status === "verified").length,
+      6,
+    );
+    await f.service.startFollowed({
+      accountIds: ids,
+      revision: f.service.snapshot().revision,
+      confirmed: true,
+    });
+    await f.service.tick();
+    assert.equal(f.submissions, 6);
+    assert.equal(f.service.snapshot().tasks.length, 6);
+  } finally {
+    await f.close();
+  }
+});
+
+test("贴吧同步并启动：同UID新环境核验后恢复身份暂停，保留手动暂停，跨过旧批次仍能执行未提交项", async () => {
+  const f = await fixture();
+  try {
+    await f.configure(2);
+    const targets = f.service.store.targets();
+    targets[0].paused = true;
+    targets[0].pauseReason =
+      "账号环境或登录身份已变化，请重新准备内容后再提交。";
+    f.service.store.saveTarget(targets[0]);
+    f.service.pauseTarget({
+      targetId: targets[1].id,
+      paused: true,
+      revision: f.service.snapshot().revision,
+    });
+    f.time += 3 * 60 * 60 * 1000;
+    await f.service.tick();
+    const oldDeadline = f.service.snapshot().run!.deadlineAt;
+    const result = await f.service.startFollowed({
+      accountIds: [f.account.id],
+      revision: f.service.snapshot().revision,
+      confirmed: true,
+    });
+    assert.equal(result.config.targetIds.length, 1);
+    assert.equal(result.targets[0].paused, false);
+    assert.equal(result.targets[1].paused, true);
+    assert.ok(result.run!.deadlineAt > oldDeadline);
+    await f.service.tick();
+    assert.equal(f.submissions, 1);
+    assert.equal(
+      f.service.snapshot().tasks.find((t) => t.targetId === targets[0].id)!
+        .status,
+      "verified",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("贴吧同步并启动：结果未知不重放，账号读取失败不改变原开关、选择和排期", async () => {
+  const f = await fixture();
+  try {
+    await f.configure();
+    f.unknown = true;
+    await f.service.tick();
+    const original = f.service.snapshot().tasks[0];
+    assert.equal(original.status, "uncertain");
+    f.time += 3 * 60 * 60 * 1000;
+    await f.service.startFollowed({
+      accountIds: [f.account.id],
+      revision: f.service.snapshot().revision,
+      confirmed: true,
+    });
+    await f.service.tick();
+    assert.equal(f.submissions, 1);
+    assert.deepEqual(
+      f.service.snapshot().tasks.find((t) => t.id === original.id),
+      original,
+    );
+    const before = f.service.snapshot();
+    const originalList = f.ports.tieba!.listForums;
+    f.ports.tieba!.listForums = async () => {
+      throw new Error("读取失败");
+    };
+    const result = await f.service.startFollowed({
+      accountIds: [f.account.id],
+      revision: before.revision,
+      confirmed: true,
+    });
+    assert.equal(result.startResult?.accounts[0].status, "failed");
+    assert.equal(result.revision, before.revision);
+    assert.deepEqual(result.config, before.config);
+    assert.equal(result.enabled, before.enabled);
+    assert.deepEqual(result.run, before.run);
+    f.ports.tieba!.listForums = originalList;
+  } finally {
+    await f.close();
+  }
+});
+
+test("贴吧同步并启动：完整关注列表已移除的旧目标不得被恢复，其他账号失败仍启动成功账号", async () => {
+  const f = await fixture();
+  try {
+    await f.configure(2);
+    f.forums = ["102"];
+    const env = await f.environments.save({
+      name: "未登录环境",
+      engine: "bitbrowser",
+      profileId: "tieba-not-signed-in",
+    });
+    const other = f.accounts.add("tieba", "未登录账号", env.id);
+    const result = await f.service.startFollowed({
+      accountIds: [other.id, f.account.id],
+      revision: f.service.snapshot().revision,
+      confirmed: true,
+    });
+    assert.deepEqual(
+      result.startResult?.accounts.map((item) => item.status),
+      ["failed", "ready"],
+    );
+    assert.equal(result.config.targetIds.length, 1);
+    const removed = result.targets.find((t) => t.forumId === "101")!;
+    assert.equal(removed.paused, true);
+    assert.equal(removed.followed, false);
+    assert.ok(!result.config.targetIds.includes(removed.id));
+    f.time += 60000;
+    await f.service.tick();
+    assert.equal(f.submissions, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("贴吧原始UID修复：仅新鲜官网别名配对且连接无历史时纠正旧open_uid，其他账号和历史不改", async () => {
+  for (const mode of ["paired", "foreign", "history"] as const) {
+    const f = await fixture();
+    try {
+      if (mode === "history")
+        await f.service.syncForums({ accountId: f.account.id });
+      f.db.run(
+        "UPDATE website_accounts SET uid=? WHERE id=?",
+        "3853302030",
+        f.account.id,
+      );
+      f.db.run(
+        "UPDATE browser_environment_accounts SET uid=? WHERE kind='website' AND account_id=?",
+        "3853302030",
+        f.account.id,
+      );
+      f.ports.websiteSessions!.verify = async () => ({
+        hasSession: true,
+        uid: "7127295479",
+        tiebaOpenUid: mode === "foreign" ? "other" : "3853302030",
+        windowOpen: false,
+        error: null,
+      });
+      const result = await f.accounts.verify(f.account.id);
+      assert.equal(result.uid, mode === "paired" ? "7127295479" : "3853302030");
+      assert.equal(
+        result.status,
+        mode === "paired" ? "connected" : "disconnected",
+      );
+      assert.equal(
+        f.environments.link({ kind: "website", id: f.account.id }).uid,
+        result.uid,
+      );
+      if (mode === "history")
+        assert.ok(
+          f.service.snapshot().targets.every((t) => t.uid === "tieba-owner-1"),
+        );
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+async function parallelFixture(counts = [5, 7, 5]) {
+  const f = await fixture();
+  const ids = [f.account.id],
+    signed = new Set<string>();
+  for (let i = 1; i < counts.length; i++) {
+    const env = await f.environments.save({
+      name: `并行环境${i}`,
+      engine: "bitbrowser",
+      profileId: `tieba-parallel-${i}`,
+    });
+    const account = f.accounts.add("tieba", `并行账号${i}`, env.id);
+    f.identities.set(account.id, `parallel-owner-${i}`);
+    ids.push(account.id);
+  }
+  const writes: {
+    accountId: string;
+    uid: string;
+    at: number;
+    forumId: string;
+  }[] = [];
+  f.ports.tieba!.listForums = async (account) =>
+    Array.from({ length: counts[ids.indexOf(account.id)] }, (_, i) =>
+      f.reading(String(101 + i)),
+    );
+  f.ports.tieba!.readForum = async (_account, uid, forum) => ({
+    ...f.reading(forum.forumId),
+    signed: signed.has(`${uid}:${forum.forumId}`),
+  });
+  f.ports.tieba!.checkIn = async (account, uid, forum, checkpoint) => {
+    await checkpoint();
+    writes.push({
+      accountId: account.id,
+      uid,
+      at: f.time,
+      forumId: forum.forumId,
+    });
+    signed.add(`${uid}:${forum.forumId}`);
+    return { ...f.reading(forum.forumId), signed: true };
+  };
+  await f.service.startFollowed({
+    accountIds: ids,
+    revision: f.service.snapshot().revision,
+    confirmed: true,
+  });
+  return { f, ids, writes };
+}
+
+test("半小时并行：17个目标按账号独立排期，7轮完成，真实提交间隔不跨账号串行", async () => {
+  const { f, ids, writes } = await parallelFixture();
+  try {
+    const start = f.time,
+      initial = f.service.snapshot();
+    assert.equal(Date.parse(initial.run!.deadlineAt) - start, 30 * 60000);
+    assert.equal(
+      new Set(
+        initial.tasks
+          .filter((t) => Date.parse(t.plannedAt) === start)
+          .map((t) => t.accountId),
+      ).size,
+      3,
+    );
+    for (let minute = 0; minute < 7; minute++) {
+      await f.service.tick();
+      f.time += 60000;
+    }
+    assert.equal(writes.length, 17);
+    assert.ok(f.service.snapshot().tasks.every((t) => t.status === "verified"));
+    for (const accountId of ids) {
+      const own = writes.filter((w) => w.accountId === accountId);
+      for (let i = 1; i < own.length; i++)
+        assert.ok(own[i].at - own[i - 1].at >= 60000);
+    }
+    assert.equal(writes.filter((w) => w.at === start).length, 3);
+    assert.ok(Math.max(...writes.map((w) => w.at)) - start < 30 * 60000);
+    f.restart();
+    await f.service.tick();
+    assert.equal(writes.length, 17);
+  } finally {
+    await f.close();
+  }
+});
+
+test("半小时并行：慢账号不阻塞其他账号继续，同账号不会并发重复领取", async () => {
+  const { f, ids, writes } = await parallelFixture([1, 2, 1]);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let thirdDone!: () => void, secondDone!: () => void;
+  const third = new Promise<void>((resolve) => {
+    thirdDone = resolve;
+  });
+  const second = new Promise<void>((resolve) => {
+    secondDone = resolve;
+  });
+  const read = f.ports.tieba!.readForum,
+    checkIn = f.ports.tieba!.checkIn;
+  let active = 0,
+    peak = 0;
+  f.ports.tieba!.readForum = async (...args) => {
+    active++;
+    peak = Math.max(peak, active);
+    if (args[0].id === ids[0]) await gate;
+    return read(...args);
+  };
+  f.ports.tieba!.checkIn = async (...args) => {
+    const result = await checkIn(...args);
+    active--;
+    if (args[0].id === ids[2]) thirdDone();
+    if (
+      args[0].id === ids[1] &&
+      writes.filter((w) => w.accountId === ids[1]).length === 2
+    )
+      secondDone();
+    return result;
+  };
+  const running = f.service.tick();
+  try {
+    await third;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      f.service
+        .snapshot()
+        .tasks.filter((t) => t.accountId === ids[0] && t.status === "running")
+        .length,
+      1,
+    );
+    assert.equal(peak, 2); // Reuses the shared environment queue's two available workers.
+    assert.equal(f.service.isBusy, true);
+    f.time += 60000;
+    const next = f.service.tick();
+    await second;
+    await next;
+    assert.equal(writes.filter((w) => w.accountId === ids[1]).length, 2);
+    assert.equal(writes.filter((w) => w.accountId === ids[0]).length, 0);
+    await f.service.tick();
+    assert.equal(
+      f.service
+        .snapshot()
+        .tasks.filter((t) => t.accountId === ids[0] && t.status === "running")
+        .length,
+      1,
+    );
+  } finally {
+    release();
+    await running;
+    await f.close();
+  }
+});
+
+test("半小时迁移：旧两小时排期压缩，成功与未知原记录不重放，重启不延长新窗口", async () => {
+  const { f, writes } = await parallelFixture([3]);
+  try {
+    await f.service.tick();
+    const tasks = f.service.store
+      .tasks()
+      .sort((a, b) => a.forumId.localeCompare(b.forumId));
+    const verified = structuredClone(tasks[0]);
+    tasks[1].status = "uncertain";
+    tasks[1].submittedAt = new Date(f.time).toISOString();
+    f.service.store.saveTask(tasks[1]);
+    const unknown = structuredClone(tasks[1]);
+    tasks[2].plannedAt = new Date(f.time + 50 * 60000).toISOString();
+    tasks[2].deadlineAt = new Date(f.time + 80 * 60000).toISOString();
+    f.service.store.saveTask(tasks[2]);
+    const state = f.service.store.state();
+    delete state.planVersion;
+    state.run!.startedAt = new Date(f.time - 40 * 60000).toISOString();
+    state.run!.deadlineAt = new Date(f.time + 80 * 60000).toISOString();
+    f.service.store.saveState(state);
+    f.restart();
+    const current = f.service.snapshot();
+    assert.equal(Date.parse(current.run!.deadlineAt) - f.time, 30 * 60000);
+    assert.ok(
+      Date.parse(current.tasks.find((t) => t.id === tasks[2].id)!.plannedAt) <
+        Date.parse(current.run!.deadlineAt),
+    );
+    assert.deepEqual(f.service.store.task(verified.id), verified);
+    assert.deepEqual(f.service.store.task(unknown.id), unknown);
+    await f.service.tick();
+    assert.equal(writes.length, 1);
+    const deadline = current.run!.deadlineAt;
+    f.time += 60000;
+    f.restart();
+    assert.equal(f.service.snapshot().run!.deadlineAt, deadline);
+  } finally {
+    await f.close();
+  }
+});
+
+test("半小时并行：回复、主题、关注与资源发布间隔只阻断本UID，未知仅阻断对应账号", async () => {
+  const { f, ids, writes } = await parallelFixture([1, 1, 1]);
+  try {
+    const secondUid = f.accounts.get(ids[1]).uid!,
+      thirdUid = f.accounts.get(ids[2]).uid!;
+    const at = new Date(f.time).toISOString();
+    f.db.run(
+      "INSERT INTO tieba_reply_drafts(id,candidate_id,uid,thread_id,status,version,submitted_at,data) VALUES(?,?,?,?,?,?,?,?)",
+      "parallel_reply",
+      "candidate",
+      secondUid,
+      "1000",
+      "verified",
+      1,
+      at,
+      JSON.stringify({ accountId: ids[1] }),
+    );
+    f.db.run(
+      "INSERT INTO tieba_topic_drafts(id,target_id,uid,forum_id,status,version,submitted_at,body_hash,data) VALUES(?,?,?,?,?,?,?,?,?)",
+      "parallel_topic",
+      "target",
+      thirdUid,
+      "101",
+      "verified",
+      1,
+      at,
+      "body",
+      JSON.stringify({ accountId: ids[2] }),
+    );
+    const target = f.service.store
+      .targets()
+      .find((t) => t.accountId === ids[1])!;
+    target.followIntent = {
+      status: "verified",
+      submittedAt: at,
+      checkedAt: at,
+      message: "已确认",
+    };
+    f.service.store.saveTarget(target);
+    f.db.setSetting(tiebaPublishingIndexKey, ["parallel_post"]);
+    f.db.setSetting("tieba-publishing:draft:v1:parallel_post", {
+      id: "parallel_post",
+      uid: thirdUid,
+      accountId: ids[2],
+      status: "verified",
+      submittedAt: at,
+      lastMutationAt: at,
+    });
+    await f.service.tick();
+    assert.deepEqual(
+      writes.map((w) => w.accountId),
+      [ids[0]],
+    );
+    assert.ok(
+      f.service
+        .snapshot()
+        .tasks.filter((t) => t.accountId !== ids[0])
+        .every(
+          (t) =>
+            t.status === "pending" &&
+            Date.parse(t.plannedAt) === f.time + 60000,
+        ),
+    );
+    f.time += 60000;
+    f.db.run(
+      "UPDATE tieba_reply_drafts SET status='uncertain' WHERE id='parallel_reply'",
+    );
+    await f.service.tick();
+    assert.deepEqual(
+      writes.map((w) => w.accountId).sort(),
+      [ids[0], ids[2]].sort(),
+    );
+    assert.equal(
+      f.service.snapshot().tasks.find((t) => t.accountId === ids[1])!.status,
+      "pending",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("半小时重排：旧未来时段压缩，同账号间隔保留，反复重启不把任务往后推", async () => {
+  const { f, writes } = await parallelFixture([2, 2]);
+  try {
+    for (const task of f.service.store.tasks()) {
+      task.plannedAt = new Date(f.time + 20 * 60000).toISOString();
+      f.service.store.saveTask(task);
+    }
+    const before = f.service.snapshot();
+    f.service.save({
+      revision: before.revision,
+      config: { targetIds: [...before.config.targetIds].reverse() },
+    });
+    assert.equal(
+      f.service
+        .snapshot()
+        .tasks.filter((t) => Date.parse(t.plannedAt) === f.time).length,
+      2,
+    );
+    await f.service.tick();
+    assert.equal(writes.length, 2);
+    const deadline = f.service.snapshot().run!.deadlineAt;
+    f.time += 30000;
+    f.restart();
+    const pending = f.service
+      .snapshot()
+      .tasks.filter((t) => t.status === "pending");
+    assert.ok(pending.every((t) => Date.parse(t.plannedAt) === f.time + 30000));
+    f.time += 10000;
+    f.restart();
+    assert.equal(f.service.snapshot().run!.deadlineAt, deadline);
+    assert.deepEqual(
+      f.service
+        .snapshot()
+        .tasks.filter((t) => t.status === "pending")
+        .map((t) => t.plannedAt),
+      pending.map((t) => t.plannedAt),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("半小时截止：最终提交前跨过30分钟不写入，并行停止也不再提交", async () => {
+  const { f, writes } = await parallelFixture([1]);
+  try {
+    const checkIn = f.ports.tieba!.checkIn;
+    f.ports.tieba!.checkIn = async (...args) => {
+      f.time += 30 * 60000;
+      return checkIn(...args);
+    };
+    await f.service.tick();
+    assert.equal(writes.length, 0);
+    assert.equal(f.service.snapshot().tasks[0].status, "expired");
+  } finally {
+    await f.close();
+  }
+  const next = await parallelFixture([1, 1]);
+  let release!: () => void, both!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    both = resolve;
+  });
+  let entered = 0;
+  const read = next.f.ports.tieba!.readForum;
+  next.f.ports.tieba!.readForum = async (...args) => {
+    if (++entered === 2) both();
+    await gate;
+    return read(...args);
+  };
+  const running = next.f.service.tick();
+  try {
+    await started;
+    next.f.service.toggle({
+      enabled: false,
+      revision: next.f.service.snapshot().revision,
+      confirmed: true,
+    });
+    release();
+    await running;
+    assert.equal(next.writes.length, 0);
+    assert.ok(
+      next.f.service.snapshot().tasks.every((t) => t.status === "cancelled"),
+    );
+  } finally {
+    release();
+    await running;
+    await next.f.close();
   }
 });

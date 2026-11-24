@@ -8,6 +8,7 @@ import {
 } from "../../shared/website-accounts";
 
 export type OtherProvider = WebsiteProvider | "baidu-zhidao";
+// Supported platforms default to fingerprint login; native-only integrations and marketing keep their existing defaults.
 export const defaultOtherAccountBrowser = (provider: OtherProvider) => ({
   fingerprint:
     provider !== "baidu-marketing" &&

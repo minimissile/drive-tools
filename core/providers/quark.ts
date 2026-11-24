@@ -1,3 +1,5 @@
+import { quarkMembership } from "./membership";
+import { quarkIdentity } from "./quark-identity";
 import { uploadQuark } from "./quark-upload";
 import type { UploadAsset } from "./small-upload";
 import type {
@@ -123,34 +125,13 @@ export class QuarkProvider implements DriveProvider {
       account.id,
       `https://${this.id === "uc" ? "drive.uc.cn" : "pan.quark.cn"}/account/info?fr=pc&platform=pc`,
     );
-    const data = result.data;
-    if (
-      !data ||
-      typeof data !== "object" ||
-      Object.keys(data).length === 0 ||
-      result.success === false ||
-      !["0", "OK"].includes(String(result.code ?? "0"))
-    )
-      throw new AppError(
-        "AUTH_EXPIRED",
-        `${this.label}官方账号接口尚未确认登录，请在原账号窗口完成登录。`,
-      );
-    const uid =
-      data.user_id ??
-      data.uid ??
-      data.qid ??
-      data.quark_id ??
-      data.uc_id ??
-      (await this.transport.principalId?.(account.id, this.id));
-    if (uid == null || String(uid) === "")
-      throw new AppError(
-        "UID_UNAVAILABLE",
-        `${this.label}已确认登录，但尚未取得稳定账号ID。请重新打开官方登录窗口后再次核验。`,
-      );
-    return {
-      uid: String(uid),
-      nickname: String(data.nickname ?? data.nick_name ?? ""),
-    };
+    return quarkIdentity(result, this.label, () =>
+      this.transport.principalId?.(account.id, this.id) ?? Promise.resolve(null),
+    );
+  }
+
+  async membership(account: Account) {
+    const result=await this.request(account,"member",{fetch_subscribe:"true",_ch:"home",fetch_identity:"true"});return quarkMembership(result.data??{});
   }
   async capacity(account: Account) {
     const result = await this.request(account, "member", {
@@ -251,8 +232,11 @@ export class QuarkProvider implements DriveProvider {
     throw new AppError("TOO_MANY_FILES", "目录过大，请选择更小的目标目录。");
   }
   async upload(account: Account, parentId: string, asset: UploadAsset) {
-    await uploadQuark(this.id, parentId, asset, (path, body) =>
-      this.request(account, path, {}, body),
+    await uploadQuark(this.id, parentId, asset,
+      (path, body) => this.request(account, path, {}, body),
+      this.transport.storageRequest
+        ? (_provider, url, init) => this.transport.storageRequest!(account.id, url.href, init)
+        : undefined,
     );
   }
   async manageFile(

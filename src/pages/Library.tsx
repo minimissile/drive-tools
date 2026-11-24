@@ -357,7 +357,7 @@ export default function LibraryPage() {
                       )}
                     />
                     <div className="resource-row-copy">
-                      <strong>{r.title}</strong>
+                      <strong>{r.title || "未命名资源"}</strong>
                       <div className="muted">
                         <span className="resource-provider">
                           <ProviderIcon
@@ -373,7 +373,7 @@ export default function LibraryPage() {
                         >
                           ·
                         </span>
-                        {r.category}
+                        {r.category || "待分类"}
                         <span
                           className="resource-meta-separator"
                           aria-hidden="true"

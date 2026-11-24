@@ -8,6 +8,7 @@ import {
   oldTrafficObservationDays,
   pendingObservationMultiplier,
   recentGrowthMaxReadingHours,
+  tiebaCumulativeTrafficDays,
   tiebaDiscoveryRulesSchema,
   type TiebaDiscoveryRules,
 } from "../../shared/tieba-resource-discovery";
@@ -113,13 +114,18 @@ function DiscoveryRuleDetails({ rules }: { rules: TiebaDiscoveryRules }) {
         </dd>
         <dt>流量帖</dt>
         <dd>
-          <p><strong>累计高流量</strong>　累计浏览达到 <strong>{ruleValue.format(trafficThreshold)} 次</strong>，可直接入库。</p>
+          <p>
+            <strong>累计高流量</strong>　自动扫描时，发帖 {tiebaCumulativeTrafficDays} 天以内，
+            累计浏览达到 <strong>{ruleValue.format(trafficThreshold)} 次</strong>的资源帖可入库。
+            历史扫描优先判断老帖初筛，未通过时再判断累计高流量条件。
+            {oldResourceCheckEnabled ? " 历史扫描还会核验资源线索。" : ""}
+          </p>
           <p>
             <strong>老帖初筛</strong>　发帖满 {oldTrafficMinimumAgeDays} 天，
             累计浏览达到 <strong>{ruleValue.format(oldTrafficMinTotalViews)} 次</strong>，
             且累计浏览 ÷ 发帖以来的实际天数达到 <strong>{ruleValue.format(oldTrafficMinLifetimeDailyViews)} 次/天</strong>。
             {oldResourceCheckEnabled
-              ? " 当前已开启资源校验，还要在标题、正文或最近最多 20 条回复里命中网盘、云盘、资源、链接、提取码、口令、百度、夸克或 //pan. 中任一关键词；关键词以文本匹配，不要求能解析出有效分享链接。"
+              ? " 当前已开启资源校验，标题、正文或最近最多 20 条回复还需包含网盘分享链接，或命中网盘、云盘、链接、提取码、口令、百度、夸克、//pan. 中任一关键词。"
               : " 当前资源校验已关闭，通过流量初筛即可收录。"}
           </p>
           <p>

@@ -48,6 +48,10 @@ export class TransferQueue {
     readonly mutex: AccountMutex,
     private changed: () => void,
     private onShareSaved?: (copyId: string) => Promise<void>,
+    private withSession: <T>(
+      accountId: string,
+      action: () => Promise<T>,
+    ) => Promise<T> = (_accountId, action) => action(),
   ) {}
   start() {
     if (this.timer) return;
@@ -92,7 +96,8 @@ export class TransferQueue {
     await this.notes.flush();
   }
   private stage(jobId: string, stage: string, checkpoint?: string) {
-    if (this.repo.getJob(jobId).stage === "cancelled")
+    const previous = this.repo.getJob(jobId);
+    if (previous.stage === "cancelled")
       throw new AppError("CANCELLED", "本地任务已停止，远端操作可能仍在完成。");
     this.repo.db.run(
       "UPDATE jobs SET stage=?,checkpoint=COALESCE(?,checkpoint),error=NULL,updated_at=? WHERE id=?",
@@ -107,6 +112,17 @@ export class TransferQueue {
       now(),
       this.repo.getJob(jobId).copyId,
     );
+    const label = (
+      {
+        preflight: "预检",
+        transferring: "转存",
+        verifying: "校验文件",
+        sharing: "本人分享",
+        archiving: "本地归档",
+      } as Record<string, string>
+    )[stage];
+    if (label && previous.stage !== stage)
+      this.repo.log(jobId, `开始${label}。`);
     this.changed();
   }
   async execute(jobId: string) {
@@ -118,232 +134,250 @@ export class TransferQueue {
       await worker(jobId);
       return;
     }
+    if (["completed", "cancelled"].includes(operation.stage)) return;
     const job = this.repo.getJob(jobId),
       copy = this.repo.getCopy(job.copyId),
       account = this.repo.getAccount(copy.accountId),
       resource = this.repo.getResource(copy.resourceId),
       provider = this.providers[account.provider];
     try {
-      if (!account.enabled || !account.uid)
+      const uid = account.uid;
+      if (!account.enabled || !uid)
         throw new AppError("AUTH_EXPIRED", "请登录任务创建时选定的本人账号。");
-      const assertIdentity = async () => {
-        const identity = await provider.identity(account);
-        if (identity.uid !== account.uid)
-          throw new AppError(
-            "ACCOUNT_UID_MISMATCH",
-            "当前会话UID与任务绑定账号不同。请登录原账号，禁止切换身份继续。",
-          );
-      };
-      await assertIdentity();
-      const source: ShareInput = parseShare(
-        resource.sourceUrl,
-        (await this.secrets.get(`source:${resource.id}`)) ?? "",
-      );
-      let checkpoint = this.repo.getJob(jobId).checkpoint;
-      let selected = this.repo.selectedFiles(copy.id);
-      let folder = copy.folderId;
-      if (checkpoint === "new") {
-        this.stage(jobId, "preflight");
-        if (!selected.length)
-          throw new AppError(
-            "SELECTION_REQUIRED",
-            "请先读取分享并选择需要转存的文件。",
-          );
-        const live: RemoteFile[] = [];
-        for (const parentId of [...new Set(selected.map((f) => f.parentId))]) {
-          let cursor: string | undefined;
-          for (let page = 1; page <= 100; page++) {
-            const inspection = await provider.inspect(
-              account,
-              source,
-              parentId,
-              page,
-              cursor,
+      this.repo.log(jobId, "开始处理任务，核对绑定账号身份。");
+      const checkpoint = await this.withSession(account.id, async () => {
+        const assertIdentity = async () => {
+          const identity = await provider.identity(account);
+          if (identity.uid !== uid)
+            throw new AppError(
+              "ACCOUNT_UID_MISMATCH",
+              "当前会话UID与任务绑定账号不同。请登录原账号，禁止切换身份继续。",
             );
-            live.push(...inspection.files);
-            if (!inspection.hasMore) break;
-            cursor = inspection.nextCursor;
-          }
-        }
-        const refreshed = selected.map((f) =>
-          live.find((current) => current.id === f.id),
-        );
-        if (refreshed.some((f) => !f))
-          throw new AppError(
-            "SOURCE_CHANGED",
-            "已选文件发生变化，请重新读取分享。",
-          );
-        selected = refreshed as RemoteFile[];
-        folder = await provider.ensureFolder(account, copy.directory);
-        const existing = await provider.list(account, folder);
-        if (existing.length)
-          throw new AppError(
-            "TARGET_NOT_EMPTY",
-            "新任务的专用目标目录非空，请人工核对，未重复转存。",
-          );
-        this.repo.db.run(
-          "UPDATE copies SET folder_id=?,selected_files=? WHERE id=?",
-          folder,
-          JSON.stringify(selected),
-          copy.id,
-        );
-        this.repo.db.run(
-          "UPDATE jobs SET checkpoint=? WHERE id=?",
-          "folder_ready",
-          jobId,
-        );
-        checkpoint = "folder_ready";
-        this.repo.log(jobId, "分享与UID已核验，目标专用目录为空；准备转存。");
-      }
-      if (!folder)
-        throw new AppError(
-          "INVALID_CHECKPOINT",
-          "任务缺少目标目录检查点，请人工核对。",
-        );
-      if (checkpoint === "transfer_requested") {
-        this.stage(jobId, "verifying");
-        const actual = await provider.list(account, folder);
-        if (!actual.length)
-          throw new AppError(
-            "UNCERTAIN_REMOTE_RESULT",
-            "上次转存请求结果未知，当前目录为空；不自动重复提交，请稍后再次核对或在网盘内处理。",
-            true,
-          );
-        assertManifest(selected, actual);
-        this.repo.db.run(
-          "UPDATE copies SET files=? WHERE id=?",
-          JSON.stringify(actual),
-          copy.id,
-        );
-        checkpoint = "transferred";
-        this.repo.log(
-          jobId,
-          "已核对先前为空的目标目录，当前文件与清单的名称、类型、数量和大小一致；未获取内容哈希。",
-        );
-      }
-      if (checkpoint === "folder_ready") {
+        };
         await assertIdentity();
-        this.stage(jobId, "transferring", "transfer_requested");
-        const transfer = await provider.transfer(
-          account,
-          source,
-          selected,
-          folder,
-          copy.directory,
+        const source: ShareInput = parseShare(
+          resource.sourceUrl,
+          (await this.secrets.get(`source:${resource.id}`)) ?? "",
         );
-        this.repo.db.run(
-          "UPDATE jobs SET metadata=?,checkpoint=?,updated_at=? WHERE id=?",
-          JSON.stringify({ taskId: transfer.taskId }),
-          transfer.taskId ? "remote_task" : "transferred",
-          now(),
-          jobId,
-        );
-        checkpoint = transfer.taskId ? "remote_task" : "transferred";
-        this.repo.log(
-          jobId,
-          transfer.taskId
-            ? "远端任务ID已保存，正在等待服务端处理。"
-            : "服务端已响应，开始核验目标文件。",
-        );
-      }
-      if (checkpoint === "remote_task") {
-        this.stage(jobId, "transferring");
-        const remoteId = String(this.repo.jobMetadata(jobId).taskId ?? "");
-        if (!remoteId)
+        let checkpoint = this.repo.getJob(jobId).checkpoint;
+        let selected = this.repo.selectedFiles(copy.id);
+        let folder = copy.folderId;
+        let recoveredFiles: RemoteFile[] | undefined;
+        if (checkpoint === "new") {
+          this.stage(jobId, "preflight");
+          if (!selected.length)
+            throw new AppError(
+              "SELECTION_REQUIRED",
+              "请先读取分享并选择需要转存的文件。",
+            );
+          const live: RemoteFile[] = [];
+          for (const parentId of [
+            ...new Set(selected.map((f) => f.parentId)),
+          ]) {
+            const missing = new Set(
+              selected.filter((f) => f.parentId === parentId).map((f) => f.id),
+            );
+            let cursor: string | undefined;
+            for (let page = 1; page <= 100; page++) {
+              const inspection = await provider.inspect(
+                account,
+                source,
+                parentId,
+                page,
+                cursor,
+              );
+              live.push(...inspection.files);
+              for (const file of inspection.files) missing.delete(file.id);
+              if (!missing.size || !inspection.hasMore) break;
+              cursor = inspection.nextCursor;
+            }
+          }
+          const refreshed = selected.map((f) =>
+            live.find((current) => current.id === f.id),
+          );
+          if (refreshed.some((f) => !f))
+            throw new AppError(
+              "SOURCE_CHANGED",
+              "已选文件发生变化，请重新读取分享。",
+            );
+          selected = refreshed as RemoteFile[];
+          folder = await provider.ensureFolder(account, copy.directory);
+          const existing = await provider.list(account, folder);
+          if (existing.length)
+            throw new AppError(
+              "TARGET_NOT_EMPTY",
+              "新任务的专用目标目录非空，请人工核对，未重复转存。",
+            );
+          this.repo.db.run(
+            "UPDATE copies SET folder_id=?,selected_files=? WHERE id=?",
+            folder,
+            JSON.stringify(selected),
+            copy.id,
+          );
+          this.repo.db.run(
+            "UPDATE jobs SET checkpoint=? WHERE id=?",
+            "folder_ready",
+            jobId,
+          );
+          checkpoint = "folder_ready";
+          this.repo.log(jobId, "分享与UID已核验，目标专用目录为空；准备转存。");
+        }
+        if (!folder)
           throw new AppError(
             "INVALID_CHECKPOINT",
-            "远端任务ID缺失，不能安全重试。",
+            "任务缺少目标目录检查点，请人工核对。",
           );
-        let done = false;
-        for (let attempt = 0; attempt < 60; attempt++) {
-          if (this.repo.getJob(jobId).stage === "cancelled")
-            throw new AppError("CANCELLED", "已停止本地等待，未撤销远端任务。");
-          if (await provider.poll(account, remoteId)) {
-            done = true;
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-        }
-        if (!done)
-          throw new AppError(
-            "REMOTE_STILL_RUNNING",
-            "远端任务仍在处理。可稍后恢复查询，不会重复转存。",
-            true,
-          );
-        checkpoint = "transferred";
-      }
-      if (checkpoint === "transferred") {
-        this.stage(jobId, "verifying");
-        await assertIdentity();
-        const actual = await provider.list(account, folder);
-        assertManifest(selected, actual);
-        this.repo.db.run(
-          "UPDATE copies SET files=?,owner_uid=?,verified_at=? WHERE id=?",
-          JSON.stringify(actual),
-          account.uid,
-          now(),
-          copy.id,
-        );
-        this.repo.db.run(
-          "UPDATE jobs SET checkpoint=? WHERE id=?",
-          "verified",
-          jobId,
-        );
-        checkpoint = "verified";
-        this.repo.log(
-          jobId,
-          "目标文件在绑定账号下已核验：数量、类型、名称与大小一致；目录内容由网盘转存，未声明内容哈希核验。",
-        );
-      }
-      if (checkpoint === "share_requested") {
-        this.stage(jobId, "sharing");
-        const files = this.repo.getCopy(copy.id).files;
-        const existing = await provider.findOwnShare(account, files);
-        if (!existing)
-          throw new AppError(
-            "UNCERTAIN_SHARE_RESULT",
-            "上次建分享结果未知，未找到可核验的本人分享。请在网盘内核对后再处理。",
-            true,
-          );
-        await this.storeShare(copy.id, account.uid, existing);
-        checkpoint = "shared";
-      }
-      if (checkpoint === "verified") {
-        await assertIdentity();
-        this.stage(jobId, "sharing", "share_requested");
-        try {
-          await this.storeShare(
-            copy.id,
-            account.uid,
-            await provider.createShare(
-              account,
-              this.repo.getCopy(copy.id).files,
-              resource.title,
-            ),
-          );
-        } catch (error) {
-          if (
-            error instanceof AppError &&
-            !error.uncertain &&
-            ["AUTH_EXPIRED", "USER_ACTION_REQUIRED", "QUOTA_EXCEEDED"].includes(
-              error.code,
-            )
-          ) {
-            this.repo.db.run(
-              "UPDATE jobs SET checkpoint='verified' WHERE id=?",
-              jobId,
+        if (checkpoint === "transfer_requested") {
+          this.stage(jobId, "verifying");
+          const actual = await provider.list(account, folder);
+          if (!actual.length)
+            throw new AppError(
+              "UNCERTAIN_REMOTE_RESULT",
+              "上次转存请求结果未知，当前目录为空；不自动重复提交，请稍后再次核对或在网盘内处理。",
+              true,
             );
-            throw error;
-          }
-          throw new AppError(
-            error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
-            safeMessage(error),
-            true,
+          assertManifest(selected, actual);
+          recoveredFiles = actual;
+          checkpoint = "transferred";
+          this.repo.log(
+            jobId,
+            "已核对先前为空的目标目录，当前文件与清单的名称、类型、数量和大小一致；未获取内容哈希。",
           );
         }
-        checkpoint = "shared";
-        this.repo.log(jobId, "本人分享归属已核验，来源链接不会进入分发内容。");
-      }
+        if (checkpoint === "folder_ready") {
+          await assertIdentity();
+          this.stage(jobId, "transferring", "transfer_requested");
+          const transfer = await provider.transfer(
+            account,
+            source,
+            selected,
+            folder,
+            copy.directory,
+          );
+          this.repo.db.run(
+            "UPDATE jobs SET metadata=?,checkpoint=?,updated_at=? WHERE id=?",
+            JSON.stringify({ taskId: transfer.taskId }),
+            transfer.taskId ? "remote_task" : "transferred",
+            now(),
+            jobId,
+          );
+          checkpoint = transfer.taskId ? "remote_task" : "transferred";
+          this.repo.log(
+            jobId,
+            transfer.taskId
+              ? "远端任务ID已保存，正在等待服务端处理。"
+              : "服务端已响应，开始核验目标文件。",
+          );
+        }
+        if (checkpoint === "remote_task") {
+          this.stage(jobId, "transferring");
+          const remoteId = String(this.repo.jobMetadata(jobId).taskId ?? "");
+          if (!remoteId)
+            throw new AppError(
+              "INVALID_CHECKPOINT",
+              "远端任务ID缺失，不能安全重试。",
+            );
+          let done = false;
+          for (let attempt = 0; attempt < 60; attempt++) {
+            if (this.repo.getJob(jobId).stage === "cancelled")
+              throw new AppError(
+                "CANCELLED",
+                "已停止本地等待，未撤销远端任务。",
+              );
+            if (await provider.poll(account, remoteId)) {
+              done = true;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+          if (!done)
+            throw new AppError(
+              "REMOTE_STILL_RUNNING",
+              "远端任务仍在处理。可稍后恢复查询，不会重复转存。",
+              true,
+            );
+          checkpoint = "transferred";
+        }
+        if (checkpoint === "transferred") {
+          this.stage(jobId, "verifying");
+          await assertIdentity();
+          const actual =
+            recoveredFiles ?? (await provider.list(account, folder));
+          assertManifest(selected, actual);
+          this.repo.db.run(
+            "UPDATE copies SET files=?,owner_uid=?,verified_at=? WHERE id=?",
+            JSON.stringify(actual),
+            uid,
+            now(),
+            copy.id,
+          );
+          this.repo.db.run(
+            "UPDATE jobs SET checkpoint=? WHERE id=?",
+            "verified",
+            jobId,
+          );
+          checkpoint = "verified";
+          this.repo.log(
+            jobId,
+            "目标文件在绑定账号下已核验：数量、类型、名称与大小一致；目录内容由网盘转存，未声明内容哈希核验。",
+          );
+        }
+        if (checkpoint === "share_requested") {
+          this.stage(jobId, "sharing");
+          const files = this.repo.getCopy(copy.id).files;
+          const existing = await provider.findOwnShare(account, files);
+          if (!existing)
+            throw new AppError(
+              "UNCERTAIN_SHARE_RESULT",
+              "上次建分享结果未知，未找到可核验的本人分享。请在网盘内核对后再处理。",
+              true,
+            );
+          await this.storeShare(copy.id, uid, existing);
+          checkpoint = "shared";
+        }
+        if (checkpoint === "verified") {
+          await assertIdentity();
+          this.stage(jobId, "sharing", "share_requested");
+          try {
+            await this.storeShare(
+              copy.id,
+              uid,
+              await provider.createShare(
+                account,
+                this.repo.getCopy(copy.id).files,
+                resource.title,
+              ),
+            );
+          } catch (error) {
+            if (
+              error instanceof AppError &&
+              !error.uncertain &&
+              [
+                "AUTH_EXPIRED",
+                "USER_ACTION_REQUIRED",
+                "QUOTA_EXCEEDED",
+              ].includes(error.code)
+            ) {
+              this.repo.db.run(
+                "UPDATE jobs SET checkpoint='verified' WHERE id=?",
+                jobId,
+              );
+              throw error;
+            }
+            throw new AppError(
+              error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",
+              safeMessage(error),
+              true,
+            );
+          }
+          checkpoint = "shared";
+          this.repo.log(
+            jobId,
+            "本人分享归属已核验，来源链接不会进入分发内容。",
+          );
+        }
+        return checkpoint;
+      });
       if (checkpoint === "shared") {
         this.stage(jobId, "archiving", "shared");
         this.repo.db.transaction(() => {
@@ -362,8 +396,7 @@ export class TransferQueue {
             jobId,
           );
         });
-        await this.onShareSaved?.(copy.id);
-        await this.notes.flush();
+        await Promise.all([this.onShareSaved?.(copy.id), this.notes.flush()]);
         this.repo.log(jobId, "资源已归档；Obsidian导出状态独立记录。");
       }
     } catch (error) {

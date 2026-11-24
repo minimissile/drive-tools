@@ -2,11 +2,12 @@ import type { BrowserEnvironmentView } from "./browser-environments";
 
 type Member = { kind: string; platform: string };
 export const isDriveSharedMember = (member: Member) =>
-  (member.kind === "drive" && member.platform === "drive-baidu") ||
+  (member.kind === "drive" &&
+    ["drive-baidu", "drive-quark"].includes(member.platform)) ||
   (member.kind === "zhidao" && member.platform === "baidu-zhidao") ||
   (member.kind === "website" && ["tieba", "wechat"].includes(member.platform));
 
-/** Drive background mode can be shared by Baidu workflows and WeChat, with separate identity realms. */
+/** Supported drive background modes share a profile with separate identity realms. */
 export function environmentAllowsAccount(
   environment: Pick<BrowserEnvironmentView, "engine" | "accounts">,
   member: Member,

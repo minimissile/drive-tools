@@ -1,6 +1,8 @@
+import { latestTiebaSubmission } from "../tieba/submissions";
 import type { z } from "zod";
 import { id, type Database } from "../database";
 import { AppError, safeMessage } from "../errors";
+import { requireKeyboardSkinCandidates } from "../keyboard-skins";
 import type { Repository } from "../repository";
 import type { SearchOperations } from "../search";
 import type { SecretStore } from "../secrets";
@@ -14,9 +16,10 @@ import type { TiebaPublicationRef } from "../../shared/tieba-insights";
 import type {
   TiebaPublishingSnapshot,
   TiebaPublishingResource,
-  tiebaPublishingSaveSchema,
+  tiebaKeyboardSkinDraftSchema,
   tiebaPublishingSubmitSchema,
 } from "../../shared/tieba-publishing";
+import { tiebaPublishingSaveSchema } from "../../shared/tieba-publishing";
 import { ContentSources, sameContentWord } from "../content-sources";
 import { RuntimeLog } from "../runtime-log";
 import {
@@ -252,6 +255,7 @@ export class TiebaPublishing {
             stamp: _stamp,
             payloadHash: _hash,
             lastMutationAt: _last,
+            keyboardRequestHash: _request,
             ...draft
           }) => draft,
         ),
@@ -273,89 +277,168 @@ export class TiebaPublishing {
   }
   async save(input: z.infer<typeof tiebaPublishingSaveSchema>) {
     return this.operation(async () => {
+      const savedDraftId = await this.saveDraft(input);
+      return { ...this.snapshot(), savedDraftId };
+    });
+  }
+  async saveKeyboardSkins(input: z.infer<typeof tiebaKeyboardSkinDraftSchema>) {
+    return this.operation(async () => {
+      const draftId = `tiebapublishing_${input.requestId}`;
+      const requestHash = topicHash([
+        input.accountId,
+        input.targetId,
+        input.resourceIds,
+        input.title,
+      ]);
+      const existing = this.store.draft(draftId);
+      if (existing) {
+        if (existing.keyboardRequestHash !== requestHash)
+          throw new AppError(
+            "KEYBOARD_SKINS_REQUEST",
+            "这批皮肤已有帖子草稿，请打开原稿或重新抽取。",
+          );
+        return { id: draftId };
+      }
       const { target } = this.target(input.targetId);
-      const old = input.id ? this.draft(input.id, input.version) : null;
-      if (
-        old &&
-        (!input.version ||
-          old.submittedAt ||
-          !["draft", "ready"].includes(old.status))
-      )
-        throw new AppError(
-          "TIEBA_PUBLISHING_NOT_EDITABLE",
-          "已提交的原稿只能核对，不可修改后重新发出。",
-        );
-      if (
-        old &&
-        (old.targetId !== target.id ||
-          old.accountId !== target.accountId ||
-          old.uid !== target.uid ||
-          old.forumId !== target.forumId)
-      )
+      if (target.accountId !== input.accountId)
         throw new AppError(
           "TIEBA_PUBLISHING_TARGET_CHANGED",
-          "编辑原稿不能切换账号或贴吧，请另建草稿。",
+          "请选择当前账号下的发布贴吧。",
         );
-      if (
-        input.keywordSourceId !== "manual" &&
-        !this.words({
-          query: input.keyword,
-          source: input.keywordSourceId.startsWith("pool:")
-            ? "pool"
-            : "history",
-        }).some(
-          (word) =>
-            word.id === input.keywordSourceId &&
-            sameContentWord(word.word) === sameContentWord(input.keyword),
-        )
-      )
+      const candidates = requireKeyboardSkinCandidates(
+        this.d.repo,
+        input.resourceIds,
+      );
+      const resources = await Promise.all(
+        candidates.map(({ copyId }) => this.resource(copyId)),
+      );
+      const current = requireKeyboardSkinCandidates(
+        this.d.repo,
+        input.resourceIds,
+      );
+      if (JSON.stringify(current) !== JSON.stringify(candidates))
         throw new AppError(
-          "TIEBA_PUBLISHING_KEYWORD",
-          "所选流量词来源已变化，请重新选择或明确使用手工词。",
+          "KEYBOARD_SKINS_CHANGED",
+          "所选资源或分享状态已变化，请重新抽取。",
         );
-      const resources = [];
+      const body = [
+        `整理了 ${resources.length} 款手机键盘皮肤，下面按名称列出对应的网盘链接。下载前请核对文件名和输入法要求，下载后按你使用的输入法步骤导入。带提取码的资源可在网盘页面输入对应提取码查看。`,
+        ...resources.map((resource, index) => {
+          const name =
+            resource.title
+              .replace(/https?:\/\/\S+/giu, "")
+              .replace(
+                /(?:提取码|访问码|密码)\s*[:：]?\s*[a-z0-9]{4,8}\b/giu,
+                "",
+              )
+              .replace(/\s+/g, " ")
+              .trim() || "键盘皮肤";
+          return `${index + 1}. ${name}\n网盘链接：${resource.url}${resource.code ? `\n提取码：${resource.code}` : ""}`;
+        }),
+      ].join("\n\n");
+      await this.saveDraft(
+        tiebaPublishingSaveSchema.parse({
+          targetId: target.id,
+          copyIds: resources.map(({ copyId }) => copyId),
+          keyword: "手机键盘皮肤",
+          title: input.title,
+          body,
+        }),
+        { draftId, resources, requestHash },
+      );
+      return { id: draftId };
+    });
+  }
+  private async saveDraft(
+    input: z.infer<typeof tiebaPublishingSaveSchema>,
+    prepared?: {
+      draftId: string;
+      resources: TiebaPublishingResource[];
+      requestHash: string;
+    },
+  ) {
+    const { target } = this.target(input.targetId);
+    const old = input.id ? this.draft(input.id, input.version) : null;
+    if (
+      old &&
+      (!input.version ||
+        old.submittedAt ||
+        !["draft", "ready"].includes(old.status))
+    )
+      throw new AppError(
+        "TIEBA_PUBLISHING_NOT_EDITABLE",
+        "已提交的原稿只能核对，不可修改后重新发出。",
+      );
+    if (
+      old &&
+      (old.targetId !== target.id ||
+        old.accountId !== target.accountId ||
+        old.uid !== target.uid ||
+        old.forumId !== target.forumId)
+    )
+      throw new AppError(
+        "TIEBA_PUBLISHING_TARGET_CHANGED",
+        "编辑原稿不能切换账号或贴吧，请另建草稿。",
+      );
+    if (
+      input.keywordSourceId !== "manual" &&
+      !this.words({
+        query: input.keyword,
+        source: input.keywordSourceId.startsWith("pool:") ? "pool" : "history",
+      }).some(
+        (word) =>
+          word.id === input.keywordSourceId &&
+          sameContentWord(word.word) === sameContentWord(input.keyword),
+      )
+    )
+      throw new AppError(
+        "TIEBA_PUBLISHING_KEYWORD",
+        "所选流量词来源已变化，请重新选择或明确使用手工词。",
+      );
+    const resources = prepared?.resources ?? [];
+    if (!prepared)
       for (const copyId of new Set(input.copyIds))
         resources.push(await this.resource(copyId));
-      this.alive();
-      this.target(target.id);
-      if (old) this.draft(old.id, old.version);
-      const draft: TiebaPublishingRecord = {
-        id: old?.id ?? id("tiebapublishing"),
-        targetId: target.id,
-        accountId: target.accountId,
-        uid: target.uid,
-        forumId: target.forumId,
-        forumName: target.name,
-        keyword: input.keyword,
-        keywordSourceId: input.keywordSourceId,
-        resources,
-        title: input.title,
-        body: input.body,
-        ruleNote: input.ruleNote,
-        version: (old?.version ?? 0) + 1,
-        status: "draft",
-        checks: [],
-        message: "草稿已保存。",
-        submittedAt: null,
-        receipt: null,
-        createdAt: old?.createdAt ?? this.now(),
-        updatedAt: this.now(),
-        stamp: this.d.environments.stamp(ref(target.accountId)),
-        payloadHash: "",
-        lastMutationAt: null,
-      };
-      try {
-        draft.checks = checkResourcePost(draft);
-        draft.status = "ready";
-        draft.message = "草稿已保存，可直接发布当前版本。";
-      } catch (error) {
-        draft.message = safeMessage(error);
-      }
-      draft.payloadHash = hash(draft);
-      this.store.save(draft);
-      this.event("resource-post.saved", draft);
-      return { ...this.snapshot(), savedDraftId: draft.id };
-    });
+    this.alive();
+    this.target(target.id);
+    if (old) this.draft(old.id, old.version);
+    const draft: TiebaPublishingRecord = {
+      id: old?.id ?? prepared?.draftId ?? id("tiebapublishing"),
+      targetId: target.id,
+      accountId: target.accountId,
+      uid: target.uid,
+      forumId: target.forumId,
+      forumName: target.name,
+      keyword: input.keyword,
+      keywordSourceId: input.keywordSourceId,
+      resources,
+      title: input.title,
+      body: input.body,
+      ruleNote: input.ruleNote,
+      version: (old?.version ?? 0) + 1,
+      status: "draft",
+      checks: [],
+      message: "草稿已保存。",
+      submittedAt: null,
+      receipt: null,
+      createdAt: old?.createdAt ?? this.now(),
+      updatedAt: this.now(),
+      stamp: this.d.environments.stamp(ref(target.accountId)),
+      payloadHash: "",
+      lastMutationAt: null,
+      keyboardRequestHash: prepared?.requestHash ?? old?.keyboardRequestHash,
+    };
+    try {
+      draft.checks = checkResourcePost(draft);
+      draft.status = "ready";
+      draft.message = "草稿已保存，可直接发布当前版本。";
+    } catch (error) {
+      draft.message = safeMessage(error);
+    }
+    draft.payloadHash = hash(draft);
+    this.store.save(draft);
+    this.event("resource-post.saved", draft);
+    return draft.id;
   }
   private context(draft: TiebaPublishingRecord) {
     const { target, account } = this.target(draft.targetId);
@@ -452,9 +535,7 @@ export class TiebaPublishing {
         "TIEBA_PUBLISHING_DUPLICATE",
         "相同正文已有账号提交，不重复发布，请根据目标贴吧重新编辑内容。",
       );
-    const latest = this.d.db.get<{ at: string | null }>(
-      "SELECT MAX(at) at FROM (SELECT submitted_at at FROM tieba_autocare_tasks UNION ALL SELECT submitted_at at FROM tieba_reply_drafts UNION ALL SELECT submitted_at at FROM tieba_topic_drafts)",
-    )?.at;
+    const latest = latestTiebaSubmission(this.d.db, draft.uid);
     const last = [latest, state.lastMutationAt, follow.lastMutationAt]
       .filter((value): value is string => !!value)
       .sort()

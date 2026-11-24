@@ -37,6 +37,11 @@ export const catalogRemoveItemsSchema = z.object({
   expectedRevision: z.number().int().positive(),
   resourceIds: z.array(z.string().min(1).max(128)).min(1).max(2000),
 });
+export const catalogExportWechatSchema = z.object({
+  id: catalogIdSchema,
+  expectedRevision: z.number().int().positive(),
+  expectedHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
 export type CatalogSaveInput = z.infer<typeof catalogSaveSchema>;
 export interface ResourceCatalog extends Omit<
   CatalogSaveInput,
@@ -244,6 +249,10 @@ export interface ResourceCatalogContract {
   "resourceCatalog.export": Contract<
     { id: string; preparationId?: string; format: "xlsx" | "md" },
     string | null
+  >;
+  "resourceCatalog.exportWechat": Contract<
+    z.infer<typeof catalogExportWechatSchema>,
+    { articleId: string }
   >;
   "resourceCatalog.sitePublish": Contract<
     z.infer<typeof catalogSitePublishSchema>,

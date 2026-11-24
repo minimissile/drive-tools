@@ -1,3 +1,5 @@
+import { useAccountBatch } from "./useAccountBatch";
+import { AccountBatchToolbar } from "./AccountBatchToolbar";
 import { useId, useState } from "react";
 import { Plus, ShieldCheck, X } from "lucide-react";
 import { providerIds, providerSpecs } from "../../shared/providers";
@@ -49,6 +51,7 @@ export default function DriveAccounts() {
         .toLocaleLowerCase()
         .includes(needle),
   );
+  const batch=useAccountBatch({scope:"drive",provider:filter==="all"?null:filter,accounts,visible:filtered,onFinished:()=>{}});
   const clearFilters = () => {
     setQuery("");
     setFilter("all");
@@ -80,6 +83,7 @@ export default function DriveAccounts() {
           />
           <Button
             primary={!adding}
+            disabled={batch.active}
             onClick={() => setAdding((open) => !open)}
             aria-expanded={adding}
             aria-controls={formId}
@@ -96,6 +100,7 @@ export default function DriveAccounts() {
       <div id={formId} hidden={!adding}>
         {adding ? (
           <AddAccountForm
+            blocked={batch.active}
             onAdded={(account) => {
               setFilter(account.provider);
               setQuery("");
@@ -141,18 +146,21 @@ export default function DriveAccounts() {
           />
         </div>
         <TabPanel value={filter}>
+          <AccountBatchToolbar batch={batch} providerName={filter==="all"?null:providerSpecs[filter].name} allowRefresh disabled={busy>0}/>
           <div className="accounts-list" aria-label="网盘账号列表">
             {filtered.length ? (
               <>
                 <div className="accounts-column-head" aria-hidden="true">
                   <span>网盘与账号</span>
                   <span>网盘容量</span>
+                  <span>会员信息</span>
                   <span>账号操作</span>
                 </div>
                 {filtered.map((a) => (
                   <AccountRow
                     key={a.id}
                     account={a}
+                    selection={{checked:batch.selected.includes(a.id),disabled:filter==="all"||!a.enabled||batch.active||batch.submitting||busy>0,onChange:checked=>batch.select(a.id,checked)}}
                     focusLogin={newAccountId === a.id}
                     onLoginFocused={() => setNewAccountId("")}
                     current={
@@ -168,8 +176,8 @@ export default function DriveAccounts() {
                               candidate.isDefault,
                           )?.id) === a.id
                     }
-                    busy={busy > 0}
-                    pending={pending?.id === a.id ? pending.action : null}
+                    busy={busy > 0 || batch.active}
+                    pending={batch.status(a.id)==="running"?(batch.batch?.action==="refresh"?"capacity":"verify"):pending?.id === a.id ? pending.action : null}
                     onUse={() => setActiveAccount(a.provider, a.id)}
                     onManage={() => setEditing(a)}
                     onBrowser={() => setBrowserAccount(a)}

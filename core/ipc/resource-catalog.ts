@@ -9,6 +9,7 @@ import {
   catalogAiStartSchema,
   catalogResourcesSchema,
   catalogRemoveItemsSchema,
+  catalogExportWechatSchema,
 } from "../../shared/resource-catalog";
 import type { ResourceCatalogs } from "../resource-catalog";
 
@@ -40,6 +41,10 @@ export function createResourceCatalogHandlers(services: {
       return services.resourceCatalogs.aiStep(value.id, value.retryUncertain);
     },
     "resourceCatalog.list": () => services.resourceCatalogs.list(),
+    "resourceCatalog.exportWechat": (input: unknown) =>
+      services.resourceCatalogs.exportWechat(
+        catalogExportWechatSchema.parse(input),
+      ),
     "resourceCatalog.sitePublish": (input: unknown) =>
       services.resourceCatalogs.sitePublish(
         catalogSitePublishSchema.parse(input),

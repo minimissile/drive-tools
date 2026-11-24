@@ -22,7 +22,7 @@ import {
   tiebaTopicRuleView,
 } from "../src/tieba/topic-view";
 
-test("自动回帖起步：只在初始未保存状态推荐首5个草稿目标，不扩大保存过的范围或授权", () => {
+test("自动回帖起步：只在初始未保存状态推荐全部可用草稿目标，不扩大保存过的范围或授权", () => {
   const snapshot = {
     revision: 1,
     enabled: false,
@@ -39,7 +39,14 @@ test("自动回帖起步：只在初始未保存状态推荐首5个草稿目标�
     })),
   } as unknown as TiebaAutomationSnapshot;
   assert.deepEqual(tiebaAutomationInitialRecommendation(snapshot), {
-    targetIds: ["target_0", "target_1", "target_2", "target_3", "target_4"],
+    targetIds: [
+      "target_0",
+      "target_1",
+      "target_2",
+      "target_3",
+      "target_4",
+      "target_5",
+    ],
     mode: "draft",
     dailyLimit: 1,
   });

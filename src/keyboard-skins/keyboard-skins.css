@@ -1,0 +1,113 @@
+.keyboard-skins .page-heading {
+  margin-bottom: var(--space-4);
+}
+
+.keyboard-skins-panel {
+  padding: var(--space-4);
+}
+
+.keyboard-skins-form,
+.keyboard-skins-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.keyboard-skins-form {
+  align-items: flex-end;
+}
+
+.keyboard-skins-form input {
+  width: 112px;
+}
+
+.keyboard-skins-form > small {
+  align-self: flex-end;
+  margin: 0 0 8px var(--space-2);
+}
+
+.keyboard-skins-actions,
+.keyboard-skins-channel,
+.keyboard-skins-saved {
+  align-items: center;
+}
+
+.keyboard-skins-channel {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.keyboard-skins-channel .select-control {
+  width: 148px;
+}
+
+.keyboard-skins-tieba-fields {
+  gap: var(--space-3);
+  max-width: 640px;
+  margin-bottom: var(--space-3);
+}
+
+.keyboard-skins-saved {
+  color: var(--green);
+  display: inline-flex;
+  gap: var(--space-1);
+  font-size: 12px;
+  margin-inline-end: var(--space-1);
+}
+
+.keyboard-skins-title {
+  max-width: 640px;
+}
+
+.keyboard-skins-panel .notice {
+  margin-top: var(--space-3);
+}
+
+.keyboard-skins-total {
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.keyboard-skins-list {
+  border-top: 1px solid var(--line);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.keyboard-skins-list > li {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.keyboard-skins-list > li + li {
+  border-top: 1px solid var(--line);
+}
+
+.keyboard-skins-list > li > :is(img, span) {
+  background: var(--bg);
+  border-radius: var(--control-radius);
+  width: 60px;
+  height: 36px;
+  color: var(--muted);
+}
+
+.keyboard-skins-list img {
+  object-fit: contain;
+}
+
+.keyboard-skins-list li > span {
+  display: grid;
+  place-items: center;
+}
+
+.keyboard-skins-list strong {
+  overflow-wrap: anywhere;
+}
+
+.keyboard-skins-list small {
+  color: var(--muted);
+}

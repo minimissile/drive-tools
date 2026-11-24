@@ -48,8 +48,29 @@ export interface BitBrowserDiagnostic {
   blockers: string[];
   pendingOperations: string[];
 }
+export const bitIdlePolicySchema = bitProfileCommandSchema.extend({
+  idleMinutes: z.union([
+    z.literal(0),
+    z.literal(10),
+    z.literal(30),
+    z.literal(60),
+  ]),
+});
+export interface BitPageStatus {
+  temporary: number;
+  protected: number;
+  closed: number;
+  connected: boolean;
+  owner: "panxu" | "retained";
+  busy: boolean;
+  lastUsed: number | null;
+  idleMinutes: number;
+}
 type Contract<A, V> = { args: A; value: V };
 export interface BitBrowserContract {
+  "bit.pages": Contract<BitProfileCommand, BitPageStatus>;
+  "bit.cleanPages": Contract<BitProfileCommand, BitPageStatus>;
+  "bit.idlePolicy": Contract<z.infer<typeof bitIdlePolicySchema>, boolean>;
   "bit.profiles": Contract<undefined, BitBrowserWindows>;
   "bit.diagnose": Contract<BitProfileCommand, BitBrowserDiagnostic>;
   "bit.openProfile": Contract<BitProfileCommand, boolean>;

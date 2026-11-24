@@ -550,13 +550,13 @@ test("cross-account body reuse and per-UID daily limit cannot be replayed", asyn
     await f.close();
   }
 });
-test("global M1/M2 interval and unknown blocking apply to topics", async () => {
+test("same-account M1/M2 interval and unknown blocking apply to topics", async () => {
   const f = await fixture();
   try {
     const d = f.prepare();
     f.db.run(
       "INSERT INTO tieba_reply_drafts(id,candidate_id,uid,thread_id,status,version,submitted_at,data) VALUES('reply_fixture','x',?,'123','verified',1,?,'{}')",
-      "222",
+      "111",
       new Date(f.time - 1000).toISOString(),
     );
     await assert.rejects(f.service.submit(submit(d)), /不足60秒/);

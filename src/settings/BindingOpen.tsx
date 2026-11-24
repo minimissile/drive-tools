@@ -47,6 +47,21 @@ export function BindingOpen({ binding }: { binding: BrowserBinding }) {
         <ExternalLink size={14} />
         打开入口联调
       </Button>
+      {!binding.websiteAccountId ? (
+        <Button
+          quiet
+          disabled={busy > 0}
+          onClick={() =>
+            void command(
+              "binding.open",
+              { id: binding.id, contentFormat: format, newPage: true },
+              { text: "已新建编辑页面，原页面保留。", tone: "info" },
+            )
+          }
+        >
+          新建页面
+        </Button>
+      ) : null}
     </div>
   );
 }

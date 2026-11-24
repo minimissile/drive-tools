@@ -323,7 +323,7 @@ test("automation defaults disabled and read-only; validation prevents broad limi
   }
 });
 
-test("bounded persistent batch uses global daily limit, 45 minute slots, and immutable same-day deadline", async () => {
+test("bounded persistent batch uses global daily limit, 10 minute slots, and immutable same-day deadline", async () => {
   const f = await fixture();
   try {
     const first = f.configure("draft", 2),
@@ -333,9 +333,9 @@ test("bounded persistent batch uses global daily limit, 45 minute slots, and imm
     assert.equal(tasks.length, 2);
     assert.equal(
       Date.parse(tasks[1].plannedAt) - Date.parse(tasks[0].plannedAt),
-      45 * 60000,
+      10 * 60000,
     );
-    assert.equal(Date.parse(first.run!.deadlineAt) - f.time, 2 * 3600000);
+    assert.equal(Date.parse(first.run!.deadlineAt) - f.time, 30 * 60000);
     const deadline = first.run!.deadlineAt;
     f.stop();
     f.time += 30 * 60000;
@@ -534,7 +534,7 @@ test("unknown generation is terminal attention; unknown submission only supports
 test("expired and cross-day work is not caught up, and a late batch ends at Beijing midnight", async () => {
   const f = await fixture();
   try {
-    f.time = Date.parse("2026-11-07T15:30:00Z");
+    f.time = Date.parse("2026-11-07T15:55:00Z");
     const state = f.configure("publish", 2);
     assert.equal(state.run!.deadlineAt, "2026-11-07T16:00:00.000Z");
     assert.equal(

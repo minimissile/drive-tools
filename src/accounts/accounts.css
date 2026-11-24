@@ -124,7 +124,7 @@
 .accounts-column-head,
 .account-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.85fr) 246px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(190px, 0.85fr) minmax(170px, 0.65fr) 220px;
   gap: var(--space-5);
   padding-inline: var(--space-5);
 }
@@ -156,6 +156,10 @@
   gap: var(--space-3);
   align-items: start;
   min-width: 0;
+}
+.account-identity.account-identity-selectable {
+  grid-template-columns: 18px 40px minmax(0, 1fr);
+  column-gap: var(--space-2);
 }
 .account-identity .provider-icon {
   margin-top: 2px;

@@ -33,7 +33,7 @@ export function ContentSourcesSettings() {
       }
     >
       <p className="muted">
-        用于微信公众号文章搜索、阅读数查询，以及皮皮虾图文和评论采集。密钥仅保存在当前工作空间的系统加密凭据中。
+        用于皮皮虾图文和评论采集、抖音热门配乐。密钥仅保存在当前工作空间的系统加密凭据中。
       </p>
       <QueryError
         error={config.error}

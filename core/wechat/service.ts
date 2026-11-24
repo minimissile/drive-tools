@@ -1,3 +1,4 @@
+import { keyboardSkinOverview } from "../keyboard-skins";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { id, now } from "../database";
@@ -13,6 +14,9 @@ import type {
   ShareCheck,
 } from "../../shared/types";
 import { smzdmSourceSchema, type SmzdmResourceLink } from "../../shared/smzdm";
+import type { KeyboardSkinDraftInput } from "../../shared/keyboard-skins";
+import type { CatalogSnapshot } from "../../shared/resource-catalog";
+import { catalogWechatDraftId, catalogWechatText } from "./catalog-draft";
 import {
   wechatArticleUrl,
   wechatTextInput,
@@ -49,9 +53,17 @@ import {
   formatArticle,
   replaceArticleLinks,
 } from "../smzdm/content";
-import { readContentImage, saveContentImage } from "../content-assets";
+import { saveContentImage } from "../content-assets";
+import { readWechatLocalImage } from "./local-image";
+import { WechatArticleModules } from "./article-modules";
+import {
+  keyboardSkinDraftTitle,
+  resolveKeyboardSkinDraft,
+  sampleKeyboardSkins,
+} from "./keyboard-skins";
 import {
   defaultWechatRewriteStyle,
+  wechatRewriteStyleIds,
   type WechatRewriteStyleId,
 } from "../../shared/wechat-rewrite";
 import { wechatRewriteInstruction } from "./rewrite-styles";
@@ -66,9 +78,9 @@ import {
   wechatTitleResponse,
 } from "./title-candidates";
 import { RuntimeLog } from "../runtime-log";
-import { wechatArticleFamilies, wechatSourceIdentity } from "./article-family";
+import { redactPromptText } from "../text-safety";
+import { wechatArticleFamilies, wechatSourceKey } from "./article-family";
 import type { AppPorts } from "../ports";
-import { WechatDiscovery } from "./discovery";
 import { wechatImagePrompt } from "./image-prompts";
 import {
   wechatTrafficWordsInput,
@@ -95,8 +107,8 @@ interface Dependencies {
   port?: WechatPort;
   dataPath: string;
   readImage?(): Promise<{ name: string; bytes: Buffer } | null>;
+  readClipboardImage?: AppPorts["readWechatClipboardImage"];
   readRemoteImage?(url: string): Promise<{ bytes: Buffer }>;
-  discoveryFetch?: AppPorts["wechatDiscoveryFetch"];
   generateImage(bytes: Buffer, prompt: string): Promise<Buffer>;
   generateThemeImage(prompt: string): Promise<Buffer>;
   saveResource(
@@ -115,18 +127,36 @@ const articleKey = (id: string) => `wechat:article:v1:${id}`;
 const draftIdentifier = z
   .string()
   .regex(/^[a-zA-Z0-9_-]{1,100}$/, "微信草稿标识不正确");
+
+function resourceSummary(body: string) {
+  const prose = body
+    .replace(
+      /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm,
+      "",
+    )
+    .replace(/!\[[^\]\n]*\]\([^\n)]*\)/g, "")
+    .replace(/\[([^\]\n]+)\]\([^\n)]*\)/g, "$1")
+    .replace(/^ {0,3}(?:#{1,6}|>|[-+*]|\d+[.)])[ \t]+/gm, "")
+    .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, "$1$2")
+    .replace(/`([^`\n]+)`/g, "$1");
+  return Array.from(
+    redactPromptText(prose)
+      .replace(/\[(?:链接|凭据)已省略\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  )
+    .slice(0, 300)
+    .join("");
+}
+
 /** Owns local drafts and a draft-only remote handoff; never publishes or mass sends. */
 export class WechatArticles {
   private active = new Set<string>();
   private closed = false;
   private readonly logs: RuntimeLog;
-  readonly discovery: WechatDiscovery;
+  readonly modules: WechatArticleModules;
   constructor(private d: Dependencies) {
-    this.discovery = new WechatDiscovery({
-      db: d.repo.db,
-      secrets: d.secrets,
-      request: d.discoveryFetch,
-    });
+    this.modules = new WechatArticleModules(d.repo.db, d.changed);
     this.logs = new RuntimeLog(d.repo.db, d.dataPath, "wechat");
     for (const article of this.articles()) {
       if (
@@ -150,11 +180,10 @@ export class WechatArticles {
     }
   }
   get isBusy() {
-    return this.active.size > 0 || this.discovery.isBusy;
+    return this.active.size > 0;
   }
   close() {
     this.closed = true;
-    this.discovery.close();
   }
   private articles() {
     return this.d.repo.db
@@ -216,6 +245,19 @@ export class WechatArticles {
     this.d.repo.db.setSetting(articleKey(article.id), article);
     this.d.changed();
   }
+  private addDraft(article: WechatArticle) {
+    if (this.closed)
+      throw new AppError("WECHAT_CLOSED", "工作空间已关闭，未保存到其他空间。");
+    const { db } = this.d.repo;
+    db.transaction(() => {
+      db.setSetting(articleKey(article.id), article);
+      db.setSetting(indexKey, [
+        article.id,
+        ...db.setting<string[]>(indexKey, []),
+      ]);
+    });
+    this.d.changed();
+  }
   deleteDraft(id: string, revision: number) {
     const article = this.load(id);
     if (this.closed || this.active.has(id) || article.stage === "sending")
@@ -257,7 +299,7 @@ export class WechatArticles {
   }
   private articleFamily(article: WechatArticle) {
     return wechatArticleFamilies(this.articles()).get(
-      wechatSourceIdentity(article.source.url),
+      wechatSourceKey(article.source),
     )!;
   }
   private trafficWordPlan(
@@ -267,7 +309,7 @@ export class WechatArticles {
     const words = article.trafficWords?.words ?? [];
     return wechatTrafficWordPlan(
       this.d.repo.db,
-      article.source.url,
+      wechatSourceKey(article.source),
       words,
       wechatDeliveryWordCoverage(words, family),
     );
@@ -374,7 +416,7 @@ export class WechatArticles {
     const parent = this.load(parentId);
     this.editable(parent);
     const rootId = wechatArticleFamilies(this.articles()).get(
-      wechatSourceIdentity(parent.source.url),
+      wechatSourceKey(parent.source),
     )![0].id;
     const existing = this.articles().find(
       (item) => item.edition?.requestId === requestId,
@@ -413,13 +455,7 @@ export class WechatArticles {
       createdAt: now(),
       updatedAt: now(),
     };
-    this.d.repo.db.transaction(() => {
-      this.persist(article);
-      this.d.repo.db.setSetting(indexKey, [
-        article.id,
-        ...this.d.repo.db.setting<string[]>(indexKey, []),
-      ]);
-    });
+    this.addDraft(article);
     return this.get(article.id);
   }
   private issues(article: WechatArticle): WechatDetail["issues"] {
@@ -470,7 +506,7 @@ export class WechatArticles {
       /(?:TODO|待补充|\[在此填写|作为一个(?:AI|人工智能))/i.test(article.body)
     )
       add("正文包含占位内容，请补全后发送。");
-    if (!article.body.includes(article.source.url))
+    if (article.source.url && !article.body.includes(article.source.url))
       add("请核对转载、引用和配图授权，按需保留原文来源。", "warning");
     for (const text of article.source.warnings) add(text, "warning");
     return issues;
@@ -482,6 +518,7 @@ export class WechatArticles {
       article,
       templateSupport: true,
       supportedTemplates: wechatTemplateIds,
+      supportedRewriteStyles: wechatRewriteStyleIds,
       readMoreEntries: this.readMoreEntries(article),
       editions: this.editionHistory(article, family),
       trafficWordPlan: this.trafficWordPlan(article, family),
@@ -501,7 +538,7 @@ export class WechatArticles {
                 .find((a) => a.id === copy.accountId);
             return {
               copyId: copy.id,
-              title: resource.title,
+              title: resource.title || "未命名资源",
               account: account?.alias ?? "账号已移除",
             };
           });
@@ -511,7 +548,8 @@ export class WechatArticles {
         if (link.copyId) {
           try {
             const copy = this.d.repo.getCopy(link.copyId);
-            title = this.d.repo.getResource(copy.resourceId).title;
+            title =
+              this.d.repo.getResource(copy.resourceId).title || "未命名资源";
             status = copy.status;
             message =
               copy.status === "ready"
@@ -568,6 +606,118 @@ export class WechatArticles {
       };
     });
   }
+  keyboardSkinsOverview() {
+    return keyboardSkinOverview(this.d.repo);
+  }
+  sampleKeyboardSkins(count: number) {
+    return sampleKeyboardSkins(this.d, count);
+  }
+  async createKeyboardSkinsDraft(input: KeyboardSkinDraftInput) {
+    const title =
+      input.title ?? keyboardSkinDraftTitle(input.resourceIds.length);
+    const draftId = `wechat_${input.requestId}`;
+    const existing = () => {
+      const article = this.d.repo.db.setting<WechatArticle | null>(
+        articleKey(draftId),
+        null,
+      );
+      if (!article) return;
+      if (
+        article.source.kind !== "keyboard-skins" ||
+        article.source.title !== title ||
+        JSON.stringify(article.source.resourceIds) !==
+          JSON.stringify(input.resourceIds)
+      )
+        throw new AppError(
+          "KEYBOARD_SKINS_REQUEST",
+          "此草稿请求已用于另一组内容，请重新提交。",
+        );
+      return this.get(draftId);
+    };
+    const previous = existing();
+    if (previous) return previous;
+    const operation = id("keyboard-skins");
+    this.active.add(operation);
+    const { links, imageCount, assertCurrent, ...fields } =
+      await resolveKeyboardSkinDraft(this.d, input.resourceIds).finally(() =>
+        this.active.delete(operation),
+      );
+    if (this.closed)
+      throw new AppError("WECHAT_CLOSED", "工作空间已关闭，未保存到其他空间。");
+    const concurrent = existing();
+    if (concurrent) return concurrent;
+    assertCurrent();
+    const text = wechatTextInput.parse({ ...fields, title, author: "" });
+    const timestamp = now();
+    const article: WechatArticle = {
+      ...text,
+      id: draftId,
+      source: {
+        kind: "keyboard-skins",
+        batchId: input.requestId,
+        resourceIds: input.resourceIds,
+        url: "",
+        title,
+        body: text.body,
+        author: "",
+        publishedAt: "",
+        imageCount,
+        warnings: [],
+      },
+      links,
+      revision: 1,
+      aiAssisted: false,
+      stage: "editing",
+      message: "键盘皮肤合集已存入本地草稿箱，可检查正文和封面后送稿。",
+      remote: null,
+      pendingAccount: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.addDraft(article);
+    return this.get(article.id);
+  }
+  createCatalogDraft(catalogId: string, snapshot: CatalogSnapshot) {
+    if (this.closed)
+      throw new AppError("WECHAT_CLOSED", "工作空间已关闭，未保存到其他空间。");
+    const draftId = catalogWechatDraftId(catalogId, snapshot.hash);
+    const existing = this.d.repo.db.setting<WechatArticle | null>(
+      articleKey(draftId),
+      null,
+    );
+    if (existing) return { articleId: draftId };
+    const { text, links } = catalogWechatText(snapshot);
+    const timestamp = now();
+    const article: WechatArticle = {
+      ...text,
+      id: draftId,
+      source: {
+        kind: "resource-catalog",
+        url: "",
+        catalogId,
+        snapshotHash: snapshot.hash,
+        title: snapshot.title,
+        body: text.body,
+        author: "",
+        publishedAt: "",
+        imageCount: 0,
+        warnings: [
+          "分享链接保留导出时的清单快照，不会自动跟随资源库变化；发送前请核对访问权限。",
+        ],
+      },
+      links,
+      revision: 1,
+      aiAssisted: false,
+      stage: "editing",
+      message: `资源清单已导入本地草稿箱，选择封面和公众号后可送微信草稿。${snapshot.title.length > 64 ? "公众号标题已缩短，完整标题保留在正文。" : ""}`,
+      remote: null,
+      pendingAccount: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.addDraft(article);
+    return { articleId: draftId };
+  }
   async importArticle(rawUrl: string) {
     const url = wechatArticleUrl.parse(rawUrl);
     if (this.closed || this.active.has("import"))
@@ -611,13 +761,7 @@ export class WechatArticles {
         createdAt: now(),
         updatedAt: now(),
       };
-      this.d.repo.db.transaction(() => {
-        this.persist(article);
-        this.d.repo.db.setSetting(indexKey, [
-          article.id,
-          ...this.d.repo.db.setting<string[]>(indexKey, []),
-        ]);
-      });
+      this.addDraft(article);
       return this.get(article.id);
     } finally {
       this.active.delete("import");
@@ -736,19 +880,21 @@ export class WechatArticles {
     }
     return this.get(id);
   }
-  async pickImage(id: string) {
+  async pickImage(id: string, source: "file" | "clipboard" = "file") {
     const article = this.load(id);
     this.editable(article);
-    if (!this.d.readImage)
-      throw new AppError("WECHAT_DESKTOP", "请在桌面窗口选择本地图片。");
+    const fromClipboard = source === "clipboard";
+    const read = fromClipboard ? this.d.readClipboardImage : this.d.readImage;
+    if (!read)
+      throw new AppError("WECHAT_DESKTOP", "请在桌面窗口添加公众号图片。");
     this.active.add(id);
     try {
-      const file = await this.d.readImage();
+      const file = await read();
       if (!file) return null;
       if (this.closed)
-        throw new AppError("WECHAT_CLOSED", "工作空间已关闭，请重新选择图片。");
+        throw new AppError("WECHAT_CLOSED", "工作空间已关闭，请重新添加图片。");
       if (file.bytes.length > 10 * 1024 * 1024)
-        throw new AppError("WECHAT_IMAGE", "请选择不超过 10MB 的图片。");
+        throw new AppError("WECHAT_IMAGE", "请使用不超过 10MB 的图片。");
       const image = await saveContentImage(
         this.d.dataPath,
         file.bytes,
@@ -762,22 +908,9 @@ export class WechatArticles {
     }
   }
   async image(file: string) {
-    if (this.closed || !/^[a-f0-9]{64}\.(png|jpg|gif)$/.test(file))
+    if (this.closed)
       throw new AppError("WECHAT_IMAGE", "图片地址不正确。");
-    const bytes = await readContentImage(this.d.dataPath, {
-      file,
-      sha256: file.split(".")[0],
-      name: file,
-      storage: "content-assets",
-    });
-    return {
-      bytes,
-      mime: file.endsWith(".png")
-        ? "image/png"
-        : file.endsWith(".gif")
-          ? "image/gif"
-          : "image/jpeg",
-    };
+    return readWechatLocalImage(this.d.dataPath, file);
   }
   private async referenceImage(raw: string) {
     const url = new URL(raw);
@@ -957,15 +1090,11 @@ export class WechatArticles {
     this.active.add(id);
     try {
       const result = await this.d.saveResource({
-        title:
-          `${article.source.title} · 资料${article.links.indexOf(link) + 1}`.slice(
-            0,
-            200,
-          ),
+        title: article.source.title,
         sourceText: link.sourceText,
-        category: "学习资料",
+        category: "",
         tags: [],
-        summary: `文章：${article.source.title}\n作者：${article.source.author}\n来源：${article.source.url}`,
+        summary: resourceSummary(article.body),
         accountId,
         directory: "",
         enqueue: false,
@@ -1021,9 +1150,10 @@ export class WechatArticles {
           check.message || "本人分享未通过实时核验。",
         );
     }
+    const share = parseShare(copy.shareUrl);
     return {
-      url: parseShare(copy.shareUrl).url,
-      code: (await this.d.secrets.get(`share:${copy.id}`)) ?? "",
+      url: share.url,
+      code: (await this.d.secrets.get(`share:${copy.id}`)) ?? share.code,
     };
   }
   private async replacements(article: WechatArticle, verify: boolean) {
@@ -1349,7 +1479,7 @@ export class WechatArticles {
         this.persist(article);
         recordWechatTrafficWords(
           this.d.repo.db,
-          article.source.url,
+          wechatSourceKey(article.source),
           trafficWords,
           article.title,
           article.body,

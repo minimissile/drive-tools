@@ -149,6 +149,7 @@ export async function fixture(
   overrides: Partial<
     Record<import("../shared/types").Provider, DriveProvider>
   > = {},
+  portOverrides: Partial<AppPorts> = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "panxu-test-")),
     provider = new TestProvider(),
@@ -185,6 +186,7 @@ export async function fixture(
     openExternal: async () => {},
     copyText: async () => {},
     saveFile: async () => null,
+    ...portOverrides,
   };
   const app = new AppService(
     dir,

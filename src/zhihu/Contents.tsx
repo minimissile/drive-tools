@@ -3,6 +3,8 @@ import { useState } from "react";
 import { z } from "zod";
 import {
   zhihuContentInput,
+  zhihuContentForAccount,
+  zhihuTaskClaimsContent,
   type ZhihuContent,
   type ZhihuContentInput,
   type ZhihuSnapshot,
@@ -350,14 +352,102 @@ export function ZhihuContents({
           </p>
         ) : null}
         {current?.reviewed && savedMatches ? (
-          <ScheduleContent
-            content={current}
-            snapshot={snapshot}
-            busy={busy}
-            run={run}
-          />
+          <>
+            {snapshot.originalDraftsSupported &&
+            current.kind === "article" &&
+            current.purpose === "warming" &&
+            !current.source ? (
+              <OriginalDraft
+                key={`${current.id}:${current.version}`}
+                content={current}
+                snapshot={snapshot}
+                busy={busy}
+                run={run}
+              />
+            ) : null}
+            <ScheduleContent
+              key={current.id}
+              content={current}
+              snapshot={snapshot}
+              busy={busy}
+              run={run}
+            />
+          </>
         ) : null}
       </Panel>
+    </div>
+  );
+}
+function OriginalDraft({
+  content,
+  snapshot,
+  busy,
+  run,
+}: {
+  content: ZhihuContent;
+  snapshot: ZhihuSnapshot;
+  busy: boolean;
+  run: ZhihuAction;
+}) {
+  const [accountId, setAccountId] = useState(content.accountId ?? "");
+  const accounts = snapshot.accounts.filter(
+    (account) => account.uid && zhihuContentForAccount(content, account.id),
+  );
+  const selected = accounts.find((account) => account.id === accountId);
+  const claimed = snapshot.tasks.some(
+    (task) => task.contentId === content.id && zhihuTaskClaimsContent(task),
+  );
+  const approved = content.autocareOriginal?.version === content.version;
+  const owner = snapshot.accounts.find(
+    (account) => account.id === content.accountId,
+  );
+  if (!approved && claimed) return null;
+  return (
+    <div className="zhihu-schedule-content">
+      <h3>原创备用稿</h3>
+      {approved ? (
+        <p className="muted">
+          已允许 {owner?.alias ?? "原账号"} 在皮皮虾缺料时使用当前版本。
+        </p>
+      ) : (
+        <p className="muted">
+          确认这篇文章为本人原创，且拥有配图使用权。添加后，皮皮虾缺料时可按该账号的现有规则自动排期。
+        </p>
+      )}
+      <div className="row wrap">
+        {approved ? null : (
+          <Select
+            aria-label="原创备用稿账号"
+            disabled={busy || accounts.length === 0}
+            value={selected?.id ?? ""}
+            items={[
+              { value: "", label: "选择知乎账号" },
+              ...accounts.map((account) => ({
+                value: account.id,
+                label: account.alias,
+              })),
+            ]}
+            onValueChange={setAccountId}
+          />
+        )}
+        <Button
+          disabled={busy || (!approved && !selected)}
+          onClick={() =>
+            void run(
+              () =>
+                ipc("zhihu.content.original", {
+                  id: content.id,
+                  version: content.version,
+                  accountId: approved ? null : selected!.id,
+                  confirmed: true,
+                }),
+              approved ? "已移出原创备用稿" : "当前版本已加入原创备用稿",
+            )
+          }
+        >
+          {approved ? "移出备用稿" : "确认为原创备用稿"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -372,14 +462,17 @@ function ScheduleContent({
   busy: boolean;
   run: ZhihuAction;
 }) {
-  const [accountId, setAccountId] = useState(""),
+  const [accountId, setAccountId] = useState(content.accountId ?? ""),
     [at, setAt] = useState(""),
     [firstPost, setFirstPost] = useState(false);
+  const accounts = snapshot.accounts.filter((account) =>
+    zhihuContentForAccount(content, account.id),
+  );
+  const selected = accounts.find((account) => account.id === accountId);
   const firstPostEligible =
     content.kind === "article" &&
     content.purpose === "warming" &&
-    snapshot.accounts.find((a) => a.id === accountId)?.plan.progress
-      ?.creator === false;
+    selected?.plan.progress?.creator === false;
   return (
     <div className="zhihu-schedule-content">
       <h3>指定账号发布</h3>
@@ -389,14 +482,14 @@ function ScheduleContent({
       <div className="zhihu-fields">
         <Field label="发布账号">
           <Select
-            value={accountId}
+            value={selected?.id ?? ""}
             onValueChange={(id) => {
               setAccountId(id);
               setFirstPost(false);
             }}
             items={[
               { value: "", label: "选择知乎账号" },
-              ...snapshot.accounts.map((a) => ({
+              ...accounts.map((a) => ({
                 value: a.id,
                 label: a.alias,
               })),
@@ -419,7 +512,7 @@ function ScheduleContent({
         />
       ) : null}
       <Button
-        disabled={busy || !accountId || (firstPostEligible && !firstPost)}
+        disabled={busy || !selected || (firstPostEligible && !firstPost)}
         onClick={() =>
           void run(
             () =>

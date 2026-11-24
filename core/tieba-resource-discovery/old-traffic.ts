@@ -12,13 +12,15 @@ import {
   type TiebaOldResourceFilter,
   type TiebaTrafficPost,
   type TiebaTrafficPostsView,
+  type TiebaTrafficSort,
+  type TiebaTrafficSortDirection,
   type TiebaDiscoveryTrafficPost,
 } from "../../shared/tieba-resource-discovery";
 import type { Database } from "../database";
 import { tiebaDiscoveryStateKey } from "./migration";
 import { discoveryInterval as hour, type ViewReading } from "./rules";
-import { admitOldResource, saveOldResource } from "./old-resource";
-import { trafficPage, visibleHighTraffic } from "./archive";
+import { admitOldResource, oldResourceAdmission, saveOldResource } from "./old-resource";
+import { visibleHighTraffic } from "./archive";
 
 const day = 24 * hour;
 const observationGap = oldTrafficObservationDays * day;
@@ -28,6 +30,11 @@ export type OldTrafficCandidate = Pick<
   TiebaAnalysisThread,
   "id" | "title" | "url" | "forum" | "authorId"
 > & { publishedAt: string; author?: string };
+
+type StoredOldPost = OldTrafficCandidate & {
+  archivedAt?: number;
+  latestReading?: ViewReading;
+};
 
 export type OldTrafficReading = {
   post: OldTrafficCandidate;
@@ -113,7 +120,7 @@ export function migrateTiebaOldTraffic(db: DatabaseSync) {
       continue;
     insert.run(
       track.post.id,
-      JSON.stringify(track.post),
+      JSON.stringify({ ...track.post, archivedAt: track.readings[0].at }),
       reading.at,
       reading.views,
       reading.at + observationGap,
@@ -127,7 +134,7 @@ export function migrateTiebaOldTraffic(db: DatabaseSync) {
 }
 
 export function oldTrafficSummary(db: Store, rules: TiebaDiscoveryRules) {
-  const admission = rules.oldResourceCheckEnabled ? "AND r.admitted = 1" : "";
+  const admission = rules.oldResourceCheckEnabled ? `AND ${oldResourceAdmission}` : "";
   return {
     tracked: db.get<{ count: number }>(
       `SELECT count(*) AS count FROM tieba_discovery_old_traffic t
@@ -149,7 +156,7 @@ function oldTrafficQuery(
   resource: TiebaOldResourceFilter,
 ) {
   const screened = view === "screened";
-  const admission = rules.oldResourceCheckEnabled ? "AND r.admitted = 1" : "";
+  const admission = rules.oldResourceCheckEnabled ? `AND ${oldResourceAdmission}` : "";
   const scope = screened ? "t.last_at IS NOT NULL" : "t.daily_added > ?";
   const filters = {
     all: "",
@@ -202,7 +209,7 @@ export function oldTrafficPage(
 function oldTrafficReading(row: Row, threshold: number): TiebaOldTrafficPost {
   const { id, title, url, forum, publishedAt, latestReading } = JSON.parse(
     row.post,
-  ) as OldTrafficCandidate & { latestReading?: ViewReading };
+  ) as StoredOldPost;
   const latest =
     latestReading && latestReading.at >= row.last_at!
       ? latestReading
@@ -243,35 +250,55 @@ export function trafficPostsPage(
   rules: TiebaDiscoveryRules,
   view: TiebaTrafficPostsView,
   resource: TiebaOldResourceFilter,
+  sort: TiebaTrafficSort,
+  direction: TiebaTrafficSortDirection,
 ): { page: number; total: number; items: TiebaTrafficPost[] } {
-  if (view === "high") {
-    const { page, total, items } = trafficPage(db, requestedPage, rules);
-    return { page, total, items: items.map((post) => ({
-      ...post, kind: "high", archivedAt: post.archivedAt ?? post.checkedAt,
-    })) };
-  }
-  if (view !== "all") {
-    const { page, total, items } = oldTrafficPage(db, requestedPage, rules, view, resource);
-    return { page, total, items: items.map((post) => ({ ...post, kind: "old" })) };
-  }
-  const { from } = oldTrafficQuery(rules, "screened", "all");
+  const old = view === "high" ? null : oldTrafficQuery(
+    rules, view === "qualified" ? "qualified" : "screened",
+    view === "all" ? "all" : resource,
+  );
   const high = `FROM tieba_discovery_traffic h
     WHERE ${visibleHighTraffic("h.thread_id", rules.oldResourceCheckEnabled)}`;
+  const includeHigh = view === "all" || view === "high";
+  const sources = [old?.from, includeHigh ? high : null].filter(Boolean);
+  const args = old?.args ?? [];
   const total = db.get<{ count: number }>(
-    `SELECT (SELECT count(*) ${from}) + (SELECT count(*) ${high}) AS count`,
+    `SELECT ${sources.map((from) => `(SELECT count(*) ${from})`).join(" + ")} AS count`,
+    ...args,
   )!.count;
   const page = Math.min(requestedPage, Math.max(1, Math.ceil(total / pageSize)));
-  const items = db.all<Row & { kind: "old" | "high"; sorted_at: number }>(
-    `SELECT 'old' AS kind, t.thread_id AS id, t.last_at AS sorted_at, t.last_views AS sorted_views,
-      ${oldReadingColumns} ${from}
-    UNION ALL
-    SELECT 'high', h.thread_id, h.archived_at, h.views,
-      h.reading, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL ${high}
-    ORDER BY sorted_at DESC, sorted_views DESC, id DESC LIMIT ? OFFSET ?`,
-    pageSize, (page - 1) * pageSize,
+  const latest = "json_extract(t.post, '$.latestReading.at') >= t.last_at";
+  const selections = [
+    old && `SELECT 'old' AS kind, t.thread_id AS id,
+      coalesce(json_extract(t.post, '$.archivedAt'), t.baseline_at, t.last_at) AS archived_at,
+      CASE WHEN ${latest} THEN json_extract(t.post, '$.latestReading.views') ELSE t.last_views END AS sorted_views,
+      CASE WHEN ${latest} THEN json_extract(t.post, '$.latestReading.at') ELSE t.last_at END AS observed_at,
+      unixepoch(json_extract(t.post, '$.publishedAt'), 'subsec') * 1000 AS published_at,
+      ${oldReadingColumns} ${old.from}`,
+    includeHigh && `SELECT 'high' AS kind, h.thread_id AS id, h.archived_at, h.views AS sorted_views,
+      json_extract(h.reading, '$.checkedAt') AS observed_at,
+      unixepoch(json_extract(h.reading, '$.publishedAt'), 'subsec') * 1000 AS published_at,
+      h.reading AS post, NULL AS last_at, NULL AS last_views, NULL AS baseline_at, NULL AS added_views,
+      NULL AS daily_added, NULL AS previous_daily, NULL AS evidence, NULL AS checked_at ${high}`,
+  ].filter(Boolean);
+  const order = {
+    archivedAt: "archived_at",
+    views: "sorted_views",
+    lifetimeDailyViews: `CASE WHEN observed_at >= published_at
+      THEN sorted_views * ${day}.0 / CASE WHEN kind = 'high'
+        THEN max(observed_at - published_at, ${hour / 2})
+        ELSE nullif(observed_at - published_at, 0) END END`,
+    dailyAddedViews: "daily_added",
+  };
+  const items = db.all<Row & { kind: "old" | "high"; archived_at: number }>(
+    `WITH posts AS (${selections.join(" UNION ALL ")})
+     SELECT * FROM posts
+     ORDER BY ${order[sort]} ${direction === "asc" ? "ASC" : "DESC"} NULLS LAST,
+       archived_at DESC, sorted_views DESC, id DESC LIMIT ? OFFSET ?`,
+    ...args, pageSize, (page - 1) * pageSize,
   ).map((row): TiebaTrafficPost => row.kind === "old"
-    ? { ...oldTrafficReading(row, rules.oldTrafficMinViews), kind: "old" }
-    : { ...(JSON.parse(row.post) as TiebaDiscoveryTrafficPost), kind: "high", archivedAt: row.sorted_at });
+    ? { ...oldTrafficReading(row, rules.oldTrafficMinViews), kind: "old", archivedAt: row.archived_at }
+    : { ...(JSON.parse(row.post) as TiebaDiscoveryTrafficPost), kind: "high", archivedAt: row.archived_at });
   return { page, total, items };
 }
 
@@ -287,7 +314,7 @@ export function dueOldTraffic(
     SELECT post FROM tieba_discovery_old_traffic t
     LEFT JOIN tieba_discovery_old_resource r USING (thread_id)
     WHERE t.next_check_at <= ? AND t.last_at IS NOT NULL
-      ${resourceCheckEnabled ? "AND r.admitted = 1" : ""}
+      ${resourceCheckEnabled ? `AND ${oldResourceAdmission}` : ""}
     ORDER BY t.next_check_at, t.thread_id LIMIT ?
   `,
       at,
@@ -309,7 +336,7 @@ export function saveOldTraffic(
     `SELECT t.* FROM tieba_discovery_old_traffic t
      LEFT JOIN tieba_discovery_old_resource r USING (thread_id)
      WHERE t.thread_id = ? AND t.last_at IS NOT NULL
-       ${rules.oldResourceCheckEnabled && !refresh ? "AND r.admitted = 1" : ""}`,
+       ${rules.oldResourceCheckEnabled && !refresh ? `AND ${oldResourceAdmission}` : ""}`,
   );
   const write = db.db.prepare(`
     INSERT INTO tieba_discovery_old_traffic
@@ -336,14 +363,11 @@ export function saveOldTraffic(
     )
       continue;
     const previousAt = current?.last_at ?? null;
-    const savedPost = current
-      ? (JSON.parse(current.post) as OldTrafficCandidate & {
-          latestReading?: ViewReading;
-        })
-      : undefined;
+    const savedPost = current ? (JSON.parse(current.post) as StoredOldPost) : undefined;
     if (savedPost?.latestReading && savedPost.latestReading.at > at) continue;
     if (previousAt !== null && at < previousAt) continue;
     if (previousAt !== null && at === previousAt && !refresh) continue;
+    const archivedAt = savedPost?.archivedAt ?? current?.baseline_at ?? previousAt ?? at;
     if (
       previousAt !== null &&
       at - previousAt < observationGap &&
@@ -355,7 +379,7 @@ export function saveOldTraffic(
             "UPDATE tieba_discovery_old_traffic SET post = ? WHERE thread_id = ?",
           )
           .run(
-            JSON.stringify({ ...post, latestReading: { at, views } }),
+            JSON.stringify({ ...post, archivedAt, latestReading: { at, views } }),
             post.id,
           );
         updated++;
@@ -373,7 +397,7 @@ export function saveOldTraffic(
         : (views - previousViews) / ((at - baseline) / day);
     write.run(
       post.id,
-      JSON.stringify(post),
+      JSON.stringify({ ...post, archivedAt }),
       at,
       views,
       at + observationGap,

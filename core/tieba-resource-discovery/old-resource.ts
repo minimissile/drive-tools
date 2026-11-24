@@ -43,8 +43,15 @@ export function oldResourceEvidence(
 }
 
 export function isOldResource(evidence: TiebaOldResourceEvidence) {
-  return evidence.linkSources.length > 0 || evidence.keywords.length > 0;
+  return evidence.linkSources.length > 0 || evidence.keywords.some((word) => word !== "资源");
 }
+
+// Older records could be admitted on the generic word alone. Keep their readings
+// so a later scan can restore the post if it finds stronger evidence.
+export const oldResourceAdmission = `r.admitted = 1 AND (
+  json_array_length(r.evidence, '$.linkSources') > 0
+  OR json_extract(r.evidence, '$.keywords') <> '["资源"]'
+)`;
 
 export function migrateTiebaOldResourceAdmission(db: DatabaseSync) {
   const columns = db

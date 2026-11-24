@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { providerSpecs } from "../../shared/providers";
 import type { Account } from "../../shared/types";
 import type { DriveBrowserPreview } from "../../shared/drive-browser";
 import { ipc } from "../api/client";
@@ -49,7 +50,7 @@ export function DriveBrowserDialog({
   const browser = latest.browser;
   return (
     <Dialog
-      title="百度网盘 · 指纹浏览器管理"
+      title={`${providerSpecs[account.provider].name}网盘 · 指纹浏览器管理`}
       className="drive-browser-dialog"
       busy={disabled}
       onClose={onClose}
@@ -85,7 +86,7 @@ export function DriveBrowserDialog({
       <p className="drive-browser-intro">
         <strong>{latest.alias}</strong>{" "}
         创建时已固定使用比特指纹浏览器，浏览器方式和所选配置不能更换。
-        此环境可供贴吧、知道和公众号共用，日常请求在同一后台串行执行。
+        此环境可供已支持的网盘、贴吧、知道和公众号共用，日常请求在同一后台串行执行。
       </p>
       {browser ? (
         <section className="drive-browser-current" aria-label="固定的指纹环境">

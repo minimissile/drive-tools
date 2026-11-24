@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   ExternalLink,
   Eye,
+  ListPlus,
   LoaderCircle,
   Maximize2,
   Save,
@@ -15,7 +16,9 @@ import { wechatTargetReceipt } from "../../shared/wechat";
 import { wechatPreviewHtml } from "./image-preview";
 import {
   defaultWechatRewriteStyle,
+  legacyWechatRewriteStyleIds,
   wechatRewriteStyleSchema,
+  type WechatRewriteStyleId,
 } from "../../shared/wechat-rewrite";
 import {
   planWechatTrafficWords,
@@ -53,6 +56,7 @@ import { ArticleEditionSwitcher } from "./ArticleEditionSwitcher";
 import { ArticleTitlesDialog } from "./ArticleTitlesDialog";
 import { ArticleReadMore } from "./ArticleReadMore";
 import { ArticleTemplateSelect } from "./ArticleTemplateSelect";
+import { InsertArticleModule } from "./ArticleModules";
 import {
   defaultWechatTemplate,
   wechatTemplateSchema,
@@ -79,9 +83,10 @@ const text = (article: WechatText) => ({
   readMore: article.readMore,
   templateId: article.templateId ?? defaultWechatTemplate,
 });
+const bodyLimit = 200_000;
 const editorSchema = z.object({
   title: z.string().max(200),
-  body: z.string().max(200000),
+  body: z.string().max(bodyLimit),
   author: z.string().max(200),
   digest: z.string().max(500),
   coverUrl: z.string().max(4000),
@@ -124,6 +129,7 @@ export function ArticleEditor({
     [error, setError] = useState<ActionError | null>(null),
     [resourceBusy, setResourceBusy] = useState(false),
     [preview, setPreview] = useState(false),
+    [moduleOpen, setModuleOpen] = useState(false),
     [comparisonOpen, setComparisonOpen] = useState(false),
     [rewriteOpen, setRewriteOpen] = useState(false),
     [trafficWordsOpen, setTrafficWordsOpen] = useState(false),
@@ -131,6 +137,8 @@ export function ArticleEditor({
     [deliveryOpen, setDeliveryOpen] = useState(false);
   const [titleCandidates, setTitleCandidates] = useState<string[] | null>(null);
   const article = detail.article;
+  const supportedRewriteStyles: readonly WechatRewriteStyleId[] =
+    detail.supportedRewriteStyles ?? legacyWechatRewriteStyleIds;
   const editions = detail.editions ?? [
     {
       id: article.id,
@@ -216,6 +224,8 @@ export function ArticleEditor({
     rewriteButton = useRef<HTMLButtonElement>(null),
     titleButton = useRef<HTMLButtonElement>(null),
     editorTabs = useRef<HTMLDivElement>(null);
+  const bodyInput = useRef<HTMLTextAreaElement>(null);
+  const bodyCursor = useRef<number | null>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -285,6 +295,30 @@ export function ArticleEditor({
   ]);
   const update = (patch: Partial<WechatText>) => {
     draft.update({ ...patch, textEdited: true });
+  };
+  const insertModule = (content: string) => {
+    if (busy || !editable || conflict)
+      return "当前稿件暂不能编辑，请返回正文查看状态。";
+    const body = draft.value.body;
+    const offset = Math.min(bodyCursor.current ?? body.length, body.length);
+    const before = body.slice(0, offset);
+    const after = body.slice(offset);
+    const lineBreak = (text: string, pattern: RegExp) =>
+      text.trim()
+        ? "\n".repeat(Math.max(0, 2 - (text.match(pattern)?.[0].length ?? 0)))
+        : "";
+    const block = content.replace(/^(?:[ \t]*\r?\n)+|(?:\r?\n[ \t]*)+$/g, "");
+    const addition = lineBreak(before, /\n*$/) + block;
+    const combined = before + addition + lineBreak(after, /^\n*/) + after;
+    if (combined.length > bodyLimit) return "添加后正文将超过 200,000 字。";
+    const cursor = before.length + addition.length;
+    bodyCursor.current = cursor;
+    update({ body: combined });
+    setPreview(false);
+    requestAnimationFrame(() => {
+      bodyInput.current?.focus({ preventScroll: true });
+      bodyInput.current?.setSelectionRange(cursor, cursor);
+    });
   };
   const apply = (next: WechatDetail) => {
     if (!alive.current) return;
@@ -673,6 +707,15 @@ export function ArticleEditor({
                 {!preview ? <small>支持 Markdown</small> : null}
               </div>
               <div className="wechat-editor-actions">
+                <Button
+                  size="compact"
+                  aria-haspopup="dialog"
+                  disabled={busy || !editable || conflict}
+                  onClick={() => setModuleOpen(true)}
+                >
+                  <ListPlus size={14} aria-hidden="true" />
+                  添加模块
+                </Button>
                 <ArticleTemplateSelect
                   value={draft.value.templateId}
                   disabled={busy || !editable || conflict}
@@ -704,12 +747,16 @@ export function ArticleEditor({
               />
             ) : (
               <textarea
+                ref={bodyInput}
                 className="wechat-body"
                 aria-labelledby="wechat-body-label"
                 value={draft.value.body}
-                maxLength={200000}
+                maxLength={bodyLimit}
                 disabled={busy || !editable}
                 onChange={(e) => update({ body: e.target.value })}
+                onBlur={(event) => {
+                  bodyCursor.current = event.currentTarget.selectionEnd;
+                }}
               />
             )}
             <div className="wechat-body-options">
@@ -785,6 +832,13 @@ export function ArticleEditor({
           </TabPanel>
         </Tabs>
       </Panel>
+      {moduleOpen ? (
+        <InsertArticleModule
+          templateId={draft.value.templateId}
+          onInsert={insertModule}
+          onClose={() => setModuleOpen(false)}
+        />
+      ) : null}
       {trafficWordsOpen ? (
         <TrafficWordsDialog
           storageKey={`panxu:wechat:${data!.dataPath}:${article.id}:traffic-words`}
@@ -818,6 +872,7 @@ export function ArticleEditor({
       {rewriteOpen ? (
         <ArticleRewriteDialog
           styleId={draft.value.styleId}
+          supportedStyles={supportedRewriteStyles}
           instruction={draft.value.instruction}
           wordCount={trafficWords.words.length}
           wordPlan={trafficWordPlan}
@@ -836,15 +891,17 @@ export function ArticleEditor({
             setRewriteOpen(false);
             setError(null);
           }}
-          onRewrite={() =>
+          onRewrite={() => {
+            const { styleId, instruction } = draft.value;
+            if (!supportedRewriteStyles.includes(styleId)) return;
             void run(
               "AI 改写",
               async () => {
                 await saved();
                 const result = await ipc("wechat.rewrite", {
                   id: article.id,
-                  styleId: draft.value.styleId,
-                  instruction: draft.value.instruction || undefined,
+                  styleId,
+                  instruction: instruction || undefined,
                 });
                 if (alive.current) {
                   setRewriteOpen(false);
@@ -858,8 +915,8 @@ export function ArticleEditor({
               },
               "标题、正文和摘要已改写，请对照原文审阅。",
               "rewrite",
-            )
-          }
+            );
+          }}
         />
       ) : null}
       {comparisonOpen ? (

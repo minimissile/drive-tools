@@ -1,10 +1,16 @@
 import { z } from "zod";
-import type { WebsiteAccount } from "./website-accounts";
+import {
+  websiteAccountIdSchema,
+  type WebsiteAccount,
+} from "./website-accounts";
 import type { TiebaAutocareTarget } from "./tieba-autocare";
 import type { TiebaTopicReceipt } from "./tieba-topics";
 import type { ContentKeyword } from "./content-sources";
 import type { RuntimeLogPage } from "./runtime-logs";
 import type { Provider } from "./types";
+import { keyboardSkinDraftInput } from "./keyboard-skins";
+
+export const tiebaPublishingResourceLimit = 10;
 
 export interface TiebaPublishingResource {
   resourceId: string;
@@ -70,10 +76,21 @@ export const tiebaPublishingSaveSchema = z.object({
   targetId: z.string().regex(/^tiebatarget_[\w-]+$/),
   keyword: z.string().trim().min(1).max(100),
   keywordSourceId: z.string().max(250).default("manual"),
-  copyIds: z.array(z.string().min(1).max(150)).min(1).max(10),
+  copyIds: z
+    .array(z.string().min(1).max(150))
+    .min(1)
+    .max(tiebaPublishingResourceLimit),
   title: z.string().trim().max(30),
   body: z.string().trim().max(10000),
   ruleNote: z.string().trim().max(2000).default(""),
+});
+export const tiebaKeyboardSkinDraftSchema = keyboardSkinDraftInput.extend({
+  resourceIds: keyboardSkinDraftInput.shape.resourceIds.max(
+    tiebaPublishingResourceLimit,
+  ),
+  title: z.string().trim().min(3).max(30),
+  targetId: tiebaPublishingSaveSchema.shape.targetId,
+  accountId: websiteAccountIdSchema,
 });
 export const tiebaPublishingSubmitSchema = z.object({
   id: identifier,
@@ -94,6 +111,10 @@ export interface TiebaPublishingContract {
     value: TiebaPublishingResource[];
   };
   "tieba.publishing.save": Contract<z.infer<typeof tiebaPublishingSaveSchema>>;
+  "tieba.publishing.saveKeyboardSkins": {
+    args: z.infer<typeof tiebaKeyboardSkinDraftSchema>;
+    value: { id: string };
+  };
   "tieba.publishing.submit": Contract<
     z.infer<typeof tiebaPublishingSubmitSchema>
   >;

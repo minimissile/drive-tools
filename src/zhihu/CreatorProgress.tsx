@@ -1,32 +1,52 @@
-import type { ZhihuProgress } from "../../shared/zhihu";
+import {
+  hasZhihuOfficialScore,
+  zhihuOfficialScoreRefreshMs,
+  type ZhihuSnapshot,
+} from "../../shared/zhihu";
+import { formatTime } from "../lib/format";
 
 const number = (value: number) => value.toLocaleString("zh-CN");
 
 /** Shared by the overview and account detail; plan targets never supply scores. */
 export function ZhihuCreatorProgress({
-  progress: p,
-  targetLevel,
+  account,
+  targetLevel = account.plan.targetLevel,
 }: {
-  progress: ZhihuProgress | null;
-  targetLevel: number;
+  account: Pick<ZhihuSnapshot["accounts"][number], "plan" | "uid" | "status">;
+  targetLevel?: number;
 }) {
-  const score =
-    p?.source === "official" &&
-    p.creator &&
-    Number.isSafeInteger(p.score) &&
-    p.score! >= 0
-      ? p.score!
+  const sameIdentity = !!account.uid && account.plan.uid === account.uid;
+  const p = sameIdentity ? account.plan.progress : null;
+  const last = sameIdentity ? account.plan.lastOfficialScore : undefined;
+  const scoreReading = hasZhihuOfficialScore(p)
+    ? p
+    : p?.creator !== false && hasZhihuOfficialScore(last)
+      ? last
       : null;
+  const checkedAt = Date.parse(scoreReading?.checkedAt ?? "");
+  const historical =
+    !!scoreReading &&
+    (scoreReading !== p ||
+      !!account.plan.officialProgressFailedAt ||
+      account.status !== "connected" ||
+      !Number.isFinite(checkedAt) ||
+      Date.now() - checkedAt >= zhihuOfficialScoreRefreshMs);
+  const score = scoreReading?.score ?? null;
+  const level = scoreReading?.level;
+  const threshold = scoreReading?.nextLevelScore;
   const total =
     score !== null &&
-    p?.level != null &&
-    p.level < 10 &&
-    Number.isSafeInteger(p.nextLevelScore) &&
-    p.nextLevelScore! > 0 &&
-    p.nextLevelScore! >= score
-      ? p.nextLevelScore!
+    level != null &&
+    level < 10 &&
+    typeof threshold === "number" &&
+    Number.isSafeInteger(threshold) &&
+    threshold > 0 &&
+    threshold >= score
+      ? threshold
       : null;
   const percent = total === null ? null : ((score! / total) * 100).toFixed(1);
+  const metric = historical ? "上次官方创作分" : "创作分";
+  const nextLevel = level == null ? null : level + 1;
   return (
     <div className="zhihu-creator-progress">
       <div className="zhihu-growth-heading">
@@ -37,30 +57,36 @@ export function ZhihuCreatorProgress({
         <>
           <div className="zhihu-score-line">
             <span>
-              创作分 <b>{number(score)}</b>
+              {metric} <b>{number(score)}</b>
               {total === null ? " 分" : ` / ${number(total)}`}
             </span>
-            {percent !== null ? <span>{percent}%</span> : null}
+            {historical ? (
+              <span>待刷新</span>
+            ) : percent !== null ? (
+              <span>{percent}%</span>
+            ) : null}
           </div>
-          {total !== null ? (
+          {total !== null && !historical ? (
             <progress
               className="zhihu-score-bar"
               value={score}
               max={total}
-              aria-label={`升至 Lv.${p!.level! + 1} 的创作分进度`}
+              aria-label={`升至 Lv.${nextLevel} 的创作分进度`}
               aria-valuetext={`${number(score)} / ${number(total)} 分，${percent}%`}
             />
           ) : null}
           <div className="zhihu-growth-meta">
             <span>
-              {total !== null
-                ? `升至 Lv.${p!.level! + 1} 还需 ${number(total - score)} 分`
-                : p?.level === 10
-                  ? "已达最高创作等级"
-                  : "下一等级门槛未读取"}
+              {historical && scoreReading
+                ? `上次读取 ${formatTime(scoreReading.checkedAt)}`
+                : total !== null
+                  ? `升至 Lv.${nextLevel} 还需 ${number(total - score)} 分`
+                  : level === 10
+                    ? "已达最高创作等级"
+                    : "下一等级门槛未读取"}
             </span>
-            {p?.scoreUpdatedOn ? (
-              <span>分数更新 {p.scoreUpdatedOn}</span>
+            {scoreReading?.scoreUpdatedOn ? (
+              <span>官方分数日期 {scoreReading.scoreUpdatedOn}</span>
             ) : null}
           </div>
         </>
@@ -76,6 +102,7 @@ export function ZhihuCreatorProgress({
       {p?.source === "official" && p.dimensions?.length ? (
         <details className="zhihu-growth-dimensions">
           <summary>创作分维度 · 官方更新口径</summary>
+          {historical ? <small>分值以当前官方页面为准</small> : null}
           {p.dimensions.every((d) => d.score === null) ? (
             <small>维度分值暂未读取</small>
           ) : null}
