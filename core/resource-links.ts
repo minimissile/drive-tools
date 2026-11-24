@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { z } from "zod";
+import { providerSchema } from "../shared/schemas";
 import { now } from "./database";
 import { AppError } from "./errors";
 import { resourceLinkNetworkError } from "./resource-link-errors";
@@ -13,6 +14,7 @@ import type {
   ResourceLinkContext,
   ResourceLinkSettings,
   ResourceLinkWrite,
+  PublishedResourceUrls,
   RemoteResourceLink,
 } from "../shared/resource-links";
 import type { Account, Resource, ResourceCopy } from "../shared/types";
@@ -63,7 +65,7 @@ const writeSchema = z.object({
     .min(1)
     .max(200)
     .refine((value) => !controlCharacters.test(value)),
-  provider: z.enum(["quark", "baidu", "uc", "xunlei", "guangya", "pikpak"]),
+  provider: providerSchema,
   targetUrl: z.string().max(2048).nullable(),
   code: z
     .string()
@@ -128,7 +130,7 @@ const remoteSchema = z.object({
   slug: z.string().regex(/^[A-Za-z0-9_-]{8,32}$/),
   url: z.string().url(),
   title: z.string().max(200),
-  provider: z.enum(["quark", "baidu", "uc", "xunlei", "guangya", "pikpak"]),
+  provider: providerSchema,
   targetUrl: z.string().url().nullable(),
   code: z.string().max(128),
   enabled: z.boolean(),
@@ -554,7 +556,7 @@ export class ResourceLinks {
     }
   }
   /** Local publication state only; never sync, create an entry, or read secrets. */
-  publishedUrls(resourceId: string) {
+  publishedUrls(resourceId: string): PublishedResourceUrls {
     const link = this.record(resourceId);
     const issue = !link
       ? "尚未创建固定入口，请在资源库的固定入口中创建。"
@@ -574,7 +576,7 @@ export class ResourceLinks {
     );
     const landing = row
       ? (JSON.parse(row.data) as {
-          published?: { document?: unknown } | null;
+          published?: { document?: unknown; version?: number } | null;
           pending?: unknown;
         })
       : null;
@@ -586,6 +588,7 @@ export class ResourceLinks {
           ? "尚未发布资源落地页，请先在资源库发布。"
           : null);
     return {
+      revision: JSON.stringify([link?.id, link?.revision, link?.enabled, link?.targetUrl, landing?.published?.version, !!landing?.pending]),
       landingUrl:
         !landingIssue && link ? `${link.baseUrl}/r/${link.slug}` : null,
       redirectUrl: !issue && link ? `${link.baseUrl}/go/${link.slug}` : null,

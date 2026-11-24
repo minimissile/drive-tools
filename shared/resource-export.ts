@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { providerIds } from "./providers";
 import { exportFields } from "./resource-export-fields";
 export { exportFields } from "./resource-export-fields";
 export const exportField = z.enum(
@@ -26,7 +27,7 @@ export const exportInput = z
     scope: z.enum(["database", "notes", "combined"]).default("combined"),
     category: z.string().max(60).default("all"),
     provider: z
-      .enum(["all", "quark", "baidu", "uc", "xunlei", "guangya", "pikpak"])
+      .enum(["all", ...providerIds])
       .default("all"),
     accountId: z.string().max(100).default("all"),
     archivedOnly: z.boolean().default(false),

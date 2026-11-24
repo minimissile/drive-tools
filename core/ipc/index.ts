@@ -1,4 +1,5 @@
 import { createAccountBatchHandlers } from "./account-batch";
+import { createDriveSyncHandlers } from "./drive-sync";
 import { createZhihuAutocareHandlers } from "./zhihu-autocare";
 import { createSystemLogHandlers } from "./system-logs";
 import { createTiebaAutocareHandlers } from "./tieba-autocare";
@@ -67,6 +68,7 @@ import { createWeiboWorkspaceHandlers } from "./weibo-workspace";
 
 export function createApplicationHandlers(services: HandlerServices) {
   return createIpcRegistry(
+    createDriveSyncHandlers(services),
     createZhidaoWorkflowHandlers(services),
     createSystemLogHandlers(services),
     createTiebaAutomationHandlers(services),

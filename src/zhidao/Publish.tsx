@@ -59,7 +59,13 @@ export default function Publish() {
         <Header title="问答发布" action={pageActions} />
       ) : null}
       {view.value.tab === "generate" ? (
-        <PublishingWorkflow headerActions={pageActions} />
+        <PublishingWorkflow
+          headerActions={pageActions}
+          onShowRun={(run) => {
+            model.pick(run);
+            view.update({ tab: "history" });
+          }}
+        />
       ) : null}
       {view.value.tab === "upload" ? (
         <PublishUpload

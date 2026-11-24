@@ -2,10 +2,15 @@ import {
   answerStyleDetails,
   answerStyleNames,
 } from "../../shared/answer-styles";
+import {
+  zhidaoAnswerLanguage,
+  zhidaoAnswerLanguageLabels,
+} from "../../shared/zhidao-answer-language";
 import type { z } from "zod";
 import type { answerDraftSchema } from "./answer-draft";
 import { Field } from "../ui/primitives";
 import { Select } from "../ui/Select";
+import { answerLanguageSample } from "./answer-language-samples";
 
 type Draft = z.infer<typeof answerDraftSchema>;
 export function AnswerExpression({
@@ -25,24 +30,45 @@ export function AnswerExpression({
         <h3 id="answer-expression-title">回答表达</h3>
         <p>让回答贴近问题，也贴近提问的人。</p>
       </div>
-      <Field label="回答风格">
-        <Select
-          value={value.style}
-          onValueChange={(style) => update({ style: style as Draft["style"] })}
-          items={answerStyleNames.map((style) => ({
-            value: style,
-            label: style,
-          }))}
-        />
-      </Field>
+      <div className="answer-expression-options">
+        <Field label="回答风格">
+          <Select
+            value={value.style}
+            onValueChange={(style) =>
+              update({ style: style as Draft["style"] })
+            }
+            items={answerStyleNames.map((style) => ({
+              value: style,
+              label: style,
+            }))}
+          />
+        </Field>
+        <Field label="回答语言">
+          <Select
+            value={value.language}
+            onValueChange={(language) =>
+              update({ language: zhidaoAnswerLanguage.parse(language) })
+            }
+            items={zhidaoAnswerLanguage.options.map((language) => ({
+              value: language,
+              label: zhidaoAnswerLanguageLabels[language],
+            }))}
+          />
+        </Field>
+      </div>
       <div
         className="answer-style-preview"
         aria-live="polite"
         aria-atomic="true"
       >
         <p>{detail.description}</p>
-        <blockquote>{detail.sample}</blockquote>
-        <small>语气示例 · 实际回答会结合每道题生成</small>
+        <blockquote>
+          {answerLanguageSample(value.language, value.style)}
+        </blockquote>
+        <small>
+          {zhidaoAnswerLanguageLabels[value.language]}语气示例 ·
+          实际回答会结合每道题生成
+        </small>
       </div>
       {value.mode === "auto" ? (
         <Field label="补充回答要求（可选）">

@@ -1,3 +1,4 @@
+import { baiduMembershipParserRevision } from "../shared/drive-membership";
 import type { PublicationDeliveryCheck } from "../shared/publication-checks";
 import { defaultContentFormat } from "../shared/channels";
 import type {
@@ -37,6 +38,10 @@ export class Repository {
       this.db.setting(`account:capacity:${row.id}`, null),
     );
     const membership = accountMembershipSchema.safeParse(this.db.setting(`account:membership:${row.id}`, null));
+    const membershipValue = membership.success && membership.data.ownerUid === row.uid ? membership.data : null;
+    const trustedMembership = row.provider === "baidu" && membershipValue && membershipValue.parserRevision !== baiduMembershipParserRevision
+      ? {...membershipValue,value:null,updatedAt:null,error:membershipValue.error||"百度会员识别规则已更新，请刷新会员信息。"}
+      : membershipValue;
     return {
       id: row.id,
       provider: row.provider,
@@ -50,7 +55,7 @@ export class Repository {
       error: row.error,
       browserEngine: this.db.setting<"electron" | "bitbrowser">(`drive-browser-mode:${row.id}`, browser ? "bitbrowser" : "electron"),
       browser: browser ? { environmentId: browser.environmentId, profileId: browser.profileId, profileName: browser.profileName, exitIp: browser.exitIp, requireProxy: browser.requireProxy } : null,
-      membership: membership.success && membership.data.ownerUid === row.uid ? membership.data : null,
+      membership: trustedMembership,
       capacity:
         capacity.success && capacity.data.ownerUid === row.uid
           ? capacity.data

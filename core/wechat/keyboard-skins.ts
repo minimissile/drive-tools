@@ -3,7 +3,7 @@ import {
   type KeyboardSkinItem,
   type KeyboardSkinSample,
 } from "../../shared/keyboard-skins";
-import { providerSpecs } from "../../shared/providers";
+import { providerDriveName } from "../../shared/providers";
 import type { SmzdmResourceLink } from "../../shared/smzdm";
 import { wechatCoverFilePattern } from "../../shared/wechat-markup";
 import { id } from "../database";
@@ -116,7 +116,7 @@ export async function resolveKeyboardSkinDraft(d: Dependencies, ids: string[]) {
         resourceId: candidate.id,
         ownUrl: share.url,
       };
-      const shareLine = `[${providerSpecs[share.provider].name}网盘](${shareUrl})${codeText}`;
+      const shareLine = `[${providerDriveName(share.provider)}](${shareUrl})${codeText}`;
       return { ...preview, link, shareLine };
     }),
   );

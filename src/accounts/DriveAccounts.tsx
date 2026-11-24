@@ -146,7 +146,7 @@ export default function DriveAccounts() {
           />
         </div>
         <TabPanel value={filter}>
-          <AccountBatchToolbar batch={batch} providerName={filter==="all"?null:providerSpecs[filter].name} allowRefresh disabled={busy>0}/>
+          <AccountBatchToolbar storageKey={`account-batch-panel:${data!.dataPath}:drive`} batch={batch} providerName={filter==="all"?null:providerSpecs[filter].name} allowRefresh disabled={busy>0}/>
           <div className="accounts-list" aria-label="网盘账号列表">
             {filtered.length ? (
               <>

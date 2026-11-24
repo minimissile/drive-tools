@@ -9,6 +9,7 @@ import {
   tiebaTrafficPostsPageSchema,
   tiebaTrafficResourceMarkSchema,
   tiebaFilterAuditPageSchema,
+  tiebaRecycledPageSchema,
   tiebaOldResourceDeleteSchema,
   tiebaResourceSeedsSchema,
 } from "../../shared/tieba-resource-discovery";
@@ -63,8 +64,10 @@ export function createTiebaResourceDiscoveryHandlers({
       startFilterAuditInput.parse(input);
       return tiebaResourceDiscovery.startFilterAudit();
     },
-    "tieba.discovery.recycled": (input) =>
-      tiebaResourceDiscovery.recycledPage(tiebaDiscoveryPotentialPageSchema.parse(input).page),
+    "tieba.discovery.recycled": (input) => {
+      const { page, ...filters } = tiebaRecycledPageSchema.parse(input);
+      return tiebaResourceDiscovery.recycledPage(page, filters);
+    },
     "tieba.discovery.deleteOldResource": (input) =>
       tiebaResourceDiscovery.deleteOldResource(tiebaOldResourceDeleteSchema.parse(input).id),
     "tieba.discovery.seeds": (input) =>

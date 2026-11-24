@@ -1,5 +1,6 @@
 import { AppError, ServiceHttpError } from "../../errors";
 import type { OperationRun } from "../../../shared/zhidao";
+import type { ZhidaoAnswerLanguage } from "../../../shared/zhidao-answer-language";
 import { wait, type WorkerContext } from "./context";
 
 /** Only a known 429 rejection can be retried automatically; no uncertain paid calls. */
@@ -9,6 +10,7 @@ export async function generateAutoAnswer(
   question: string,
   style: string,
   evidence: unknown,
+  language: ZhidaoAnswerLanguage,
   signal: AbortSignal,
 ) {
   for (let attempt = 0; ; attempt++) {
@@ -25,7 +27,7 @@ export async function generateAutoAnswer(
     }
     signal.throwIfAborted();
     try {
-      const result = await ctx.generateAnswer(question, style, evidence);
+      const result = await ctx.generateAnswer(question, style, evidence, language);
       if (!ctx.closed)
         ctx.store.config(run.id, {
           ...ctx.store.run(run.id).config,

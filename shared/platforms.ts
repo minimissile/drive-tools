@@ -6,6 +6,7 @@ export const providers = {
   xunlei: "迅雷",
   guangya: "光鸭",
   pikpak: "PikPak",
+  cmcc: "移动云盘",
 } as const;
 export const platformSpecs: {
   id: Platform;

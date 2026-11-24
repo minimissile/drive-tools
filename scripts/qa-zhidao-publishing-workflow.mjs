@@ -39,7 +39,10 @@ export async function run({ page, windowId, checkpoint }) {
   const confirm = () =>
     page
       .getByRole("button", { name: "确认并保存本份问答", exact: true })
-      .click();
+      .evaluate((node) => {
+        if (node.disabled) throw new Error("问答确认按钮仍不可用");
+        node.click();
+      });
   try {
     await page
       .getByRole("heading", { name: "问答发布", exact: true })
@@ -213,7 +216,7 @@ export async function run({ page, windowId, checkpoint }) {
     await budget
       .getByRole("button", { name: "转存进行中", exact: true })
       .waitFor();
-    assert.equal(await next("预览与下载").isDisabled(), true);
+    assert.equal(await next("上传与审核").isDisabled(), true);
     await page.evaluate(() => {
       window.__publishingTransferComplete = true;
     });
@@ -255,7 +258,19 @@ export async function run({ page, windowId, checkpoint }) {
     );
     await next("转存与独立链接").click();
     assert.equal(await button("准备所有待处理资源").isDisabled(), true);
-    await next("预览与下载").click();
+    await next("上传与审核").click();
+    assert.equal(
+      await page.getByLabel("任务名称", { exact: true }).inputValue(),
+      "办公表格练习等2份问答",
+    );
+    await page.getByLabel("任务名称", { exact: true }).fill("办公预算资料发布");
+    await page.reload();
+    await button("预览完整问答").waitFor();
+    assert.equal(
+      await page.getByLabel("任务名称", { exact: true }).inputValue(),
+      "办公预算资料发布",
+      "刷新保留手动任务名",
+    );
     await button("预览完整问答").click();
     const dialog = page.getByRole("dialog");
     await dialog.getByText(/每条问答一个独立链接/).waitFor();
@@ -269,10 +284,41 @@ export async function run({ page, windowId, checkpoint }) {
     await page.screenshot({ path: `${out}/05-download-1366.png` });
     const rect = await button("下载已审核表格").boundingBox();
     assert.ok(rect.x + rect.width <= 1366);
-    const calls = (await read()).calls.length;
+    assert.equal(await button("上传21条问答").isDisabled(), true);
+    await page
+      .getByRole("combobox", { name: "百度知道发布账号", exact: true })
+      .click();
+    await page
+      .getByRole("option", { name: "学习答主 · 备用账号", exact: true })
+      .click();
+    await button("上传21条问答").click();
+    await page.getByText("上传已完成", { exact: true }).waitFor();
+    const uploaded = await read();
+    const uploads = uploaded.calls.filter(
+      (call) => call.method === "zhidao.workflow.publish",
+    );
+    assert.equal(uploads.length, 1);
+    assert.equal(uploads[0].args.taskName, "办公预算资料发布");
+    assert.equal(uploads[0].args.accountId, "qa-publisher-2");
+    assert.equal(
+      await page
+        .getByRole("button", { name: "上传21条问答", exact: true })
+        .count(),
+      0,
+    );
+    await page.screenshot({ path: `${out}/05-uploaded-1366.png` });
+    await button("查询平台审核").click();
+    await page.getByText(/通过 21 · 失败 0/).waitFor();
     await page.reload();
-    await button("下载已审核表格").waitFor();
-    assert.equal((await read()).calls.length, calls, "恢复不重建链接或重跑AI");
+    await page.getByText("上传已完成", { exact: true }).waitFor();
+    assert.equal(
+      (await read()).calls.filter(
+        (call) => call.method === "zhidao.workflow.publish",
+      ).length,
+      1,
+      "刷新不能再次上传",
+    );
+    await page.screenshot({ path: `${out}/05-audit-restored.png` });
     assert.deepEqual(errors, []);
     return {
       out,
@@ -285,7 +331,7 @@ export async function run({ page, windowId, checkpoint }) {
         "按实际N条建链",
         "暂停恢复不重复",
         "固定ID防串链",
-        "完整预览与下载",
+        "完整上传与审核",
         "1440与1366桌面视觉",
       ],
     };

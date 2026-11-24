@@ -2,11 +2,19 @@ import { useState } from "react";
 import { z } from "zod";
 import { useAppData, useAppNavigation, useAppSelection } from "../state";
 import { useLocalDraft } from "../hooks/useLocalDraft";
-import { providerIds, providerSpecs } from "../../shared/providers";
-import { Button, Empty, Field, Notice, Panel } from "../ui/primitives";
+import {
+  providerIds,
+  providerSpecs,
+  providerDriveName,
+} from "../../shared/providers";
+import { Button, Empty, Field, Notice } from "../ui/primitives";
 import { Select } from "../ui/Select";
 import { OperationsWorkspace } from "../workbench/OperationsWorkspace";
+import { LocalDriveIndex } from "../drive-files/LocalDriveIndex";
+import { Tabs, TabList, TabPanel } from "../ui/Tabs";
 import { DriveBrowser } from "../drive-files/DriveBrowser";
+import "../ui/workspace.css";
+import "../drive-files/drive-files-page.css";
 
 export default function DriveFiles() {
   const { data } = useAppData();
@@ -15,35 +23,38 @@ export default function DriveFiles() {
   const [scope, setScope] = useState(0);
   const draft = useLocalDraft(
     `panxu-drive-browser:${data!.dataPath}`,
-    { provider: "all", accountId: copy?.accountId ?? "", path: "/" },
+    {
+      provider: "all",
+      accountId: copy?.accountId ?? "",
+      path: "/",
+      view: "local" as "local" | "remote",
+    },
     (v) =>
       z
         .object({
           provider: z.string(),
           accountId: z.string(),
           path: z.string(),
+          view: z.enum(["local", "remote"]).default("local"),
         })
         .parse(v),
   );
-  const accounts = data!.accounts.filter(
-    (a) => a.enabled && a.status === "connected",
-  );
+  const accounts = data!.accounts;
   const account = accounts.find((a) => a.id === draft.value.accountId);
   return (
     <OperationsWorkspace
+      className="workspace-frame drive-files-workspace"
       title="网盘文件"
-      description="浏览本人网盘中的资源，管理文件与广告素材，将核验后的分享归档到资源库。"
+      description="同步全盘目录，查找未录入资源；切换实时网盘管理文件与广告素材。"
+      action={
+        <Button quiet size="compact" onClick={() => navigate("accounts")}>
+          管理网盘账号
+        </Button>
+      }
     >
       {draft.error ? <Notice danger>{draft.error}</Notice> : null}
-      <Panel
-        title="选择本人网盘"
-        extra={
-          <Button quiet onClick={() => navigate("accounts")}>
-            管理网盘账号
-          </Button>
-        }
-      >
-        <div className="operations-form-grid">
+      <section className="drive-files-context" aria-label="选择本人网盘">
+        <div className="drive-files-account-fields">
           <Field label="网盘类型">
             <Select
               value={draft.value.provider}
@@ -54,7 +65,7 @@ export default function DriveFiles() {
                 { value: "all", label: "全部网盘" },
                 ...providerIds.map((id) => ({
                   value: id,
-                  label: providerSpecs[id].name + "网盘",
+                  label: providerDriveName(id),
                 })),
               ]}
             />
@@ -66,7 +77,7 @@ export default function DriveFiles() {
                 draft.update({ accountId, path: "/" })
               }
               items={[
-                { value: "", label: "选择已登录的本人账号" },
+                { value: "", label: "选择本人网盘账号" },
                 ...accounts
                   .filter(
                     (a) =>
@@ -84,35 +95,69 @@ export default function DriveFiles() {
         {copy?.folderId && accounts.some((a) => a.id === copy.accountId) ? (
           <Button
             quiet
+            size="compact"
+            className="drive-files-resource-location"
+            title={`定位到当前资源的目录：${copy.directory}`}
             onClick={() => {
               draft.update({
                 provider: data!.accounts.find((a) => a.id === copy.accountId)!
                   .provider,
                 accountId: copy.accountId,
                 path: copy.directory,
+                view: "remote",
               });
               setScope((v) => v + 1);
             }}
           >
-            定位到当前资源的目录：{copy.directory}
+            定位当前资源
           </Button>
         ) : null}
-      </Panel>
+      </section>
       {account ? (
-        <DriveBrowser
-          key={`${account.id}:${scope}`}
-          accountId={account.id}
-          copy={copy}
-          initialPath={draft.value.path}
-          workspace={data!.dataPath}
-          onPathChange={(path) => draft.update({ path })}
-        />
+        <Tabs
+          className="drive-files-views"
+          value={draft.value.view}
+          onChange={(view) => draft.update({ view })}
+        >
+          <TabList
+            label="网盘浏览方式"
+            items={[
+              ["local", "本地目录"],
+              ["remote", "实时网盘"],
+            ]}
+          />
+          <TabPanel value="local">
+            <LocalDriveIndex
+              key={`${data!.dataPath}:${account.id}`}
+              account={account}
+              workspace={data!.dataPath}
+              onOpenRemote={(path) => {
+                draft.update({ path, view: "remote" });
+                setScope((v) => v + 1);
+              }}
+            />
+          </TabPanel>
+          <TabPanel value="remote">
+            {account.enabled ? (
+              <DriveBrowser
+                key={`${account.id}:${scope}`}
+                accountId={account.id}
+                copy={copy?.accountId === account.id ? copy : undefined}
+                initialPath={draft.value.path}
+                workspace={data!.dataPath}
+                onPathChange={(path) => draft.update({ path })}
+              />
+            ) : (
+              <Empty title="此账号已停用">
+                可切回本地目录查看历史；重新启用账号后可访问实时网盘。
+              </Empty>
+            )}
+          </TabPanel>
+        </Tabs>
       ) : (
         <Empty
           title={
-            accounts.length
-              ? "先选择一个本人网盘账号"
-              : "还没有已登录的本人网盘账号"
+            accounts.length ? "先选择一个本人网盘账号" : "还没有本人网盘账号"
           }
           action={
             !accounts.length ? (
@@ -122,7 +167,7 @@ export default function DriveFiles() {
             ) : undefined
           }
         >
-          支持百度、夸克、UC、迅雷、光鸭和 PikPak；账号之间分别管理。
+          支持百度、夸克、UC、迅雷、光鸭、PikPak 和移动云盘；账号之间分别管理。
         </Empty>
       )}
     </OperationsWorkspace>

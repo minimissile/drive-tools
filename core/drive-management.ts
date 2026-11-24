@@ -114,7 +114,7 @@ export class DriveManagement {
         accountId,
         provider: a.provider,
         readAt: now(),
-        capabilities: {
+        capabilities: await p.fileCapabilities?.(a) ?? {
           rename: !!p.manageFile || !!p.manage,
           delete: !!p.manageFile || !!p.manage,
           upload: !!p.upload,

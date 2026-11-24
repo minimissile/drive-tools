@@ -1,0 +1,302 @@
+.drive-index {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.drive-index > .panel {
+  padding: var(--space-4);
+  margin: 0;
+}
+.drive-index-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.drive-index-sync {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-3);
+  padding-bottom: var(--space-3);
+}
+.drive-index-sync-copy {
+  min-width: 0;
+}
+.drive-index-actions,
+.drive-index-status,
+.drive-index-selection,
+.drive-index-breadcrumb,
+.drive-index-meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.drive-index-status {
+  gap: var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+.drive-index-status > strong {
+  font-size: 13px;
+}
+.drive-index-status > strong[data-state="completed"] {
+  color: var(--green);
+}
+.drive-index-status > strong[data-state="partial"],
+.drive-index-status > strong[data-state="blocked"] {
+  color: var(--amber);
+}
+.drive-index-status > span,
+.drive-index-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.drive-index-meta {
+  margin-top: var(--space-1);
+  gap: var(--space-3);
+}
+.drive-index-scope > summary {
+  margin: 0;
+}
+.drive-index-scope > p {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.drive-index-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--amber);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.drive-index-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.drive-index-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.drive-index-toolbar > :first-child {
+  flex: 1;
+  min-width: 220px;
+}
+.drive-index-filter > .field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+.drive-index-filter .select-control {
+  width: 130px;
+}
+.drive-index-selection {
+  min-height: 36px;
+  margin-left: auto;
+  font-size: 12px;
+}
+.drive-index-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: 0;
+}
+.drive-index-tree {
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-3) var(--space-2) 0 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+}
+.drive-index-tree-heading {
+  display: block;
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+.drive-index-tree .button {
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.drive-index-tree .button[aria-current="location"] {
+  color: var(--blue);
+  background: var(--blue-bg);
+}
+.drive-index-branches {
+  padding-left: var(--space-2);
+}
+.drive-index-tree-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: start;
+}
+.drive-index-tree-row > .button:first-child {
+  padding-inline: var(--space-1);
+}
+.drive-index-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.drive-index-breadcrumb {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+  overflow: auto;
+}
+.drive-index-breadcrumb > *,
+.drive-index-breadcrumb .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.drive-index-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.drive-index-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.drive-index-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.drive-index-table th,
+.drive-index-table td {
+  padding: var(--space-2) 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.drive-index-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--muted);
+  background: var(--bg);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+.drive-index-table th:first-child {
+  width: 36px;
+}
+.drive-index-table th:nth-child(3) {
+  width: 86px;
+}
+.drive-index-table th:nth-child(4) {
+  width: 140px;
+}
+.drive-index-table th:nth-child(5) {
+  width: 168px;
+}
+.drive-index-table small {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 12px;
+}
+.drive-index-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+}
+.drive-index-name > svg {
+  flex: none;
+  color: var(--muted);
+}
+.drive-index-name > strong,
+.drive-index-name > .button {
+  min-width: 0;
+  font-size: 13px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.drive-index-name > strong {
+  font-weight: 500;
+  line-height: 24px;
+}
+.drive-index-name > .button {
+  padding: 0;
+  min-height: 24px;
+}
+.drive-index-table .drive-index-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.drive-index-resource-count {
+  font-size: 12px;
+}
+.drive-index-row-actions {
+  display: flex;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.drive-index-row-actions > .button {
+  white-space: normal;
+}
+.drive-index-resource-title {
+  overflow-wrap: anywhere;
+}
+.drive-index-state--recorded {
+  color: var(--green);
+}
+.drive-index-state--review {
+  color: var(--amber);
+}
+.drive-index-list > .pagination {
+  flex: none;
+  margin-top: var(--space-2);
+}
+.drive-index:has(.drive-index-preview-panel) > .drive-index-workspace {
+  flex: none;
+  min-height: 300px;
+}
+.drive-index-preview-panel {
+  flex: none;
+}
+.drive-index-preview-panel > .panel-heading {
+  margin-bottom: var(--space-2);
+}
+.drive-index-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  max-height: 320px;
+  margin-block: var(--space-3);
+  overflow: auto;
+}
+.drive-index-preview > .field {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.drive-index-preview-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  padding-block: var(--space-3);
+}

@@ -164,6 +164,11 @@ export function AddAccountForm({
           {adding ? "正在添加…" : "添加账号"}
         </Button>
       </div>
+      {provider === "cmcc" ? (
+        <p className="muted">
+          移动云盘通过内置浏览器登录，支持个人盘目录同步和新版个人盘文件管理。分享、转存、会员信息和分享统计暂未接入，请在官网处理。
+        </p>
+      ) : null}
       {fingerprint && supportsDriveBrowser(provider) ? (
         <DriveBrowserCreation
           key={provider}

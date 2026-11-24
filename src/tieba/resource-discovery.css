@@ -265,15 +265,19 @@
 }
 
 .tieba-recycled-table :is(th, td):first-child {
-  width: 46%;
+  width: 42%;
 }
 
 .tieba-recycled-table :is(th, td):nth-child(3) {
-  width: 19%;
+  width: 18%;
 }
 
-.tieba-recycled-table :is(th, td):last-child {
+.tieba-recycled-table :is(th, td):nth-last-child(-n + 2) {
   width: 176px;
+}
+
+.tieba-recycled-views-filter {
+  width: 144px;
 }
 
 .tieba-discovery-post-facts {

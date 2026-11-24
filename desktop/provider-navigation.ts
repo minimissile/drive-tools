@@ -1,6 +1,6 @@
 import type { BrowserWindow } from "electron";
 import type { Provider } from "../shared/types";
-import { providerAuthAllowed, providerSpecs } from "../shared/providers";
+import { providerAuthAllowed, providerDriveName } from "../shared/providers";
 import { AppError } from "../core/errors";
 import { isAbortedNavigation } from "./website-session-policy";
 
@@ -28,7 +28,7 @@ export async function loadProviderPage(
     const detail = /^ERR_[A-Z0-9_]{1,64}$/.test(code) ? `（${code}）` : "";
     throw new AppError(
       "ACCOUNT_PAGE_LOAD_FAILED",
-      `${providerSpecs[provider].name}网盘官方页面加载失败${detail}，请检查网络后重新打开登录窗口。`,
+      `${providerDriveName(provider)}官方页面加载失败${detail}，请检查网络后重新打开登录窗口。`,
     );
   }
 }

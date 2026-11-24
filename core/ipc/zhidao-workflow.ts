@@ -5,8 +5,10 @@ import {
   savePublishingRowsSchema,
   publishingResourceLimit,
   publishingResourceSchema,
+  publishingLinkTypeSchema,
 } from "../../shared/zhidao-workflow";
 import type { HandlerMap, HandlerServices } from "./types";
+import { zhidaoTaskNameLimit } from "../../shared/zhidao-publishing";
 
 export function createZhidaoWorkflowHandlers({
   zhidaoWorkflow,
@@ -18,7 +20,31 @@ export function createZhidaoWorkflowHandlers({
       .max(publishingResourceLimit)
       .refine((v) => new Set(v).size === v.length),
   });
+  const output = ids.extend({
+    linkType: publishingLinkTypeSchema.default("drive"),
+    linkRevision: z.string().max(2000).optional(),
+  });
   return {
+    "zhidao.workflow.linkOptions": (raw) =>
+      zhidaoWorkflow.linkOptions(ids.parse(raw).ids),
+    "zhidao.workflow.publish": (raw) => {
+      const input = output
+        .extend({
+          accountId: z.string().min(1).max(100),
+          taskName: z.string().trim().min(1).max(zhidaoTaskNameLimit),
+          selectionRevision: z.string().min(1).max(12000),
+          authorized: z.literal(true),
+        })
+        .parse(raw);
+      return zhidaoWorkflow.publish(
+        input.ids,
+        input.accountId,
+        input.taskName,
+        input.selectionRevision,
+        input.linkType,
+        input.linkRevision,
+      );
+    },
     "zhidao.workflow.planMany": (raw) =>
       zhidaoWorkflow.planMany(
         z
@@ -65,7 +91,13 @@ export function createZhidaoWorkflowHandlers({
       const v = savePublishingRowsSchema.parse(raw);
       return zhidaoWorkflow.saveRows(v.id, v.rows, v.generationId ?? "");
     },
-    "zhidao.workflow.export": (raw) =>
-      zhidaoWorkflow.export(ids.parse(raw).ids),
+    "zhidao.workflow.export": (raw) => {
+      const input = output.parse(raw);
+      return zhidaoWorkflow.export(
+        input.ids,
+        input.linkType,
+        input.linkRevision,
+      );
+    },
   } satisfies HandlerMap;
 }

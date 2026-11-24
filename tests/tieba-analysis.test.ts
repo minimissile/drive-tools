@@ -6,7 +6,9 @@ import {
   queryTiebaAnalysisFollowedForums,
   queryTiebaAnalysisForumPosts,
   queryTiebaAnalysisWithContext,
+  queryTiebaAnalysisThread,
   readTiebaOldResource,
+  readTiebaThreadSource,
 } from "../core/tieba/analysis";
 import {
   encodeTiebaFields,
@@ -36,6 +38,22 @@ test("老帖扫描接受贴吧标记仍有下一页的空页", async () => {
   assert.equal(page.hasMore, true);
   assert.deepEqual(page.threads, []);
   await assert.rejects(queryTiebaAnalysisForumPosts({ name: "热门", page: 34 }, send));
+});
+
+test("贴吧资源扫描在近期和历史两种模式都识别列表摘要里的网盘线索", async () => {
+  const send = async () => response(encode([
+    [2, encode([[1, 3n], [2, Buffer.from("测试贴吧")]])],
+    [7, encode([[1, BigInt(tid)], [3, Buffer.from("标题无资源词")],
+      [142, encode([[2, Buffer.from("提取码 abcd")]])],
+    ])],
+  ]));
+  const input = { name: "测试贴吧", page: 1 };
+  for (const mode of [true, "old"] as const) {
+    const page = await queryTiebaAnalysisForumPosts(input, send, mode);
+    assert.deepEqual(page.threads[0]?.oldResource?.keywords, ["资源", "提取码"]);
+  }
+  const manual = await queryTiebaAnalysisForumPosts(input, send);
+  assert.equal(manual.threads[0]?.oldResource, undefined);
 });
 
 test("老帖资源检查从正文、回复和楼中楼区分链接与关键词", async () => {
@@ -408,6 +426,164 @@ test("IPC 拒绝无效页码和外站帖子链接，不访问网络", async () =
     }),
     { code: "TIEBA_ANALYSIS_TARGET" },
   );
+});
+
+test("单帖查询接受长数字 ID 和帖子链接，读取楼主正文和互动数据", async () => {
+  const published = 1794124800n;
+  let requests = 0;
+  const handlers = createTiebaAnalysisHandlers(undefined, (input) => queryTiebaAnalysisThread(input, async (url, init) => {
+    requests++;
+    assert.equal(new URL(String(url)).pathname, "/c/f/pb/page");
+    assert.equal((await requestPayload(init)).integer(4), BigInt(tid));
+    return response(encode([
+      [2, encode([[2, Buffer.from("网盘资源")]])],
+      [8, encode([
+        [1, BigInt(tid)], [3, Buffer.from("单帖查询样本")], [4, 0n],
+        [18, encode([[2, BigInt(uid)], [4, Buffer.from("楼主")]])],
+        [126, encode([[1, 12n]])],
+      ])],
+      [6, encode([[3, 1n], [4, published], [5, encode([[2, Buffer.from("首楼正文")]])]])],
+      [6, encode([[3, 2n], [5, encode([[2, Buffer.from("第二楼回复")]])]])],
+      [37, 321n],
+    ]));
+  }));
+  for (const target of [tid, `https://tieba.baidu.com/p/${tid}?pid=42#42`]) {
+    const { observedAt, ...post } = await handlers["tieba.analysis.thread"]({ target });
+    assert.ok(Number.isFinite(observedAt));
+    assert.deepEqual(post, {
+      id: tid, url: `https://tieba.baidu.com/p/${tid}`, title: "单帖查询样本",
+      author: "楼主", authorId: uid, forum: "网盘资源", bodyText: "首楼正文",
+      publishedAt: new Date(Number(published) * 1000).toISOString(),
+      views: 321, replies: 0, likes: 12, shares: null,
+    });
+  }
+  for (const target of ["9223372036854775808", `https://example.org/p/${tid}`, "https://tieba.baidu.com/f?kw=foo"]) {
+    await assert.rejects(handlers["tieba.analysis.thread"]({ target }), { code: "TIEBA_ANALYSIS_THREAD_TARGET" });
+  }
+  assert.equal(requests, 2);
+});
+
+test("贴吧采集保留楼主正文段落、原帖外链和图片引用，排除回复", async () => {
+  const share = "https://www.123pan.com/s/sample-example";
+  const firstImage = "https://tiebapic.baidu.com/forum/pic/item/one.jpg";
+  const secondImage = "https://tiebapic.baidu.com/forum/pic/item/two.jpg";
+  const postedAt = 1719133245n;
+  const result = await readTiebaThreadSource(tid, async (url, init) => {
+    assert.equal(new URL(String(url)).origin, "https://tiebac.baidu.com");
+    assert.equal(init?.credentials, "omit");
+    assert.equal(init?.redirect, "error");
+    assert.equal((await requestPayload(init)).integer(4), BigInt(tid));
+    return response(encode([
+      [2, encode([[2, Buffer.from("系统教程")]])],
+      [8, encode([
+        [1, BigInt(tid)],
+        [3, Buffer.from("打印机设置")],
+        [18, encode([[4, Buffer.from("教程作者")]])],
+      ])],
+      [6, encode([[3, 2n], [5, encode([[2, Buffer.from("回复不能进入素材")]])]])],
+      [6, encode([
+        [3, 1n],
+        [4, postedAt],
+        [5, encode([[2, Buffer.from("先打开设置。\n\n资料见 ")]])],
+        [5, encode([[1, 1n], [2, Buffer.from("下载说明")], [3, Buffer.from(share)]])],
+        [5, encode([[2, Buffer.from("，然后选择打印机。\n\n")]])],
+        [5, encode([[1, 3n], [2, Buffer.from("图片字段不是正文")], [25, Buffer.from(firstImage)]])],
+        [5, encode([[1, 3n], [9, Buffer.from(secondImage)], [25, Buffer.from("invalid URL")]])],
+        [5, encode([[1, 3n], [25, Buffer.from(firstImage)]])],
+        [5, encode([[2, Buffer.from("最后确认设置。")]])],
+      ])],
+    ]));
+  });
+  assert.deepEqual(result, {
+    id: tid,
+    url: `https://tieba.baidu.com/p/${tid}`,
+    title: "打印机设置",
+    forum: "系统教程",
+    author: "教程作者",
+    publishedAt: new Date(Number(postedAt) * 1000).toISOString(),
+    firstFloor: {
+      text: "先打开设置。\n\n资料见 下载说明，然后选择打印机。\n\n最后确认设置。",
+      hrefs: [share],
+      images: [firstImage, secondImage],
+      truncated: false,
+    },
+  });
+});
+
+test("贴吧采集区分楼主首楼缺失和可识别正文截断", async () => {
+  const thread = encode([[1, BigInt(tid)]]);
+  const read = async (floor: bigint, body: string) =>
+    readTiebaThreadSource(tid, async () => response(encode([
+      [8, thread],
+      [6, encode([[3, floor], [5, encode([[2, Buffer.from(body)]])]])],
+    ])));
+  assert.equal((await read(2n, "此处只有回复")).firstFloor, null);
+  const { firstFloor } = await read(1n, "字".repeat(30_001));
+  assert.equal(firstFloor?.text.length, 30_000);
+  assert.equal(firstFloor?.truncated, true);
+});
+
+test("切换有序采集时保留段内外链、图片位置和重复引用", async () => {
+  const share = "https://pan.baidu.com/s/example";
+  const image = "https://tiebapic.baidu.com/forum/pic/item/example.jpg";
+  const send: typeof fetch = async () =>
+    response(
+      encode([
+        [8, encode([[1, BigInt(tid)]])],
+        [
+          6,
+          encode([
+            [3, 1n],
+            [5, encode([[2, Buffer.from("  段落开头。\n\n")]])],
+            [
+              5,
+              encode([
+                [1, 3n],
+                [25, Buffer.from("invalid")],
+                [9, Buffer.from(image)],
+                [8, Buffer.from("https://tiebapic.baidu.com/preview.jpg")],
+              ]),
+            ],
+            [5, encode([[2, Buffer.from("见 ")]])],
+            [
+              5,
+              encode([
+                [1, 1n],
+                [2, Buffer.from(" 文件 ")],
+                [3, Buffer.from(share)],
+              ]),
+            ],
+            [5, encode([[2, Buffer.from(" 说明。\n")]])],
+            [5, encode([[1, 3n], [25, Buffer.from(image)]])],
+            [5, encode([[1, 3n], [25, Buffer.from("blob:unavailable")]])],
+            [5, encode([[1, 2n], [2, Buffer.from("其他类型忽略")]])],
+            [5, encode([[2, Buffer.from("结尾。  ")]])],
+          ]),
+        ],
+      ]),
+    );
+
+  const plain = await readTiebaThreadSource(tid, send);
+  assert.deepEqual(plain.firstFloor, {
+    text: "段落开头。\n\n见  文件  说明。\n结尾。",
+    hrefs: [share],
+    images: [image],
+    truncated: false,
+  });
+  const ordered = await readTiebaThreadSource(tid, send, true);
+  assert.deepEqual(ordered.firstFloor, {
+    ...plain.firstFloor,
+    parts: [
+      { kind: "text", text: "  段落开头。\n\n" },
+      { kind: "image", url: image },
+      { kind: "text", text: "见 " },
+      { kind: "text", text: " 文件 ", href: share },
+      { kind: "text", text: " 说明。\n" },
+      { kind: "image", url: image },
+      { kind: "image", url: "" },
+      { kind: "text", text: "结尾。  " },
+    ],
+  });
 });
 
 test("关注贴吧仅在公开时分页读取，并生成官方跳转链接", async () => {

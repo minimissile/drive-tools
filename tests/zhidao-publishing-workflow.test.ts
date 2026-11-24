@@ -37,6 +37,8 @@ async function setup() {
   f.app.db.setSetting("model", "fixture-model");
   const aiCalls: GenerationInput[] = [];
   let planOutput: unknown;
+  let reviewOutput: unknown = { issues: [] };
+  const reviewCalls: unknown[] = [];
   const planCalls: unknown[] = [];
   let aiOutput: ((input: GenerationInput) => unknown) | undefined;
   let beforeAi: (() => Promise<void> | void) | undefined;
@@ -56,13 +58,20 @@ async function setup() {
         planOutput ?? {
           groups: words.slice(0, 20).map((_, index) => ({
             index,
+            intent: `办公练习主题${index + 1}获取`,
             related:
               index === 0
                 ? words.slice(20).map((_, offset) => offset + 20)
                 : [],
           })),
+          excluded: [],
         },
       );
+    }
+    if (_name === "zhidao_publishing_review") {
+      options?.beforeRequest?.();
+      reviewCalls.push(input);
+      return schema.parse(reviewOutput);
     }
     assert.equal(instruction, publishingGenerationInstruction);
     options?.beforeRequest?.();
@@ -219,6 +228,10 @@ async function setup() {
     receipts,
     aiCalls,
     planCalls,
+    reviewCalls,
+    setReviewOutput: (value: unknown) => {
+      reviewOutput = value;
+    },
     setPlanOutput: (value: unknown) => {
       planOutput = value;
     },
@@ -1313,14 +1326,19 @@ test("规划允许少于20条，拒绝无效分组；生成中断保留规划和
       keywords: Array.from({ length: 12 }, (_, i) => `办公练习${i + 1}`),
     };
     f.flow.planMany([resource]);
-    f.setPlanOutput({ groups: [{ index: 0, related: [0] }] });
+    f.setPlanOutput({
+      groups: [{ index: 0, related: [0], intent: "办公练习获取" }],
+      excluded: [],
+    });
     await assert.rejects(() => f.flow.generate(resource.key), /重复或无效序号/);
     assert.equal(f.aiCalls.length, 0);
     f.setPlanOutput({
       groups: resource.keywords.slice(0, 9).map((_, index) => ({
         index,
+        intent: `办公练习主题${index + 1}获取`,
         related: index === 0 ? [9, 10, 11] : [],
       })),
+      excluded: [],
     });
     f.setBeforeAi(() => {
       if (f.aiCalls.length === 2) throw new Error("测试中断");
@@ -1476,6 +1494,107 @@ test("本地已提交URL不再次分配，导出前新增提交记录也会阻�
     assert.ok(ready.links.every((link) => !link.url.endsWith("/canonical")));
     submitted(ready.links[0].url);
     await assert.rejects(() => f.flow.export([ready.id]), /有分享URL已提交/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("第三步逐词记录去向：漏词/重复排除阻断，教程不改成下载题，无有效词保留原因", async () => {
+  const f = await setup();
+  try {
+    const resource = {
+      ...f.resource,
+      keywords: ["办公工具下载", "办公工具软件", "共享打印机主机ip地址怎么看"],
+    };
+    f.flow.planMany([resource]);
+    f.setPlanOutput({
+      groups: [{ index: 0, related: [], intent: "办公工具安装包获取" }],
+      excluded: [],
+    });
+    await assert.rejects(() => f.flow.generate(resource.key), /未说明去向/);
+    assert.equal(f.aiCalls.length, 0);
+    f.setPlanOutput({
+      groups: [{ index: 0, related: [1, 2], intent: "办公工具安装包获取" }],
+      excluded: [],
+    });
+    await assert.rejects(() => f.flow.generate(resource.key), /重复或无效序号/);
+    f.setPlanOutput({
+      groups: [{ index: 0, related: [1], intent: "办公工具安装包获取" }],
+      excluded: [],
+    });
+    const result = await f.flow.generate(resource.key);
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.generation?.excludedKeywords?.length, 1);
+    assert.equal(result.generation?.planVersion, 2);
+    assert.equal(result.generation?.validation?.status, "passed");
+    assert.equal(f.reviewCalls.length, 1);
+    const plan = result.keywordPlan;
+    const optimized = await f.flow.generate(resource.key, false, true);
+    assert.deepEqual(optimized.keywordPlan, plan);
+    assert.equal(optimized.generation?.validation?.status, "passed");
+    assert.equal(f.reviewCalls.length, 2);
+    assert.equal(f.counts().creates, 0);
+    const empty = {
+      ...f.resource,
+      key: randomUUID(),
+      keywords: ["共享打印机主机ip地址怎么看"],
+    };
+    f.flow.planMany([empty]);
+    f.setPlanOutput({
+      groups: [],
+      excluded: [{ index: 0, reason: "属于查看IP教程，不能生成资源获取题" }],
+    });
+    await assert.rejects(() => f.flow.generate(empty.key), /没有适合生成/);
+    assert.equal(f.flow.get(empty.key).generation?.excludedKeywords?.length, 1);
+    assert.equal(f.flow.get(empty.key).rows.length, 0);
+    assert.equal(f.aiCalls.length, 2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("第三步生成后检查意图、无依据属性及近似题：拦截并保留草稿，不确认、不建链、不自动重试", async () => {
+  const f = await setup();
+  try {
+    const resource = {
+      ...f.resource,
+      keywords: ["办公工具下载", "办公工具Win10"],
+    };
+    f.flow.planMany([resource]);
+    f.setReviewOutput({
+      issues: [
+        {
+          index: 1,
+          kind: "duplicate",
+          duplicateOf: 0,
+          reason: "此行没有保留Win10区别，与第1条相同获取意图，仅换了问法",
+        },
+      ],
+    });
+    await assert.rejects(
+      () => f.flow.generate(resource.key),
+      /问答意图检查发现1处问题/,
+    );
+    const failed = f.flow.get(resource.key);
+    assert.equal(failed.generation?.validation?.status, "failed");
+    assert.equal(failed.generation?.drafts.length, 2);
+    assert.equal(failed.rows.length, 0);
+    assert.equal(f.counts().creates, 0);
+    const calls = f.reviewCalls.length;
+    f.flow.get(resource.key);
+    assert.equal(f.reviewCalls.length, calls);
+    f.setReviewOutput({
+      issues: [
+        {
+          index: 99,
+          kind: "intent",
+          duplicateOf: null,
+          reason: "不存在的问答序号不能通过检查",
+        },
+      ],
+    });
+    await assert.rejects(() => f.flow.generate(resource.key), /无效结果/);
+    assert.equal(f.flow.get(resource.key).rows.length, 0);
   } finally {
     await f.cleanup();
   }

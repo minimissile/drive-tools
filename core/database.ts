@@ -1,3 +1,4 @@
+import { migrateDriveSync } from "./drive-sync-schema";
 import { defaultContentFormat, type Platform } from "../shared/channels";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
@@ -22,7 +23,7 @@ import {
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 43;
+export const databaseSchemaVersion = 45;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -90,12 +91,29 @@ export class Database {
     if (version > databaseSchemaVersion)
       throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 44) {
+      // Development clients may already have created the initial sync tables.
+      this.transaction(() => {
+        this.db.exec("CREATE INDEX IF NOT EXISTS drive_index_seen ON drive_index_entries(account_id,owner_uid,last_seen,is_directory); DROP INDEX IF EXISTS drive_index_parent; CREATE INDEX drive_index_parent ON drive_index_entries(account_id,owner_uid,parent_id,is_directory DESC,name,file_id);");
+        this.db.exec("PRAGMA user_version=45;");
+      });
+      return;
+    }
+    if (version === 43) {
+      this.transaction(() => {
+        migrateDriveSync(this.db);
+        this.db.exec("PRAGMA user_version=44;");
+      });
+      this.migrate(false);
+      return;
+    }
     if (version === 42) {
       this.transaction(() => {
         if (!this.get("SELECT 1 FROM pragma_table_info('resources') WHERE name='search_keywords'"))
           this.db.exec("ALTER TABLE resources ADD COLUMN search_keywords TEXT NOT NULL DEFAULT '[]';");
         this.db.exec("PRAGMA user_version=43;");
       });
+      this.migrate(false);
       return;
     }
     if (version === 41) {

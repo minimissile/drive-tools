@@ -7,6 +7,8 @@ export const tiebaAnalysisInputSchema = z.object({
   page: z.number().int().min(1).max(2_147_483_647),
 });
 
+export const tiebaAnalysisThreadInputSchema = tiebaAnalysisInputSchema.pick({ target: true });
+
 export const tiebaAnalysisFollowedInputSchema = z.object({
   uid: z
     .string()
@@ -65,6 +67,12 @@ export interface TiebaAnalysisThread {
   forumLevel?: number | null;
   resource?: TiebaDiscoveryEvidence;
   oldResource?: TiebaOldResourceEvidence;
+}
+
+export interface TiebaAnalysisThreadDetail extends TiebaAnalysisThread {
+  author: string;
+  bodyText: string;
+  observedAt: number;
 }
 
 export interface TiebaAnalysisForumPage {
@@ -130,6 +138,10 @@ export type TiebaAnalysisContract = {
   "tieba.analysis.query": {
     args: z.infer<typeof tiebaAnalysisInputSchema>;
     value: TiebaAnalysisPage;
+  };
+  "tieba.analysis.thread": {
+    args: z.input<typeof tiebaAnalysisThreadInputSchema>;
+    value: TiebaAnalysisThreadDetail;
   };
   "tieba.analysis.followedForums": {
     args: z.infer<typeof tiebaAnalysisFollowedInputSchema>;

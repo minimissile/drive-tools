@@ -63,6 +63,12 @@ export const shareCreationCapabilities: Record<
     extractionCode: { mode: "none", description: "公开链接，不设置提取码" },
     note: "当前创建无需提取码的公开链接，暂不支持自定义提取码。",
   },
+  cmcc: {
+    supported: false,
+    expiryOptions: [],
+    extractionCode: { mode: "none", description: "请在移动云盘官网管理分享" },
+    note: "移动云盘分享接口尚未完成核验，请先使用本地目录同步与文件管理。",
+  },
 };
 
 /** Shared by the form and provider validation; never silently drops settings. */

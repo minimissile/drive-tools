@@ -44,6 +44,7 @@ export function safeMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "操作失败，请重试。";
   return message
     .replace(/\bBearer\s+[^\s,;"'}]+/gi, "Bearer [已隐藏]")
+    .replace(/\bBasic\s+[A-Za-z0-9+/=]+/gi, "Basic [已隐藏]")
     .replace(/\bsk-or-v1-[a-zA-Z0-9_-]{8,}\b/g, "[已隐藏Key]")
     .replace(
       /(authorization|cookie|access_token|refresh_token|captcha_token|pass_code_token|bdstoken|stoken|api_?key)["']?\s*[:=]\s*["']?[^\s,;"'}]+/gi,

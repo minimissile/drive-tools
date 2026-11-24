@@ -39,9 +39,12 @@ import {
   collectionDriveType,
 } from "../../shared/resource-collection";
 import { answerInstruction } from "./answer-prompt";
+import type { ZhidaoAnswerLanguage } from "../../shared/zhidao-answer-language";
+import { answerProgressDay } from "../../shared/zhidao-answer-progress";
 import { AnswerReservations } from "./answer-history";
 import { autoAnswersStart, zhidaoAccountLabel } from "../../shared/zhidao";
 import { publicationFingerprint } from "./publishing";
+import { publishingRowsWithLinks, publishingRowShare, type PublishingRecord, type PublishingDestination } from "../../shared/zhidao-workflow";
 import {
   zhidaoContentIssue,
   type ZhidaoPublishReceipt,
@@ -66,6 +69,7 @@ export class ZhidaoOperations {
   private fetcher: SourceFetch;
   private pace: number;
   private verifyCopy?: (copyId: string) => Promise<void>;
+  private validateWorkflowItem?: (item: OperationItem) => void;
   private pauseQuestionImport?: (sourceId: string) => void;
   constructor(
     private repo: Repository,
@@ -78,6 +82,7 @@ export class ZhidaoOperations {
       fetcher?: SourceFetch;
       pace?: number;
       verifyCopy?: (copyId: string) => Promise<void>;
+      validateWorkflowItem?: (item: OperationItem) => void;
       pauseQuestionImport?: (sourceId: string) => void;
       environments?: BrowserEnvironments;
       schedule?<T>(
@@ -91,6 +96,7 @@ export class ZhidaoOperations {
     this.fetcher = options.fetcher ?? sourceFetch;
     this.pace = options.pace ?? 2500;
     this.verifyCopy = options.verifyCopy;
+    this.validateWorkflowItem = options.validateWorkflowItem;
     this.pauseQuestionImport = options.pauseQuestionImport;
     this.environments = options.environments;
     this.schedule = options.schedule;
@@ -471,6 +477,29 @@ export class ZhidaoOperations {
     this.launch(run);
     return this.store.run(run.id);
   }
+  startWorkflowPublication(records: PublishingRecord[], accountId: string, taskName: string, onCreated: (run: OperationRun) => void, destination?: PublishingDestination) {
+    const run = this.repo.db.transaction(() => {
+      const total = records.reduce((n, record) => n + record.rows.length, 0);
+      const source = this.store.create("template", "五步问答发布", { sourceKind: "publishing-workflow" }, total);
+      const items = records.flatMap((record) => publishingRowsWithLinks(record, record.rows, destination).map((row, index) => {
+        const share = publishingRowShare(record, record.rows[index], index)!;
+        return this.store.put(source.id, `${record.id}:${row.id}`, {
+          name: record.resource.title, question: row.question, answer: row.answer,
+          link: destination?.url ?? share.url, code: destination ? "" : share.code, copyId: record.copyId,
+          shareVersion: this.repo.getCopy(record.copyId).shareVersion,
+          workflowSource: { recordId: record.id, rowId: row.id!, linkType: destination?.type ?? "drive", linkRevision: destination?.revision },
+          status: "ready", reviewed: true,
+        });
+      }));
+      this.store.state(source.id, "completed", "已从五步流程确认问答", total);
+      const prepared = this.prepareStart({ kind: "publish", authorized: true, input: { accountId, taskName, itemIds: items.map((item) => item.id) } });
+      const created = this.store.create(prepared.kind, prepared.title, { ...prepared.config, workflowIds: records.map((record) => record.id), workflowLinkType: destination?.type ?? "drive", workflowLinkUrl: destination?.url, workflowLinkRevision: destination?.revision }, total);
+      onCreated(created);
+      return created;
+    });
+    this.launch(run);
+    return this.store.run(run.id);
+  }
   startAnswers(raw: unknown) {
     const input = autoAnswersStart.parse(raw);
     const identities = input.accountIds.map((id) => this.store.account(id).uid).filter(Boolean);
@@ -487,13 +516,15 @@ export class ZhidaoOperations {
     return runs.map((run) => this.store.run(run.id));
   }
   answerSessions() {
+    const day = answerProgressDay();
     return this.repo.db.all<{ id: string }>(`SELECT id FROM (
       SELECT id,created_at,ROW_NUMBER() OVER (
         PARTITION BY json_extract(config,'$.accountId')
         ORDER BY CASE WHEN status='running' THEN 0 ELSE 1 END,created_at DESC,rowid DESC
       ) AS rank FROM operation_runs
       WHERE kind='answer' AND json_extract(config,'$.mode')='auto'
-    ) WHERE rank=1 ORDER BY created_at DESC LIMIT 200`).map((row) => this.store.run(row.id));
+        AND (status='running' OR (created_at>=? AND created_at<?))
+    ) WHERE rank=1 ORDER BY created_at DESC LIMIT 200`, day.start, day.end).map((row) => this.store.run(row.id));
   }
   pause(runId: string) {
     const run = this.store.run(runId);
@@ -735,8 +766,8 @@ export class ZhidaoOperations {
       settings: () => this.settings(),
       identity: (id) => this.identity(id),
       ownTarget: (id) => this.ownTarget(id),
-      generateAnswer: (question, style, evidence) =>
-        this.generateAnswer(question, style, evidence),
+      generateAnswer: (question, style, evidence, language) =>
+        this.generateAnswer(question, style, evidence, language),
       validatePublication: (ids) => this.validatePublication(ids),
       assertNoDuplicatePublication: (ids, accountId) =>
         this.assertNoDuplicatePublication(ids, accountId),
@@ -845,12 +876,13 @@ export class ZhidaoOperations {
     question: string,
     style: string,
     evidence: unknown = {},
+    language: ZhidaoAnswerLanguage = "mandarin",
   ) {
     return this.ai.resourceExport(
       "zhidao_answer",
       qaResponse,
-      answerInstruction(style, evidence),
-      { question, evidence },
+      answerInstruction(style, evidence, language),
+      { question, evidence, language },
     );
   }
   private ownTarget(copyId: string) {
@@ -893,7 +925,10 @@ export class ZhidaoOperations {
       const issue = zhidaoContentIssue(item);
       if (issue)
         throw new AppError("INVALID_CONTENT", `${issue}，请编辑后重新审核。`);
-      if (item.copyId) {
+      if (item.workflowSource) {
+        if (!this.validateWorkflowItem) throw new AppError("UPDATE_REQUIRED", "请应用更新后上传五步问答。");
+        this.validateWorkflowItem(item);
+      } else if (item.copyId) {
         const { copy } = this.ownTarget(item.copyId);
         if (
           copy.shareVersion !== item.shareVersion ||

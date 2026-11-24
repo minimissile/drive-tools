@@ -18,6 +18,14 @@ export const currentSchemaVersion = databaseSchemaVersion;
 // Legacy fixtures start from today's schema before reconstructing their old
 // version. Remove later tables too, so a fixture cannot retain future schema.
 export const removeV34 = `
+  DROP TRIGGER IF EXISTS drive_links_insert;
+  DROP TRIGGER IF EXISTS drive_links_update;
+  DROP TABLE IF EXISTS drive_resource_entries;
+  DROP TABLE IF EXISTS drive_index_entries;
+  DROP TABLE IF EXISTS drive_sync_folders;
+  DROP TABLE IF EXISTS drive_sync_runs;
+  DROP TABLE IF EXISTS tieba_forum_cache_posts;
+  DROP TABLE IF EXISTS tieba_forum_cache;
   DROP TRIGGER IF EXISTS traffic_queries_revision_insert;
   DROP TRIGGER IF EXISTS traffic_queries_revision_update;
   DROP TRIGGER IF EXISTS traffic_queries_revision_delete;
@@ -198,6 +206,7 @@ export async function fixture(
       xunlei: provider,
       guangya: provider,
       pikpak: provider,
+      cmcc: provider,
       ...overrides,
     },
     ports,

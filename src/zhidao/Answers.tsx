@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
@@ -13,7 +12,6 @@ import { AnswerLogs } from "./AnswerLogs";
 import { AutoAnswerSettings } from "./AutoAnswerSettings";
 import { AnswerExpression } from "./AnswerExpression";
 import { AnswerAccountsProgress } from "./AnswerAccountsProgress";
-import { CheckboxField } from "../ui/CheckboxField";
 import "./answers.css";
 import {
   answerDraftKey,
@@ -26,16 +24,12 @@ export default function Answers() {
   const action = useOperationAction(),
     model = useOperation("answer"),
     accounts = useIpcQuery("zhidao.accounts", undefined, {});
-  const [consent, setConsent] = useState(false);
   const draft = useLocalDraft(
     answerDraftKey(data!.dataPath),
     defaultAnswerDraft,
     (v) => answerDraftSchema.parse(v),
   );
-  const update: typeof draft.update = (patch) => {
-    draft.update(patch);
-    setConsent(false);
-  };
+  const update = draft.update;
   const sessions = useIpcQuery("zhidao.answer.sessions", undefined, {
     enabled: draft.value.mode === "auto",
     refreshInterval: 2000,
@@ -60,6 +54,7 @@ export default function Answers() {
           mode: "manual" as const,
           question: draft.value.question,
           style: draft.value.style,
+          language: draft.value.language,
         }
       : draft.value;
   const batchInput = { ...draft.value, authorized: true as const };
@@ -88,7 +83,6 @@ export default function Answers() {
               value={draft.value.mode}
               onChange={(mode) => {
                 draft.update({ mode });
-                setConsent(false);
               }}
             >
               <TabList
@@ -117,6 +111,7 @@ export default function Answers() {
                   </div>
                   <Field label="你的问题">
                     <textarea
+                      aria-label="你的问题"
                       rows={8}
                       value={draft.value.question}
                       maxLength={5000}
@@ -145,7 +140,6 @@ export default function Answers() {
                     runningAccounts={runningAccounts}
                     onAccounts={() => navigate("zhidao-accounts")}
                     onCheck={(id) => {
-                      setConsent(false);
                       void action.run(
                         "zhidao.account.check",
                         { id },
@@ -173,16 +167,9 @@ export default function Answers() {
           {draft.error ? <Notice danger>{draft.error}</Notice> : null}
           <div className="answer-launch">
             <div className="answer-launch-context">
-              {draft.value.mode === "auto" ? (
-                <CheckboxField
-                  checked={consent}
-                  onChange={(e) => setConsent(e.target.checked)}
-                  label={`我已核对${draft.value.accountIds.length}个账号与每号${draft.value.count}条，授权本次 AI 生成和自动提交`}
-                />
-              ) : null}
               <small>
                 {draft.value.mode === "auto"
-                  ? `本次目标共${draft.value.accountIds.length * draft.value.count}条。各账号独立执行，安全验证只暂停对应账号。`
+                  ? `已选${draft.value.accountIds.length}个账号 · 每号${draft.value.count}条 · 本次共${draft.value.accountIds.length * draft.value.count}条。安全验证只暂停对应账号。`
                   : "使用现有文案模型，生成费用计入 AI 台账。"}
               </small>
             </div>
@@ -201,8 +188,7 @@ export default function Answers() {
                   !validInput ||
                   (draft.value.mode === "manual"
                     ? !draft.value.question.trim()
-                    : !consent ||
-                      !accountsReady ||
+                    : !accountsReady ||
                       !!sessions.error ||
                       !sessions.data ||
                       !draft.value.categories.length)
@@ -213,7 +199,6 @@ export default function Answers() {
                       "zhidao.answer.startMany",
                       autoAnswersStart.parse(batchInput),
                       (runs) => {
-                        setConsent(false);
                         if (runs[0]) model.pick(runs[0]);
                         sessions.reload();
                       },
@@ -229,7 +214,6 @@ export default function Answers() {
                       authorized: true,
                     },
                     (run) => {
-                      setConsent(false);
                       model.pick(run);
                     },
                     "问答任务已开始",
@@ -269,7 +253,7 @@ export default function Answers() {
         />
         <AnswerLogs
           key={model.id || "idle"}
-          runId={model.id}
+          runId={model.detail.data?.run.id ?? ""}
           running={model.running}
         />
       </div>

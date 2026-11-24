@@ -1,6 +1,10 @@
 import type { OperationRun } from "../../shared/zhidao";
 import { operationLabels, zhidaoAccountLabel } from "../../shared/zhidao";
 import { templateUsesAi } from "../../shared/zhidao-generation";
+import {
+  zhidaoAnswerLanguage,
+  zhidaoAnswerLanguageLabels,
+} from "../../shared/zhidao-answer-language";
 import { useAppData, useAppNavigation } from "../state";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { Dialog } from "../ui/Dialog";
@@ -38,6 +42,9 @@ export function ResumeRunDialog({
           ? "请先选择文案创作模型并保存设置，再继续任务。"
           : "";
   const automatic = run.kind === "answer" && run.config.mode === "auto";
+  const language = zhidaoAnswerLanguage.safeParse(
+    run.config.language ?? "mandarin",
+  );
   const webCollection =
     run.kind === "collect" &&
     (run.config.haisou === true || run.config.pansoo === true);
@@ -114,6 +121,16 @@ export function ResumeRunDialog({
           <div>
             <dt>回答风格</dt>
             <dd>{run.config.style}</dd>
+          </div>
+        ) : null}
+        {run.kind === "answer" ? (
+          <div>
+            <dt>回答语言</dt>
+            <dd>
+              {language.success
+                ? zhidaoAnswerLanguageLabels[language.data]
+                : "语言配置无效"}
+            </dd>
           </div>
         ) : null}
       </dl>

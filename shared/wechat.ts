@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { smzdmSourceSchema, wechatArticleUrl } from "./smzdm";
 import type {
   SmzdmSource,
   SmzdmResourceLink,
@@ -34,7 +35,55 @@ import type {
   KeyboardSkinSampleInput,
 } from "./keyboard-skins";
 
-export { wechatArticleUrl } from "./smzdm";
+export { wechatArticleUrl };
+
+export const tiebaArticleUrl = z
+  .string()
+  .trim()
+  .max(4000)
+  .transform((value, ctx) => {
+    try {
+      const url = new URL(value);
+      const id = url.pathname.match(/^\/p\/([1-9]\d{0,19})\/?$/)?.[1];
+      if (
+        id &&
+        ["http:", "https:"].includes(url.protocol) &&
+        url.hostname === "tieba.baidu.com" &&
+        !url.port &&
+        !url.username &&
+        !url.password
+      )
+        return `https://tieba.baidu.com/p/${id}`;
+    } catch {
+      // The shared validation message also covers malformed URLs.
+    }
+    ctx.addIssue({ code: "custom", message: "请填写百度贴吧帖子链接。" });
+    return z.NEVER;
+  });
+
+export const wechatImportUrl = z.union([wechatArticleUrl, tiebaArticleUrl], {
+  error: "请粘贴微信公众号文章链接或百度贴吧帖子链接。",
+});
+
+export const tiebaArticleImageHosts = [
+  "tiebapic.baidu.com",
+  "imgsrc.baidu.com",
+  "imgsa.baidu.com",
+  "hiphotos.baidu.com",
+] as const;
+
+export function isTiebaArticleImageHost(hostname: string) {
+  return tiebaArticleImageHosts.some((host) => host === hostname);
+}
+
+export const wechatTiebaSourceSchema = smzdmSourceSchema.extend({
+  kind: z.literal("tieba"),
+  url: tiebaArticleUrl,
+  preservesImageOrder: z.literal(true).optional(),
+});
+export type WechatTiebaImportSource = z.infer<typeof wechatTiebaSourceSchema>;
+export type WechatImportSource = SmzdmSource | WechatTiebaImportSource;
+
 export const wechatTextInput = z.object({
   title: z.string().trim().min(1, "请填写文章标题").max(64, "标题最多 64 字"),
   body: z
@@ -94,6 +143,7 @@ export interface WechatEditionSummary {
 }
 export type WechatSource =
   | (SmzdmSource & { kind?: never })
+  | WechatTiebaImportSource
   | (Omit<SmzdmSource, "url"> & {
       kind: "keyboard-skins";
       url: "";
@@ -189,7 +239,7 @@ export function wechatTargetReceipt(
   return { accountId, draftId, url, uid, revision, sentAt };
 }
 export interface WechatPort {
-  readArticle(url: string): Promise<SmzdmSource>;
+  readArticle(url: string): Promise<WechatImportSource>;
   saveDraft(
     account: WebsiteAccount,
     payload: WechatDraftPayload,

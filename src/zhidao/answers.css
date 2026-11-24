@@ -162,6 +162,14 @@
   width: 100%;
   margin: 0;
 }
+.answer-expression-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.answer-expression-options > .field + .field {
+  margin-top: 0;
+}
 .answer-style-preview {
   margin: var(--space-3) 0 var(--space-4);
 }
@@ -201,10 +209,6 @@
 }
 .answer-launch-context {
   min-width: 0;
-}
-.answer-composer .answer-launch .checkbox-field {
-  margin: 0 0 var(--space-1);
-  font-size: 13px;
 }
 .answer-launch small {
   color: var(--muted);

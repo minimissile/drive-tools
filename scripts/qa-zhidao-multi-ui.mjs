@@ -42,13 +42,12 @@ export async function run({ page, checkpoint, windowId }) {
   assert.match(await picker.textContent(), /西桥.*南山/);
   await frame.getByLabel("每个账号回答数", { exact: true }).fill("5");
   const consent = frame.getByRole("checkbox", { name: /授权本次/ });
-  assert.equal(await consent.isChecked(), false);
+  assert.equal(await consent.count(), 0);
   const start = frame.getByRole("button", {
     name: "开始自动回答",
     exact: true,
   });
-  assert.equal(await start.isDisabled(), true);
-  await click(consent);
+  assert.equal(await start.isDisabled(), false);
   await click(start);
   const sessions = frame.getByRole("region", { name: "各账号回答进度" });
   await frame
@@ -84,14 +83,14 @@ export async function run({ page, checkpoint, windowId }) {
     ),
     "running",
   );
-  // Reload the child only: UI drafts persist, submission consent does not.
+  // Reload the child only: UI drafts persist and no task starts without a click.
   const childUrl = await frame.locator("body").evaluate(() => location.href);
   await page.locator("iframe").evaluate((node, src) => {
     node.src = src;
   }, childUrl);
   await picker.waitFor();
   assert.match(await picker.textContent(), /西桥.*南山/);
-  assert.equal(await consent.isChecked(), false);
+  assert.equal(await consent.count(), 0);
   await page.setViewportSize({ width: 1366, height: 768 });
   await click(picker);
   await frame.getByRole("option", { name: /长昵称用于核对/ }).waitFor();
@@ -107,7 +106,7 @@ export async function run({ page, checkpoint, windowId }) {
       "多选与每号目标数",
       "独立进度与日志切换",
       "只停止一个账号",
-      "刷新保留选择不保留授权",
+      "直接点击开始且刷新不自动启动",
     ],
   };
 }

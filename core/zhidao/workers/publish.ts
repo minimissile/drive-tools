@@ -56,9 +56,13 @@ export async function runPublish(
     : pendingIds.map((sourceId) => [sourceId]);
   for (const ids of groups) {
     signal.throwIfAborted();
+    const verified = new Set<string>();
     for (const sourceId of ids) {
       const source = ctx.store.item(sourceId);
-      if (source.copyId) await ctx.verifyCopy?.(source.copyId);
+      if (source.copyId && !verified.has(source.copyId)) {
+        await ctx.verifyCopy?.(source.copyId);
+        verified.add(source.copyId);
+      }
       signal.throwIfAborted();
     }
     ctx.validatePublication(ids);

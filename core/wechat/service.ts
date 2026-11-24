@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { id, now } from "../database";
 import { AppError, safeMessage } from "../errors";
-import { parseShare } from "../links";
+import { parseShare, shareUrlWithCode } from "../links";
 import type { Repository } from "../repository";
 import type { SecretStore } from "../secrets";
 import type { AiService } from "../ai";
@@ -16,9 +16,15 @@ import type {
 import { smzdmSourceSchema, type SmzdmResourceLink } from "../../shared/smzdm";
 import type { KeyboardSkinDraftInput } from "../../shared/keyboard-skins";
 import type { CatalogSnapshot } from "../../shared/resource-catalog";
+import {
+  hasUnlinkedTiebaBaiduShare,
+  linkTiebaBaiduShare,
+} from "../../shared/tieba-article-links";
 import { catalogWechatDraftId, catalogWechatText } from "./catalog-draft";
 import {
-  wechatArticleUrl,
+  tiebaArticleUrl,
+  wechatImportUrl,
+  wechatTiebaSourceSchema,
   wechatTextInput,
   type WechatArticle,
   type WechatDetail,
@@ -81,6 +87,11 @@ import { RuntimeLog } from "../runtime-log";
 import { redactPromptText } from "../text-safety";
 import { wechatArticleFamilies, wechatSourceKey } from "./article-family";
 import type { AppPorts } from "../ports";
+import {
+  canRestoreTiebaImageOrder,
+  hasLegacyTiebaImageTail,
+  wechatImportedBody,
+} from "./tieba-draft-layout";
 import { wechatImagePrompt } from "./image-prompts";
 import {
   wechatTrafficWordsInput,
@@ -719,22 +730,32 @@ export class WechatArticles {
     return { articleId: draftId };
   }
   async importArticle(rawUrl: string) {
-    const url = wechatArticleUrl.parse(rawUrl);
+    const url = wechatImportUrl.parse(rawUrl);
     if (this.closed || this.active.has("import"))
       throw new AppError("WECHAT_BUSY", "正在导入文章，请等待完成。");
     const old = this.articles().find((article) => article.source.url === url);
-    if (old) return this.get(old.id);
-    if (!this.d.port)
-      throw new AppError(
-        "WECHAT_DESKTOP",
-        "请在当前源码桌面窗口导入公众号文章。",
-      );
+    const port = this.d.port;
+    if (old && (!port || !this.canRepairTiebaDraft(old)))
+      return this.get(old.id);
+    if (!port) throw new AppError("WECHAT_DESKTOP", "请在桌面客户端导入文章。");
     this.active.add("import");
     try {
-      const source = smzdmSourceSchema.parse(
-        await this.d.port.readArticle(url),
-      );
-      source.url = url;
+      if (old) return await this.repairTiebaDraft(old, port);
+      const isTieba = tiebaArticleUrl.safeParse(url).success;
+      const original = await port.readArticle(url);
+      if (this.closed)
+        throw new AppError(
+          "WECHAT_CLOSED",
+          "工作空间已关闭，未保存到其他空间。",
+        );
+      const source = isTieba
+        ? wechatTiebaSourceSchema.parse(original)
+        : { ...smzdmSourceSchema.parse(original), url };
+      if (source.url !== url)
+        throw new AppError(
+          "WECHAT_ARTICLE_SOURCE",
+          "读取到的帖子与导入链接不一致，请检查后重试。",
+        );
       const links = articleLinks(source.body);
       if (links.length > 100)
         throw new AppError(
@@ -745,7 +766,7 @@ export class WechatArticles {
         id: id("wechat"),
         source,
         title: source.title.slice(0, 64),
-        body: linkifyWechatMarkdown(formatArticle(source.body)),
+        body: wechatImportedBody(source.body),
         author: "",
         digest: "",
         coverUrl:
@@ -766,6 +787,80 @@ export class WechatArticles {
     } finally {
       this.active.delete("import");
     }
+  }
+  private canRepairTiebaDraft(article: WechatArticle) {
+    return (
+      article.source.kind === "tieba" &&
+      article.stage === "editing" &&
+      !article.remote &&
+      !article.pendingAccount &&
+      !article.pendingDraft &&
+      !this.active.has(article.id) &&
+      (hasUnlinkedTiebaBaiduShare(article.source.body) ||
+        hasLegacyTiebaImageTail(article.source))
+    );
+  }
+  private async repairTiebaDraft(old: WechatArticle, port: WechatPort) {
+    const original = await port.readArticle(old.source.url).catch(() => null);
+    if (this.closed)
+      throw new AppError("WECHAT_CLOSED", "工作空间已关闭，未保存到其他空间。");
+    const source = wechatTiebaSourceSchema.safeParse(original);
+    if (!source.success || source.data.url !== old.source.url)
+      return this.get(old.id);
+
+    const article = this.load(old.id);
+    if (
+      article.source.kind !== "tieba" ||
+      article.revision !== old.revision ||
+      !this.canRepairTiebaDraft(article)
+    )
+      return this.get(old.id);
+    const previousBody = article.source.body;
+    const shareRepair = hasUnlinkedTiebaBaiduShare(previousBody)
+      ? this.tiebaShareRepair(article, source.data.body)
+      : null;
+    const originalBody = shareRepair?.originalBody ?? previousBody;
+    const restoreImages = canRestoreTiebaImageOrder(
+      { ...article.source, body: originalBody },
+      source.data,
+    );
+    if (!shareRepair && !restoreImages) return this.get(article.id);
+    const body =
+      restoreImages && article.body === wechatImportedBody(previousBody)
+        ? wechatImportedBody(source.data.body)
+        : (shareRepair?.body ?? article.body);
+    if (body !== article.body && body.length <= 200000) {
+      article.links = this.scan(body, article.links);
+      article.body = body;
+      this.revised(article);
+    }
+    article.source.body = restoreImages ? source.data.body : originalBody;
+    if (restoreImages) article.source.preservesImageOrder = true;
+    this.persist(article);
+    return this.get(article.id);
+  }
+  private tiebaShareRepair(article: WechatArticle, incomingBody: string) {
+    const knownShares = new Set(
+      articleLinkOccurrences(article.source.body).map(({ share }) => share.url),
+    );
+    const repairs = new Map<string, { url: URL; originalBody: string }>();
+    for (const { share, queryCode } of articleLinkOccurrences(incomingBody)) {
+      if (share.provider !== "baidu" || knownShares.has(share.url)) continue;
+      const url = new URL(shareUrlWithCode(share.url, queryCode || share.code));
+      const originalBody = linkTiebaBaiduShare(article.source.body, url);
+      if (originalBody !== article.source.body)
+        repairs.set(url.href, { url, originalBody });
+    }
+    if (repairs.size !== 1) return null;
+    const [{ url, originalBody }] = Array.from(repairs.values());
+    if (originalBody.length > 200000) return null;
+    const shareUrl = `${url.origin}${url.pathname}`;
+    const body = article.links.some(
+      (link) => link.url === shareUrl || link.ownUrl === shareUrl,
+    )
+      ? article.body
+      : linkTiebaBaiduShare(article.body, url);
+    return { originalBody, body };
   }
   private scan(body: string, previous: SmzdmResourceLink[]) {
     const scanned = articleLinks(body);

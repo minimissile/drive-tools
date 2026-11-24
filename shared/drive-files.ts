@@ -14,7 +14,12 @@ export interface DriveDirectory {
   folderId: string;
   files: RemoteFile[];
   readAt: string;
-  capabilities: { rename: boolean; delete: boolean; upload: boolean };
+  capabilities: {
+    mkdir?: boolean;
+    rename: boolean;
+    delete: boolean;
+    upload: boolean;
+  };
   pending: DriveWriteReceipt | null;
 }
 export interface DriveCopyLocation {

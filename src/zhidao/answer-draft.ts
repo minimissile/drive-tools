@@ -2,6 +2,7 @@ import { windowStorage } from "../storage/window-storage";
 import { z } from "zod";
 import { readDraft, writeDraft } from "../storage/local-draft";
 import { answerStyle } from "../../shared/answer-styles";
+import { zhidaoAnswerLanguage } from "../../shared/zhidao-answer-language";
 
 export const answerCategories = [
   { value: "emotion", label: "情感" },
@@ -13,6 +14,7 @@ export const answerDraftSchema = z
     mode: z.enum(["manual", "auto"]),
     question: z.string(),
     style: answerStyle,
+    language: zhidaoAnswerLanguage.default("mandarin"),
     accountId: z.string().default(""),
     accountIds: z.array(z.string()).default([]),
     count: z.number(),
@@ -39,6 +41,7 @@ export const defaultAnswerDraft: z.infer<typeof answerDraftSchema> = {
   mode: "manual",
   question: "",
   style: "清晰实用",
+  language: "mandarin",
   accountId: "",
   accountIds: [],
   count: 30,

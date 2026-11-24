@@ -78,6 +78,7 @@ async function fixture() {
   const workspace = await mkdtemp(join(root, "workspace-"));
   const calls: { path: string; method: string; fields?: URLSearchParams }[] =
     [];
+  const tiebaReferers: (string | undefined)[] = [];
   let uid = account.uid,
     multi = false,
     badReceipt = false,
@@ -87,6 +88,10 @@ async function fixture() {
       url = new URL(request.url());
     if (url.hostname === "mmbiz.qpic.cn")
       return route.fulfill({ contentType: "image/png", body: png });
+    if (url.hostname === "tiebapic.baidu.com") {
+      tiebaReferers.push(request.headers().referer);
+      return route.fulfill({ contentType: "image/png", body: png });
+    }
     if (url.origin !== "https://mp.weixin.qq.com") return route.abort();
     const fields =
       request.method() === "POST" && url.pathname === "/cgi-bin/operate_appmsg"
@@ -145,6 +150,7 @@ async function fixture() {
   return {
     context,
     calls,
+    tiebaReferers,
     payload,
     session,
     setUid(value: string) {
@@ -164,6 +170,36 @@ async function fixture() {
     },
   };
 }
+
+test("比特公众号在所选环境读取贴吧配图并将其作为微信素材上传", async () => {
+  const f = await fixture();
+  try {
+    const original = "https://tiebapic.baidu.com/forum/pic/item/fixture.png";
+    await f.session.port.saveDraft(
+      account,
+      {
+        ...f.payload,
+        coverUrl: original,
+        html: `<p>资料</p><img src="${original}">`,
+      },
+      async () => {},
+    );
+    assert(f.tiebaReferers.length > 0);
+    assert(
+      f.tiebaReferers.every((value) => value === "https://tieba.baidu.com/"),
+    );
+    assert.equal(
+      f.calls.filter((c) => c.path === "/cgi-bin/filetransfer").length,
+      1,
+    );
+    const html = f.calls.find(({ fields }) => fields)?.fields?.get("content0");
+    assert.match(html ?? "", /mmbiz\.qpic\.cn/);
+    assert.doesNotMatch(html ?? "", /tiebapic\.baidu\.com/);
+    assert.equal(f.context.pages().length, 0);
+  } finally {
+    await f.close();
+  }
+});
 
 test("比特公众号读取原始ID，图片上传与草稿新建/更新在同一上下文，临时页关闭且无额外回读", async () => {
   const f = await fixture();

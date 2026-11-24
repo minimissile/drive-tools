@@ -28,28 +28,140 @@ export const library = {
 export async function publishingMock(method, args) {
   const current = state();
   if (method === "snapshot")
-    return window.panxu
-      .invoke(method, args)
-      .then((snapshot) => ({
-        ...snapshot,
-        dataPath: snapshot.dataPath + "/publishing-qa",
-        accounts: [
-          {
-            id: "qa-drive",
-            alias: "百度资料账号",
-            provider: "baidu",
-            enabled: true,
-            status: "connected",
-            uid: "qa",
-            defaultDirectory: "/盘序资料",
-          },
-        ],
-        resources: [],
-        jobs: [],
-        drafts: [],
-        bindings: [],
-        publications: [],
-      }));
+    return window.panxu.invoke(method, args).then((snapshot) => ({
+      ...snapshot,
+      dataPath: snapshot.dataPath + "/publishing-qa",
+      accounts: [
+        {
+          id: "qa-drive",
+          alias: "百度资料账号",
+          provider: "baidu",
+          enabled: true,
+          status: "connected",
+          uid: "qa",
+          defaultDirectory: "/盘序资料",
+        },
+      ],
+      resources: [],
+      jobs: [],
+      drafts: [],
+      bindings: [],
+      publications: [],
+    }));
+  const publishers = [
+    {
+      id: "qa-publisher",
+      alias: "主账号",
+      nickname: "资料答主",
+      status: "connected",
+      bulkPermission: true,
+      publishingRights: {
+        hasPermission: true,
+        isBanned: false,
+        remainingQuota: 5000,
+      },
+    },
+    {
+      id: "qa-publisher-2",
+      alias: "备用账号",
+      nickname: "学习答主",
+      status: "connected",
+      bulkPermission: true,
+      publishingRights: {
+        hasPermission: true,
+        isBanned: false,
+        remainingQuota: 5000,
+      },
+    },
+  ];
+  if (method === "zhidao.accounts") return publishers;
+  if (method === "zhidao.account.check") {
+    current.calls.push({ method, args });
+    save(current);
+    return publishers.find((a) => a.id === args.id);
+  }
+  if (method === "zhidao.workflow.publish") {
+    current.calls.push({ method, args });
+    if (!args.authorized || !publishers.some((a) => a.id === args.accountId))
+      throw new Error("请选择并确认发布账号");
+    if (current.uploadRun) {
+      save(current);
+      return current.uploadRun;
+    }
+    const rows = args.ids.flatMap((id) => current.records[id].rows);
+    if (rows.some((row) => !row.reviewed)) throw new Error("请先确认问答");
+    const run = {
+      id: crypto.randomUUID(),
+      kind: "publish",
+      title: args.taskName,
+      status: "completed",
+      total: rows.length,
+      done: rows.length,
+      message: "问答已上传，等待平台审核。",
+      config: {
+        workflowLinkType: args.linkType || "drive",
+        workflowLinkUrl:
+          args.linkType === "landing"
+            ? "https://panxu.site/r/qa-office"
+            : args.linkType === "redirect"
+              ? "https://panxu.site/go/qa-office"
+              : undefined,
+        workflowLinkRevision: args.linkRevision,
+        accountId: args.accountId,
+        taskName: args.taskName,
+        workflowIds: args.ids,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    current.uploadRun = run;
+    args.ids.forEach((id) => (current.records[id].publicationRunId = run.id));
+    save(current);
+    return run;
+  }
+  if (method === "zhidao.workflow.linkOptions") {
+    if (args.ids.flatMap((id) => current.records[id].rows).length !== 1)
+      throw new Error("仅单个问答可选择公共入口");
+    return {
+      landingUrl: current.publicUnavailable
+        ? null
+        : "https://panxu.site/r/qa-office",
+      redirectUrl: current.publicUnavailable
+        ? null
+        : "https://panxu.site/go/qa-office",
+      landingIssue: current.publicUnavailable
+        ? "固定入口尚未同步完成，请先在资源库完成同步。"
+        : null,
+      redirectIssue: current.publicUnavailable
+        ? "固定入口尚未同步完成，请先在资源库完成同步。"
+        : null,
+      revision: "qa-public-v1",
+    };
+  }
+  if (method === "zhidao.run" && current.uploadRun?.id === args.id)
+    return {
+      run: current.uploadRun,
+      items: [],
+      total: current.uploadRun.total,
+      page: 1,
+      pageSize: 25,
+    };
+  if (method === "zhidao.publish.sync") {
+    current.calls.push({ method, args });
+    current.uploadRun.config.platformTasks = [
+      {
+        id: "qa-platform-task",
+        taskName: current.uploadRun.title,
+        status: "finished",
+        successCount: current.uploadRun.total,
+        failCount: 0,
+        usedQuota: current.uploadRun.total,
+        checkedAt: new Date().toISOString(),
+      },
+    ];
+    save(current);
+    return current.uploadRun;
+  }
   if (method === "zhidao.workflow.resources") return Promise.resolve([library]);
   if (method === "resource.intakeOptions")
     return Promise.resolve({
@@ -300,20 +412,18 @@ export async function publishingMock(method, args) {
           await new Promise((resolve) => {
             window.__publishingReleaseGeneration = resolve;
           });
-        record.rows = record.resource.keywords
-          .slice(0, 20)
-          .map((keyword, i) =>
-            record.rows[i]?.reviewed
-              ? record.rows[i]
-              : {
-                  id: record.rows[i]?.id || crypto.randomUUID(),
-                  relatedKeywords: [],
-                  keyword,
-                  question: `${keyword}的百度网盘${args.optimize ? "分享地址在哪" : "链接在哪"}？`,
-                  answer: `<p>${record.resource.summary}${args.optimize ? "围绕" : "关于"}「${keyword}」，可核对已有资料中的相应练习内容。</p>`,
-                  reviewed: false,
-                },
-          );
+        record.rows = record.resource.keywords.slice(0, 20).map((keyword, i) =>
+          record.rows[i]?.reviewed
+            ? record.rows[i]
+            : {
+                id: record.rows[i]?.id || crypto.randomUUID(),
+                relatedKeywords: [],
+                keyword,
+                question: `${keyword}的百度网盘${args.optimize ? "分享地址在哪" : "链接在哪"}？`,
+                answer: `<p>${record.resource.summary}${args.optimize ? "围绕" : "关于"}「${keyword}」，可核对已有资料中的相应练习内容。</p>`,
+                reviewed: false,
+              },
+        );
         record.generation.status = "completed";
         save(current);
       }
@@ -334,7 +444,7 @@ export async function publishingMock(method, args) {
     return Promise.resolve("/tmp/百度知道问答.xlsx");
   }
   if (
-    /^(?:share\.|resource\.save|zhidao\.start|zhidao\.workflow\.|job\.|account\.login)/.test(
+    /^(?:share\.|resource\.save|zhidao\.(?:start|publish\.|account\.)|zhidao\.workflow\.|job\.|account\.login)/.test(
       method,
     )
   )

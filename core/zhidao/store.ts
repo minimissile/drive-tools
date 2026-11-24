@@ -1,5 +1,6 @@
 import { Database, id, now, parseJson } from "../database";
 import { AppError } from "../errors";
+import { answerProgressDay } from "../../shared/zhidao-answer-progress";
 import { collectionDriveType, type CollectionDriveFilter, type CollectionResultSummary } from "../../shared/resource-collection";
 import type {
   OperationRun,
@@ -100,19 +101,27 @@ export class OperationsStore {
     };
   }
   list(kind?: OperationKind, page = 1) {
-    const where = kind ? "WHERE kind=?" : "";
-    const args = kind ? [kind] : [];
+    const conditions = kind ? ["kind=?"] : [];
+    const args: string[] = kind ? [kind] : [];
+    if (kind === "answer") {
+      const day = answerProgressDay();
+      conditions.push("created_at>=? AND created_at<?");
+      args.push(day.start, day.end);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const total = this.db.get<{ n: number }>(
+      `SELECT count(*) n FROM operation_runs ${where}`,
+      ...args,
+    )!.n;
+    const currentPage = Math.min(page, Math.max(1, Math.ceil(total / 20)));
     const rows = this.db.all<{ id: string }>(
       `SELECT id FROM operation_runs ${where} ORDER BY created_at DESC,rowid DESC LIMIT 20 OFFSET ?`,
       ...args,
-      (page - 1) * 20,
+      (currentPage - 1) * 20,
     );
     return {
       items: rows.map((r) => this.run(r.id)),
-      total: this.db.get<{ n: number }>(
-        `SELECT count(*) n FROM operation_runs ${where}`,
-        ...args,
-      )!.n,
+      total,
     };
   }
   activeRuns() {

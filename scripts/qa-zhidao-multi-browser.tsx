@@ -4,6 +4,12 @@ import { AppProvider, useAppData } from "../src/state";
 import Answers from "../src/zhidao/Answers";
 import type { OperationRun, ZhidaoAccount } from "../shared/zhidao";
 import { windowStorage } from "../src/storage/window-storage";
+import { answerLanguageSample } from "../src/zhidao/answer-language-samples";
+import { zhidaoAnswerLanguage } from "../shared/zhidao-answer-language";
+import {
+  isTodayAnswerRun,
+  answerProgressDay,
+} from "../shared/zhidao-answer-progress";
 import "../src/styles.css";
 
 const params = new URLSearchParams(location.search);
@@ -11,7 +17,9 @@ const runId = params.get("run")!;
 if (params.get("frame") !== "1") {
   const frame = document.createElement("iframe");
   frame.title = "多账号答题模拟页面";
-  frame.src = `${location.pathname}?frame=1&run=${encodeURIComponent(runId)}`;
+  const frameUrl = new URL(location.href);
+  frameUrl.searchParams.set("frame", "1");
+  frame.src = frameUrl.href;
   frame.style.cssText = "width:100%;height:100vh;border:0;display:block";
   document.body.style.margin = "0";
   document.getElementById("root")!.replaceWith(frame);
@@ -31,6 +39,7 @@ if (params.get("frame") !== "1") {
       },
       runs: [],
       calls: [],
+      answers: {},
       accounts: [
         {
           id: "zd_one",
@@ -72,6 +81,7 @@ if (params.get("frame") !== "1") {
     snapshot: any;
     runs: OperationRun[];
     calls: any[];
+    answers: Record<string, string>;
     accounts: ZhidaoAccount[];
   };
   const changed = new Set<() => void>();
@@ -79,13 +89,39 @@ if (params.get("frame") !== "1") {
   const invoke = async (method: string, args: any) => {
     if (method === "snapshot") return state.snapshot;
     if (method === "zhidao.accounts") return state.accounts;
-    if (method === "zhidao.answer.sessions") return state.runs;
-    if (method === "zhidao.runs")
-      return { items: state.runs, total: state.runs.length };
+    if (method === "zhidao.answer.sessions")
+      return state.runs.filter(
+        (run) =>
+          run.config.mode === "auto" &&
+          (run.status === "running" || isTodayAnswerRun(run)),
+      );
+    if (method === "zhidao.runs") {
+      const items = state.runs.filter(
+        (run) => args.kind !== "answer" || isTodayAnswerRun(run),
+      );
+      const page = Math.min(
+        args.page ?? 1,
+        Math.max(1, Math.ceil(items.length / 20)),
+      );
+      return {
+        items: items.slice((page - 1) * 20, page * 20),
+        total: items.length,
+      };
+    }
     if (method === "zhidao.run")
       return {
         run: state.runs.find((r) => r.id === args.id),
-        items: [],
+        items: state.answers[args.id]
+          ? [
+              {
+                id: `item-${args.id}`,
+                question: state.runs.find((r) => r.id === args.id)!.config
+                  .question,
+                answer: state.answers[args.id],
+                status: "ready",
+              },
+            ]
+          : [],
         total: 0,
         page: 1,
         pageSize: 25,
@@ -126,6 +162,32 @@ if (params.get("frame") !== "1") {
       emit();
       return runs;
     }
+    if (
+      method === "zhidao.start" &&
+      args.kind === "answer" &&
+      args.input.mode === "manual"
+    ) {
+      state.calls.push(args);
+      const run: OperationRun = {
+        id: `manual-${state.calls.length}`,
+        kind: "answer",
+        title: "手动回答",
+        config: args.input,
+        status: "completed",
+        total: 1,
+        done: 1,
+        message: "已生成回答",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      state.answers[run.id] = answerLanguageSample(
+        zhidaoAnswerLanguage.parse(args.input.language ?? "mandarin"),
+        "第一人称共鸣",
+      );
+      state.runs.push(run);
+      emit();
+      return run;
+    }
     if (method === "zhidao.pause") {
       const r = state.runs.find((r) => r.id === args.id)!;
       r.status = "paused";
@@ -161,6 +223,42 @@ if (params.get("frame") !== "1") {
     );
   }
   Object.assign(window, { __qaState: () => state });
+  if (params.get("progress") === "1" && !state.runs.length) {
+    const today = answerProgressDay().start;
+    const yesterday = new Date(Date.parse(today) - 1).toISOString();
+    const config = {
+      mode: "manual",
+      question: "如何沟通自己的感受？",
+      style: "清晰实用",
+      language: "mandarin",
+    };
+    state.runs = [
+      { id: "today-manual", title: "今日回答", createdAt: today },
+      { id: "yesterday-manual", title: "昨日回答", createdAt: yesterday },
+    ].map((run) => ({
+      ...run,
+      kind: "answer",
+      config,
+      status: "completed",
+      total: 1,
+      done: 1,
+      message: "回答已完成",
+      updatedAt: run.createdAt,
+    }));
+    state.answers["today-manual"] = "先梳理感受，再选择平静的时候沟通。";
+    state.answers["yesterday-manual"] =
+      "昨日生成的回答不应重新显示在今日进度中。";
+    windowStorage.setItem(
+      `panxu-operation-focus:${state.snapshot.dataPath}:answer`,
+      JSON.stringify({ id: "yesterday-manual" }),
+    );
+  }
+  Object.assign(window, {
+    __qaSetRuns: (runs: OperationRun[]) => {
+      state.runs = runs;
+      emit();
+    },
+  });
   function Ready() {
     const { data } = useAppData();
     return data ? (

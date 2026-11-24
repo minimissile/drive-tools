@@ -21,7 +21,12 @@ export async function runAnswers(
   if (input.mode === "manual") {
     if (ctx.store.items(run.id).some((i) => i.status === "ready")) return;
     ctx.progress(run, "正在生成回答…", 0);
-    const result = await ctx.generateAnswer(input.question, input.style);
+    const result = await ctx.generateAnswer(
+      input.question,
+      input.style,
+      undefined,
+      input.language,
+    );
     signal.throwIfAborted();
     ctx.store.put(run.id, "manual", {
       name: input.question.slice(0, 100),
@@ -157,6 +162,7 @@ export async function runAnswers(
             category,
             requirements: input.instructions,
           },
+          input.language,
           signal,
         );
         if (ctx.closed) return;

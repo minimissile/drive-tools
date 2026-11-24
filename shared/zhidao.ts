@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { CollectionResultSummary } from "./resource-collection";
 import { answerStyle } from "./answer-styles";
+import { zhidaoAnswerLanguage } from "./zhidao-answer-language";
 import {
   generationResource,
   generationRules,
@@ -50,13 +51,18 @@ export interface ZhidaoAccount {
   checkedAt: string | null;
   message: string;
 }
-export function zhidaoAccountName(account: Pick<ZhidaoAccount, "nickname" | "alias">) {
+export function zhidaoAccountName(
+  account: Pick<ZhidaoAccount, "nickname" | "alias">,
+) {
   return account.nickname.trim() || account.alias.trim() || "未命名账号";
 }
-export function zhidaoAccountLabel(account: Pick<ZhidaoAccount, "nickname" | "alias">) {
+export function zhidaoAccountLabel(
+  account: Pick<ZhidaoAccount, "nickname" | "alias">,
+) {
   const name = zhidaoAccountName(account);
   return account.alias.trim() && account.alias.trim() !== name
-    ? `${name} · ${account.alias.trim()}` : name;
+    ? `${name} · ${account.alias.trim()}`
+    : name;
 }
 export interface OperationRun {
   id: string;
@@ -73,6 +79,7 @@ export interface OperationRun {
 export type ItemStatus =
   "pending" | "ready" | "failed" | "submitted" | "uncertain" | "skipped";
 export interface OperationItem {
+  workflowSource?: { recordId: string; rowId: string; linkType?: import("./zhidao-workflow").PublishingLinkType; linkRevision?: string };
   id: string;
   runId: string;
   key: string;
@@ -163,21 +170,25 @@ export const collectionInput = z
     "百度知道采集需要选择账号",
   );
 const answerOptions = {
-    style: answerStyle.default("清晰实用"),
-    count: z.number().int().min(1).max(200).default(1),
-    categories: z
-      .array(z.enum(["emotion", "general", "education"]))
-      .min(1)
-      .max(1, "一次只能选择一种答题分类，请重新选择后开始")
-      .default(["emotion"]),
-    intervalSeconds: z.number().int().min(18).max(600).default(18),
-    instructions: text.max(2000).default(""),
+  style: answerStyle.default("清晰实用"),
+  language: zhidaoAnswerLanguage.default("mandarin"),
+  count: z.number().int().min(1).max(200).default(1),
+  categories: z
+    .array(z.enum(["emotion", "general", "education"]))
+    .min(1)
+    .max(1, "一次只能选择一种答题分类，请重新选择后开始")
+    .default(["emotion"]),
+  intervalSeconds: z.number().int().min(18).max(600).default(18),
+  instructions: text.max(2000).default(""),
 };
 export const zhidaoAnswerAccountLimit = 20;
 export const zhidaoAnswerPageLimit = 1000;
 export const autoAnswersStart = z.object({
   ...answerOptions,
-  accountIds: z.array(text.min(1).max(100)).min(1, "请选择答题账号").max(zhidaoAnswerAccountLimit, "一次最多选择20个答题账号")
+  accountIds: z
+    .array(text.min(1).max(100))
+    .min(1, "请选择答题账号")
+    .max(zhidaoAnswerAccountLimit, "一次最多选择20个答题账号")
     .refine((ids) => new Set(ids).size === ids.length, "答题账号不能重复"),
   authorized: z.literal(true),
 });

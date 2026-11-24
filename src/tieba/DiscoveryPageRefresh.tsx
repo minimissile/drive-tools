@@ -16,6 +16,7 @@ export function DiscoveryPageRefresh({
 }) {
   const { notify } = useFeedbackActions();
   const locked = useRef(false);
+  const review = request?.kind === "recycled";
   const [refreshing, setRefreshing] = useState(false);
   const count =
     request &&
@@ -30,11 +31,10 @@ export function DiscoveryPageRefresh({
     locked.current = true;
     setRefreshing(true);
     try {
-      const { updated, failed } = await ipc("tieba.discovery.refresh", request);
+      const { updated, failed, restored } = await ipc("tieba.discovery.refresh", request);
       onRefresh();
-      if (failed)
-        notify(`已刷新 ${updated} 项，${failed} 项暂未读全`, "warning");
-      else notify(`已刷新 ${updated} 项`, "success");
+      const result = review ? `已复查 ${updated} 条，恢复 ${restored ?? 0} 条` : `已刷新 ${updated} 项`;
+      notify(failed ? `${result}，${failed} 项暂未读全` : result, failed ? "warning" : "success");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "刷新失败，请重试。";
@@ -57,7 +57,7 @@ export function DiscoveryPageRefresh({
       onClick={() => void refresh()}
     >
       <RefreshCw size={14} aria-hidden="true" />
-      {refreshing ? "正在刷新…" : "刷新本页"}
+      {review ? (refreshing ? "正在复查…" : "复查本页") : (refreshing ? "正在刷新…" : "刷新本页")}
     </Button>
   );
 }

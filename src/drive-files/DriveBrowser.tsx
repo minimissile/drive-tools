@@ -162,8 +162,11 @@ export function DriveBrowser({
   const segments = directory?.path.split("/").filter(Boolean) ?? [];
   const maintenanceActions = directory ? (
     <div className="drive-selection-actions" aria-label="文件维护操作">
-      <strong>已选 {files.length} 项</strong>
-      <Button disabled={blocked} onClick={() => open("mkdir")}>
+      {context === "resource" ? <strong>已选 {files.length} 项</strong> : null}
+      <Button
+        disabled={blocked || directory.capabilities.mkdir === false}
+        onClick={() => open("mkdir")}
+      >
         <FolderPlus size={14} />
         新建文件夹
       </Button>
@@ -220,11 +223,12 @@ export function DriveBrowser({
   return (
     <div className="drive-browser" data-context={context}>
       {context === "page" ? (
-        <Panel title="本人网盘目录">
+        <section className="drive-browser-location" aria-label="本人网盘目录">
           <div className="drive-location">
-            <Field label="目录路径" hint="支持从根目录逐层浏览">
+            <Field label="目录路径">
               <input
                 aria-label="本人网盘目录路径"
+                title="支持从根目录逐层浏览"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
                 placeholder="/"
@@ -242,18 +246,9 @@ export function DriveBrowser({
           <small>
             读取后显示当前目录的全部文件，可按名称筛选。选择文件夹可进入下一层。
           </small>
-        </Panel>
+        </section>
       ) : null}
-      <Panel
-        title={context === "page" ? "文件内容" : undefined}
-        extra={
-          context === "page" && directory ? (
-            <small>
-              {directory.files.length} 项 · {directory.path}
-            </small>
-          ) : undefined
-        }
-      >
+      <Panel>
         <QueryError
           error={error}
           loading={loading}
@@ -265,7 +260,7 @@ export function DriveBrowser({
               className={
                 context === "resource"
                   ? "drive-directory-navigation"
-                  : undefined
+                  : "drive-page-toolbar"
               }
             >
               <nav className="drive-breadcrumb" aria-label="本人网盘目录导航">
@@ -333,7 +328,9 @@ export function DriveBrowser({
                   <RefreshCw size={15} />
                   刷新
                 </Button>
-              ) : null}
+              ) : (
+                maintenanceActions
+              )}
             </div>
             {loading ? (
               <Loading label="正在读取，仍显示上次成功读取的目录…" />
@@ -362,7 +359,6 @@ export function DriveBrowser({
                 {checkError ? <p role="alert">{checkError}</p> : null}
               </Notice>
             ) : null}
-            {context === "page" ? maintenanceActions : null}
             <FileTable
               key={`files:${directory.path}`}
               files={directory.files}

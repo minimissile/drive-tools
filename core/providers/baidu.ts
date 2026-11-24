@@ -1,3 +1,4 @@
+import { ownPage } from "./own-list-page";
 import { baiduMembership } from "./membership";
 import { digest, type UploadAsset } from "./small-upload";
 import { randomBytes } from "node:crypto";
@@ -154,7 +155,15 @@ export class BaiduProvider implements DriveProvider {
     return { uid: data.uid, nickname: data.nickname };
   }
   async membership(account: Account) {
-    const result=await this.request(account, "/rest/2.0/membership/user", {method:"query"}); return baiduMembership(result);
+    const result = await this.request(account, "/rest/2.0/membership/user", {method:"query"});
+    let flags;
+    try {
+      const response = await this.request(account, "/api/gettemplatevariable", {fields:JSON.stringify(["is_vip","is_svip"])});
+      flags = response.result ?? response.data;
+    } catch (error) {
+      if (error instanceof AppError && ["AUTH_EXPIRED","ACCOUNT_UID_MISMATCH"].includes(error.code)) throw error;
+    }
+    return baiduMembership(result, Date.now(), flags);
   }
   async capacity(account: Account) {
     const result = await this.request(account, "/api/quota", {
@@ -228,6 +237,12 @@ export class BaiduProvider implements DriveProvider {
       page,
       parentId,
     };
+  }
+  async listPage(account: Account, parentId: string, cursor = "") {
+    const page = ownPage(cursor);
+    const result = await this.request(account, "/api/list", { dir: parentId, page, num: 100, order: "name", desc: 0, showempty: 0 });
+    if (!Array.isArray(result.list)) throw new AppError("REMOTE_SCHEMA_CHANGED", "百度未返回本人目录文件列表。");
+    return { files: result.list.map((r: JsonObject) => normalizeRemoteFile(r, this.id, parentId)), next: result.list.length >= 100 ? String(page + 1) : null };
   }
   async list(account: Account, parentId: string) {
     const files: RemoteFile[] = [];

@@ -30,6 +30,7 @@ const families: Record<Provider, string[]> = {
   xunlei: ["xunlei.com", "sandai.net"],
   pikpak: ["mypikpak.net", "mypikpak.com", "aliyuncs.com"],
   guangya: ["aliyuncs.com", "guangyapan.com"],
+  cmcc: ["yun.139.com", "aliyuncs.com"],
 };
 export function storageUrl(provider: Provider, value: string) {
   const url = new URL(value);

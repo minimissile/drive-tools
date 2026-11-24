@@ -2,7 +2,7 @@ import type { AccountMembership } from "./drive-membership";
 import type { AccountCapacity } from "./drive-capacity";
 import type { TiebaDiscoveryTask } from "./tieba-resource-discovery";
 export type Provider =
-  "quark" | "baidu" | "uc" | "xunlei" | "guangya" | "pikpak";
+  "quark" | "baidu" | "uc" | "xunlei" | "guangya" | "pikpak" | "cmcc";
 export type { Platform } from "./channels";
 import type { Platform, ContentFormat, ChannelCapabilities } from "./channels";
 export type Endpoint = "longtail" | "suggest" | "metrics" | "radar";

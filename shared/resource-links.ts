@@ -1,4 +1,11 @@
 import type { Provider } from "./types";
+export interface PublishedResourceUrls {
+  landingUrl: string | null;
+  redirectUrl: string | null;
+  landingIssue: string | null;
+  redirectIssue: string | null;
+  revision?: string;
+}
 
 export interface ResourceLinkSettings {
   enabled: boolean;

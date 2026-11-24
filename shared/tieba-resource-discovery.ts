@@ -155,17 +155,18 @@ export const defaultTiebaDiscoveryRules: Readonly<TiebaDiscoveryRules> = {
 };
 
 export const tiebaDiscoveryPageSize = 10;
+export const tiebaForumNoResourceLimit = 50;
 export const tiebaDiscoveryRecycleLimit = 500;
 export type TiebaDiscoveryRecycleSource = "potential" | "pending" | "traffic";
 export interface TiebaDiscoveryRecycledPost {
-  post: Pick<TiebaDiscoveryReadingPost, "id" | "title" | "url" | "forum" | "publishedAt" | "views">;
+  post: Pick<TiebaDiscoveryReadingPost, "id" | "title" | "url" | "forum" | "publishedAt" | "views"> & { checkedAt?: number };
   source: TiebaDiscoveryRecycleSource;
   reason: "belowThreshold" | "observationExpired" | "resource";
   recycledAt: number;
 }
 export const tiebaDiscoveryRefreshSchema = z.discriminatedUnion("kind", [
   z.object({
-    kind: z.enum(["potential", "pending", "traffic", "trending", "oldTraffic", "trafficPosts"]),
+    kind: z.enum(["potential", "pending", "traffic", "trending", "oldTraffic", "trafficPosts", "recycled"]),
     ids: z.array(z.string().regex(/^[1-9]\d{0,18}$/)).min(1).max(tiebaDiscoveryPageSize),
   }),
   z.object({
@@ -181,6 +182,13 @@ export type TiebaDiscoveryImportKind = "traffic" | "potential" | "pending" | "ol
 export const tiebaDiscoveryPotentialPageSchema = z.object({
   page: z.number().int().min(1).max(2_147_483_647),
 });
+export const tiebaRecycledPageSchema = tiebaDiscoveryPotentialPageSchema.extend({
+  source: z.enum(["all", "potential", "pending", "traffic"]).default("all"),
+  reason: z.enum(["all", "observationExpired", "belowThreshold", "resource"]).default("all"),
+  minViews: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  sort: z.enum(["recycledAt", "views"]).default("recycledAt"),
+});
+export type TiebaRecycledFilters = Omit<z.input<typeof tiebaRecycledPageSchema>, "page">;
 export const tiebaDiscoveryPotentialFilterSchema = tiebaDiscoveryPotentialPageSchema.extend({
   grew: z.boolean().optional(),
 });
@@ -315,6 +323,7 @@ export interface TiebaDiscoverySnapshot {
   filterAudit?: TiebaDiscoveryFilterAuditSummary | null;
   filterAuditSortReady?: boolean;
   recycledCount?: number;
+  recycledReviewReady?: boolean;
   trending: TiebaDiscoveryCandidate[];
   watching: TiebaDiscoveryCandidate[];
 }
@@ -326,7 +335,7 @@ export interface TiebaResourceDiscoveryContract {
   };
   "tieba.discovery.refresh": {
     args: z.input<typeof tiebaDiscoveryRefreshSchema>;
-    value: { updated: number; failed: number };
+    value: { updated: number; failed: number; restored?: number };
   };
   "tieba.discovery.snapshot": {
     args: undefined;
@@ -369,7 +378,7 @@ export interface TiebaResourceDiscoveryContract {
     value: TiebaDiscoveryPostPage<TiebaDiscoveryFilterSample> & { batch: number | null };
   };
   "tieba.discovery.recycled": {
-    args: z.input<typeof tiebaDiscoveryPotentialPageSchema>;
+    args: z.input<typeof tiebaRecycledPageSchema>;
     value: TiebaDiscoveryPostPage<TiebaDiscoveryRecycledPost>;
   };
   "tieba.discovery.startFilterAudit": {

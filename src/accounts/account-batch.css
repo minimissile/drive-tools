@@ -1,0 +1,92 @@
+.account-batch-toolbar {
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+  background: var(--surface);
+}
+.account-batch-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+  font-size: 12px;
+}
+.account-batch-toggle {
+  flex-shrink: 0;
+  padding-inline: 0;
+}
+.account-batch-toggle strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.account-batch-heading .account-batch-summary {
+  margin-left: auto;
+  min-width: 0;
+}
+.account-batch-summary p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.account-batch-content {
+  padding-top: var(--space-3);
+}
+.account-batch-actions,
+.account-batch-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-size: 12px;
+}
+.account-batch-summary {
+  justify-content: space-between;
+}
+.account-batch-hint {
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.account-batch-progress {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.account-batch-results {
+  max-height: 190px;
+  overflow: auto;
+  list-style: none;
+  padding: 0;
+  margin-top: var(--space-2);
+}
+.account-batch-results li {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) 64px minmax(0, 2fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  padding-block: 6px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.account-batch-results li + li {
+  border-top: 1px solid var(--line);
+}
+.account-batch-results strong {
+  font-weight: 500;
+}
+.account-batch-results [data-state="failed"],
+.account-batch-results [data-state="warning"] {
+  color: var(--amber);
+}
+.account-batch-results [data-state="success"] {
+  color: var(--green);
+}
+.account-batch-results [data-state="queued"],
+.account-batch-results [data-state="cancelled"] {
+  color: var(--muted);
+}
+.account-batch-check {
+  margin-top: 9px;
+}

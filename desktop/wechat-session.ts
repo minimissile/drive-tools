@@ -30,6 +30,7 @@ import {
   normalizeWechatRemoteImageUrl,
   isPublicWechatImageAddress,
   assertWechatPreviewBytes,
+  wechatRemoteImageReferer,
 } from "./wechat-image-policy";
 import {
   decodeWechatImageReceipt,
@@ -81,7 +82,7 @@ async function downloadImage(value: string): Promise<Buffer> {
               callback(null, address.address, address.family),
             signal: AbortSignal.timeout(30000),
             headers: {
-              Referer: "https://mp.weixin.qq.com/",
+              Referer: wechatRemoteImageReferer(url),
               "Accept-Encoding": "identity",
             },
           },

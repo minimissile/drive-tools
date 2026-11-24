@@ -14,12 +14,14 @@ export function IntakeShareStatus({
   parsing,
   validation,
   recovery,
+  idleMessage,
 }: {
   id: string;
   error: string;
   parsing: boolean;
   validation: IntakeShareValidation | null;
   recovery?: ReactNode;
+  idleMessage?: string;
 }) {
   const state = error
     ? "invalid"
@@ -39,7 +41,7 @@ export function IntakeShareStatus({
   const message =
     error ||
     (parsing ? "正在识别链接与提取码…" : validation?.message) ||
-    "离开输入框后自动识别并检查链接有效性。";
+    idleMessage || "离开输入框后自动识别并检查链接有效性。";
   return (
     <div className="intake-share-status" data-state={state}>
       <span

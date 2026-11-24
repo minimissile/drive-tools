@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { fixture } from "./helpers";
 import { ZhidaoOperations } from "../core/zhidao/service";
 import { AnswerReservations } from "../core/zhidao/answer-history";
+import { answerLanguageSample } from "../src/zhidao/answer-language-samples";
+import { zhidaoAnswerLanguage, zhidaoAnswerLanguageLabels } from "../shared/zhidao-answer-language";
 import {
   autoAnswersStart,
   zhidaoAccountLabel,
@@ -116,6 +118,31 @@ test("账号昵称优先展示，保留不同备注；旧单号草稿迁移为�
     false,
   );
 });
+test("多账号自动答题分别持久化并使用同一所选回答语言", async () => {
+  for (const language of zhidaoAnswerLanguage.options) {
+  const f = await setup();
+  try {
+    f.op.client.questions = async (id) => ({
+      items: [{ qid: `language-${id}`, question: `账号${id}如何安排学习时间？` }],
+      nextBase: 8, hasMore: false, total: 1,
+    });
+    const languages: string[] = [];
+    f.app.ai.resourceExport = async <T>(_name: string, _schema: unknown, instruction: string, input: any) => {
+      languages.push(input.language);
+      assert.match(instruction, new RegExp(`回答语言：${zhidaoAnswerLanguageLabels[language]}`));
+      return { answer: answerLanguageSample(language, "第一人称共鸣") } as T;
+    };
+    const runs = f.op.startAnswers({ ...options, accountIds: ["zd_multi1", "zd_multi2"], language });
+    await Promise.all(runs.map((run) => f.op.settled(run.id)));
+    assert.deepEqual(languages, [language, language]);
+    for (const run of runs) {
+      assert.equal(f.op.store.run(run.id).config.language, language);
+      assert.equal(f.op.store.run(run.id).done, 1);
+    }
+  } finally { await f.cleanup(); }
+  }
+});
+
 test("题号或规范化标题重复时互斥，不同题目并行，释放后可重新占用", () => {
   const claims = new AnswerReservations();
   assert.equal(claims.claim("a", "q1", "怎么学习？"), true);

@@ -48,6 +48,7 @@ import { createPhotoPostSessions } from "./photo-post-session";
 import { UcProvider } from "../core/providers/uc";
 import { PikPakProvider } from "../core/providers/pikpak";
 import { GuangyaProvider } from "../core/providers/guangya";
+import { CmccProvider } from "../core/providers/cmcc";
 import { providerRequestReferer } from "../core/providers/request-context";
 import { XunleiProvider } from "../core/providers/xunlei";
 import { WebTokenSession } from "../core/providers/web-token-session";
@@ -216,7 +217,7 @@ const transport: ProviderTransport = {
     if (service.driveBrowsers.isBound(accountId))
       return service.driveBrowsers.storageRequest(accountId, url, init);
     const account = service.repo.getAccount(accountId);
-    if (account.provider !== "quark" && account.provider !== "uc")
+    if (account.provider !== "quark" && account.provider !== "uc" && account.provider !== "cmcc")
       throw new AppError("UPLOAD_UNSUPPORTED", "此网盘不支持该存储传输方式。");
     return storageRequest(account.provider, new URL(url), init);
   },
@@ -327,9 +328,11 @@ const guangyaSessions = new WebTokenSession(
   transport,
   "guangya",
 );
+const cmccSessions = new WebTokenSession(() => service.secrets, transport, "cmcc");
 const usesTokenSession = (provider: string) =>
-  ["xunlei", "pikpak", "guangya"].includes(provider);
+  ["xunlei", "pikpak", "guangya", "cmcc"].includes(provider);
 function tokenSession(provider: string) {
+  if (provider === "cmcc") return cmccSessions;
   if (provider === "pikpak") return pikpakSessions;
   if (provider === "guangya") return guangyaSessions;
   if (provider === "xunlei") return thunderSessions;
@@ -338,6 +341,7 @@ function tokenSession(provider: string) {
 const authHostAllowed = providerAuthAllowed;
 
 async function captureTokenStorage(account: Account, auth: BrowserWindow) {
+  if (account.provider === "cmcc") return;
   let origin = "";
   if (!auth.isDestroyed()) {
     try {
@@ -409,7 +413,7 @@ async function openAccountWindow(account: Account, url?: string) {
     };
     authSession.webRequest.onBeforeSendHeaders(
       {
-        urls: providerSpecs[account.provider].apiHosts.map(
+        urls: account.provider === "cmcc" ? ["https://yun.139.com/*", "https://*.yun.139.com/*"] : providerSpecs[account.provider].apiHosts.map(
           (host) => `https://${host}/*`,
         ),
       },
@@ -1023,6 +1027,7 @@ else {
           xunlei: new XunleiProvider(transport),
           pikpak: new PikPakProvider(transport),
           guangya: new GuangyaProvider(transport),
+          cmcc: new CmccProvider(transport),
         },
         ports,
         changed,

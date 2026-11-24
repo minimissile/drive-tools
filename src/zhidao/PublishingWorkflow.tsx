@@ -1,3 +1,4 @@
+import { PublishingKeywordPlan } from "./PublishingKeywordPlan";
 import {
   useCallback,
   useEffect,
@@ -9,7 +10,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Download,
   FileSpreadsheet,
 } from "lucide-react";
 import {
@@ -19,6 +19,7 @@ import {
   publishingRowShare,
   publishingRowsWithLinks,
   type PublishingQuestion,
+  type PublishingDestination,
 } from "../../shared/zhidao-workflow";
 import {
   parseResourceKeywordText,
@@ -54,10 +55,15 @@ import { PublishingKeywordBatch } from "./PublishingKeywordBatch";
 import { usePublishingKeywordBatch } from "./usePublishingKeywordBatch";
 import "./publishing-workflow.css";
 
+import { PublishingSubmit } from "./PublishingSubmit";
+import type { OperationRun } from "../../shared/zhidao";
+
 export function PublishingWorkflow({
   headerActions,
+  onShowRun,
 }: {
   headerActions?: ReactNode;
+  onShowRun(run: OperationRun): void;
 }) {
   const { data } = useAppData();
   const dataPath = data!.dataPath;
@@ -102,7 +108,6 @@ export function PublishingWorkflow({
     (value: boolean) => setSearching(value),
     [],
   );
-  const [download, setDownload] = useState("");
   const [previewGroups, setPreviewGroups] = useState<PublishingPreviewGroup[]>(
     [],
   );
@@ -120,7 +125,7 @@ export function PublishingWorkflow({
   const busy =
     !!action.pending || searching || preparation.pending || generation.pending;
   const readyRows = rows.filter((row) => findRecord(row)?.stage === "ready");
-  const openPreview = () => {
+  const openPreview = (destination?: PublishingDestination) => {
     setPreviewGroups(
       rows.flatMap((row) => {
         const record = findRecord(row);
@@ -158,7 +163,7 @@ export function PublishingWorkflow({
             pendingLinks: step !== 4,
             rows:
               step === 4
-                ? publishingRowsWithLinks(record, previewRows)
+                ? publishingRowsWithLinks(record, previewRows, destination)
                 : previewRows,
           },
         ];
@@ -223,12 +228,6 @@ export function PublishingWorkflow({
         !draft.value.pendingReviews.includes(row.key)
       );
     });
-  const signature =
-    JSON.stringify(rows.map(({ prepared, ...row }) => row)) +
-    draft.value.accountId;
-  useEffect(() => {
-    setDownload("");
-  }, [signature]);
   const replaceRows = (next: PublishingDraftRow[]) => {
     const updated = next.map((row) => {
       const previous = rows.find((r) => r.key === row.key);
@@ -631,6 +630,9 @@ export function PublishingWorkflow({
           }
           className="publishing-review-panel"
         >
+          {activeRecord ? (
+            <PublishingKeywordPlan record={activeRecord} />
+          ) : null}
           {duplicateTitles ? (
             <Notice warning>
               存在重复的问题标题，请逐份资源修改后保存，再下载表格。
@@ -691,24 +693,45 @@ export function PublishingWorkflow({
                 )}
               </p>
               {activeRecord.generation.status === "running" ? (
-                <LoadingState compact label="正在使用 AI 生成标题与简介…" />
+                <LoadingState
+                  compact
+                  label={
+                    activeRecord.generation.topics &&
+                    activeRecord.generation.drafts.length ===
+                      activeRecord.generation.targets.length
+                      ? "正在检查问答意图与相似内容…"
+                      : "正在使用 AI 生成标题与简介…"
+                  }
+                />
               ) : (
                 <>
                   <Notice warning>
                     {activeRecord.generation.message ||
                       "AI 生成尚未完成，请核对后继续。"}
                   </Notice>
-                  <Button
-                    primary
-                    disabled={busy}
-                    onClick={() =>
-                      void action
-                        .run("zhidao.workflow.generate", { id: active.key })
-                        .finally(records.reload)
-                    }
-                  >
-                    继续生成剩余问答
-                  </Button>
+                  {activeRecord.generation.validation?.status === "failed" ||
+                  (activeRecord.generation.topics &&
+                    !activeRecord.generation.topics.length) ? (
+                    <Button
+                      primary
+                      disabled={busy}
+                      onClick={() => draft.update({ step: 1 })}
+                    >
+                      返回调整关键词
+                    </Button>
+                  ) : (
+                    <Button
+                      primary
+                      disabled={busy}
+                      onClick={() =>
+                        void action
+                          .run("zhidao.workflow.generate", { id: active.key })
+                          .finally(records.reload)
+                      }
+                    >
+                      继续生成剩余问答
+                    </Button>
+                  )}
                 </>
               )}
             </>
@@ -832,48 +855,19 @@ export function PublishingWorkflow({
         />
       ) : null}
       {step === 4 ? (
-        <Panel title="预览与下载问答表格">
-          {publishingLinkIssue(currentRecords) ? (
-            <Notice warning>{publishingLinkIssue(currentRecords)}</Notice>
-          ) : null}
-          <div className="publishing-download">
-            <FileSpreadsheet size={36} aria-hidden="true" />
-            <div>
-              <h3>百度知道批量问答表格</h3>
-              <p>
-                {rows.length} 份资源 ·{" "}
-                {currentRecords.reduce((n, r) => n + r.rows.length, 0)} 行问答 ·
-                XLSX
-              </p>
-              <p className="muted">
-                固定三列：qid（留空）、问题标题、回答内容。下载不会自动上传到百度。
-              </p>
-            </div>
-          </div>
-          <div className="publishing-review-actions">
-            <Button disabled={busy || !available[4]} onClick={openPreview}>
-              预览完整问答
-            </Button>
-            <Button
-              primary
-              disabled={busy || !available[4] || !!records.error}
-              onClick={() =>
-                void action.run(
-                  "zhidao.workflow.export",
-                  { ids },
-                  (path) => {
-                    if (path) setDownload(path);
-                  },
-                  undefined,
-                )
-              }
-            >
-              <Download size={15} />
-              下载已审核表格
-            </Button>
-          </div>
-          {download ? <Notice>表格已保存：{download}</Notice> : null}
-        </Panel>
+        !currentRecords.length ? (
+          !records.error ? (
+            <LoadingState compact label="正在读取本批问答与上传任务…" />
+          ) : null
+        ) : (
+          <PublishingSubmit
+            records={currentRecords}
+            ready={!!available[4] && !records.error}
+            onPreview={openPreview}
+            onChanged={records.reload}
+            onShowRun={onShowRun}
+          />
+        )
       ) : null}
       <div className="publishing-workflow-footer">
         <div>

@@ -3,6 +3,7 @@ import type {
   TiebaAnalysisFollowedPage,
   TiebaAnalysisForumPage,
   TiebaAnalysisPage,
+  TiebaAnalysisThreadDetail,
 } from "../../shared/tieba-analysis";
 import { normalizeTiebaForumName } from "../../shared/tieba-forums";
 import { AppError } from "../errors";
@@ -263,12 +264,35 @@ export async function readTiebaOldResource(tid: string, send: typeof fetch = fet
 }
 
 export async function readTiebaDiscoveryThread(tid: string, send: typeof fetch = fetch) {
+  return (await readThreadOverview(tid, send)).summary;
+}
+
+export async function queryTiebaAnalysisThread(
+  { target }: { target: string },
+  send: typeof fetch = fetch,
+): Promise<TiebaAnalysisThreadDetail> {
+  const tid = numericId(target) ?? numericId(tiebaThreadIdFromUrl(target.replace(/^http:/i, "https:")) ?? "");
+  if (!tid)
+    throw new AppError("TIEBA_ANALYSIS_THREAD_TARGET", "请输入百度贴吧主题帖链接或数字帖子 ID。");
+  const { summary, firstFloor } = await readThreadOverview(tid, send);
+  const { uid, ...post } = summary;
+  return {
+    ...post,
+    id: tid,
+    url: tiebaThreadUrl(tid),
+    authorId: uid,
+    bodyText: firstFloor ? contentFragments(firstFloor, 5).text.trim() : "",
+    observedAt: Date.now(),
+  };
+}
+
+async function readThreadOverview(tid: string, send: typeof fetch) {
   if (!numericId(tid)) throw invalidResponse();
   const { data, thread } = await readThread(tid, send);
   const author = tiebaFields(thread.bytes(18) ?? empty);
   const forum = tiebaFields(data.bytes(2) ?? empty);
   const firstFloor = data.messages(6).find((post) => post.integer(3) === 1n);
-  return {
+  const summary = {
     views: count(data.integer(37)),
     title: thread.string(3) || "无标题主题帖",
     forum: forum.string(2) || thread.string(28),
@@ -278,6 +302,82 @@ export async function readTiebaDiscoveryThread(tid: string, send: typeof fetch =
     replies: count(thread.integer(4)),
     likes: count(tiebaFields(thread.bytes(126) ?? empty).integer(1)),
     shares: count(thread.integer(135)),
+  };
+  return { summary, firstFloor };
+}
+
+export type TiebaSourcePart =
+  | { kind: "text"; text: string; href?: string }
+  | { kind: "image"; url: string };
+
+/** Read the original post and its references for use as source material. */
+export async function readTiebaThreadSource(
+  tid: string,
+  send: typeof fetch = fetch,
+  includeOrderedParts = false,
+) {
+  const { summary, firstFloor } = await readThreadOverview(tid, send);
+  return {
+    id: tid,
+    url: tiebaThreadUrl(tid),
+    title: summary.title,
+    forum: summary.forum,
+    author: summary.author,
+    publishedAt: summary.publishedAt,
+    firstFloor: firstFloor
+      ? sourcePostContent(firstFloor, includeOrderedParts)
+      : null,
+  };
+}
+
+function sourcePostContent(
+  post: ReturnType<typeof tiebaFields>,
+  includeOrderedParts: boolean,
+) {
+  const fragments = post.messages(5);
+  const fragmentLimit = 200;
+  const textLimit = 30_000;
+  const textParts: string[] = [];
+  const hrefs = new Set<string>();
+  const images = new Set<string>();
+  const parts: TiebaSourcePart[] | undefined = includeOrderedParts
+    ? []
+    : undefined;
+  for (const fragment of fragments.slice(0, fragmentLimit)) {
+    const type = fragment.integer(1) ?? 0n;
+    if (type === 3n) {
+      // PbContent origin_src, big_cdn_src, cdn_src, then src.
+      let imageUrl = "";
+      for (const field of [25, 9, 8, 4]) {
+        const value = fragment.string(field);
+        const url = URL.parse(value.startsWith("//") ? `https:${value}` : value);
+        if (
+          url &&
+          (url.protocol === "https:" || url.protocol === "http:") &&
+          !url.username && !url.password && !url.port
+        ) {
+          imageUrl = url.href;
+          break;
+        }
+      }
+      if (imageUrl) images.add(imageUrl);
+      parts?.push({ kind: "image", url: imageUrl });
+    } else if (type === 0n || type === 1n) {
+      // Fragments can split a line around an inline link. Keep the text bytes' whitespace.
+      const text = fragment.bytes(2)?.toString("utf8") ?? "";
+      const href = type === 1n ? fragment.string(3) : "";
+      textParts.push(text);
+      if (href) hrefs.add(href);
+      parts?.push(href ? { kind: "text", text, href } : { kind: "text", text });
+    }
+  }
+  const text = textParts.join("").trim();
+  return {
+    text: text.slice(0, textLimit),
+    hrefs: [...hrefs],
+    images: [...images],
+    truncated: fragments.length > fragmentLimit || text.length > textLimit,
+    ...(parts ? { parts } : {}),
   };
 }
 
@@ -438,6 +538,7 @@ export async function queryTiebaAnalysisForumPosts(
       const embeddedMatches = !embeddedUid || embeddedUid === authorUid;
       const agree = tiebaFields(post.bytes(126) ?? empty);
       const title = post.string(3) || "无标题主题帖";
+      const fragments = discoverResources ? contentFragments(post, 142) : undefined;
       threads.set(tid, {
         id: tid,
         forumId: id,
@@ -459,16 +560,13 @@ export async function queryTiebaAnalysisForumPosts(
         replies: count(post.integer(4)),
         likes: count(agree.integer(1)),
         shares: count(post.integer(135)),
-        ...(discoverResources === "old"
-          ? { oldResource: oldResourceEvidence([
+        ...(fragments ? {
+            oldResource: oldResourceEvidence([
               { source: "标题", text: title },
-              { source: "正文", ...contentFragments(post, 142) },
-            ]) }
-          : discoverResources
-          ? {
-              resource: discoveryEvidence(post, 142, title),
-            }
-          : {}),
+              { source: "正文", ...fragments },
+            ]),
+            resource: resourceEvidence(title, fragments.text, fragments.hrefs),
+          } : {}),
       });
     }
     if (!allowEmptyPage && !threads.size && hasMore === 1n && (discoverResources !== "old" || data.messages(7).length))

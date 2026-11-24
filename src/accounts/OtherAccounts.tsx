@@ -410,7 +410,7 @@ export default function OtherAccounts({
           />
         </div>
         <TabPanel value={filter}>
-          <AccountBatchToolbar batch={batch} providerName={filter==="all"?null:otherProviderName(filter)} disabled={!!pending||!accounts.ready}/>
+          <AccountBatchToolbar storageKey={`account-batch-panel:${data!.dataPath}:other`} batch={batch} providerName={filter==="all"?null:otherProviderName(filter)} disabled={!!pending||!accounts.ready}/>
           {filtered.length ? (
             <div className="website-account-list" aria-label="其他平台账号列表">
               <div className="website-account-column-head" aria-hidden="true">

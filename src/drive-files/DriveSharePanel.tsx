@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import type { DriveShareResult } from "../../shared/zhidao";
 import { ipc } from "../api/client";
-import { useAppActions, useAppNavigation } from "../state";
+import { useAppActions, useAppNavigation, useAppData } from "../state";
+import { shareCreationCapabilities } from "../../shared/share-options";
 import { Button, Notice } from "../ui/primitives";
 import { usePublishingView } from "../zhidao/usePublishingView";
 
@@ -22,6 +23,8 @@ export function DriveSharePanel({
 }) {
   const { notify, refresh } = useAppActions();
   const { navigate } = useAppNavigation();
+  const { data } = useAppData();
+  const provider = data?.accounts.find((a) => a.id === accountId)?.provider;
   const publishing = usePublishingView();
   const [result, setResult] = useState<DriveShareResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,6 +91,12 @@ export function DriveSharePanel({
       }
     }
   };
+  if (provider && !shareCreationCapabilities[provider].supported)
+    return (
+      <div className="drive-share-controls">
+        <p className="muted">{shareCreationCapabilities[provider].note}</p>
+      </div>
+    );
   return (
     <div className="drive-share-controls">
       <p>分别分享所选项目并归档到资源库，请确保有权分享这些文件。</p>

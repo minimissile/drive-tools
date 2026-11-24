@@ -2,6 +2,8 @@ import { z } from "zod";
 import { generationResource } from "./zhidao-generation";
 import { zhidaoAnswerIssue } from "./zhidao-content";
 import { zhidaoContentIssue } from "./zhidao-publishing";
+import { zhidaoTaskNameLimit } from "./zhidao-publishing";
+import type { PublishedResourceUrls } from "./resource-links";
 import {
   normalizeResourceKeywords,
   resourceKeywordsSchema,
@@ -12,10 +14,49 @@ export const publishingSteps = [
   "检查关键词",
   "生成并检查问答",
   "转存与独立链接",
-  "预览与下载",
+  "上传与审核",
 ] as const;
 export const publishingResourceLimit = 50;
 export const publishingQuestionLimit = 20;
+export const publishingLinkTypeSchema = z.enum([
+  "drive",
+  "landing",
+  "redirect",
+]);
+export type PublishingLinkType = z.infer<typeof publishingLinkTypeSchema>;
+export interface PublishingPublicLinks extends PublishedResourceUrls {
+  revision: string;
+}
+export interface PublishingDestination {
+  type: "landing" | "redirect";
+  url: string;
+  revision: string;
+}
+export function publishingTaskName(titles: readonly string[]) {
+  const first =
+    titles
+      .find((title) => title.trim())
+      ?.replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "资源";
+  const title =
+    first.match(/^《[^》]+》/)?.[0] ||
+    first
+      .replace(
+        /\s*(?:百度网盘分享|百度分享|网盘分享|资源分享|下载链接|网盘链接)$/,
+        "",
+      )
+      .trim() ||
+    "资源";
+  const suffix = titles.length > 1 ? `等${titles.length}份问答` : "问答";
+  let short = "";
+  for (const character of title) {
+    if (short.length + character.length + suffix.length > zhidaoTaskNameLimit)
+      break;
+    short += character;
+  }
+  return short.trim() + suffix;
+}
 export const publishingResourceSchema = z.object({
   key: z.string().uuid(),
   resourceId: z.string().max(100).default(""),
@@ -54,7 +95,18 @@ export interface PublishingGeneration {
   drafts: PublishingGenerationDraft[];
   message?: string;
   upgradeLegacy?: true;
-  topics?: { id: string; keyword: string; relatedKeywords: string[] }[];
+  topics?: {
+    id: string;
+    keyword: string;
+    relatedKeywords: string[];
+    intent?: string;
+  }[];
+  planVersion?: 2;
+  excludedKeywords?: { keyword: string; reason: string }[];
+  validation?: {
+    status: "passed" | "failed";
+    issues: { index: number; reason: string }[];
+  };
 }
 export function publishingQuestionIssue(
   row: Pick<PublishingQuestion, "question" | "answer">,
@@ -92,7 +144,12 @@ export interface PublishingRecord {
   legacyUpgraded?: true;
   canUpgradeLegacy?: true;
   generation?: PublishingGeneration;
+  keywordPlan?: {
+    topics: NonNullable<PublishingGeneration["topics"]>;
+    excludedKeywords: { keyword: string; reason: string }[];
+  };
   contentFirst?: true;
+  publicationRunId?: string;
   rowShares?: Record<string, PublishingShare>;
   canonicalShare?: { url: string; version: number };
   updatedAt: string;
@@ -110,6 +167,13 @@ export interface PublishingShare {
   url: string;
   code: string;
   expiresAt?: string;
+}
+export function publishingSelectionRevision(records: PublishingRecord[]) {
+  return JSON.stringify(
+    records
+      .map((record) => [record.id, record.updatedAt])
+      .sort((a, b) => a[0].localeCompare(b[0])),
+  );
 }
 const htmlEntities: Record<string, string> = {
   "&": "&amp;",
@@ -134,17 +198,18 @@ export function publishingRowShare(
 export function publishingRowsWithLinks(
   record: PublishingRecord,
   rows = record.rows,
+  destination?: PublishingDestination,
 ) {
   if (!record.contentFirst) return rows;
   return rows.map((row, index) => {
     const share = publishingRowShare(record, row, index);
     if (!share) return row;
-    const url = new URL(share.url);
-    if (share.code) url.searchParams.set("pwd", share.code);
+    const url = new URL(destination?.url ?? share.url);
+    if (!destination && share.code) url.searchParams.set("pwd", share.code);
     const href = escapePublishingHtml(url.href);
     return {
       ...row,
-      answer: `<p><strong>点击链接获取网盘资源：</strong><br/></p><p><a href="${href}">${href}</a><br/></p>${row.answer}`,
+      answer: `<p><strong>${destination?.type === "landing" ? "点击查看资源介绍与获取入口：" : destination?.type === "redirect" ? "点击直达网盘资源：" : "点击链接获取网盘资源："}</strong><br/></p><p><a href="${href}">${href}</a><br/></p>${row.answer}`,
     };
   });
 }
@@ -234,5 +299,28 @@ export interface ZhidaoWorkflowContract {
     args: z.infer<typeof savePublishingRowsSchema>;
     value: PublishingRecord;
   };
-  "zhidao.workflow.export": { args: { ids: string[] }; value: string | null };
+  "zhidao.workflow.linkOptions": {
+    args: { ids: string[] };
+    value: PublishingPublicLinks;
+  };
+  "zhidao.workflow.export": {
+    args: {
+      ids: string[];
+      linkType?: PublishingLinkType;
+      linkRevision?: string;
+    };
+    value: string | null;
+  };
+  "zhidao.workflow.publish": {
+    args: {
+      ids: string[];
+      accountId: string;
+      taskName: string;
+      selectionRevision: string;
+      linkType?: PublishingLinkType;
+      linkRevision?: string;
+      authorized: true;
+    };
+    value: import("./zhidao").OperationRun;
+  };
 }

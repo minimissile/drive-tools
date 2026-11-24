@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../api/client";
 import { intakeDestination } from "./intake-share";
-import { providerSpecs } from "../../shared/providers";
+import { providerDriveName } from "../../shared/providers";
 import type {
   Account,
   Provider,
@@ -46,6 +46,7 @@ export function useIntakeShare(input: {
   accountId: string;
   directory: string;
   resourceId?: string;
+  localSource?: ShareInput;
   accounts: Account[];
   activeAccounts: Record<string, string>;
   onParsed: (result: Parsed) => void;
@@ -89,6 +90,17 @@ export function useIntakeShare(input: {
     const start = latest.current,
       revision = version.current;
     if (!start.sourceText.trim()) return Promise.resolve(undefined);
+    if (
+      start.localSource &&
+      start.sourceText.trim() === start.localSource.url
+    ) {
+      return Promise.resolve({
+        share: start.localSource,
+        provider: start.localSource.provider,
+        accountId: start.accountId,
+        directory: start.directory,
+      });
+    }
     const key = JSON.stringify([start.sourceText, start.code]);
     if (pending.current?.key === key && pending.current.version === revision)
       return pending.current.promise;
@@ -136,7 +148,7 @@ export function useIntakeShare(input: {
   };
   const validate = (force = false): Promise<void> => {
     const start = latest.current;
-    if (!start.sourceText.trim()) return Promise.resolve();
+    if (!start.sourceText.trim() || start.localSource) return Promise.resolve();
     const key = contextKey(start),
       revision = version.current;
     if (
@@ -193,7 +205,7 @@ export function useIntakeShare(input: {
           show({
             status: "unavailable",
             checkedAt: new Date().toISOString(),
-            message: `请先添加或选择${providerSpecs[parsed.provider].name}网盘账号，再检查链接。`,
+            message: `请先添加或选择${providerDriveName(parsed.provider)}账号，再检查链接。`,
           });
           return;
         }

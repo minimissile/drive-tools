@@ -78,6 +78,7 @@ const rewrittenSections = (
 /** Temporary AppService and per-instance ports only: no browser, global mock, or paid network. */
 async function fixture(
   body = `原文说明：只依据已有资料整理，不承诺学习效果。\n\n![示意图](${sourceImage})\n\n[配套资料](${sourceShare}?pwd=orig) 提取码：orig`,
+  readSource?: NonNullable<AppPorts["wechat"]>["readArticle"],
 ) {
   const dir = await mkdtemp(join(tmpdir(), "panxu-wechat-test-"));
   const drive = new TestProvider();
@@ -177,7 +178,7 @@ async function fixture(
     wechat: {
       readArticle: async (url) => {
         control.reads++;
-        return { ...control.source, url };
+        return readSource ? readSource(url) : { ...control.source, url };
       },
       saveDraft: async (_account, payload, beforeSubmit, onReceipt) => {
         await control.beforeWrite?.();
@@ -227,6 +228,7 @@ async function fixture(
       xunlei: drive,
       guangya: drive,
       pikpak: drive,
+      cmcc: drive,
     },
     ports,
     () => {},
@@ -697,6 +699,295 @@ test("公众号导入：正文、来源、提取码和插图入本地，重复�
       }),
     );
     assert.equal(f.control.reads, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("贴吧导入：以帖子 ID 去重，保留来源、网盘码和首图，验证失败不落稿", async () => {
+  const url = "https://tieba.baidu.com/p/9063569462";
+  const image = "https://tiebapic.baidu.com/forum/pic/item/fixture.jpg";
+  let blocked = true;
+  let mismatch = false;
+  const f = await fixture(undefined, async (requested) => {
+    assert.equal(requested, url);
+    if (blocked)
+      throw new AppError(
+        "TIEBA_ARTICLE_VERIFICATION",
+        "请完成百度安全验证后重试。",
+      );
+    return {
+      kind: "tieba",
+      url: mismatch ? "https://tieba.baidu.com/p/123456" : requested,
+      title: "帖子原始标题",
+      author: "楼主昵称",
+      publishedAt: "2024-06-24 10:30",
+      body: `主楼内容\n\n![主楼配图](${image})\n\n[配套资料](${sourceShare}) 提取码：orig`,
+      imageCount: 1,
+      warnings: [],
+    };
+  });
+  try {
+    for (const invalid of [
+      "https://tieba.baidu.com/f?kw=test",
+      "https://tieba.baidu.com.example.org/p/9063569462",
+      "https://someone@tieba.baidu.com/p/9063569462",
+    ])
+      await assert.rejects(f.invoke("wechat.import", { url: invalid }));
+    assert.equal(f.control.reads, 0);
+
+    await assert.rejects(f.invoke("wechat.import", { url }), /百度安全验证/);
+    assert.equal((await f.invoke("wechat.list")).length, 0);
+    blocked = false;
+    mismatch = true;
+    await assert.rejects(
+      f.invoke("wechat.import", { url }),
+      /帖子与导入链接不一致/,
+    );
+    assert.equal((await f.invoke("wechat.list")).length, 0);
+
+    mismatch = false;
+    const { article } = await f.invoke("wechat.import", {
+      url: "http://tieba.baidu.com/p/9063569462/?pn=2&see_lz=1#reply",
+    });
+    assert.equal(article.source.kind, "tieba");
+    assert.equal(article.source.url, url);
+    assert.equal(article.source.author, "楼主昵称");
+    assert.equal(article.title, "帖子原始标题");
+    assert.equal(article.author, "");
+    assert.equal(article.coverUrl, image);
+    assert.equal(article.links[0].url, sourceShare);
+    assert.equal(article.links[0].code, "orig");
+    const edited = await f.save(
+      await f.invoke("wechat.get", { id: article.id }),
+      {
+        title: "已修改的草稿标题",
+      },
+    );
+    const repeated = await f.invoke("wechat.import", { url });
+    assert.equal(repeated.article.id, edited.article.id);
+    assert.equal(repeated.article.title, "已修改的草稿标题");
+    assert.equal(f.control.reads, 3);
+    assert.equal((await f.invoke("wechat.list")).length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("贴吧重导给旧稿原位补上百度网盘，仅关联相同提取码并保留本地编辑", async () => {
+  const url = "https://tieba.baidu.com/p/111000222";
+  const share = "https://pan.baidu.com/s/1OldArticleRepair";
+  const bare = "百度网盘\n\n提取码：s7K2";
+  const linked = `[百度网盘](${share}?pwd=s7K2)\n\n提取码：s7K2`;
+  const original = `主楼的说明\n\n[配套资料](${sourceShare}?pwd=orig)\n\n${bare}`;
+  let nextBody: string | null = original;
+  let beforeRead: (() => Promise<void>) | undefined;
+  const f = await fixture(undefined, async (requested) => {
+    assert.equal(requested, url);
+    await beforeRead?.();
+    if (nextBody === null) throw new Error("网络不可用");
+    return {
+      kind: "tieba",
+      url,
+      title: "帖子标题",
+      author: "楼主昵称",
+      publishedAt: "2024-06-24 10:30",
+      body: nextBody,
+      imageCount: 0,
+      warnings: [],
+    };
+  });
+  try {
+    const detail = await f.invoke("wechat.import", { url });
+    const edited = await f.save(detail, {
+      title: "本地改稿标题",
+      body: detail.article.body.replace("主楼的说明", "我整理的正文"),
+    });
+    nextBody = null;
+    assert.deepEqual(
+      (await f.invoke("wechat.import", { url })).article,
+      edited.article,
+    );
+
+    nextBody = original.replace(bare, linked.replaceAll("s7K2", "oops"));
+    assert.deepEqual(
+      (await f.invoke("wechat.import", { url })).article,
+      edited.article,
+    );
+
+    nextBody = `原帖后来修改了先前的说明\n\n${linked}`;
+    let entered!: () => void, resume!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const paused = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    beforeRead = async () => {
+      entered();
+      await paused;
+    };
+    const pending = f.invoke("wechat.import", { url });
+    await reading;
+    const concurrent = await f.save(edited, { digest: "改稿摘要" });
+    resume();
+    assert.deepEqual((await pending).article, concurrent.article);
+    beforeRead = undefined;
+
+    const repaired = (await f.invoke("wechat.import", { url })).article;
+    assert.equal(repaired.id, edited.article.id);
+    assert.equal(repaired.title, edited.article.title);
+    assert.equal(repaired.digest, "改稿摘要");
+    assert.equal(repaired.revision, concurrent.article.revision + 1);
+    assert.equal(repaired.source.body, original.replace(bare, linked));
+    assert.equal(repaired.body, concurrent.article.body.replace(bare, linked));
+    assert.deepEqual(repaired.links[0], edited.article.links[0]);
+    assert.equal(repaired.links[1].url, share);
+    assert.equal(repaired.links[1].code, "s7K2");
+    assert.equal((await f.invoke("wechat.list")).length, 1);
+    assert.deepEqual(
+      (await f.invoke("wechat.import", { url })).article,
+      repaired,
+    );
+    assert.equal(f.control.reads, 5);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("贴吧旧稿已移除百度网盘标签时仅修复原文对照", async () => {
+  const url = "https://tieba.baidu.com/p/111000223";
+  const share = "https://pan.baidu.com/s/1SourceOnlyRepair?pwd=Xq62";
+  let label = "百度网盘";
+  const f = await fixture(undefined, async () => ({
+    kind: "tieba",
+    url,
+    title: "帖子标题",
+    author: "",
+    publishedAt: "",
+    body: `原文\n\n${label}\n\n提取码：Xq62`,
+    imageCount: 0,
+    warnings: [],
+  }));
+  try {
+    const detail = await f.invoke("wechat.import", { url });
+    const edited = await f.save(detail, { body: "我独立整理的说明" });
+    label = `[百度网盘](${share})`;
+    const repaired = (await f.invoke("wechat.import", { url })).article;
+    assert.equal(repaired.id, edited.article.id);
+    assert.equal(repaired.revision, edited.article.revision);
+    assert.equal(repaired.body, edited.article.body);
+    assert.deepEqual(repaired.links, []);
+    assert.ok(repaired.source.body.includes(label));
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("贴吧重导恢复旧稿配图位置和百度链接，并保留其他稿件数据", async () => {
+  const url = "https://tieba.baidu.com/p/111000224";
+  const first =
+    "![贴吧配图](https://tiebapic.baidu.com/forum/pic/item/first.jpg)";
+  const second =
+    "![贴吧配图](https://tiebapic.baidu.com/forum/pic/item/second.jpg)";
+  const baidu = "https://pan.baidu.com/s/1TiebaLayout?pwd=R7k2";
+  const quark = `[配套资料](${sourceShare}?pwd=orig)`;
+  const cloud = "https://www.123pan.com/s/ExampleLink";
+  const tail = `\n\n${quark}\n\n${cloud}提取码：p123\n\n百度网盘\n\n提取码：R7k2`;
+  const original = `原文第一段第二段第三段${tail}\n\n${first}\n\n${second}`;
+  const ordered =
+    `原文第一段\n\n${first}\n\n第二段\n\n${second}\n\n第三段` +
+    tail
+      .replace(`${cloud}提取码`, `${cloud} 提取码`)
+      .replace("百度网盘\n", `[百度网盘](${baidu})\n`);
+  let sourceBody = original;
+  const f = await fixture(undefined, async () => ({
+    kind: "tieba",
+    url,
+    title: "帖子标题",
+    author: "",
+    publishedAt: "",
+    body: sourceBody,
+    imageCount: 2,
+    preservesImageOrder: sourceBody === ordered ? true : undefined,
+    warnings: [],
+  }));
+  try {
+    const detail = await f.invoke("wechat.import", { url });
+    const edited = await f.save(detail, {
+      title: "已保存的标题",
+      coverUrl: sourceImage,
+    });
+    sourceBody = ordered;
+    const repaired = (await f.invoke("wechat.import", { url })).article;
+    assert.equal(repaired.id, edited.article.id);
+    assert.equal(repaired.title, edited.article.title);
+    assert.equal(repaired.coverUrl, sourceImage);
+    assert.equal(repaired.revision, edited.article.revision + 1);
+    assert.equal(repaired.source.kind, "tieba");
+    assert.equal(repaired.source.preservesImageOrder, true);
+    assert.equal(repaired.source.body, ordered);
+    assert.ok(
+      repaired.body.startsWith(
+        `原文第一段\n\n${first}\n\n第二段\n\n${second}\n\n第三段`,
+      ),
+    );
+    assert.deepEqual(repaired.links[0], edited.article.links[0]);
+    assert.equal(repaired.links[1].code, "R7k2");
+    assert.equal((await f.invoke("wechat.list")).length, 1);
+    assert.deepEqual(
+      (await f.invoke("wechat.import", { url })).article,
+      repaired,
+    );
+    assert.equal(f.control.reads, 2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("贴吧旧稿配图只采用同文同图的有序原文，不覆盖已编辑的正文", async () => {
+  const url = "https://tieba.baidu.com/p/111000225";
+  const first = "![贴吧配图](https://tiebapic.baidu.com/forum/pic/item/a.jpg)";
+  const second = "![贴吧配图](https://tiebapic.baidu.com/forum/pic/item/b.jpg)";
+  const share = `[配套资料](${sourceShare}?pwd=orig)`;
+  const original = `第一段。第二段。${share}\n\n${first}\n\n${second}`;
+  const ordered = `第一段。\n\n${first}\n\n第二段。\n\n${second}\n\n${share}`;
+  let sourceBody = original;
+  let orderedRead = false;
+  const f = await fixture(undefined, async () => ({
+    kind: "tieba",
+    url,
+    title: "帖子标题",
+    author: "",
+    publishedAt: "",
+    body: sourceBody,
+    imageCount: 2,
+    preservesImageOrder: orderedRead ? true : undefined,
+    warnings: [],
+  }));
+  try {
+    const detail = await f.invoke("wechat.import", { url });
+    const edited = await f.save(detail, { body: "我独立整理的说明" });
+    orderedRead = true;
+    for (const mismatch of [
+      ordered.replace("第二段。", "另一段。"),
+      `第一段。\n\n${second}\n\n第二段。\n\n${first}\n\n${share}`,
+      ordered.replace("pwd=orig", "pwd=alt9"),
+    ]) {
+      sourceBody = mismatch;
+      assert.deepEqual(
+        (await f.invoke("wechat.import", { url })).article,
+        edited.article,
+      );
+    }
+    sourceBody = ordered;
+    const repaired = (await f.invoke("wechat.import", { url })).article;
+    assert.equal(repaired.revision, edited.article.revision);
+    assert.equal(repaired.body, edited.article.body);
+    assert.deepEqual(repaired.links, edited.article.links);
+    assert.equal(repaired.source.kind, "tieba");
+    assert.equal(repaired.source.body, ordered);
+    assert.equal(repaired.source.preservesImageOrder, true);
   } finally {
     await f.cleanup();
   }
@@ -2731,6 +3022,7 @@ test("公众号中断恢复：重开临时工作空间后保留未知意图，�
         xunlei: f.drive,
         guangya: f.drive,
         pikpak: f.drive,
+        cmcc: f.drive,
       },
       f.ports,
       () => {},
@@ -2806,6 +3098,7 @@ test("成功回执落盘后中断：新旧回执重开直接恢复，不重新�
             xunlei: f.drive,
             guangya: f.drive,
             pikpak: f.drive,
+            cmcc: f.drive,
           },
           f.ports,
           () => {},

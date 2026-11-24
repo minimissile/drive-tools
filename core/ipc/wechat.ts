@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  wechatArticleUrl,
+  wechatImportUrl,
   wechatRegenerateImagesInput,
   wechatThemeImagesInput,
   wechatTextInput,
@@ -86,7 +86,7 @@ export function createWechatHandlers({
       );
     },
     "wechat.import": (raw) =>
-      wechat.importArticle(z.object({ url: wechatArticleUrl }).parse(raw).url),
+      wechat.importArticle(z.object({ url: wechatImportUrl }).parse(raw).url),
     "wechat.save": (raw) => {
       const i = version.extend(wechatTextInput.shape).parse(raw);
       return wechat.save(i.id, i.revision, i);

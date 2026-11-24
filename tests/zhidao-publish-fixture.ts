@@ -27,6 +27,7 @@ export async function publishingFixture() {
     },
     mode: "success" as "success" | "unknown" | "missing-id" | "reject",
     identity: "qa-publisher",
+    identityGate: null as Promise<void> | null,
     envelope: 0,
     failTasks: false,
     taskStatus: 0,
@@ -35,6 +36,7 @@ export async function publishingFixture() {
     uploadGate: null as Promise<void> | null,
   };
   const accepted: { id: string; taskName: string; count: number }[] = [];
+  const downloads: Uint8Array[] = [];
   const provider = new TestProvider();
   const service = new AppService(
     dir,
@@ -44,7 +46,7 @@ export async function publishingFixture() {
       decrypt: async (v) => Buffer.from(v, "base64").toString(),
     },
     Object.fromEntries(
-      ["quark", "baidu", "uc", "xunlei", "guangya", "pikpak"].map((key) => [
+      ["quark", "baidu", "uc", "xunlei", "guangya", "pikpak", "cmcc"].map((key) => [
         key,
         provider,
       ]),
@@ -63,7 +65,10 @@ export async function publishingFixture() {
       openExternal: async () => {
         throw Error("隔离测试禁止打开外部浏览器");
       },
-      saveFile: async () => null,
+      saveFile: async (_name, bytes) => {
+        downloads.push(bytes);
+        return null;
+      },
       zhidaoSession: {
         login: async (accountId, page) => {
           events.push({ type: "open", accountId, path: page });
@@ -76,14 +81,15 @@ export async function publishingFixture() {
           assert.equal(url.origin, "https://zhidao.baidu.com");
           events.push({ type: "request", accountId, path: url.pathname });
           let value: unknown;
-          if (url.pathname === "/api/logininfo")
+          if (url.pathname === "/api/logininfo") {
+            if (state.identityGate) await state.identityGate;
             value = {
               isLogin: 1,
               uid: state.identity,
               userName: "发布模拟答主",
               stoken: "fixture-only",
             };
-          else if (url.pathname === "/qa/api/bulkqa/userinfo")
+          } else if (url.pathname === "/qa/api/bulkqa/userinfo")
             value = {
               code: state.envelope,
               data: { uid: state.identity, ...state.rights },
@@ -178,11 +184,13 @@ export async function publishingFixture() {
   return {
     invoke,
     service,
+    provider,
     dir,
     account,
     events,
     state,
     accepted,
+    downloads,
     seed,
     async cleanup() {
       service.close();

@@ -1,3 +1,4 @@
+import { ownPage } from "./own-list-page";
 import { quarkMembership } from "./membership";
 import { quarkIdentity } from "./quark-identity";
 import { uploadQuark } from "./quark-upload";
@@ -201,6 +202,17 @@ export class QuarkProvider implements DriveProvider {
       page,
       parentId,
     };
+  }
+  async listPage(account: Account, parentId: string, cursor = "") {
+    const page = ownPage(cursor);
+    const result = await this.request(account, "file/sort", { pdir_fid: parentId, _page: page, _size: 100, _fetch_total: 1, _sort: "file_type:asc,file_name:asc", fetch_all_file: 1 });
+    const rows = result.data?.list;
+    if (!Array.isArray(rows)) throw new AppError("REMOTE_SCHEMA_CHANGED", `${this.label}目标文件列表格式变化。`);
+    const total = result.metadata?._total;
+    const hasTotal = total != null && Number.isFinite(Number(total)) && Number(total) >= 0;
+    const more = hasTotal ? page * 100 < Number(total) : rows.length >= 100;
+    if (!rows.length && more) throw new AppError("INCOMPLETE_LIST", "平台返回空分页但仍有剩余文件，请重试此目录。");
+    return { files: rows.map((r: JsonObject) => normalizeRemoteFile(r, this.id, parentId)), next: more ? String(page + 1) : null };
   }
   async list(account: Account, parentId: string) {
     const files: RemoteFile[] = [];

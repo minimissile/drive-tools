@@ -1,3 +1,6 @@
+import { baiduMembershipParserRevision } from "../shared/drive-membership";
+import { indexedOwnSource } from "./drive-sync-resource";
+import { DriveSync } from "./drive-sync";
 import { AccountBatches } from "./account-batches";
 import { providerSpecs } from "../shared/providers";
 import { websiteProviderSpecs } from "../shared/website-accounts";
@@ -199,6 +202,7 @@ export class AppService {
   private switchingWorkspace = false;
   private capacityRequests = new Map<string, Promise<Account>>();
   readonly accountBatches: AccountBatches;
+  readonly driveSync: DriveSync;
   readonly mutex = new AccountMutex();
   constructor(
     readonly dataPath: string,
@@ -363,6 +367,7 @@ export class AppService {
               "本人分享未通过实时核验，请检查后再生成或发布。",
             );
         },
+        validateWorkflowItem: (item) => this.zhidaoWorkflow.validatePublicationItem(item),
       },
     );
     this.zhidaoPages = new ZhidaoPageDiscovery(
@@ -649,7 +654,8 @@ export class AppService {
       repo: this.repo,
       resources: this.resourceDeletion,
       hasRunningJobs: () =>
-        this.hasRunningJobs(true) || this.resourceDeletion.isBusy,
+        this.hasRunningJobs({ ignoreAccountDeletion: true }) ||
+        this.resourceDeletion.isBusy,
       locked: (id, action) => this.mutex.run(id, action),
       clearSession: (id) => this.ports.clearSession(id),
       changed,
@@ -662,7 +668,11 @@ export class AppService {
       repo: this.repo,
       secrets: this.secrets,
       driveFiles: this.driveFiles,
-      hasRunningJobs: () => this.hasRunningJobs(false, true),
+      hasRunningJobs: () =>
+        this.hasRunningJobs({
+          ignoreDiscoveryQuestions: true,
+          ignoreResearchWindows: true,
+        }),
       assertIdle: (accountId) => this.assertNoActiveJobs(accountId, true),
       assertMutable: (resourceId) =>
         this.resourceDeletion.assertMutable(resourceId),
@@ -684,6 +694,14 @@ export class AppService {
       saveResource: (input) => this.saveResource(input),
       shareCreation: this.shareCreation,
       checkShare: (id) => this.checkShare(id),
+      resourcePublishedUrls: (resourceId) => {
+        const links = this.resourceLinks.publishedUrls(resourceId);
+        return { ...links, revision: links.revision ?? "" };
+      },
+      publication: {
+        get: (id) => this.zhidao.store.run(id),
+        start: (...args) => this.zhidao.startWorkflowPublication(...args),
+      },
       changed,
     });
     this.resourceCatalogs = new ResourceCatalogs(
@@ -843,7 +861,31 @@ export class AppService {
         return null;
       },
     });
+    this.driveSync = new DriveSync({
+      db: this.db,
+      account: (accountId) => this.repo.getAccount(accountId),
+      supported: (account) => !!this.providers[account.provider].listPage,
+      environment: (accountId) => {
+        const account = this.repo.getAccount(accountId);
+        if (!supportsDriveBrowser(account.provider))
+          return JSON.stringify({engine:"electron",profileId:`persist:panxu-${accountId}`,provider:account.provider,uid:account.uid});
+        if (!this.db.get("SELECT 1 FROM browser_environment_accounts WHERE kind='drive' AND account_id=?", accountId))
+          this.environments.registerAccount({ kind: "drive", id: accountId });
+        return JSON.stringify(this.environments.stamp({ kind: "drive", id: accountId }));
+      },
+      withAccount: (accountId, action, signal) => {
+        const account = this.repo.getAccount(accountId);
+        if (!supportsDriveBrowser(account.provider))
+          return this.authenticated(accountId, action);
+        return this.environmentQueue.schedule(
+          [{ kind: "drive", id: accountId }], "网盘目录同步与资源登记",
+          () => this.authenticated(accountId, action), signal,
+        );
+      },
+      changed,
+    });
     this.handlers = createApplicationHandlers({
+      driveSync: this.driveSync,
       accountBatches: this.accountBatches,
       systemLogs: this.systemLogs,
       tiebaAutomation: this.tiebaAutomation,
@@ -1045,6 +1087,7 @@ export class AppService {
     this.db.setSetting(`account:membership:${accountId}`, {
       ownerUid: account.uid,
       value: account.membership?.value ?? null,
+      parserRevision: account.membership?.parserRevision,
       updatedAt: account.membership?.updatedAt ?? null,
       attemptedAt: now(),
       error: safeMessage(error),
@@ -1062,11 +1105,11 @@ export class AppService {
       const current=this.repo.getAccount(account.id);
       if (!current.enabled || current.uid!==account.uid) return;
       const time=now();
-      this.db.setSetting(`account:membership:${account.id}`,{ownerUid:account.uid,value,updatedAt:time,attemptedAt:time,error:null});
+      this.db.setSetting(`account:membership:${account.id}`,{ownerUid:account.uid,value,parserRevision:account.provider==="baidu"?baiduMembershipParserRevision:undefined,updatedAt:time,attemptedAt:time,error:null});
     } catch(error) {
       const current=this.repo.getAccount(account.id);
       if (!current.enabled || current.uid!==account.uid) return;
-      this.db.setSetting(`account:membership:${account.id}`,{ownerUid:account.uid,value:previous?.value??null,updatedAt:previous?.updatedAt??null,attemptedAt:now(),error:safeMessage(error)});
+      this.db.setSetting(`account:membership:${account.id}`,{ownerUid:account.uid,value:previous?.value??null,parserRevision:previous?.parserRevision,updatedAt:previous?.updatedAt??null,attemptedAt:now(),error:safeMessage(error)});
     }
     this.changed();
   }
@@ -1210,7 +1253,8 @@ export class AppService {
         "OWNED_TRANSFER_BLOCKED",
         "自有资源直接入库，不创建转存任务。",
       );
-    const source = parseShare(input.sourceText, input.extractionCode),
+    const indexedSource = indexedOwnSource(this.db, input);
+    const source = indexedSource ?? parseShare(input.sourceText, input.extractionCode),
       account = this.account(input.accountId);
     if (source.provider !== account.provider)
       throw new AppError(
@@ -1343,6 +1387,7 @@ export class AppService {
     if (
       input.isOwnResource &&
       priorCopy?.status === "ready" &&
+      !indexedSource &&
       this.repo.getCopy(priorCopy.id).shareUrl !== source.url
     )
       throw new AppError(
@@ -1443,7 +1488,7 @@ export class AppService {
           directory,
           copyId,
         );
-      if (input.isOwnResource) {
+      if (input.isOwnResource && !indexedSource) {
         this.db.run(
           "UPDATE resources SET source_kind='owned' WHERE id=?",
           resourceId,
@@ -1520,10 +1565,15 @@ export class AppService {
       this.changed();
     }
   }
-  private hasRunningJobs(
+  private hasRunningJobs({
     ignoreAccountDeletion = false,
     ignoreDiscoveryQuestions = false,
-  ) {
+    ignoreResearchWindows = false,
+  }: {
+    ignoreAccountDeletion?: boolean;
+    ignoreDiscoveryQuestions?: boolean;
+    ignoreResearchWindows?: boolean;
+  } = {}) {
     return (
       this.keywordLookupBusy ||
       this.photoPosts.isBusy ||
@@ -1533,10 +1583,13 @@ export class AppService {
       (!ignoreDiscoveryQuestions && this.baiduDiscoveryQuestions?.isBusy) ||
       (!ignoreDiscoveryQuestions && this.zhidaoWorkflow?.isBusy) ||
       this.accountBatches?.isBusy ||
+      this.driveSync?.isBusy ||
       this.driveBrowsers.isBusy ||
-      !!this.ports.baiduDiscovery?.isOpen() ||
-      !!this.ports.keywordWebBrowser?.isOpen() ||
-      !!this.ports.baiduShareReader?.isOpen() ||
+      // Visible research pages hold workspace updates, but do not occupy a drive account.
+      // Real lookups, transfer jobs and account/environment locks remain checked separately.
+      (!ignoreResearchWindows && !!this.ports.baiduDiscovery?.isOpen()) ||
+      (!ignoreResearchWindows && !!this.ports.keywordWebBrowser?.isOpen()) ||
+      (!ignoreResearchWindows && !!this.ports.baiduShareReader?.isOpen()) ||
       this.resourceLinks?.isBusy ||
       this.resourceLanding?.isBusy ||
       this.shareCreation?.isBusy ||
@@ -1940,6 +1993,7 @@ export class AppService {
     this.zhidao.close();
     this.zhidaoPages.close();
     this.queue.stop();
+    this.driveSync.close();
     this.accountBatches.close();
     this.environmentQueue.close();
     this.db.close();

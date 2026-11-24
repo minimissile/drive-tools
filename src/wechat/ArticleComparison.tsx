@@ -8,6 +8,15 @@ import { wechatPreviewHtml } from "./image-preview";
 import { ArticleTemplateSelect } from "./ArticleTemplateSelect";
 import type { WechatTemplateId } from "../../shared/wechat-templates";
 
+const sourceLabels: Record<
+  NonNullable<WechatArticle["source"]["kind"]>,
+  string
+> = {
+  "resource-catalog": "导出时的清单",
+  "keyboard-skins": "初始合集",
+  tieba: "贴吧原帖",
+};
+
 export function ArticleComparison({
   source,
   current,
@@ -24,12 +33,7 @@ export function ArticleComparison({
   onClose(): void;
 }) {
   const [error, setError] = useState("");
-  const sourceLabel =
-    source.kind === "resource-catalog"
-      ? "导出时的清单"
-      : source.kind === "keyboard-skins"
-        ? "初始合集"
-        : "原文";
+  const sourceLabel = source.kind ? sourceLabels[source.kind] : "原文";
   return (
     <Dialog
       title="全屏预览"

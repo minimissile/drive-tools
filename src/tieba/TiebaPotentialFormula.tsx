@@ -10,6 +10,7 @@ import {
   recentGrowthMaxReadingHours,
   tiebaCumulativeTrafficDays,
   tiebaDiscoveryRulesSchema,
+  tiebaForumNoResourceLimit,
   type TiebaDiscoveryRules,
 } from "../../shared/tieba-resource-discovery";
 import type { useIpcQuery } from "../api/useIpcQuery";
@@ -61,6 +62,11 @@ export function TiebaPotentialFormula({
             <p>当前后台未返回完整的发现规则。可点击「应用更新并重启」后再查看。</p>
           )}
           <dl>
+            <dt>跳过贴吧</dt>
+            <dd>
+              资源发现按顺序检查帖子标题和列表摘要。同一个贴吧连续 {tiebaForumNoResourceLimit} 篇没有网盘线索时，停止本轮翻页并记录到扫描日志。
+              重复帖子只计一次，发现网盘线索后重新计数。
+            </dd>
             <dt>帖子曝光潜力</dt>
             <dd>
               读取时的累计浏览量 ÷ 发帖到此次读取经过的时间。发帖不足半小时，按半小时算。

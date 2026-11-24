@@ -1,3 +1,4 @@
+import type { DriveSyncContract } from "./drive-sync";
 import type { AccountBatchContract } from "./account-batch";
 import type { PhotoPostContract } from "./photo-posts";
 import type { SystemLogContract } from "./system-logs";
@@ -128,6 +129,7 @@ export interface IpcContract
     JianshuContract,
     WechatContract,
     DriveFilesContract,
+    DriveSyncContract,
     DriveBrowserContract,
     DistributionContract,
     ZhihuContract,
@@ -268,9 +270,11 @@ export type IpcArguments<M extends IpcMethod> =
 
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
+  "driveSync.index",
   "accountBatch.current",
   "jianshu.list", "jianshu.get", "jianshu.sources", "jianshu.matches", "jianshu.image",
   "zhidao.workflow.get",
+  "zhidao.workflow.linkOptions",
   "zhidao.workflow.resources",
   "systemLogs.list",
   "zhihu.participation.snapshot",

@@ -3,6 +3,9 @@ import type {
   PublishingQuestion,
   PublishingRecord,
   PublishingResource,
+  PublishingDestination,
+  PublishingLinkType,
+  PublishingPublicLinks,
 } from "../../shared/zhidao-workflow";
 import {
   publishingQuestionIssue,
@@ -11,6 +14,7 @@ import {
   publishingLinkIssue,
   publishingRowShare,
   publishingRowsWithLinks,
+  publishingSelectionRevision,
 } from "../../shared/zhidao-workflow";
 import {
   defaultGenerationRules,
@@ -25,6 +29,7 @@ import { now } from "../database";
 import { hasVerifiedShare } from "../../shared/share-status";
 import type { Job, ShareCheck } from "../../shared/types";
 import type { AiService } from "../ai";
+import type { OperationItem, OperationRun } from "../../shared/zhidao";
 import { decodeHtml } from "./parsers";
 import { publicationWorkbook } from "./publishing";
 import {
@@ -32,6 +37,7 @@ import {
   publishingGenerationBatchSize,
   publishingTextKey,
   planPublishingTopics,
+  reviewPublishingDrafts,
 } from "./publishing-generation";
 
 type Dependencies = Pick<
@@ -43,7 +49,20 @@ type Dependencies = Pick<
   | "shareCreation"
   | "checkShare"
   | "changed"
-> & { ai: Pick<AiService, "assertTextConfigured" | "resourceExport"> };
+> & {
+  ai: Pick<AiService, "assertTextConfigured" | "resourceExport">;
+  resourcePublishedUrls?: (resourceId: string) => PublishingPublicLinks;
+  publication?: {
+    get(id: string): OperationRun;
+    start(
+      records: PublishingRecord[],
+      accountId: string,
+      taskName: string,
+      onCreated: (run: OperationRun) => void,
+      destination?: PublishingDestination,
+    ): OperationRun;
+  };
+};
 const key = (id: string) => `zhidao-publishing-resource:${id}`;
 const legacyShareCheckFailure = "本人分享检查未通过，请在资源库处理后继续。";
 function shareCheckFailure(check: ShareCheck) {
@@ -415,9 +434,22 @@ export class ZhidaoPublishingWorkflow {
     return new Set(
       rows.flatMap(({ data }) => {
         const item = JSON.parse(data);
-        return answerShares(`${item.link || ""} ${item.answer || ""}`).map(
-          (share) => share.url,
-        );
+        return (
+          decodeHtml(`${item.link || ""} ${item.answer || ""}`).match(
+            /https?:\/\/[^\s<>"'，。；）)]+/gi,
+          ) ?? []
+        ).flatMap((raw) => {
+          try {
+            return [parseShare(raw).url];
+          } catch {
+            try {
+              const url = new URL(raw);
+              return url.protocol === "https:" ? [url.href] : [];
+            } catch {
+              return [];
+            }
+          }
+        });
       }),
     );
   }
@@ -833,6 +865,7 @@ export class ZhidaoPublishingWorkflow {
         ).flatMap((_, index) => (record.rows[index]?.reviewed ? [] : [index]));
         if (!targets.length && record.rows.length) return record;
         this.d.ai.assertTextConfigured("copy");
+        const previousGeneration = record.generation;
         record.generation = {
           id: randomUUID(),
           status: "running",
@@ -844,7 +877,16 @@ export class ZhidaoPublishingWorkflow {
                   id: row.id!,
                   keyword: row.keyword,
                   relatedKeywords: row.relatedKeywords ?? [],
+                  intent: previousGeneration?.topics?.find(
+                    (topic) => topic.id === row.id,
+                  )?.intent,
                 })),
+                ...(previousGeneration?.planVersion === 2
+                  ? {
+                      planVersion: 2 as const,
+                      excludedKeywords: previousGeneration.excludedKeywords,
+                    }
+                  : {}),
               }
             : {}),
           ...(upgradeLegacy ? { upgradeLegacy: true as const } : {}),
@@ -871,19 +913,30 @@ export class ZhidaoPublishingWorkflow {
       };
       try {
         if (record.contentFirst && !generation.topics) {
-          const topics = await planPublishingTopics(
+          const plan = await planPublishingTopics(
             this.d.ai,
             record,
             assertCurrent,
           );
           assertCurrent();
-          generation.topics = topics.map((topic) => ({
+          generation.topics = plan.topics.map((topic) => ({
             ...topic,
             id: randomUUID(),
           }));
-          generation.targets = topics.map((_, index) => index);
+          generation.planVersion = 2;
+          generation.excludedKeywords = plan.excludedKeywords;
+          record.keywordPlan = {
+            topics: generation.topics,
+            excludedKeywords: plan.excludedKeywords,
+          };
+          generation.targets = plan.topics.map((_, index) => index);
           this.store(record);
         }
+        if (record.contentFirst && !generation.topics?.length)
+          throw new AppError(
+            "NO_PUBLISHING_TOPICS",
+            "没有适合生成资源获取问答的关键词。请展开关键词取舍明细，返回上一步调整关键词或补充资源事实。",
+          );
         const remaining = generation.targets.filter(
           (index) => !generation.drafts.some((row) => row.index === index),
         );
@@ -903,6 +956,24 @@ export class ZhidaoPublishingWorkflow {
           assertCurrent();
           generation.drafts.push(...batch);
           this.store(record);
+        }
+        if (generation.planVersion === 2) {
+          const issues = await reviewPublishingDrafts(
+            this.d.ai,
+            record,
+            assertCurrent,
+          );
+          assertCurrent();
+          generation.validation = {
+            status: issues.length ? "failed" : "passed",
+            issues,
+          };
+          this.store(record);
+          if (issues.length)
+            throw new AppError(
+              "QUESTION_INTENT_REVIEW",
+              `问答意图检查发现${issues.length}处问题：${issues.map((issue) => `第${issue.index + 1}条：${issue.reason}`).join("；")}。已生成内容保留，未确认或建链。请返回上一步调整关键词/资源说明后重新生成。`,
+            );
         }
         const image = generationResource.shape.image.safeParse(
           record.resource.image,
@@ -1061,7 +1132,75 @@ export class ZhidaoPublishingWorkflow {
     record.rows = rows;
     return this.store(record);
   }
-  async export(ids: string[]) {
+  linkOptions(ids: string[]): PublishingPublicLinks {
+    const records = ids.map((id) => this.get(id));
+    if (
+      records.length !== 1 ||
+      records.reduce((n, record) => n + record.rows.length, 0) !== 1
+    )
+      throw new AppError(
+        "SINGLE_QUESTION_REQUIRED",
+        "仅单个问答可使用资源落地页或直达链接，多条问答请使用网盘独立链接。",
+      );
+    if (!records[0].contentFirst)
+      throw new AppError(
+        "LEGACY_WORKFLOW",
+        "旧稿请按新流程重新检查问答及链接，再选择资源入口。",
+      );
+    const id = records[0].libraryResourceId || records[0].resource.resourceId;
+    if (!id || !this.d.resourcePublishedUrls)
+      return {
+        landingUrl: null,
+        redirectUrl: null,
+        landingIssue: "请先在资源库准备资源落地页。",
+        redirectIssue: "请先在资源库准备固定直达链接。",
+        revision: "",
+      };
+    return this.d.resourcePublishedUrls(id);
+  }
+  private destination(
+    ids: string[],
+    linkType: PublishingLinkType,
+    revision?: string,
+  ): PublishingDestination | undefined {
+    if (linkType === "drive") return;
+    const links = this.linkOptions(ids),
+      url = linkType === "landing" ? links.landingUrl : links.redirectUrl;
+    const issue =
+      linkType === "landing" ? links.landingIssue : links.redirectIssue;
+    if (issue || !url)
+      throw new AppError(
+        "PUBLIC_LINK_NOT_READY",
+        issue || "资源入口尚未就绪，请在资源库维护后重试。",
+      );
+    if (revision !== links.revision)
+      throw new AppError(
+        "PUBLIC_LINK_CHANGED",
+        "资源入口已变化，请刷新链接选项并重新预览后再提交。",
+      );
+    const parsed = new URL(url);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      parsed.search ||
+      parsed.hash ||
+      !new RegExp(
+        `^/${linkType === "landing" ? "r" : "go"}/[A-Za-z0-9_-]+$`,
+      ).test(parsed.pathname)
+    )
+      throw new AppError(
+        "PUBLIC_LINK_NOT_READY",
+        "资源入口地址无效，请在资源库核对。",
+      );
+    return { type: linkType, url: parsed.href, revision: links.revision };
+  }
+  private publicationRows(
+    ids: string[],
+    linkType: PublishingLinkType = "drive",
+    revision?: string,
+  ) {
     const records = ids.map((id) => this.get(id));
     if (
       records.some(
@@ -1082,7 +1221,10 @@ export class ZhidaoPublishingWorkflow {
       );
     const linkIssue = publishingLinkIssue(records);
     if (linkIssue) throw new AppError("SHARE_MISMATCH", linkIssue);
-    const rows = records.flatMap((r) => publishingRowsWithLinks(r));
+    const destination = this.destination(ids, linkType, revision);
+    const rows = records.flatMap((r) =>
+      publishingRowsWithLinks(r, r.rows, destination),
+    );
     for (const record of records) {
       this.assertCurrent(record);
       publishingRowsWithLinks(record).forEach((row, index) =>
@@ -1094,7 +1236,8 @@ export class ZhidaoPublishingWorkflow {
       records.some((record) =>
         record.rows.some((row, index) =>
           historical.has(
-            parseShare(publishingRowShare(record, row, index)!.url).url,
+            destination?.url ??
+              parseShare(publishingRowShare(record, row, index)!.url).url,
           ),
         ),
       )
@@ -1109,10 +1252,101 @@ export class ZhidaoPublishingWorkflow {
         "DUPLICATE_TITLE",
         "表格中存在重复标题，请返回第三步修改。",
       );
+    return { records, rows, destination };
+  }
+  async export(
+    ids: string[],
+    linkType: PublishingLinkType = "drive",
+    revision?: string,
+  ) {
+    const { rows } = this.publicationRows(ids, linkType, revision);
     return this.d.ports.saveFile(
       "百度知道问答.xlsx",
       publicationWorkbook(rows),
     );
+  }
+  publish(
+    ids: string[],
+    accountId: string,
+    taskName: string,
+    selectionRevision: string,
+    linkType: PublishingLinkType = "drive",
+    linkRevision?: string,
+  ) {
+    if (!this.d.publication)
+      throw new AppError("UPDATE_REQUIRED", "请应用后端更新后上传。");
+    if (ids.some((id) => this.active.has(id)))
+      throw new AppError("BUSY", "问答或链接仍在处理，请等待完成后上传。");
+    const existing = ids.map((id) => this.get(id));
+    if (existing.some((record) => record.publicationRunId)) {
+      const runId = existing[0].publicationRunId;
+      const run = runId && this.d.publication.get(runId);
+      if (
+        run &&
+        existing.every((record) => record.publicationRunId === runId) &&
+        run.config.accountId === accountId &&
+        (run.config.workflowLinkType ?? "drive") === linkType &&
+        JSON.stringify([...(run.config.workflowIds as string[])].sort()) ===
+          JSON.stringify([...ids].sort())
+      )
+        return run;
+      throw new AppError(
+        "ALREADY_SUBMITTED",
+        "本批有问答已关联发布任务，请查看原发布记录，避免重复上传。",
+      );
+    }
+    if (selectionRevision !== publishingSelectionRevision(existing))
+      throw new AppError(
+        "SELECTION_CHANGED",
+        "本批问答或链接已更新，请刷新并预览后再上传。",
+      );
+    const { records, destination } = this.publicationRows(
+      ids,
+      linkType,
+      linkRevision,
+    );
+    if (records.some((record) => !record.contentFirst))
+      throw new AppError(
+        "LEGACY_WORKFLOW",
+        "请先按新流程检查问答及独立链接，旧稿仍可下载。",
+      );
+    return this.d.publication.start(
+      records,
+      accountId,
+      taskName,
+      (run) => {
+        for (const record of records)
+          this.store({ ...record, publicationRunId: run.id });
+      },
+      destination,
+    );
+  }
+  validatePublicationItem(item: OperationItem) {
+    const source = item.workflowSource!;
+    const { records, rows, destination } = this.publicationRows(
+      [source.recordId],
+      source.linkType,
+      source.linkRevision,
+    );
+    const record = records[0],
+      index = record.rows.findIndex((row) => row.id === source.rowId);
+    const row = rows[index],
+      share =
+        index >= 0 && publishingRowShare(record, record.rows[index], index);
+    if (
+      !row ||
+      !share ||
+      item.copyId !== record.copyId ||
+      item.question !== row.question ||
+      item.answer !== row.answer ||
+      item.link !== (destination?.url ?? share.url) ||
+      item.code !== (destination ? "" : share.code) ||
+      this.d.repo.getCopy(record.copyId).shareVersion !== item.shareVersion
+    )
+      throw new AppError(
+        "SELECTION_CHANGED",
+        "问答或独立链接已变化，请核对原发布任务，不会上传旧内容。",
+      );
   }
   private assertCurrent(record: PublishingRecord) {
     const copy = this.d.repo.getCopy(record.copyId);

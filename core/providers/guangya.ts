@@ -1,3 +1,4 @@
+import { ownPage } from "./own-list-page";
 import { guangyaMembership } from "./membership";
 import {
   digest,
@@ -310,6 +311,12 @@ export class GuangyaProvider implements DriveProvider {
       hasMore: !!data.next,
       nextCursor: data.next || undefined,
     };
+  }
+  async listPage(account: Account, parentId: string, cursor = "") {
+    const page = ownPage(cursor, true);
+    const data = await this.request(account, "/userres/v1/file/get_file_list", { parentId: root(parentId), page, pageSize: 100, orderBy: 0, sortType: 0 });
+    const files = this.rows(data, parentId);
+    return { files, next: files.length ? String(page + 1) : null };
   }
   async list(account: Account, parentId: string) {
     const files: RemoteFile[] = [],

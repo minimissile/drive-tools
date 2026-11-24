@@ -265,6 +265,7 @@ for (const kind of ["quark", "uc", "baidu", "xunlei"] as Provider[]) {
         xunlei: "api-pan.xunlei.com",
         guangya: "api.guangyapan.com",
         pikpak: "api-drive.mypikpak.com",
+        cmcc: "yun.139.com",
       }[kind],
     );
     assert.equal(page.hasMore, kind === "xunlei");

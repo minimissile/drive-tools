@@ -306,6 +306,12 @@ export class TokenDriveProvider implements DriveProvider {
       nextCursor: data.next || undefined,
     };
   }
+  async listPage(account: Account, parentId: string, cursor = "") {
+    const data = await this.request(account, "files", { parent_id: root(parentId), page_token: cursor, limit: 100, space: "", filters: JSON.stringify({ trashed: { eq: false }, phase: { eq: "PHASE_TYPE_COMPLETE" } }) });
+    const files = this.rows(data, parentId), next = this.cursor(data) || null;
+    if (next && !files.length) throw new AppError("INCOMPLETE_LIST", "平台返回空分页但仍有下一页，请重试此目录。");
+    return { files, next };
+  }
   async list(account: Account, parentId: string) {
     const files: RemoteFile[] = [],
       seen = new Set<string>(),

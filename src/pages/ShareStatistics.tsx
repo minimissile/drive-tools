@@ -202,7 +202,7 @@ export default function ShareStatistics() {
           0，“100+”等下限值不计算精确增量。
         </Notice>
       ) : null}
-      {provider === "guangya" || provider === "pikpak" ? (
+      {provider && providerStatisticsNotes[provider] ? (
         <Notice>{providerStatisticsNotes[provider]}</Notice>
       ) : null}
       <QueryError error={error} loading={loading} onRetry={reload} />

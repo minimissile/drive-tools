@@ -22,6 +22,7 @@ import { useOperationAction, type OperationModel } from "./hooks";
 import { ResumeRunDialog } from "./ResumeRunDialog";
 import { ResolveItemDialog } from "./ResolveItemDialog";
 import { ItemEditor } from "./ItemEditor";
+import { isTodayAnswerRun } from "../../shared/zhidao-answer-progress";
 
 const statusLabels = {
   draft: "待开始",
@@ -75,11 +76,17 @@ export function AnswerActivity({
   const percent = run?.total ? Math.round((done / run.total) * 100) : 0;
   const historyPicker = history?.items.length ? (
     <Select
-      aria-label="查看回答记录"
-      value={model.id}
+      aria-label="查看今日回答记录"
+      title="只显示北京时间当天创建的回答记录"
+      value={run && !isTodayAnswerRun(run) ? "" : model.id}
       onValueChange={(id) => model.pick({ id })}
       items={[
-        ...(run && !history.items.some((entry) => entry.id === run.id)
+        ...(run && !isTodayAnswerRun(run)
+          ? [{ value: "", label: "选择今日回答记录", disabled: true }]
+          : []),
+        ...(run &&
+        isTodayAnswerRun(run) &&
+        !history.items.some((entry) => entry.id === run.id)
           ? [
               {
                 value: run.id,
@@ -304,7 +311,7 @@ export function AnswerActivity({
             ) : null}
           </>
         ) : !model.id && history && !model.history.error ? (
-          <Empty title="尚未开始回答" compact icon={MessageSquareText}>
+          <Empty title="今天尚未开始回答" compact icon={MessageSquareText}>
             完成上方设置后开始，提交进度会实时显示在这里。
           </Empty>
         ) : null}

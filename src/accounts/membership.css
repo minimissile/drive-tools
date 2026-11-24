@@ -1,0 +1,42 @@
+.account-membership {
+  min-width: 0;
+}
+.membership-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+}
+.membership-heading strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.membership-heading strong.membership-active {
+  color: var(--blue);
+}
+.membership-heading .tag {
+  padding: 0 5px;
+  font-size: 10px;
+}
+.membership-expiry {
+  margin-top: var(--space-1);
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.membership-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.membership-error {
+  color: var(--amber);
+}

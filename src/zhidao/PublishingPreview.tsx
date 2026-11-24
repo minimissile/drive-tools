@@ -71,12 +71,10 @@ function hasPreviewContent(node: ReactNode) {
   return typeof node === "string" ? !!node.trim() : node != null;
 }
 
-function baiduShareHref(raw: string) {
+function safePreviewHref(raw: string) {
   try {
     const url = new URL(raw);
     return url.protocol === "https:" &&
-      ["pan.baidu.com", "yun.baidu.com"].includes(url.hostname) &&
-      /^\/s\/[a-z\d_-]+\/?$/i.test(url.pathname) &&
       !url.username &&
       !url.password &&
       !url.port
@@ -157,7 +155,7 @@ function previewNode(node: Node, index: number): ReactNode {
   const children = Array.from(node.childNodes, previewNode);
   if (!children.some(hasPreviewContent)) return null;
   const link =
-    tag === "a" ? baiduShareHref(node.getAttribute("href") ?? "") : "";
+    tag === "a" ? safePreviewHref(node.getAttribute("href") ?? "") : "";
   if (link)
     return (
       <span key={index} className="publishing-preview-share" title={link}>

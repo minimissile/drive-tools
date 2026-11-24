@@ -13,6 +13,15 @@ const fields = [
   "dt",
   "smid",
 ] as const;
+const cmccFields = [
+  "authorization",
+  "user-agent",
+  "mcloud-skey",
+  "mcloud-client",
+  "mcloud-version",
+  "x-yun-client-info",
+  "x-deviceinfo",
+];
 interface SessionRecord {
   headers: Record<string, string>;
   refreshToken?: string;
@@ -25,8 +34,22 @@ export class WebTokenSession {
   constructor(
     private secrets: () => SecretStore,
     private transport: ProviderTransport,
-    readonly provider: "xunlei" | "pikpak" | "guangya" = "xunlei",
+    readonly provider: "xunlei" | "pikpak" | "guangya" | "cmcc" = "xunlei",
   ) {}
+  private valid(headers: Record<string, string>) {
+    if (this.provider === "cmcc") {
+      const value = headers.authorization ?? "";
+      if (!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+      return /^pc:[+\d]{5,20}:[^\r\n]+$/.test(
+        Buffer.from(value.slice(6), "base64").toString("utf8"),
+      );
+    }
+    return (
+      /^Bearer \S+$/i.test(headers.authorization ?? "") &&
+      (this.provider === "guangya" ||
+        (!!headers["x-device-id"] && !!headers["x-client-id"]))
+    );
+  }
   private key(id: string) {
     return `drive-auth:${this.provider}:${id}`;
   }
@@ -60,18 +83,16 @@ export class WebTokenSession {
         .map(([k, v]) => [k.toLowerCase(), v])
         .filter(
           ([k, v]) =>
-            (fields as readonly string[]).includes(k) &&
+            (this.provider === "cmcc"
+              ? cmccFields
+              : (fields as readonly string[])
+            ).includes(k) &&
             typeof v === "string" &&
             v.length <= 16000 &&
             !/[\r\n]/.test(v),
         ),
     );
-    if (
-      !/^Bearer \S+$/i.test(next.authorization ?? "") ||
-      (this.provider !== "guangya" &&
-        (!next["x-device-id"] || !next["x-client-id"]))
-    )
-      return false;
+    if (!this.valid(next)) return false;
     await this.update(id, (old) =>
       old.headers.authorization === next.authorization
         ? { ...old, headers: { ...old.headers, ...next } }
@@ -80,6 +101,7 @@ export class WebTokenSession {
     return true;
   }
   async captureRefresh(id: string, candidates: unknown) {
+    if (this.provider === "cmcc") return;
     if (!Array.isArray(candidates) || !candidates.length) return;
     await this.update(id, (record) => {
       const token = record.headers.authorization?.replace(/^Bearer /i, "");
@@ -100,11 +122,7 @@ export class WebTokenSession {
   }
   async headers(id: string, refresh = false) {
     const record = await this.read(id);
-    if (
-      !record.headers.authorization ||
-      (this.provider !== "guangya" &&
-        (!record.headers["x-device-id"] || !record.headers["x-client-id"]))
-    )
+    if (!this.valid(record.headers))
       throw new AppError(
         "AUTH_EXPIRED",
         "请打开该网盘账号的隔离窗口，完成登录并进入“我的云盘”后关闭窗口核验。无需手动复制令牌。",
@@ -121,6 +139,11 @@ export class WebTokenSession {
     return { ...record.headers };
   }
   private async refreshHeaders(id: string) {
+    if (this.provider === "cmcc")
+      throw new AppError(
+        "AUTH_EXPIRED",
+        "移动云盘会话已过期，请在该账号原登录窗口重新登录并进入个人云盘后核验。",
+      );
     const record = await this.read(id);
     if (!record.refreshToken || !record.headers["x-client-id"])
       throw new AppError(

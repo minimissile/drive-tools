@@ -1,3 +1,4 @@
+import { isIndexedOwnSource } from "../../shared/owned-file-source";
 import { ResourceKindIcon } from "../resources/ResourceKindIcon";
 import { ProviderIcon } from "../resources/ProviderIcon";
 import { Select } from "../ui/Select";
@@ -275,14 +276,16 @@ export function ResourceDetail({
         <details className="private-source">
           <summary>内部追溯信息</summary>
           <small>
-            {resource.sourceKind === "owned"
+            {isIndexedOwnSource(resource.sourceUrl)
+              ? "本人网盘目录登记；对外交付前创建并核验分享。"
+              : resource.sourceKind === "owned"
               ? "已录入的自有资源链接；对外交付前核验所属账号。"
               : "来源链接仅作内部记录，禁止用于对外分发。"}
           </small>
-          <p>{resource.sourceUrl}</p>
+          <p>{isIndexedOwnSource(resource.sourceUrl) ? copy.files.map(file => file.name).join("、") : resource.sourceUrl}</p>
           <small>保存目录</small>
           <p>
-            {resource.sourceKind === "owned" && !copy.folderId
+            {resource.sourceKind === "owned" && !copy.folderId && !isIndexedOwnSource(resource.sourceUrl)
               ? "未记录原网盘目录；直接入库不创建目录。"
               : copy.directory}
           </p>

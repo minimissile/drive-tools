@@ -50,6 +50,7 @@ export interface TransferResult {
   taskId: string | null;
 }
 export interface DriveProvider {
+  fileCapabilities?(account: Account): Promise<import("../../shared/drive-files").DriveDirectory["capabilities"]>;
   membership?(account: Account): Promise<import("../../shared/drive-membership").DriveMembership>;
   readFile?(
     account: Account,
@@ -87,6 +88,8 @@ export interface DriveProvider {
     cursor?: string,
   ): Promise<ShareInspection>;
   list(account: Account, parentId: string): Promise<RemoteFile[]>;
+  /** Explicit, resumable own-directory metadata reads; null next means complete. */
+  listPage?(account: Account, parentId: string, cursor?: string): Promise<import("../../shared/drive-sync").DriveListPage>;
   ensureFolder(account: Account, path: string): Promise<string>;
   transfer(
     account: Account,

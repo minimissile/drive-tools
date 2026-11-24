@@ -16,6 +16,7 @@ type Props = {
   InputProps,
   | "id"
   | "aria-labelledby"
+  | "aria-label"
   | "aria-describedby"
   | "aria-invalid"
   | "placeholder"

@@ -37,6 +37,7 @@ export type HandlerMap = Partial<Record<IpcMethod, IpcHandler>>;
 
 /** Composition-root dependencies. Each domain requests only the members it uses. */
 export interface HandlerServices {
+  driveSync: import("../drive-sync").DriveSync;
   setKeywordLookupBusy(active: boolean): void;
   zhidaoWorkflow: import("../zhidao/publishing-workflow").ZhidaoPublishingWorkflow;
   systemLogs: import("../system-logs").SystemLogs;

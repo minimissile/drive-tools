@@ -25,7 +25,7 @@ import { AppError, safeMessage } from "./errors";
 import { now } from "./database";
 import { redactPromptText } from "./text-safety";
 import type { AiModel } from "../shared/ai-models";
-import { providerSpecs } from "../shared/providers";
+import { providerDriveName } from "../shared/providers";
 import {
   extractLandingDocument,
   landingDocumentLimit,
@@ -302,7 +302,7 @@ export class ResourceLanding {
       facts.push({
         id: "access",
         label: "已核验的获取方式",
-        text: `此资源已关联${providerSpecs[resource.provider].name}网盘的本人分享，文件清单与归属已核验。公开页面提供“前往网盘查看”按钮及复制链接功能。最近核验时间以页面标注为准，后续状态仍以网盘平台为准；不保证永久有效。此项不证明文件的作者或授权。`,
+        text: `此资源已关联${providerDriveName(resource.provider)}的本人分享，文件清单与归属已核验。公开页面提供“前往网盘查看”按钮及复制链接功能。最近核验时间以页面标注为准，后续状态仍以网盘平台为准；不保证永久有效。此项不证明文件的作者或授权。`,
       });
     const raw = {
       resourceTitle: publicTitle(resource.title),

@@ -17,6 +17,8 @@ import { tiebaIdentityScript } from "../core/tieba/identity";
 import { createSmzdmSession } from "./smzdm-session";
 import { createWechatSession } from "./wechat-session";
 import { createWechatBitSession } from "./wechat-bit-session";
+import { createTiebaArticleSession } from "./tieba-article-session";
+import { tiebaArticleUrl, type WechatPort } from "../shared/wechat";
 import { createJianshuSession } from "./jianshu-session";
 import { readContentImage } from "../core/content-assets";
 import { createDocumentSessions } from "./document-session";
@@ -492,7 +494,14 @@ export function createWebsiteSessions(
     try { return await articleReader(url); }
     finally { articleReading = false; }
   };
-  const wechat = createWechatSession(context, workspace, smzdm.port.readArticle);
+  const tiebaArticles = createTiebaArticleSession();
+  const readWechatImport: WechatPort["readArticle"] = (url) => {
+    const tiebaUrl = tiebaArticleUrl.safeParse(url);
+    return tiebaUrl.success
+      ? tiebaArticles.readArticle(tiebaUrl.data)
+      : smzdm.port.readArticle(url);
+  };
+  const wechat = createWechatSession(context, workspace, readWechatImport);
   const documents = createDocumentSessions(context, (account) =>
     baiduSessions.login(account),
   );
@@ -500,7 +509,12 @@ export function createWebsiteSessions(
     account.provider === "weibo" ? weiboSessions : baiduSessions;
   const sessions: NonNullable<AppPorts["websiteSessions"]> = {
     isOpen: () =>
-      baiduSessions.isOpen() || weiboSessions.isOpen() || smzdm.isOpen() || bilibiliContent.isOpen() || jianshu.isOpen(),
+      baiduSessions.isOpen() ||
+      weiboSessions.isOpen() ||
+      smzdm.isOpen() ||
+      tiebaArticles.isOpen() ||
+      bilibiliContent.isOpen() ||
+      jianshu.isOpen(),
     login: (account) => adapter(account).login(account),
     status: (account) =>
       account.provider === "jianshu"
@@ -579,7 +593,7 @@ export function createWebsiteSessions(
     smzdm: smzdm.port,
     jianshu: jianshu.port,
     wechat: wechat.port,
-    wechatBrowserSession: createWechatBitSession(workspace, smzdm.port.readArticle),
+    wechatBrowserSession: createWechatBitSession(workspace, readWechatImport),
     bilibili: bilibiliContent.port,
     readWechatPreviewImage: wechat.readPreviewImage,
   };

@@ -1,3 +1,4 @@
+import { isIndexedOwnSource } from "../../shared/owned-file-source";
 import {
   IntakeKeywords,
   initialIntakeKeywords,
@@ -31,7 +32,7 @@ import {
   formatResourceTagInput,
   parseResourceTagInput,
 } from "../lib/resource-tag-input";
-import { providerIds, providerSpecs } from "../../shared/providers";
+import { providerIds, providerSpecs, providerDriveName } from "../../shared/providers";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowDownToLine,
@@ -67,11 +68,12 @@ export default function Intake() {
         ? undefined
         : (existing?.copies.find((c) => c.id === editCopyId) ??
           existing?.copies[0]);
+  const indexedOwned = !!existing && existing.sourceKind === "owned" && isIndexedOwnSource(existing.sourceUrl);
   const priorOwnResource =
     priorCopy?.status === "recorded" ||
     (!!priorCopy &&
       existing?.sourceKind === "owned" &&
-      priorCopy.shareUrl === existing.sourceUrl);
+      (priorCopy.shareUrl === existing.sourceUrl || indexedOwned));
   const chooseAccount = (p: Provider) =>
     chooseIntakeAccount(data!.accounts, activeAccounts, p);
   const draft = useLocalDraft(
@@ -213,6 +215,7 @@ export default function Intake() {
     accountId,
     directory,
     resourceId: existing?.id,
+    localSource: indexedOwned ? {provider:existing!.provider,url:existing!.sourceUrl,shareKey:"",code:""} : undefined,
     accounts: data!.accounts,
     activeAccounts,
     onParsed: (result) => {
@@ -408,7 +411,9 @@ export default function Intake() {
           selectedFiles: !isOwnResource ? selected : undefined,
           enqueue,
         },
-        isOwnResource
+        indexedOwned
+          ? "资源资料已更新。"
+          : isOwnResource
           ? "自有资源已直接入库，未创建转存任务。"
           : enqueue
             ? "转存任务已创建，目标账号已锁定。"
@@ -506,6 +511,8 @@ export default function Intake() {
                 >
                   {submitting
                     ? "正在保存…"
+                    : indexedOwned
+                      ? "保存资料"
                     : isOwnResource
                       ? "直接入库"
                       : existing
@@ -616,12 +623,12 @@ export default function Intake() {
                     </div>
                     <div className="intake-source-field">
                       <Field
-                        label="网盘分享链接"
+                        label={indexedOwned ? "本人网盘文件来源" : "网盘分享链接"}
                         required
-                        hint="支持整段分享文案"
+                        hint={indexedOwned ? "本人网盘目录来源已固定，分享在资源中单独创建" : "支持整段分享文案"}
                       >
                         <textarea
-                          aria-label="网盘分享链接"
+                          aria-label={indexedOwned ? "本人网盘文件来源" : "网盘分享链接"}
                           aria-required="true"
                           aria-describedby={linkStatusId}
                           aria-invalid={
@@ -629,7 +636,7 @@ export default function Intake() {
                             link.validation?.status === "invalid" ||
                             undefined
                           }
-                          value={sourceText}
+                          value={indexedOwned ? priorCopy?.files.map(file => file.path ?? file.name).join("\n") ?? "本人网盘文件" : sourceText}
                           disabled={!!existing}
                           placeholder="粘贴百度、夸克、UC、迅雷、光鸭或 PikPak 分享文案"
                           onBlur={() => void link.validate()}
@@ -654,6 +661,7 @@ export default function Intake() {
                         </span>
                         <IntakeShareStatus
                           id={linkStatusId}
+                          idleMessage={indexedOwned ? "目录登记已核对本人文件；分享在资源中单独创建。" : undefined}
                           error={link.error}
                           parsing={link.parsing}
                           validation={link.validation}
@@ -915,7 +923,7 @@ export default function Intake() {
                           items={[
                             ...providerIds.map((id) => ({
                               value: id,
-                              label: <>{providerSpecs[id].name}网盘</>,
+                              label: <>{providerDriveName(id)}</>,
                             })),
                           ]}
                         />

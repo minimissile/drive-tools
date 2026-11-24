@@ -570,18 +570,6 @@ function DiscoveryResults({
         </small>
       ) : null}
     >
-      {last?.warnings.length ? (
-        <Notice warning>
-          <details>
-            <summary>上轮有 {last.warnings.length} 条读取提示</summary>
-            <ul>
-              {last.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          </details>
-        </Notice>
-      ) : null}
       <Tabs<ResultsView["tab"]>
         className="tieba-analysis-tabs"
         value={tab}
@@ -652,7 +640,7 @@ function DiscoveryResults({
           />
         </TabPanel>
         <TabPanel value="recycled">
-          <RecycledResults count={state.recycledCount} />
+          <RecycledResults count={state.recycledCount} reviewReady={state.recycledReviewReady === true} refreshSnapshot={refreshSnapshot} />
         </TabPanel>
         <TabPanel value="filterAudit">
           <FilterAuditResults

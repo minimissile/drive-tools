@@ -1,0 +1,138 @@
+.operations-workspace.drive-files-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: hidden;
+}
+.drive-files-workspace > .page-heading {
+  flex: none;
+  align-items: center;
+  gap: var(--space-4);
+}
+.drive-files-workspace > .page-heading > :first-child {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.drive-files-workspace > .page-heading h1 {
+  font-size: 20px;
+  line-height: 1.4;
+}
+.drive-files-workspace > .page-heading p {
+  margin: 0;
+}
+.drive-files-context {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.drive-files-account-fields {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(180px, 240px) minmax(280px, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+}
+.drive-files-account-fields > .field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+}
+.drive-files-account-fields > .field > span {
+  flex-shrink: 0;
+}
+.drive-files-account-fields .select-control {
+  flex: 1;
+  min-width: 0;
+}
+.drive-files-resource-location {
+  flex-shrink: 0;
+}
+.drive-files-views {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.drive-files-views > .tabs {
+  flex: none;
+  padding-bottom: var(--space-2);
+}
+.drive-files-views > .tab-panel:not([hidden]) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+.drive-files-workspace > .data-state {
+  flex: 1;
+}
+.drive-files-views .drive-browser {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
+  gap: var(--space-3);
+}
+.drive-browser-location {
+  display: grid;
+  gap: var(--space-1);
+}
+.drive-browser-location .drive-location > .field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+.drive-browser-location .drive-location > .field > span {
+  flex: none;
+}
+.drive-browser-location .drive-location > .field > input {
+  flex: 1;
+  min-width: 0;
+}
+.drive-browser-location > small {
+  color: var(--muted);
+}
+.drive-files-views .drive-browser > .panel {
+  padding: var(--space-4);
+}
+.drive-page-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.drive-page-toolbar > .drive-breadcrumb {
+  flex: 1 1 200px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+}
+.drive-page-toolbar > .drive-breadcrumb > * {
+  flex: none;
+  white-space: nowrap;
+}
+.drive-page-toolbar .drive-breadcrumb .button {
+  white-space: nowrap;
+}
+.drive-page-toolbar > .drive-selection-actions {
+  position: static;
+  flex: none;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.drive-files-views .drive-table th,
+.drive-files-views .drive-table td {
+  padding: var(--space-2) 10px;
+}

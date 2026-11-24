@@ -7,6 +7,10 @@ import { useLocalDraft } from "../hooks/useLocalDraft";
 import type { IpcArgs, IpcMethod, IpcValue } from "../../shared/ipc";
 import type { OperationKind } from "../../shared/zhidao";
 import type { CollectionDriveFilter } from "../../shared/resource-collection";
+import {
+  answerProgressDay,
+  isTodayAnswerRun,
+} from "../../shared/zhidao-answer-progress";
 
 export function useOperationAction() {
   const { notify } = useAppActions();
@@ -98,6 +102,27 @@ export function useOperation(kind: OperationKind) {
       keepPrevious: true,
     },
   );
+  const answerDay = kind === "answer" ? answerProgressDay().start : "";
+  const historyData =
+    kind === "answer" && history.data?.items.some((run) => !isTodayAnswerRun(run))
+      ? null
+      : history.data;
+  useEffect(() => {
+    if (kind === "answer") setHistoryPage(1);
+  }, [kind, answerDay]);
+  const currentDetail =
+    detail.data?.run.id === draft.value.id ? detail.data : null;
+  const expiredAnswer =
+    kind === "answer" &&
+    !!currentDetail &&
+    currentDetail.run.status !== "running" &&
+    !isTodayAnswerRun(currentDetail.run);
+  useEffect(() => {
+    if (!expiredAnswer) return;
+    draft.update({ id: historyData?.items[0]?.id ?? "" });
+    setFocusRunId("");
+    setPage(1);
+  }, [expiredAnswer, historyData, draft.update]);
   const pick = (value: { id: string }) => {
     draft.update({ id: value.id });
     setPage(1);
@@ -110,12 +135,12 @@ export function useOperation(kind: OperationKind) {
     kind,
     focusRunId,
     clearFocus: () => setFocusRunId(""),
-    id: draft.value.id,
+    id: expiredAnswer ? "" : draft.value.id,
     pick,
-    history,
+    history: { ...history, data: historyData },
     detail: {
       ...detail,
-      data: detail.data?.run.id === draft.value.id ? detail.data : null,
+      data: expiredAnswer ? null : currentDetail,
     },
     page,
     setPage,
@@ -127,7 +152,7 @@ export function useOperation(kind: OperationKind) {
     historyPage,
     setHistoryPage,
     refresh,
-    running: detail.data?.run.status === "running",
+    running: currentDetail?.run.status === "running",
   };
 }
 export type OperationModel = ReturnType<typeof useOperation>;

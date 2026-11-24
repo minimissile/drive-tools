@@ -14,6 +14,7 @@ const hosts: Record<string, Provider> = {
   "guangyapan.com": "guangya",
   "www.guangyapan.com": "guangya",
   "mypikpak.com": "pikpak",
+  "yun.139.com": "cmcc",
 };
 export function parseShare(text: string, explicitCode = ""): ShareInput {
   const candidates = text.match(/https?:\/\/[^\s<>"'，。；）)]+/gi) ?? [];
@@ -32,7 +33,15 @@ export function parseShare(text: string, explicitCode = ""): ShareInput {
         "分享链接不能包含登录凭据或自定义端口。",
       );
     let shareKey =
-      url.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/)?.[1] ??
+      (provider === "cmcc"
+        ? (url.pathname.match(/^\/w\/i\/([a-zA-Z0-9_-]+)\/?$/)?.[1] ??
+          (url.pathname === "/shareweb/"
+            ? url.hash.match(/^#\/?w\/i\/([a-zA-Z0-9_-]+)(?:\?|$)/)?.[1]
+            : null))
+        : null) ??
+      (provider !== "cmcc"
+        ? url.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/)?.[1]
+        : null) ??
       (provider === "baidu" && url.pathname === "/share/init"
         ? url.searchParams.get("surl")
         : null);
@@ -52,24 +61,31 @@ export function parseShare(text: string, explicitCode = ""): ShareInput {
       explicitCode.trim() ||
       url.searchParams.get("pwd") ||
       (provider === "guangya" ? url.searchParams.get("code") : "") ||
+      (provider === "cmcc" ? url.searchParams.get("password") : "") ||
       text.match(/(?:提取码|访问码|密码)\s*[:：]?\s*([a-zA-Z0-9]{4,8})/)?.[1] ||
       "";
     return {
       provider,
       shareKey,
-      url: `https://${providerSpecs[provider].shareHost}/s/${shareKey}`,
+      url:
+        provider === "cmcc"
+          ? `https://yun.139.com/w/i/${shareKey}`
+          : `https://${providerSpecs[provider].shareHost}/s/${shareKey}`,
       code,
     };
   }
   throw new AppError(
     "INVALID_LINK",
-    "支持百度、夸克、UC、迅雷、光鸭和 PikPak 分享链接。",
+    "支持百度、夸克、UC、迅雷、光鸭、PikPak 和移动云盘分享链接。",
   );
 }
 export function shareUrlWithCode(rawUrl: string, code: string) {
   if (!code) return rawUrl;
   const url = new URL(rawUrl);
-  url.searchParams.set(hosts[url.hostname] === "guangya" ? "code" : "pwd", code);
+  url.searchParams.set(
+    hosts[url.hostname] === "guangya" ? "code" : "pwd",
+    code,
+  );
   return url.href;
 }
 export function validateEditorUrl(platform: Platform, text: string): string {

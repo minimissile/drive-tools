@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Blocks, Download, Plus, RefreshCw, Trash2, Users } from "lucide-react";
-import { wechatArticleUrl } from "../../shared/wechat";
+import { wechatImportUrl } from "../../shared/wechat";
 import { ipc } from "../api/client";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
@@ -169,9 +169,11 @@ export default function WechatWorkflow() {
 
   const importArticle = async (rawUrl: string) => {
     if (lock.current || editorBusy) return;
-    const url = wechatArticleUrl.safeParse(rawUrl.trim());
+    const url = wechatImportUrl.safeParse(rawUrl);
     if (!url.success) {
-      setError("请粘贴微信公众号文章链接（https://mp.weixin.qq.com/s/…）。");
+      setError(
+        "请粘贴有效的公众号文章或贴吧帖子链接（mp.weixin.qq.com/s/… 或 tieba.baidu.com/p/…）。",
+      );
       importInput.current?.focus();
       return;
     }
@@ -284,7 +286,7 @@ export default function WechatWorkflow() {
         <Panel
           className="wechat-import"
           id="wechat-import"
-          aria-label="导入公众号文章"
+          aria-label="导入文章"
         >
           <form
             className="wechat-import-bar"
@@ -296,10 +298,14 @@ export default function WechatWorkflow() {
           >
             <input
               ref={importInput}
-              aria-label="公众号文章链接"
-              aria-describedby={error ? "wechat-import-error" : undefined}
+              aria-label="文章或帖子链接"
+              aria-describedby={
+                error
+                  ? "wechat-import-error wechat-import-help"
+                  : "wechat-import-help"
+              }
               type="url"
-              placeholder="粘贴微信公众号文章链接"
+              placeholder="粘贴公众号文章或百度贴吧帖子链接"
               value={selection.value.url}
               maxLength={4000}
               disabled={pending || editorBusy}
@@ -310,9 +316,7 @@ export default function WechatWorkflow() {
             />
             <Button
               primary
-              disabled={
-                pending || editorBusy || !selection.value.url.trim()
-              }
+              disabled={pending || editorBusy || !selection.value.url.trim()}
               type="submit"
             >
               <Download size={14} />
@@ -324,8 +328,8 @@ export default function WechatWorkflow() {
               </Button>
             ) : null}
           </form>
-          <small>
-            保留原文和插图，识别网盘链接。重复导入会打开已有草稿。
+          <small id="wechat-import-help">
+            贴吧只采集主楼。导入时保留配图并识别网盘链接，重复导入会打开已有草稿。
           </small>
           {error ? (
             <Notice danger>
@@ -462,13 +466,11 @@ export default function WechatWorkflow() {
           ) : history.data ? (
             <Empty
               compact
-              title={
-                selection.value.query ? "没有匹配的文章" : "还没有文章"
-              }
+              title={selection.value.query ? "没有匹配的文章" : "还没有文章"}
             >
               {selection.value.query
                 ? "换个原文或稿件标题关键词试试。"
-                : "从上方粘贴文章链接开始。"}
+                : "从上方粘贴公众号文章或贴吧帖子链接。"}
             </Empty>
           ) : null}
         </aside>

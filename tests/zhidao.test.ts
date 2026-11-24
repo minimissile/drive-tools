@@ -19,6 +19,7 @@ import { miningSources, parseMining } from "../core/zhidao/mining";
 import { parseZhidaoJson, ZhidaoClient } from "../core/zhidao/client";
 import { pansouUrl } from "../core/zhidao/pansou";
 import { ServiceHttpError } from "../core/errors";
+import { zhidaoAnswerLanguage, zhidaoAnswerLanguageLabels } from "../shared/zhidao-answer-language";
 
 const link = "https://pan.baidu.com/s/1testshare123";
 const account = {
@@ -338,6 +339,46 @@ test("只读摘要、任务历史和导入不调用AI，手动回答显式执行
     await f.cleanup();
   }
 });
+test("智能问答手动生成和自动答题将语言传入模型，任务与回答保存所选配置", async () => {
+  for (const language of zhidaoAnswerLanguage.options) {
+    for (const mode of ["manual", "auto"] as const) {
+      const f = await operations();
+      try {
+        const captured: { instruction: string; input: any }[] = [];
+        const answer = {
+          mandarin: "我会建议先说清自己的感受，再和对方一起商量做法。",
+          cantonese: "我会建议你先讲清楚自己嘅感受，再同对方一齐商量点做。",
+          sichuanese: "莫着急，先把心头的想法说清楚，再商量咋个办。",
+          northeastern: "咱先别着急，把心里的想法说明白，再商量咋办。",
+        }[language];
+        f.app.ai.resourceExport = async <T>(_name: string, _schema: unknown, instruction: string, input: unknown) => {
+          captured.push({ instruction, input });
+          return { answer } as T;
+        };
+        f.op.client.questions = async () => ({
+          items: [{ qid: "language-question", question: "如何沟通自己的感受？" }],
+          nextBase: 8, hasMore: false, total: 1,
+        });
+        const submitted: string[] = [];
+        f.op.client.answer = async (_id, _qid, content) => {
+          submitted.push(content);
+          return { errno: 0, data: { aid: "language-answer" } };
+        };
+        const run = await f.op.start({ kind: "answer", authorized: true,
+          input: { mode, accountId: account.id, question: "如何沟通自己的感受？", count: 1, style: "第一人称共鸣", language } });
+        await f.op.settled(run.id);
+        assert.equal(captured.length, 1);
+        assert.equal(captured[0].input.language, language);
+        assert.match(captured[0].instruction, new RegExp(`回答语言：${zhidaoAnswerLanguageLabels[language]}`));
+        assert.equal(f.op.store.run(run.id).config.language, language);
+        assert.equal(f.op.store.items(run.id)[0].answer, answer);
+        assert.equal(f.op.store.run(run.id).status, "completed");
+        assert.deepEqual(submitted, mode === "auto" ? [answer] : []);
+      } finally { await f.cleanup(); }
+    }
+  }
+});
+
 test("挖词落盘、写入原有词池且历史去重；不伪造补足目标数量", async () => {
   const f = await operations();
   try {

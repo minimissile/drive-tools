@@ -24,6 +24,7 @@ import { FollowedForums } from "./FollowedForums";
 import { AnalysisPages } from "./AnalysisPages";
 import { ForumPerformance } from "./ForumPerformance";
 import { ForumPosts } from "./ForumPosts";
+import { ThreadLookup } from "./ThreadLookup";
 import { ResourceDiscovery } from "./ResourceDiscovery";
 import { TiebaPotentialFormula } from "./TiebaPotentialFormula";
 import {
@@ -37,7 +38,7 @@ const draftSchema = z.object({
   sort: z.enum(["views", "recent", "exposure"]).default("views"),
 });
 const number = new Intl.NumberFormat("zh-CN");
-const modeSchema = z.object({ mode: z.enum(["user", "forum", "discovery"]) });
+const modeSchema = z.object({ mode: z.enum(["user", "forum", "thread", "discovery"]) });
 const pageSize = 10;
 const sortItems = [
   { value: "views", label: "浏览量从高到低" },
@@ -75,13 +76,14 @@ function AnalysisWorkspace({ workspace }: { workspace: string }) {
       >
         <Header
           title="贴吧数据分析"
-          description="按用户或贴吧查询公开主题帖、浏览量和互动数据。"
+          description="按用户、贴吧或帖子查询公开主题帖、浏览量和互动数据。"
           action={
             <TabList
               label="贴吧查询方式"
               items={[
                 ["user", "按用户查询"],
                 ["forum", "按贴吧查询"],
+                ["thread", "按帖子查询"],
                 ["discovery", "资源发现"],
               ]}
             />
@@ -101,6 +103,9 @@ function AnalysisWorkspace({ workspace }: { workspace: string }) {
             selection.update({ mode: "user" });
             user.current?.findAuthor(target);
           }} />
+        </TabPanel>
+        <TabPanel value="thread" keepMounted>
+          <ThreadLookup workspace={workspace} />
         </TabPanel>
         <TabPanel value="discovery">
           <ResourceDiscovery workspace={workspace} snapshot={discovery} />

@@ -6,12 +6,18 @@ import uc from "../assets/providers/uc.png";
 import xunlei from "../assets/providers/xunlei.png";
 import guangya from "../assets/providers/guangya.png";
 import pikpak from "../assets/providers/pikpak.png";
+import cmcc from "../assets/providers/cmcc.png";
 import "./provider-icon.css";
 
-const icons = { quark, baidu, uc, xunlei, guangya, pikpak } satisfies Record<
-  Provider,
-  string
->;
+const icons = {
+  quark,
+  baidu,
+  uc,
+  xunlei,
+  guangya,
+  pikpak,
+  cmcc,
+} satisfies Record<Provider, string>;
 
 /** Local, official brand assets; no network request or letter-avatar fallback. */
 export function ProviderIcon({

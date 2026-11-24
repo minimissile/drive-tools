@@ -1,5 +1,12 @@
 import { AppError } from "../core/errors";
 import { isIP } from "node:net";
+import { isTiebaArticleImageHost } from "../shared/wechat";
+
+export function wechatRemoteImageReferer(url: URL) {
+  return isTiebaArticleImageHost(url.hostname)
+    ? "https://tieba.baidu.com/"
+    : "https://mp.weixin.qq.com/";
+}
 
 export function isPublicWechatImageAddress(address: string) {
   const text = address.toLowerCase();

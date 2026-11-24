@@ -4,6 +4,7 @@ import type { AiService } from "../../ai";
 import type { Resource, ResourceCopy } from "../../../shared/types";
 import type { OperationRun } from "../../../shared/zhidao";
 import type { OperationsStore } from "../store";
+import type { ZhidaoAnswerLanguage } from "../../../shared/zhidao-answer-language";
 import type { ZhidaoClient, SourceFetch } from "../client";
 import type { Pansou } from "../pansou";
 import type { Pansoo } from "../../resource-collection/pansoo";
@@ -33,6 +34,7 @@ export interface WorkerContext {
     question: string,
     style: string,
     evidence?: unknown,
+    language?: ZhidaoAnswerLanguage,
   ): Promise<{ answer: string }>;
   validatePublication(ids: string[]): void;
   assertNoDuplicatePublication(ids: string[], accountId: string): void;
