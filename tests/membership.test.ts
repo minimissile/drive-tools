@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { fixture } from "./helpers";
 import {
   baiduMembership,
+  cmccMembership,
   guangyaMembership,
   membershipExpiry,
   pikpakMembership,
@@ -21,6 +22,97 @@ import type { ProviderTransport } from "../core/providers/provider";
 import type { Account } from "../shared/types";
 const time = Date.parse("2026-11-23T12:00:00+08:00"),
   end = Date.parse("2026-12-10T00:00:00+08:00");
+
+test("移动云盘仅使用会员有效期，账单和云空间期限不冒充会员期限", () => {
+  const member = {
+    memberLevel: 2,
+    memberLvName: "超级会员",
+    chargingPolicyList: [
+      { prodName: "月付套餐", endTime: "2038-01-19 00:00:00" },
+    ],
+  };
+  assert.deepEqual(cmccMembership({ userSubMemberList: [member] }, time), {
+    status: "active",
+    tier: "超级会员",
+    expiresAt: null,
+  });
+  assert.equal(
+    cmccMembership(
+      {
+        userSubMemberList: [
+          { ...member, chargingPolicyList: [{ expiredTime: "2026-12-10" }] },
+        ],
+      },
+      time,
+    ).expiresAt,
+    "2026-12-10T15:59:59.000Z",
+  );
+  assert.equal(
+    cmccMembership(
+      {
+        userSubMemberList: [
+          { ...member, chargingPolicyList: [{ expiredTime: "2026-11-01" }] },
+        ],
+      },
+      time,
+    ).status,
+    "expired",
+  );
+  assert.equal(cmccMembership({ userSubMemberList: [] }, time).status, "none");
+  assert.equal(
+    cmccMembership({ userSubMemberList: [{ memberLevel: false }] }, time)
+      .status,
+    "unknown",
+  );
+  assert.throws(() => cmccMembership({}, time), {
+    code: "MEMBERSHIP_UNAVAILABLE",
+  });
+});
+
+test("移动云盘真实订购字段的14位北京时间不会按毫秒解释", () => {
+  const now = Date.parse("2026-11-25T12:00:00+08:00");
+  const member = {
+    memberLevel: 1,
+    memberLvName: "白银会员",
+    chargingPolicyList: [
+      {
+        prodName: "白银会员",
+        effectiveTime: "20261124235232",
+        expiredTime: "20270224235232",
+      },
+    ],
+  };
+  assert.deepEqual(cmccMembership({ userSubMemberList: [member] }, now), {
+    status: "active",
+    tier: "白银会员",
+    expiresAt: "2027-02-24T15:52:32.000Z",
+  });
+  for (const expiredTime of [
+    "20270230235232",
+    "20270224245232",
+    "20270224236032",
+    "永久",
+    null,
+  ]) {
+    const row = { ...member, chargingPolicyList: [{ expiredTime }] };
+    assert.equal(
+      cmccMembership({ userSubMemberList: [row] }, now).expiresAt,
+      null,
+    );
+  }
+  const upcoming = {
+    expiredTime: "20280324235232",
+    effectiveTime: "20280301000000",
+  };
+  const both = {
+    ...member,
+    chargingPolicyList: [...member.chargingPolicyList, upcoming],
+  };
+  assert.equal(
+    cmccMembership({ userSubMemberList: [both] }, now).expiresAt,
+    "2027-02-24T15:52:32.000Z",
+  );
+});
 
 test("会员到期时间支持秒、毫秒、带时区时间及国内日期；未知和坏日期不冒充永久", () => {
   for (const raw of [

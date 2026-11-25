@@ -62,6 +62,14 @@ export function parseShare(text: string, explicitCode = ""): ShareInput {
       url.searchParams.get("pwd") ||
       (provider === "guangya" ? url.searchParams.get("code") : "") ||
       (provider === "cmcc" ? url.searchParams.get("password") : "") ||
+      (provider === "cmcc" && url.hash.includes("?")
+        ? new URLSearchParams(url.hash.slice(url.hash.indexOf("?") + 1)).get(
+            "password",
+          ) ||
+          new URLSearchParams(url.hash.slice(url.hash.indexOf("?") + 1)).get(
+            "pwd",
+          )
+        : "") ||
       text.match(/(?:提取码|访问码|密码)\s*[:：]?\s*([a-zA-Z0-9]{4,8})/)?.[1] ||
       "";
     return {
@@ -69,7 +77,7 @@ export function parseShare(text: string, explicitCode = ""): ShareInput {
       shareKey,
       url:
         provider === "cmcc"
-          ? `https://yun.139.com/w/i/${shareKey}`
+          ? `https://yun.139.com/shareweb/#/w/i/${shareKey}`
           : `https://${providerSpecs[provider].shareHost}/s/${shareKey}`,
       code,
     };

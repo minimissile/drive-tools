@@ -180,9 +180,10 @@ export class AccountDeletion {
           )) {
             const operationId = row.key.slice("share-creation:".length);
             this.db.run(
-              "DELETE FROM secrets WHERE key IN (?,?)",
+              "DELETE FROM secrets WHERE key IN (?,?,?)",
               `share-creation-request:${operationId}`,
               `share-creation-result:${operationId}`,
+              `share-passphrase:creation:${operationId}`,
             );
             this.db.run("DELETE FROM settings WHERE key=?", row.key);
           }

@@ -95,8 +95,16 @@ export interface PublicationPackage {
 
 /** Business command contracts shared by renderer adapters, never component-local casts. */
 export interface IpcCommands {
-  "resource.keywordBatch": Contract<import("zod").z.infer<typeof import("./resource-keywords").keywordBatchSchema>,import("./resource-keywords").KeywordBatch>;
-  "resource.keywordBatchStatus": Contract<{id:string},import("./resource-keywords").KeywordBatch|null>;
+  "resource.keywordBatch": Contract<
+    import("zod").z.infer<
+      typeof import("./resource-keywords").keywordBatchSchema
+    >,
+    import("./resource-keywords").KeywordBatch
+  >;
+  "resource.keywordBatchStatus": Contract<
+    { id: string },
+    import("./resource-keywords").KeywordBatch | null
+  >;
   "resource.intakeOptions": Contract<
     { accountId?: string },
     import("./intake").IntakeOptions
@@ -141,6 +149,21 @@ export interface IpcCommands {
     Id & Pick<Account, "alias" | "defaultDirectory" | "enabled">
   >;
   "ai.connection": Contract<undefined, AiConnection>;
+  "ai.probe": Contract<
+    {
+      authorized: true;
+      mode: "json-schema" | "json-object" | "prompt-json";
+      model?: string;
+      provider?: string;
+      network?: "default" | "direct";
+    },
+    {
+      ok: true;
+      model: string;
+      mode: "json-schema" | "json-object" | "prompt-json";
+      checkedAt: string;
+    }
+  >;
   "ai.ideas.generate": Contract<IdeaInput, IdeaRun>;
   "ai.ideas.preview": Contract<IdeaInput, IdeaContext>;
   "ai.ideas.save": Contract<{
@@ -163,7 +186,9 @@ export interface IpcCommands {
     StartItems,
     { created: number; reused: number; skipped: number }
   >;
-  "binding.open": Contract<Id & { contentFormat: ContentFormat; newPage?: boolean }>;
+  "binding.open": Contract<
+    Id & { contentFormat: ContentFormat; newPage?: boolean }
+  >;
   "binding.save": Contract<
     {
       id?: string;

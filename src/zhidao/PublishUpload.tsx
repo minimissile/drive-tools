@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { MessageSquareText } from "lucide-react";
-import { useAppData, useAppNavigation } from "../state";
+import { useAppData } from "../state";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useIpcQuery } from "../api/useIpcQuery";
 import {
@@ -35,7 +35,6 @@ export function PublishUpload({
   onSubmitted(): void;
 }) {
   const { data } = useAppData(),
-    { navigate } = useAppNavigation(),
     action = useOperationAction();
   const [page, setPage] = useState(1),
     [consent, setConsent] = useState(false),
@@ -112,18 +111,7 @@ export function PublishUpload({
   ]);
   return (
     <div className="publish-upload-workspace">
-      <Panel
-        title="上传设置"
-        extra={
-          <Button
-            quiet
-            disabled={busy}
-            onClick={() => navigate("zhidao-accounts")}
-          >
-            管理发布账号
-          </Button>
-        }
-      >
+      <Panel title="上传设置">
         <QueryError
           error={accounts.error}
           loading={accounts.loading}

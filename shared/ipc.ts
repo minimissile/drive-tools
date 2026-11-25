@@ -13,6 +13,7 @@ import type { DevUpdateContract } from "./dev-updates";
 import type { ResourceAnswerContract } from "./resource-answers";
 import type { ResourceDeletionContract } from "./resource-deletion";
 import type { ShareCreationContract } from "./share-creation";
+import type { SharePassphraseContract } from "./share-passphrase";
 import type { ResourceLinksContract } from "./resource-links";
 import type { ResourceLandingContract } from "./resource-landing";
 import type { AccountDeletionContract } from "./account-deletion";
@@ -114,6 +115,7 @@ export type SplitSummary = {
 /** Renderer query contracts. Add new requests here instead of asserting a return type in JSX. */
 export interface IpcContract
   extends
+    SharePassphraseContract,
     AccountBatchContract,
     PhotoPostContract,
     SystemLogContract,
@@ -394,6 +396,7 @@ export const queryMethods = [
   "resource.get",
   "share.creationOptions",
   "share.creationResult",
+  "share.passphrase",
   "resource.similar",
   "resource.deletePreview",
   "resource.intakeOptions",

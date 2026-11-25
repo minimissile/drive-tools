@@ -90,6 +90,8 @@ import type { AppPorts } from "../ports";
 import {
   canRestoreTiebaImageOrder,
   hasLegacyTiebaImageTail,
+  hasUnlinkedTiebaBaiduLabel,
+  restoreUncodedTiebaBaiduShare,
   wechatImportedBody,
 } from "./tieba-draft-layout";
 import { wechatImagePrompt } from "./image-prompts";
@@ -797,6 +799,7 @@ export class WechatArticles {
       !article.pendingDraft &&
       !this.active.has(article.id) &&
       (hasUnlinkedTiebaBaiduShare(article.source.body) ||
+        hasUnlinkedTiebaBaiduLabel(article.source.body) ||
         hasLegacyTiebaImageTail(article.source))
     );
   }
@@ -818,7 +821,7 @@ export class WechatArticles {
     const previousBody = article.source.body;
     const shareRepair = hasUnlinkedTiebaBaiduShare(previousBody)
       ? this.tiebaShareRepair(article, source.data.body)
-      : null;
+      : this.tiebaUncodedShareRepair(article, source.data.body);
     const originalBody = shareRepair?.originalBody ?? previousBody;
     const restoreImages = canRestoreTiebaImageOrder(
       { ...article.source, body: originalBody },
@@ -861,6 +864,23 @@ export class WechatArticles {
       ? article.body
       : linkTiebaBaiduShare(article.body, url);
     return { originalBody, body };
+  }
+  private tiebaUncodedShareRepair(
+    article: WechatArticle,
+    incomingBody: string,
+  ) {
+    const originalBody = restoreUncodedTiebaBaiduShare(
+      article.source.body,
+      incomingBody,
+    );
+    if (!originalBody || originalBody.length > 200000) return null;
+    return {
+      originalBody,
+      body:
+        article.body === wechatImportedBody(article.source.body)
+          ? wechatImportedBody(originalBody)
+          : article.body,
+    };
   }
   private scan(body: string, previous: SmzdmResourceLink[]) {
     const scanned = articleLinks(body);

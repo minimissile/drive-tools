@@ -93,6 +93,8 @@ import { SecretStore, type SecretCodec } from "./secrets";
 import { AccountMutex, TransferQueue } from "./queue";
 import { NoteExporter } from "./notes";
 import { AiService } from "./ai";
+import { openRouterJsonRequest } from "./ai-network";
+import { fetchJson } from "./http";
 import { KeywordIdeas } from "./ideas";
 import { ResourceExports } from "./resource-export";
 import { StudioService, studioAssetPattern } from "./studio";
@@ -285,7 +287,8 @@ export class AppService {
         ? this.driveBrowsers.withRequestSession(accountId, action)
         : action(),
     );
-    this.ai = new AiService(this.repo, this.secrets, changed);
+    this.ai = new AiService(this.repo, this.secrets, changed,
+      openRouterJsonRequest(browserPorts.openrouterFetch), fetchJson);
     this.jianshu = new JianshuArticles({
       repo: this.repo,
       accounts: this.websiteAccounts,

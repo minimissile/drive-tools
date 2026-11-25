@@ -168,8 +168,15 @@ test("贴吧小程序分享转换仅接受规定路由、官方百度网盘地�
     tiebaBaiduMiniAppShare(miniAppLink(valid))?.href,
     `${valid}?pwd=a1b2`,
   );
+  assert.equal(
+    tiebaBaiduMiniAppShare(
+      miniAppLink("http://yun.baidu.com/s/1BaiduExample/", ""),
+    )?.href,
+    valid,
+  );
   for (const value of [
     miniAppLink("https://pan.baidu.com.evil.invalid/s/1BaiduExample"),
+    miniAppLink("http://pan.baidu.com.evil.invalid/s/1BaiduExample", ""),
     miniAppLink("https://pan.baidu.com/account"),
     miniAppLink("https://user:password@pan.baidu.com/s/1BaiduExample"),
     miniAppLink(`${valid}?pwd=zzzz`),
@@ -178,4 +185,39 @@ test("贴吧小程序分享转换仅接受规定路由、官方百度网盘地�
     `${miniAppLink(valid)}&url=${encodeURIComponent(valid)}`,
   ])
     assert.equal(tiebaBaiduMiniAppShare(value), null);
+});
+
+test("贴吧小程序中的旧 HTTP 百度分享转换为 HTTPS，保留空提取码和配图位置", async () => {
+  const legacyShare = "http://pan.baidu.com/s/1ClockExample";
+  const canonicalShare = "https://pan.baidu.com/s/1ClockExample";
+  const image = "https://tiebapic.baidu.com/forum/pic/item/clock.jpg";
+  const article = wechatTiebaSourceSchema.parse(
+    await readPublicTiebaArticle(url, async () => ({
+      ...thread,
+      firstFloor: {
+        ...floor,
+        parts: [
+          { kind: "text", text: "分享桌面小工具。\n" },
+          {
+            kind: "text",
+            text: "百度网盘",
+            href: miniAppLink(legacyShare, ""),
+          },
+          { kind: "image", url: image },
+        ],
+      },
+    })),
+  );
+  assert.equal(
+    article.body,
+    `分享桌面小工具。\n[百度网盘](${canonicalShare})\n\n![贴吧配图](${image})`,
+  );
+  assert.deepEqual(
+    articleLinks(article.body).map(({ provider, url, code }) => ({
+      provider,
+      url,
+      code,
+    })),
+    [{ provider: "baidu", url: canonicalShare, code: "" }],
+  );
 });

@@ -6,6 +6,18 @@ export function createAiHandlers(
   services: Pick<HandlerServices, "ai" | "db" | "ideas">,
 ) {
   return {
+    "ai.probe": (raw) => {
+      const { mode, model, provider, network } = z
+        .object({
+          authorized: z.literal(true),
+          mode: z.enum(["json-schema", "json-object", "prompt-json"]),
+          model: z.string().trim().min(1).max(200).optional(),
+          provider: z.string().trim().min(1).max(100).optional(),
+          network: z.enum(["default", "direct"]).optional(),
+        })
+        .parse(raw);
+      return services.ai.probe({ mode, model, provider, network });
+    },
     "ai.connection": async () => {
       return services.ai.connection();
     },

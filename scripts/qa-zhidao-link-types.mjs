@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
+import { devSessionRequest } from "./dev-session-client.mjs";
 
 export async function run({ page, windowId }) {
   const out = `/tmp/panxu-link-types/${windowId}`;
@@ -101,6 +102,7 @@ export async function run({ page, windowId }) {
   });
   const button = (name) => page.getByRole("button", { name, exact: true });
   const choose = async (label) => {
+    await devSessionRequest("dev.session.focus", { id: windowId });
     await page
       .getByRole("combobox", { name: "回答中的链接", exact: true })
       .click();
@@ -124,6 +126,11 @@ export async function run({ page, windowId }) {
     await page
       .getByRole("combobox", { name: "回答中的链接", exact: true })
       .waitFor();
+    assert.equal(
+      await button("管理知道账号").count(),
+      1,
+      "发布页仅保留页头的账号管理入口",
+    );
     await choose("资源落地页");
     await preview("https://panxu.site/r/qa-office");
     await button("下载已审核表格").click();

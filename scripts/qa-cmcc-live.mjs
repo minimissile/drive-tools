@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import { devSessionRequest } from "./dev-session-client.mjs";
 
 /** Run only after the user has applied the backend and logged in. Never logs credentials. */
@@ -26,18 +27,43 @@ export async function run({ page, windowId, checkpoint }) {
     "请先添加并登录移动云盘；有多个账号时请显式指定验收账号。",
   );
   const checked = await page.evaluate(async (id) => {
-    const a = await window.panxu.invoke("account.check", { id });
+    const a = await window.panxu.invoke("account.capacity", { id });
     return {
       id: a.id,
       alias: a.alias,
       status: a.status,
       hasUid: !!a.uid,
       capacity: a.capacity?.value ?? null,
+      capacityError: a.capacity?.error ?? null,
+      capacityUpdatedAt: a.capacity?.updatedAt,
+      membership: a.membership?.value ?? null,
       membershipError: a.membership?.error ?? null,
     };
   }, account.id);
   assert.equal(checked.status, "connected");
   assert.equal(checked.hasUid, true);
+  assert.equal(checked.capacityError, null);
+  assert.equal(checked.membershipError, null);
+  assert.ok(checked.membership && checked.membership.status !== "unknown");
+  if (process.env.PANXU_CMCC_EXPECTED_EXPIRY)
+    assert.equal(
+      checked.membership.expiresAt,
+      process.env.PANXU_CMCC_EXPECTED_EXPIRY,
+    );
+  if (process.env.PANXU_CMCC_EXPECTED_TOTAL)
+    assert.equal(
+      checked.capacity.totalBytes,
+      Number(process.env.PANXU_CMCC_EXPECTED_TOTAL),
+    );
+  assert.ok(
+    checked.capacity &&
+      checked.capacity.totalBytes >=
+        Number(process.env.PANXU_CMCC_TOTAL_MIN || 0),
+  );
+  if (process.env.PANXU_CMCC_TOTAL_MAX)
+    assert.ok(
+      checked.capacity.totalBytes <= Number(process.env.PANXU_CMCC_TOTAL_MAX),
+    );
   const root = await page.evaluate(async (accountId) => {
     const d = await window.panxu.invoke("drive.directory", {
       accountId,
@@ -50,6 +76,23 @@ export async function run({ page, windowId, checkpoint }) {
     };
   }, account.id);
   await checkpoint();
+  if (process.env.PANXU_CMCC_SCREENSHOT === "1") {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("tab", { name: /^移动云盘\s*\d+$/ }).click();
+    const membership = page.getByRole("region", {
+      name: `${checked.alias}会员信息`,
+    });
+    await membership
+      .getByText(checked.membership.tier, { exact: true })
+      .waitFor();
+    if (process.env.PANXU_CMCC_EXPECTED_EXPIRY)
+      await membership.getByText(/到期时间：2027\/2\/24 23:52:32/).waitFor();
+    await mkdir("/private/tmp/panxu-cmcc-live", { recursive: true });
+    await page.screenshot({
+      path: `/private/tmp/panxu-cmcc-live/${windowId}.png`,
+      fullPage: false,
+    });
+  }
   let scan = { started: false, status: "not-requested" };
   const readScan = () =>
     page.evaluate(

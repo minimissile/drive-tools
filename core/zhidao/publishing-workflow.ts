@@ -840,7 +840,32 @@ export class ZhidaoPublishingWorkflow {
         record.generation &&
         record.generation.status !== "completed" &&
         !optimize;
-      if (!resuming) {
+      const correcting =
+        optimize &&
+        record.generation?.status === "failed" &&
+        record.generation.validation?.status === "failed" &&
+        record.generation.topics?.length;
+      if (correcting) {
+        this.d.ai.assertTextConfigured("copy");
+        const previous = record.generation!;
+        const failed = new Set(
+          previous.validation!.issues.map((issue) => issue.index),
+        );
+        // Keep the plan, successful batches and review feedback. An explicit
+        // correction only regenerates rejected targets, then reviews all rows.
+        record.generation = {
+          ...previous,
+          id: randomUUID(),
+          status: "running",
+          drafts: previous.drafts.filter((draft) => !failed.has(draft.index)),
+          rejectedDrafts: [...failed].flatMap((index) => {
+            const draft =
+              previous.drafts.find((row) => row.index === index) ??
+              previous.rejectedDrafts?.find((row) => row.index === index);
+            return draft ? [draft] : [];
+          }),
+        };
+      } else if (!resuming) {
         if (record.rows.length) {
           if (!optimize && (!upgradeLegacy || record.legacyUpgraded))
             return record;
@@ -917,6 +942,7 @@ export class ZhidaoPublishingWorkflow {
             this.d.ai,
             record,
             assertCurrent,
+            copy?.files ?? [],
           );
           assertCurrent();
           generation.topics = plan.topics.map((topic) => ({
@@ -958,10 +984,15 @@ export class ZhidaoPublishingWorkflow {
           this.store(record);
         }
         if (generation.planVersion === 2) {
+          // Rewriting has finished. If the review request fails, resuming only
+          // rechecks these drafts instead of paying to rewrite them again.
+          delete generation.validation;
+          this.store(record);
           const issues = await reviewPublishingDrafts(
             this.d.ai,
             record,
             assertCurrent,
+            copy?.files ?? [],
           );
           assertCurrent();
           generation.validation = {
@@ -972,7 +1003,7 @@ export class ZhidaoPublishingWorkflow {
           if (issues.length)
             throw new AppError(
               "QUESTION_INTENT_REVIEW",
-              `问答意图检查发现${issues.length}处问题：${issues.map((issue) => `第${issue.index + 1}条：${issue.reason}`).join("；")}。已生成内容保留，未确认或建链。请返回上一步调整关键词/资源说明后重新生成。`,
+              `问答意图检查发现${issues.length}处问题。草稿已保留，未确认或建链；可修正问题稿后重新检查，也可调整关键词或资源说明。`,
             );
         }
         const image = generationResource.shape.image.safeParse(
@@ -1020,6 +1051,7 @@ export class ZhidaoPublishingWorkflow {
         if (!previous.some((row) => row.reviewed))
           record.linkedAnswerFormat = true;
         if (generation.upgradeLegacy) record.legacyUpgraded = true;
+        delete generation.rejectedDrafts;
         generation.status = "completed";
         if (record.contentFirst && !record.copyId)
           record.message = `已生成 ${record.rows.length} 条问答，请检查并确认后准备独立链接。`;

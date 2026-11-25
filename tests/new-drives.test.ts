@@ -10,6 +10,63 @@ import { parseShare } from "../core/links";
 import { providerApiAllowed, providerAuthAllowed } from "../shared/providers";
 import { AppError, ProviderHttpError, safeMessage } from "../core/errors";
 
+test("Thunder quota, directory and write requests preserve the official session captcha", async () => {
+  const captured = {
+    authorization: "Bearer fixture",
+    "x-device-id": "device-fixture",
+    "X-Captcha-Token": "captured-write-action-token",
+  };
+  const requests: string[] = [];
+  const account = {
+    id: "thunder-read-regression",
+    provider: "xunlei",
+  } as Account;
+  const provider = new XunleiProvider({
+    text: async () => "",
+    authHeaders: async (_id, refresh) => {
+      assert.ok(!refresh, "a valid session must not be refreshed");
+      return captured;
+    },
+    json: async (id, value, init) => {
+      assert.equal(id, account.id);
+      const url = new URL(value),
+        headers = new Headers(init?.headers);
+      requests.push(`${init?.method} ${url.pathname}`);
+      assert.equal(headers.get("authorization"), captured.authorization);
+      assert.equal(headers.get("x-device-id"), captured["x-device-id"]);
+      if (init?.method === "GET") {
+        assert.equal(
+          headers.get("x-captcha-token"),
+          captured["X-Captcha-Token"],
+        );
+        assert.equal(url.searchParams.get("space"), "");
+        if (url.pathname.endsWith("/about"))
+          return { quota: { limit: "1000", usage: "250" } };
+        return { files: [], next_page_token: "" };
+      }
+      assert.equal(headers.get("x-captcha-token"), captured["X-Captcha-Token"]);
+      return { id: "created-folder", kind: "drive#folder", name: "fixture" };
+    },
+  });
+  assert.deepEqual(await provider.capacity(account), {
+    totalBytes: 1000,
+    usedBytes: 250,
+  });
+  assert.deepEqual(await provider.list(account, "0"), []);
+  await provider.manageFile(account, {
+    action: "mkdir",
+    parentId: "0",
+    path: "/",
+    name: "fixture",
+  });
+  assert.equal(captured["X-Captcha-Token"], "captured-write-action-token");
+  assert.deepEqual(requests, [
+    "GET /drive/v1/about",
+    "GET /drive/v1/files",
+    "POST /drive/v1/files",
+  ]);
+});
+
 test("official share handoff uses the chosen matching account and canonical URL only", async () => {
   const f = await fixture();
   try {

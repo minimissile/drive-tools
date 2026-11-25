@@ -496,6 +496,42 @@
   overflow-x: auto;
 }
 
+.wechat-source-reader {
+  max-width: 760px;
+  margin-inline: auto;
+  padding: var(--space-4);
+}
+
+.wechat-source-reader > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.wechat-source-reader > header > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wechat-source-reader h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.wechat-source-reader header p {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+}
+
+.wechat-source-reader .wechat-preview {
+  min-height: 0;
+  padding: var(--space-4) 0 0;
+}
+
 .wechat-delivery > .dialog-body {
   gap: var(--space-3);
 }

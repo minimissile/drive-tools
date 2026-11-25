@@ -53,8 +53,9 @@ export async function fetchJson(
   init: RequestInit = {},
   timeout = 30_000,
   onResponse?: (text: string, status: number) => void,
+  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<Record<string, any>> {
-  const response = await fetch(url, {
+  const response = await request(url, {
     ...init,
     signal: init.signal ?? AbortSignal.timeout(timeout),
     redirect: "error",

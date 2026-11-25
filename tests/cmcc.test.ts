@@ -38,6 +38,7 @@ function mock() {
     next: null as string | null,
     route: "https://personal-kd-njs.yun.139.com/hcy",
     quota: { diskSize: "1000", freeDiskSize: "750" } as JsonObject,
+    benefits: { userSubMemberList: [] } as JsonObject,
     failWrite: false,
     storage: 0,
     complete: 0,
@@ -70,6 +71,12 @@ function mock() {
         headers = new Headers(init?.headers);
       calls.push({ url, body, headers });
       assert.equal(headers.get("authorization"), authorization);
+      assert.equal(
+        headers.get("Referer"),
+        url.origin === "https://yun.139.com"
+          ? "https://yun.139.com/w/"
+          : "https://yun.139.com/",
+      );
       const [time, nonce, sign] = headers.get("mcloud-sign")!.split(",");
       assert.equal(sign, cmccSignature(String(init?.body), time, nonce));
       assert.match(time, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
@@ -91,8 +98,18 @@ function mock() {
           userDomainId: control.uid,
           userProfileInfo: { userName: "云端资料归档" },
         });
-      if (url.pathname === "/user/disk/getPersonalDiskInfo")
-        return ok(control.quota);
+      if (url.pathname === "/user/disk/quota/detail") return ok(control.quota);
+      if (
+        url.pathname ===
+        "/orchestration/group-rebuild/member/v1.0/queryUserBenefits"
+      ) {
+        assert.deepEqual(body, {
+          isNeedBenefit: 0,
+          commonAccountInfo: { userDomainId: control.uid, accountType: 1 },
+        });
+        assert.equal(headers.get("mcloud-userid-flag"), "1");
+        return ok(control.benefits);
+      }
       if (url.pathname === "/hcy/file/list")
         return ok({
           items: body.parentFileId === "/" ? files : [],
@@ -189,8 +206,8 @@ test("139 服务端 UID、用户名、容量与新版个人盘根目录", async 
     nickname: "云端资料归档",
   });
   assert.deepEqual(await m.provider.capacity(account), {
-    totalBytes: 1000,
-    usedBytes: 250,
+    totalBytes: 1000 * 1024 ** 2,
+    usedBytes: 250 * 1024 ** 2,
   });
   const page = await m.provider.listPage(account, "0");
   assert.equal(page.files.length, 2);
@@ -256,6 +273,93 @@ test("139 不把坏容量、文件大小或缺失分页当作0或完整目录", 
   await assert.rejects(m.provider.listPage(account, "0"), {
     code: "INCOMPLETE_LIST",
   });
+});
+test("139 云空间总配额以 MiB 换算，保留小数用量；新旧个人盘使用同一官网总额", async () => {
+  for (const modern of [true, false]) {
+    const m = mock();
+    m.control.modern = modern;
+    m.control.quota = { diskSize: "4229120", freeDiskSize: "4229119.5" };
+    assert.deepEqual(await m.provider.capacity(account), {
+      totalBytes: 4229120 * 1024 ** 2,
+      usedBytes: 512 * 1024,
+    });
+    assert.equal(m.calls.at(-1)?.url.pathname, "/user/disk/quota/detail");
+    assert.equal(
+      m.calls.some((c) => c.url.pathname.endsWith("/getPersonalDiskInfo")),
+      false,
+    );
+  }
+  for (const invalid of [
+    null,
+    "",
+    " ",
+    true,
+    -1,
+    "NaN",
+    Infinity,
+    "9999999999999999999",
+  ]) {
+    const m = mock();
+    m.control.quota = { diskSize: invalid, freeDiskSize: "0" };
+    await assert.rejects(m.provider.capacity(account), {
+      code: "CAPACITY_UNAVAILABLE",
+    });
+  }
+  const m = mock();
+  m.control.quota = { diskSize: "10", freeDiskSize: "11" };
+  await assert.rejects(m.provider.capacity(account), {
+    code: "CAPACITY_UNAVAILABLE",
+  });
+});
+test("139 会员通过账号内订购接口读取，不根据云空间大小判断", async () => {
+  const m = mock();
+  assert.deepEqual(await m.provider.membership(account), {
+    status: "none",
+    tier: null,
+    expiresAt: null,
+  });
+  m.control.benefits = {
+    userSubMemberList: [{ memberLevel: 2, memberLvName: "超级会员" }],
+  };
+  assert.deepEqual(await m.provider.membership(account), {
+    status: "active",
+    tier: "超级会员",
+    expiresAt: null,
+  });
+  m.control.benefits = {};
+  await assert.rejects(m.provider.membership(account), {
+    code: "MEMBERSHIP_UNAVAILABLE",
+  });
+});
+test("139 会员兼容官网旧接口成功信封，内层失败和明确失败不可冒充非会员", async () => {
+  for (const envelope of [
+    { code: "0000" },
+    { code: "0", data: { result: { resultCode: "0" } } },
+    { statusCode: 200, mcsCode: "0" },
+    { resultCode: "0" },
+  ]) {
+    const m = mock();
+    m.control.override = (url) =>
+      url.pathname.endsWith("queryUserBenefits")
+        ? { ...envelope, data: { ...envelope.data, userSubMemberList: [] } }
+        : undefined;
+    assert.equal((await m.provider.membership(account)).status, "none");
+  }
+  for (const envelope of [
+    { success: false, code: "0000" },
+    { code: "0", data: { result: { resultCode: "99" } } },
+    { statusCode: 200, mcsCode: "99" },
+    {},
+  ]) {
+    const m = mock();
+    m.control.override = (url) =>
+      url.pathname.endsWith("queryUserBenefits")
+        ? { ...envelope, data: { ...envelope.data, userSubMemberList: [] } }
+        : undefined;
+    await assert.rejects(m.provider.membership(account), {
+      code: "REMOTE_ERROR",
+    });
+  }
 });
 test("139 重复游标和重复文件不算同步完成", async () => {
   const m = mock();
@@ -369,17 +473,18 @@ test("139 小素材上传不携带账号令牌，不自动覆盖同名文件", a
   );
   assert.equal(m.control.storage, 1);
 });
-test("139 分享链接识别保留ID和提取码，未核验的能力明确拒绝", async () => {
+test("139 分享链接识别保留官方hash入口、ID和提取码", async () => {
   const link = parseShare(
     "https://yun.139.com/shareweb/#/w/i/abc139 提取码：a1b2",
   );
   assert.equal(link.provider, "cmcc");
   assert.equal(link.shareKey, "abc139");
   assert.equal(link.code, "a1b2");
-  assert.equal(link.url, "https://yun.139.com/w/i/abc139");
-  await assert.rejects(mock().provider.inspect(account, link), {
-    code: "CMCC_SHARE_UNSUPPORTED",
-  });
+  assert.equal(link.url, "https://yun.139.com/shareweb/#/w/i/abc139");
+  assert.equal(
+    parseShare("https://yun.139.com/shareweb/#/w/i/abc139?password=q1w2").code,
+    "q1w2",
+  );
 });
 test("139 Basic会话按账号加密存储，不复用其他网盘续期接口", async () => {
   const f = await fixture();

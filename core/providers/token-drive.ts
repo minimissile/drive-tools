@@ -187,7 +187,11 @@ export class TokenDriveProvider implements DriveProvider {
     return this.id==="pikpak" ? pikpakMembership(await this.request(account,"privilege/vip"),account.uid) : xunleiMembership(await this.request(account,`https://${providerSpecs[this.id].apiHosts[1]}/v1/user/me`));
   }
   async capacity(account: Account) {
-    const result = await this.request(account, "about");
+    const result = await this.request(
+      account,
+      "about",
+      this.id === "xunlei" ? { space: "" } : {},
+    );
     return normalizeCapacity(result.quota?.limit, result.quota?.usage);
   }
   private rows(data: JsonObject, parentId: string): RemoteFile[] {

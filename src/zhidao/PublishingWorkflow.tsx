@@ -45,6 +45,7 @@ import {
 } from "./publishing-draft";
 import { PublishingResources } from "./PublishingResources";
 import { PublishingReview } from "./PublishingReview";
+import { PublishingGenerationRecovery } from "./PublishingGenerationRecovery";
 import {
   PublishingPreview,
   type PublishingPreviewGroup,
@@ -705,32 +706,55 @@ export function PublishingWorkflow({
                 />
               ) : (
                 <>
-                  <Notice warning>
-                    {activeRecord.generation.message ||
-                      "AI 生成尚未完成，请核对后继续。"}
-                  </Notice>
-                  {activeRecord.generation.validation?.status === "failed" ||
-                  (activeRecord.generation.topics &&
-                    !activeRecord.generation.topics.length) ? (
-                    <Button
-                      primary
-                      disabled={busy}
-                      onClick={() => draft.update({ step: 1 })}
-                    >
-                      返回调整关键词
-                    </Button>
-                  ) : (
-                    <Button
-                      primary
-                      disabled={busy}
-                      onClick={() =>
+                  {activeRecord.generation.validation?.status === "failed" ? (
+                    <PublishingGenerationRecovery
+                      record={activeRecord}
+                      busy={busy}
+                      onCorrect={() =>
                         void action
-                          .run("zhidao.workflow.generate", { id: active.key })
+                          .run("zhidao.workflow.generate", {
+                            id: active.key,
+                            optimize: true,
+                          })
                           .finally(records.reload)
                       }
-                    >
-                      继续生成剩余问答
-                    </Button>
+                      onAdjust={() => draft.update({ step: 1 })}
+                    />
+                  ) : (
+                    <>
+                      <Notice warning>
+                        {activeRecord.generation.message ||
+                          "AI 生成尚未完成，请核对后继续。"}
+                      </Notice>
+                      {activeRecord.generation.topics &&
+                      !activeRecord.generation.topics.length ? (
+                        <Button
+                          primary
+                          disabled={busy}
+                          onClick={() => draft.update({ step: 1 })}
+                        >
+                          返回调整关键词
+                        </Button>
+                      ) : (
+                        <Button
+                          primary
+                          disabled={busy}
+                          onClick={() =>
+                            void action
+                              .run("zhidao.workflow.generate", {
+                                id: active.key,
+                              })
+                              .finally(records.reload)
+                          }
+                        >
+                          {activeRecord.generation.planVersion === 2 &&
+                          activeRecord.generation.drafts.length ===
+                            activeRecord.generation.targets.length
+                            ? "重新检查问答"
+                            : "继续生成剩余问答"}
+                        </Button>
+                      )}
+                    </>
                   )}
                 </>
               )}

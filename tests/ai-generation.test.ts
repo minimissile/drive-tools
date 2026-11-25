@@ -6,6 +6,8 @@ import { Repository } from "../core/repository";
 import { SecretStore } from "../core/secrets";
 import { AiService } from "../core/ai";
 import type { fetchJson } from "../core/http";
+import { ServiceHttpError } from "../core/errors";
+import { createAiHandlers } from "../core/ipc/ai";
 
 const article = z.object({
   title: z.string().min(1),
@@ -18,7 +20,10 @@ const value = {
   checks: "此字段可以完整闭合，不能用它推断正文已完整生成。",
 };
 
-async function fixture(response: Record<string, unknown>) {
+async function fixture(
+  response: Record<string, unknown>,
+  requestOverride?: typeof fetchJson,
+) {
   const db = new Database(":memory:");
   const secrets = new SecretStore(db, {
     available: () => true,
@@ -39,13 +44,19 @@ async function fixture(response: Record<string, unknown>) {
   ]);
   let requests = 0,
     normalized = 0;
-  const request: typeof fetchJson = async () => {
+  const payloads: Record<string, any>[] = [];
+  const request: typeof fetchJson = async (...args) => {
     requests++;
+    payloads.push(args[1]?.body ? JSON.parse(String(args[1].body)) : {});
+    if (requestOverride) return requestOverride(...args);
     return response;
   };
   const ai = new AiService(new Repository(db), secrets, () => {}, request);
   return {
     db,
+    ai,
+    secrets,
+    payloads,
     requests: () => requests,
     normalized: () => normalized,
     run: () =>
@@ -127,6 +138,140 @@ test("explicit incomplete generation states reject even syntactically valid sche
         f.db.close();
       }
     });
+});
+
+test("桌面网络与原直连可显式对照，默认生成使用注入网络，失败不自动换网络或重试", async () => {
+  const f = await fixture({});
+  let system = 0,
+    direct = 0;
+  const response = {
+    usage: { cost: 0 },
+    choices: [{ finish_reason: "stop", message: { content: '{"ok":true}' } }],
+  };
+  let reject = false;
+  const ai = new AiService(
+    new Repository(f.db),
+    f.secrets,
+    () => {},
+    async () => {
+      system++;
+      if (reject)
+        throw new ServiceHttpError(400, "Request path cannot be relayed");
+      return response;
+    },
+    async () => {
+      direct++;
+      return response;
+    },
+  );
+  try {
+    await ai.probe({ mode: "json-schema" });
+    await ai.probe({ mode: "json-schema", network: "direct" });
+    assert.equal(system, 1);
+    assert.equal(direct, 1);
+    reject = true;
+    await assert.rejects(
+      () => ai.probe({ mode: "json-schema" }),
+      /cannot be relayed/,
+    );
+    assert.equal(system, 2);
+    assert.equal(direct, 1);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("显式生成诊断按原预算记费，三种输出模式独立调用，不切换默认模型或自动重试", async () => {
+  const f = await fixture({
+    usage: { cost: 0.000001 },
+    choices: [{ finish_reason: "stop", message: { content: '{"ok":true}' } }],
+  });
+  try {
+    for (const mode of ["json-schema", "json-object", "prompt-json"] as const)
+      assert.equal((await f.ai.probe({ mode })).ok, true);
+    assert.equal(f.requests(), 3);
+    assert.deepEqual(
+      f.payloads.map((p) => p.response_format?.type ?? "prompt-json"),
+      ["json_schema", "json_object", "prompt-json"],
+    );
+    assert.ok(
+      f.payloads.every(
+        (p) => p.max_tokens === 512 && p.model === "fixture/text",
+      ),
+    );
+    assert.equal(f.db.setting("model", ""), "fixture/text");
+    assert.equal(
+      f.db.get<{ n: number }>(
+        "SELECT count(*) n FROM api_calls WHERE phase='connection_probe' AND status='success' AND confirmed_micros=1",
+      )?.n,
+      3,
+    );
+    f.db.setSetting("dailyAiBudgetMicros", 0);
+    await assert.rejects(() => f.ai.probe({ mode: "json-schema" }), {
+      code: "AI_BUDGET_EXCEEDED",
+    });
+    assert.equal(f.requests(), 3);
+    const handlers = createAiHandlers({ ai: f.ai, db: f.db, ideas: {} as any });
+    assert.throws(
+      () => handlers["ai.probe"]({ mode: "json-schema" }),
+      /authorized/,
+    );
+    assert.equal(f.requests(), 3);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("被拒绝的生成保留脱敏HTTP及供应商诊断，不保存原始请求、不重试、不编造确认费用", async () => {
+  const key = "synthetic-test-only";
+  const f = await fixture({}, async (_url, _init, _timeout, onResponse) => {
+    onResponse?.(
+      JSON.stringify({
+        error: {
+          code: 400,
+          message: "Request path cannot be relayed",
+          metadata: {
+            provider_name: `Fixture ${key}`,
+            error_type: "request_validation",
+            provider_code: "invalid_path",
+            raw: `private prompt ${key}`,
+          },
+        },
+        openrouter_metadata: {
+          region: "test",
+          summary: `router ${key}`,
+          pipeline: [{ private: "never retain this" }],
+        },
+      }),
+      400,
+    );
+    throw new ServiceHttpError(400, "Request path cannot be relayed");
+  });
+  try {
+    await assert.rejects(
+      () => f.ai.probe({ mode: "json-schema" }),
+      /cannot be relayed/,
+    );
+    assert.equal(f.requests(), 1);
+    const row = f.db.get<{ value: string }>(
+      "SELECT value FROM api_cache WHERE key LIKE 'ai-diagnostic:%'",
+    )!;
+    const diagnostic = JSON.parse(row.value);
+    assert.equal(diagnostic.httpStatus, 400);
+    assert.equal(diagnostic.remoteError.code, 400);
+    assert.equal(diagnostic.remoteError.providerCode, "invalid_path");
+    assert.doesNotMatch(
+      row.value,
+      /synthetic-test-only|private prompt|never retain this/,
+    );
+    const call = f.db.get<{ status: string; confirmed_micros: number | null }>(
+      "SELECT status,confirmed_micros FROM api_calls",
+    )!;
+    assert.equal(call.status, "failed");
+    assert.equal(call.confirmed_micros, null);
+  } finally {
+    f.db.close();
+  }
 });
 
 test("a normal stop preserves the complete original JSON fields without slicing or moving checks into body", async () => {

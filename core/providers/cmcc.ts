@@ -5,12 +5,17 @@ import type { ProviderFileMutation } from "../../shared/drive-files";
 import { providerApiAllowed } from "../../shared/providers";
 import { AppError } from "../errors";
 import { normalizeCapacity } from "./capacity";
+import { cmccMembership } from "./membership";
+import { CmccShares, encodeCmccShare, decodeCmccShare } from "./cmcc-share";
+import type { ShareCreationOptions } from "../../shared/share-options";
+import { providerRequestReferer } from "./request-context";
 import { storageUrl, type UploadAsset } from "./small-upload";
 import {
   normalizedDirectory,
   type DriveProvider,
   type JsonObject,
   type ProviderTransport,
+  type ShareCreatedHandler,
 } from "./provider";
 
 const userBase = "https://user-njs.yun.139.com/user";
@@ -89,7 +94,38 @@ function modernFile(row: JsonObject, parentId: string): RemoteFile {
 export class CmccProvider implements DriveProvider {
   readonly id = "cmcc" as const;
   private contexts = new Map<string, Context>();
-  constructor(private transport: ProviderTransport) {}
+  private shares: CmccShares;
+  constructor(private transport: ProviderTransport) {
+    this.shares = new CmccShares(
+      (account) => this.context(account),
+      (account, path, data, write = false) =>
+        this.request(
+          account,
+          "https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp",
+          path,
+          data,
+          write,
+          {
+            ...(path === "/IOutLink/getOutLink"
+              ? {}
+              : { "hcy-cool-flag": "1" }),
+            "mcloud-client": "10702",
+            "mcloud-version": "7.13.3",
+            "x-yun-channel-source": "10213406",
+            "x-huawei-channelSrc": "10213406",
+            "x-yun-app-channel": "10213406",
+          },
+          path === "/IOutLink/getOutLink" ? "plain" : "encrypted",
+        ),
+      (account, _path, data) =>
+        this.request(
+          account,
+          "https://yun.139.com/orchestration/personalCloud-rebuild",
+          "/outlink/v1.0/getOutLinkList",
+          data,
+        ),
+    );
+  }
   private async headers(account: Account) {
     const headers = await this.transport.authHeaders?.(account.id);
     if (
@@ -108,6 +144,8 @@ export class CmccProvider implements DriveProvider {
     path: string,
     data: JsonObject,
     write = false,
+    headers: Record<string, string> = {},
+    sharePayload?: "plain" | "encrypted",
   ) {
     const url = `${base}${path}`;
     if (!providerApiAllowed("cmcc", url))
@@ -118,14 +156,14 @@ export class CmccProvider implements DriveProvider {
       nonce = randomBytes(12).toString("hex").slice(0, 16);
     let result: JsonObject;
     try {
-      result = await this.transport.json(account.id, url, {
+      const init: RequestInit = {
         method: "POST",
         credentials: "omit",
         headers: {
           ...captured,
           "Content-Type": "application/json;charset=UTF-8",
           Origin: "https://yun.139.com",
-          Referer: "https://yun.139.com/w/",
+          Referer: providerRequestReferer("cmcc", new URL(url)),
           "CMS-DEVICE": "default",
           "mcloud-channel": "1000101",
           "mcloud-client": captured["mcloud-client"] || "10701",
@@ -143,24 +181,56 @@ export class CmccProvider implements DriveProvider {
           "x-yun-app-channel": "10000034",
           "x-yun-channel-source": "10000034",
           "Inner-Hcy-Router-Https": "1",
+          ...headers,
         },
-        body,
-      });
+        body: sharePayload === "encrypted" ? encodeCmccShare(body) : body,
+      };
+      result = sharePayload
+        ? decodeCmccShare(await this.transport.text(account.id, url, init))
+        : await this.transport.json(account.id, url, init);
     } catch (cause) {
       if (cause instanceof AppError) throw cause;
       throw new AppError(
         write ? "UNCERTAIN_REMOTE_RESULT" : "REMOTE_UNAVAILABLE",
         write
           ? "移动云盘请求中断，远端结果待核对，未自动重试。"
-          : "移动云盘读取未完成，请检查网络或重新核验登录。",
+          : "移动云盘接口连接未完成，请检查网络后重试。",
         write,
       );
     }
-    const code = String(result.code ?? result.data?.result?.resultCode ?? "");
-    if (result.success !== true || !/^0{1,12}$/.test(code)) {
+    const nestedCode = result.data?.result?.resultCode;
+    const code = String(
+      nestedCode ??
+        result.code ??
+        result.resultCode ??
+        result.returnCode ??
+        result.mcsCode ??
+        result.statusCode ??
+        "",
+    );
+    // The old orchestration endpoints don't always include `success`; the
+    // official client normalizes several explicit success envelopes.
+    const success =
+      result.success !== false &&
+      (nestedCode == null || /^0{1,12}$/.test(String(nestedCode))) &&
+      ((result.success === true && /^0{1,12}$/.test(code)) ||
+        result.code === "0000" ||
+        (String(result.code) === "0" && nestedCode != null) ||
+        String(result.resultCode) === "0" ||
+        String(result.returnCode) === "0" ||
+        (result.statusCode === 200 &&
+          (!result.mcsCode || String(result.mcsCode) === "0")));
+    if (!success) {
       const message = String(
-        result.message ?? result.data?.result?.resultDesc ?? "",
+        result.message ?? result.desc ?? result.data?.result?.resultDesc ?? "",
       );
+      if (code === "9188")
+        throw new AppError("BAD_CODE", "移动云盘提取码缺失或不正确。");
+      if (code === "9173")
+        throw new AppError(
+          "USER_ACTION_REQUIRED",
+          "移动云盘分享限制访问，请在官网核对访问权限。",
+        );
       if (
         ["401", "200000401", "1010010002"].includes(code) ||
         /token|auth|登录|会话/i.test(message)
@@ -270,26 +340,24 @@ export class CmccProvider implements DriveProvider {
   }
   async capacity(account: Account) {
     const c = await this.context(account);
-    const data = c.modern
-      ? await this.request(account, c.user, "/disk/getPersonalDiskInfo", {
-          userDomainId: c.uid,
-        })
-      : await this.request(account, legacyBase, "/user/v1.0/getDiskInfo", {
-          commonAccountInfo: { account: c.account, accountType: 1 },
-        });
-    const value = c.modern ? data : data.diskInfo;
-    if (!value || typeof value !== "object")
-      throw new AppError(
-        "CAPACITY_UNAVAILABLE",
-        "移动云盘未返回个人盘容量信息。",
-      );
-    const total = Number(value.diskSize),
-      free = Number(value.freeDiskSize);
+    // Match the official sidebar's cloud-space total, not the personal-only
+    // legacy quota. Both diskSize fields from this endpoint are MiB, not bytes.
+    const data = await this.request(account, c.user, "/disk/quota/detail", {
+      userDomainId: c.uid,
+    });
+    const bytes = (raw: unknown) => {
+      if (
+        (typeof raw !== "number" && typeof raw !== "string") ||
+        !/^\d+(?:\.\d+)?$/.test(String(raw))
+      )
+        return NaN;
+      return Math.round(Number(raw) * 1024 ** 2);
+    };
+    const total = bytes(data.diskSize),
+      free = bytes(data.freeDiskSize);
     if (
-      value.diskSize == null ||
-      value.freeDiskSize == null ||
+      !Number.isSafeInteger(total) ||
       !Number.isSafeInteger(free) ||
-      free < 0 ||
       free > total
     )
       throw new AppError(
@@ -298,13 +366,20 @@ export class CmccProvider implements DriveProvider {
       );
     return normalizeCapacity(total, total - free);
   }
-  async membership(): Promise<
-    import("../../shared/drive-membership").DriveMembership
-  > {
-    throw new AppError(
-      "MEMBERSHIP_UNSUPPORTED",
-      "移动云盘会员状态与到期时间暂未接入，请在官网查看。",
+  async membership(account: Account) {
+    const c = await this.context(account);
+    const data = await this.request(
+      account,
+      "https://yun.139.com/orchestration/group-rebuild",
+      "/member/v1.0/queryUserBenefits",
+      {
+        isNeedBenefit: 0,
+        commonAccountInfo: { userDomainId: c.uid, accountType: 1 },
+      },
+      false,
+      { "mcloud-userid-flag": "1" },
     );
+    return cmccMembership(data);
   }
   async listPage(
     account: Account,
@@ -611,31 +686,65 @@ export class CmccProvider implements DriveProvider {
       );
     }
   }
-  private unsupported(): never {
-    throw new AppError(
-      "CMCC_SHARE_UNSUPPORTED",
-      "移动云盘分享与转存接口尚未完成核验，请先使用目录同步与本人文件管理；分享请在官网操作。",
+  inspect(account: Account, source: ShareInput, parentId = "0", page = 1) {
+    return this.shares.inspect(account, source, parentId, page);
+  }
+  transfer(
+    account: Account,
+    source: ShareInput,
+    files: RemoteFile[],
+    folderId: string,
+    path = "",
+  ) {
+    return this.shares.transfer(
+      account,
+      source,
+      files,
+      folderId,
+      path.split("/").filter(Boolean).at(-1) || "全部",
     );
   }
-  async inspect(_account: Account, _source: ShareInput) {
-    return this.unsupported();
+  poll(account: Account, taskId: string) {
+    return this.shares.poll(account, taskId);
   }
-  async transfer() {
-    return this.unsupported();
+  createShare(account: Account, files: RemoteFile[], title: string) {
+    return this.shares.create(account, files, title);
   }
-  async poll() {
-    return this.unsupported();
+  createShareWithOptions(
+    account: Account,
+    files: RemoteFile[],
+    title: string,
+    options: ShareCreationOptions,
+    onCreated?: ShareCreatedHandler,
+  ) {
+    return this.shares.create(account, files, title, options, onCreated);
   }
-  async createShare() {
-    return this.unsupported();
+  findOwnShare(account: Account, files: RemoteFile[]) {
+    return this.shares.find(account, files);
   }
-  async findOwnShare() {
-    return this.unsupported();
+  async recoverOwnShare(
+    account: Account,
+    source: ShareInput,
+    files: RemoteFile[],
+  ) {
+    if (!(await this.verifyShare(account, source.shareKey, files, source.code)))
+      throw new AppError(
+        "OWNERSHIP_UNCONFIRMED",
+        "移动云盘分享不属于当前账号或文件不匹配。",
+      );
+    return {
+      id: source.shareKey,
+      url: source.url,
+      code: source.code,
+      ownerUid: (await this.context(account)).uid,
+    };
   }
-  async recoverOwnShare() {
-    return this.unsupported();
-  }
-  async verifyShare() {
-    return this.unsupported();
+  verifyShare(
+    account: Account,
+    shareId: string,
+    files: RemoteFile[],
+    code = "",
+  ) {
+    return this.shares.verify(account, shareId, files, code);
   }
 }

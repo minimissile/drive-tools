@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { AppError } from "../errors";
+import { parseShare } from "../links";
 import {
   exportArticle,
   exportInput,
@@ -8,7 +10,15 @@ import {
 import type { HandlerServices, HandlerMap } from "./types";
 
 export function createResourceExportsHandlers(
-  services: Pick<HandlerServices, "invoke" | "ports" | "resourceExports">,
+  services: Pick<
+    HandlerServices,
+    | "invoke"
+    | "ports"
+    | "resourceExports"
+    | "checkShare"
+    | "assertOwnCopy"
+    | "repo"
+  >,
 ) {
   return {
     "resourceExport.plan": async (object) => {
@@ -50,11 +60,17 @@ export function createResourceExportsHandlers(
         input.columns,
         input.format,
         async (copyId) => {
+          // File exports retain their existing live verification contract.
+          // Clipboard copying no longer performs this check as a side effect.
+          const check = await services.checkShare(copyId);
+          if (check.status !== "valid")
+            throw new AppError("SHARE_INVALID", check.message);
+          services.assertOwnCopy(services.repo.getCopy(copyId));
           const result = (await services.invoke("copy.link", { copyId })) as {
             text: string;
           };
-          const [url, codeLine] = result.text.split("\n");
-          return { url, code: codeLine?.replace(/^提取码：/, "") || null };
+          const share = parseShare(result.text);
+          return { url: share.url, code: share.code || null };
         },
       );
       return services.ports.saveFile(file.name, file.bytes);

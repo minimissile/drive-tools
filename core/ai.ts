@@ -35,6 +35,10 @@ type ResponseOptions = {
   maxTokens?: number;
   /** Backend workflows may choose a capable catalog model without changing user defaults. */
   model?: string;
+  /** Explicit diagnostic/provider choice; no automatic paid fallback. */
+  provider?: string;
+  /** Diagnostic comparison only; ordinary calls use the app's network stack. */
+  directNetwork?: boolean;
   /** JSON-object mode instead of a provider JSON schema; local validation remains strict. */
   jsonMode?: boolean;
   /** Ask for JSON in the prompt without a provider's constrained decoder. */
@@ -73,6 +77,31 @@ function price(value: unknown): number | null {
     : null;
 }
 export class AiService {
+  /** Explicit, billed inference probe; never part of the ordinary key check. */
+  async probe(input: {
+    mode: "json-schema" | "json-object" | "prompt-json";
+    model?: string;
+    provider?: string;
+    network?: "default" | "direct";
+  }) {
+    const model = input.model ?? this.modelFor("copy");
+    const result = await this.resourceExport(
+      "connection_probe",
+      z.object({ ok: z.literal(true) }),
+      '连接诊断。只返回JSON对象 {"ok":true}，不添加任何其他内容。',
+      { check: "inference" },
+      [],
+      {
+        model,
+        provider: input.provider,
+        directNetwork: input.network === "direct",
+        maxTokens: 512,
+        ...(input.mode === "json-object" ? { jsonMode: true } : {}),
+        ...(input.mode === "prompt-json" ? { plainJson: true } : {}),
+      },
+    );
+    return { ok: result.ok, model, mode: input.mode, checkedAt: now() };
+  }
   modelFor(purpose: AiPurpose) {
     return resolveAiModels(
       this.repo.db.setting("aiModels", null),
@@ -150,6 +179,7 @@ export class AiService {
     private secrets: SecretStore,
     private changed: () => void,
     private requestJson = fetchJson,
+    private directRequestJson = requestJson,
   ) {}
   async connection(): Promise<AiConnection> {
     const key = await this.secrets.get("openrouter");
@@ -472,7 +502,12 @@ export class AiService {
                 }),
               },
             },
-      provider: { require_parameters: true },
+      provider: {
+        require_parameters: true,
+        ...(options.provider
+          ? { order: [options.provider], allow_fallbacks: false }
+          : {}),
+      },
       ...(effort ? { reasoning: { effort, exclude: true } } : {}),
     };
     const promptPrice = price(selected?.promptPrice),
@@ -530,7 +565,9 @@ export class AiService {
           : "json-schema",
     };
     try {
-      const response = await this.requestJson(
+      const response = await (
+        options.directNetwork ? this.directRequestJson : this.requestJson
+      )(
         "https://openrouter.ai/api/v1/chat/completions",
         {
           method: "POST",
@@ -538,10 +575,51 @@ export class AiService {
             Authorization: `Bearer ${key}`,
             "Content-Type": "application/json",
             "X-Title": "Panxu Studio",
+            "X-OpenRouter-Metadata": "enabled",
           },
           body: JSON.stringify(payload),
         },
         Math.min(180_000, Math.max(10_000, options.timeoutMs ?? 60_000)),
+        (text, status) => {
+          diagnostic.httpStatus = status;
+          // Error metadata can identify a provider or router failure. Keep only
+          // bounded, redacted diagnostics, never an echoed request or key.
+          if (status < 400) return;
+          try {
+            const body = JSON.parse(text);
+            const error = body.error;
+            const metadata = error?.metadata;
+            const routing = body.openrouter_metadata;
+            const textField = (value: unknown, limit = 100) =>
+              typeof value === "string"
+                ? safeMessage(
+                    new Error(String(cleanKnowledge(value, key))),
+                  ).slice(0, limit)
+                : null;
+            diagnostic.remoteError = {
+              code:
+                typeof error?.code === "number"
+                  ? error.code
+                  : textField(error?.code),
+              message: textField(error?.message, 200),
+              ...(metadata && typeof metadata === "object"
+                ? {
+                    provider: textField(metadata.provider_name),
+                    type: textField(metadata.error_type),
+                    providerCode: textField(metadata.provider_code),
+                  }
+                : {}),
+              ...(routing && typeof routing === "object"
+                ? {
+                    region: textField(routing.region, 40),
+                    summary: textField(routing.summary, 200),
+                  }
+                : {}),
+            };
+          } catch {
+            // HTTP handling retains its original error and billing semantics.
+          }
+        },
       );
       const short = (value: unknown) =>
         typeof value === "string"

@@ -10,20 +10,6 @@ export default function Membership({
   account: Account;
   refreshing?: boolean;
 }) {
-  if (account.provider === "cmcc")
-    return (
-      <section
-        className="account-membership"
-        aria-label={`${account.alias}会员信息`}
-      >
-        <div className="membership-heading">
-          <strong>会员信息暂未接入</strong>
-        </div>
-        <p className="membership-expiry">
-          请在移动云盘官网查看会员及到期时间。
-        </p>
-      </section>
-    );
   const record = account.membership,
     value = record?.value;
   const status = value ? membershipStatus(value) : "unknown";

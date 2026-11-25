@@ -12,6 +12,7 @@ import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { Button, Field, LoadingState, Notice } from "../ui/primitives";
 import "./create-share.css";
+import { SharePassphrase } from "./SharePassphrase";
 
 /** Creates an independent link without changing the resource's saved share. */
 export function CreateShareDialog({
@@ -291,6 +292,12 @@ export function CreateShareDialog({
                         : `有效期 ${receipt.expiresInDays} 天`}
                     {` · 创建于 ${new Date(receipt.createdAt).toLocaleString("zh-CN")}`}
                   </small>
+                  {context && ["baidu", "quark"].includes(context.provider) ? (
+                    <SharePassphrase
+                      key={receipt.operationId}
+                      target={{ copyId, operationId: receipt.operationId }}
+                    />
+                  ) : null}
                 </>
               ) : receipt.state === "uncertain" ? (
                 <p className="muted">

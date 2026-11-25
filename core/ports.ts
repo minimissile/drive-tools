@@ -1,12 +1,18 @@
 import type { Account } from "../shared/types";
 
 export interface AppPorts {
+  /** Official OpenRouter requests through the isolated desktop network stack. */
+  openrouterFetch?(url: string, init: RequestInit): Promise<Response>;
   jianshu?: import("../shared/jianshu").JianshuPort;
   bilibili?: import("../shared/bilibili").BilibiliContentPort;
   localVideoBundlePath?: string;
   localVideoTemplateEntryPoint?: string;
   readVideoImages?(): Promise<{ name: string; bytes: Buffer }[]>;
-  readVideoAudio?(): Promise<{ name: string; mime: string; bytes: Buffer } | null>;
+  readVideoAudio?(): Promise<{
+    name: string;
+    mime: string;
+    bytes: Buffer;
+  } | null>;
   tieba?: import("./tieba/types").TiebaAutocareBrowser;
   tiebaParticipation?: import("./tieba/participation-types").TiebaParticipationBrowser;
   tiebaTopics?: import("./tieba/topic-types").TiebaTopicPublisher;
@@ -26,7 +32,10 @@ export interface AppPorts {
     isOpen(): boolean;
     close(): void;
   };
-  read5118PublicKeywords?(keyword: string, signal: AbortSignal): Promise<string[]>;
+  read5118PublicKeywords?(
+    keyword: string,
+    signal: AbortSignal,
+  ): Promise<string[]>;
   keywordWebBrowser?: {
     check(signal: AbortSignal): Promise<void>;
     open(): Promise<void>;

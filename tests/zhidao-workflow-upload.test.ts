@@ -131,6 +131,19 @@ test("五步真实组装：3条问答直接生成一份表格上传一次，重�
     assert.equal((await f.submit()).id, run.id);
     assert.equal(f.events.filter((e) => e.type === "upload").length, 1);
     assert.equal(f.creates(), 2, "上传不另外创建分享");
+    assert.equal(
+      (await f.invoke("zhidao.templates", { page: 1 })).total,
+      0,
+      "五步流程已上传的来源不再显示为待发布",
+    );
+    const sourceRunId = f.service.zhidao.store.item(
+      (run.config.itemIds as string[])[0],
+    ).runId;
+    assert.equal(
+      f.service.zhidao.store.items(sourceRunId).length,
+      3,
+      "提交来源仍保留供历史追溯",
+    );
     const audit = await f.invoke("zhidao.publish.sync", { id: run.id });
     assert.equal((audit.config.platformTasks as any[]).length, 1);
   } finally {

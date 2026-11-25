@@ -3,6 +3,7 @@ import { runtimeDataPath } from "./runtime-paths";
 import { createVideoInputs } from "./video-inputs";
 import { landingDocumentExtensions } from "../shared/landing-document";
 import { resourceLinksTarget } from "./resource-links-network";
+import { openRouterTarget } from "../core/ai-network";
 import { pipixNetworkTarget } from "./pipix-network";
 import { musicNetworkTarget } from "../core/music/network";
 import { normalizeCover } from "./cover-image";
@@ -492,6 +493,15 @@ const environmentSessions = createEnvironmentSessions((ref) => service.environme
 const websiteSessions = createWebsiteSessions(() => service.dataPath, (account) => environmentSessions.profile({ kind: "website", id: account.id }));
 const keywordWebBrowser = createResourceKeywordWeb(() => service.dataPath);
 const ports: AppPorts = {
+  openrouterFetch(url, init) {
+    const target = openRouterTarget(url, init.method);
+    return session.fromPartition("panxu-openrouter-network", {cache: false}).fetch(target.href, {
+      ...init,
+      credentials: "omit",
+      redirect: "error",
+      bypassCustomProtocolHandlers: true,
+    });
+  },
   pipixFetch(url, init) {
     const target = pipixNetworkTarget(url, init.method ?? "GET");
     return session

@@ -2,7 +2,7 @@ import { providerSpecs } from "../../shared/providers";
 import { z } from "zod";
 import { now } from "../database";
 import { AppError, safeMessage } from "../errors";
-import { parseShare } from "../links";
+import { parseShare, shareUrlWithCode } from "../links";
 import { assertManifest } from "../providers/provider";
 import type { ShareCheck, ShareValidationResult } from "../../shared/types";
 
@@ -13,7 +13,6 @@ export function createSharingHandlers(
     HandlerServices,
     | "account"
     | "assertNoActiveJobs"
-    | "assertOwnCopy"
     | "authenticated"
     | "changed"
     | "checkShare"
@@ -339,13 +338,29 @@ export function createSharingHandlers(
     },
     "copy.link": async (object) => {
       const { copyId } = z.object({ copyId: z.string() }).parse(object);
-      const check = await services.checkShare(copyId);
-      if (check.status !== "valid")
-        throw new AppError("SHARE_INVALID", check.message);
       const copy = services.repo.getCopy(copyId);
-      services.assertOwnCopy(copy);
+      if (!copy.shareUrl)
+        throw new AppError(
+          "SHARE_NOT_READY",
+          "尚未保存本人分享链接，请先创建或填写分享。",
+        );
+      const resource = services.repo.getResource(copy.resourceId);
       const code = await services.secrets.get(`share:${copy.id}`);
-      return { text: `${copy.shareUrl}${code ? `\n提取码：${code}` : ""}` };
+      const share = parseShare(copy.shareUrl, code ?? "");
+      if (share.provider !== resource.provider)
+        throw new AppError("INVALID_LINK", "本人分享与资源网盘不一致。");
+      if (share.url === resource.sourceUrl && resource.sourceKind !== "owned")
+        throw new AppError(
+          "FOREIGN_SHARE_BLOCKED",
+          "未保存本人分享，不能将来源链接当作本人分享复制。",
+        );
+      // Copy only the saved address; checking health is a separate explicit action.
+      return {
+        text:
+          share.provider === "baidu"
+            ? shareUrlWithCode(share.url, share.code)
+            : `${share.url}${share.code ? `\n提取码：${share.code}` : ""}`,
+      };
     },
     "copies.check": async (object) => {
       const { copyIds } = z

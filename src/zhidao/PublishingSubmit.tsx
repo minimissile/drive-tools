@@ -186,18 +186,7 @@ export function PublishingSubmit({
     !draft.value.taskName.trim() ||
     draft.value.taskName.trim().length > zhidaoTaskNameLimit;
   return (
-    <Panel
-      title="上传问答表格"
-      extra={
-        <Button
-          quiet
-          size="compact"
-          onClick={() => navigate("zhidao-accounts")}
-        >
-          管理知道账号
-        </Button>
-      }
-    >
+    <Panel title="上传问答表格">
       <p className="publishing-help">
         {records.length}份资源 · {total}条已确认问答 ·
         每条一个独立链接。上传后仍需等待百度审核。

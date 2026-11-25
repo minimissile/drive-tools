@@ -71,7 +71,9 @@ async function setup() {
     if (_name === "zhidao_publishing_review") {
       options?.beforeRequest?.();
       reviewCalls.push(input);
-      return schema.parse(reviewOutput);
+      return schema.parse(
+        typeof reviewOutput === "function" ? reviewOutput(input) : reviewOutput,
+      );
     }
     assert.equal(instruction, publishingGenerationInstruction);
     options?.beforeRequest?.();
@@ -1595,6 +1597,182 @@ test("第三步生成后检查意图、无依据属性及近似题：拦截并�
     });
     await assert.rejects(() => f.flow.generate(resource.key), /无效结果/);
     assert.equal(f.flow.get(resource.key).rows.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("空介绍的本地资源在分组、生成、检查中使用相同文件依据，检查不因缺少summary误判真实目录", async () => {
+  const f = await setup();
+  try {
+    const files = [{ ...file, name: "来自远方", isDirectory: true }];
+    f.app.db.run(
+      "UPDATE copies SET files=? WHERE id=?",
+      JSON.stringify(files),
+      f.saved.copyId,
+    );
+    const resource = {
+      ...f.resource,
+      title: "电影《我的姐妹》Sister My Sister 1",
+      category: "影视资源",
+      summary: "",
+      keywords: [
+        "《我的姐妹》完整版",
+        "我的姐妹全集免费版观看高清版",
+        "我的姐妹完整版观看",
+        "我的姐妹全集免费版观看",
+      ],
+    };
+    f.flow.planMany([resource]);
+    f.setPlanOutput({
+      groups: [{ index: 0, related: [1, 2, 3], intent: "获取同名电影资源" }],
+      excluded: [],
+    });
+    f.setAiOutput(() => ({
+      rows: [
+        {
+          index: 0,
+          question: "电影《我的姐妹》的百度网盘分享地址在哪？",
+          introduction:
+            "《我的姐妹》（Sister My Sister）是本次收录的影视资源，可按中文名称或英文名称查找对应条目。",
+        },
+      ],
+    }));
+    f.setReviewOutput((input: GenerationInput) => ({
+      issues: input.resource.files.some((entry) => entry.name === "来自远方")
+        ? []
+        : [
+            {
+              index: 0,
+              kind: "unsupported",
+              duplicateOf: null,
+              reason: "检查阶段缺少写作时已提供的目录依据",
+            },
+          ],
+    }));
+    const generated = await f.flow.generate(resource.key);
+    const expected = {
+      title: resource.title,
+      category: resource.category,
+      summary: "",
+      files: [{ name: "来自远方", isDirectory: true }],
+    };
+    for (const input of [f.planCalls[0], f.aiCalls[0], f.reviewCalls[0]])
+      assert.deepEqual((input as GenerationInput).resource, expected);
+    assert.equal(generated.rows.length, 1);
+    assert.doesNotMatch(
+      generated.rows[0].question + generated.rows[0].answer,
+      /完整版|免费版|高清版|来自远方/,
+    );
+    assert.equal(generated.generation?.validation?.status, "passed");
+    assert.equal(f.counts().creates, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("显式修正只重写问题行并传入检查意见，失败后能续跑，保留有效草稿及分组且不自动建链", async () => {
+  const f = await setup();
+  try {
+    f.flow.planMany([f.resource]);
+    const reason = "标题中的完整版没有资料依据，请保留名称与获取需求";
+    f.setReviewOutput({
+      issues: [{ index: 1, kind: "unsupported", duplicateOf: null, reason }],
+    });
+    await assert.rejects(() => f.flow.generate(f.resource.key), /发现1处问题/);
+    const before = f.flow.get(f.resource.key);
+    const goodDraft = before.generation!.drafts.find(
+      (draft) => draft.index === 0,
+    );
+    const plans = f.planCalls.length;
+    const calls = f.aiCalls.length;
+    f.flow.get(f.resource.key);
+    assert.equal(f.aiCalls.length, calls, "只读与刷新不调用AI");
+
+    f.setBeforeAi(() => {
+      throw new Error("本次修正连接中断");
+    });
+    await assert.rejects(
+      () => f.flow.generate(f.resource.key, false, true),
+      /连接中断/,
+    );
+    const partial = f.flow.get(f.resource.key);
+    assert.notEqual(partial.generation?.id, before.generation?.id);
+    assert.deepEqual(partial.generation?.drafts, [goodDraft]);
+    assert.deepEqual(partial.generation?.rejectedDrafts, [
+      before.generation!.drafts.find((draft) => draft.index === 1),
+    ]);
+    assert.deepEqual(partial.generation?.topics, before.generation?.topics);
+    assert.deepEqual(partial.keywordPlan, before.keywordPlan);
+    assert.equal(partial.generation?.validation?.status, "failed");
+
+    f.setBeforeAi(undefined);
+    f.setReviewOutput({ issues: [] });
+    const corrected = await f.flow.generate(f.resource.key);
+    assert.equal(f.planCalls.length, plans, "已有分组不重做付费规划");
+    assert.deepEqual(
+      f.aiCalls.slice(calls).map((input) => input.rows.map((row) => row.index)),
+      [[1], [1]],
+    );
+    assert.ok(
+      f.aiCalls
+        .slice(calls)
+        .every((input) => JSON.stringify(input.rows).includes(reason)),
+    );
+    assert.deepEqual(
+      corrected.generation?.drafts.find((draft) => draft.index === 0),
+      goodDraft,
+    );
+    assert.equal(corrected.generation?.status, "completed");
+    assert.equal(corrected.generation?.validation?.status, "passed");
+    assert.equal(corrected.generation?.rejectedDrafts, undefined);
+    assert.equal(corrected.rows.length, 2);
+    assert.ok(corrected.rows.every((row) => !row.reviewed));
+    assert.deepEqual(corrected.links, before.links);
+    assert.deepEqual(corrected.operations, before.operations);
+    assert.equal(f.counts().creates, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("修正已完成但检查连接中断时保留新旧草稿，继续仅重查，不再次付费重写", async () => {
+  const f = await setup();
+  try {
+    f.flow.planMany([f.resource]);
+    f.setReviewOutput({
+      issues: [
+        {
+          index: 0,
+          kind: "unsupported",
+          duplicateOf: null,
+          reason: "这条简介需要去除未提供的版本描述",
+        },
+      ],
+    });
+    await assert.rejects(() => f.flow.generate(f.resource.key), /发现1处问题/);
+    const before = f.flow.get(f.resource.key);
+    f.setReviewOutput(() => {
+      throw Error("检查请求连接中断");
+    });
+    await assert.rejects(
+      () => f.flow.generate(f.resource.key, false, true),
+      /检查请求连接中断/,
+    );
+    const pending = f.flow.get(f.resource.key);
+    assert.equal(pending.generation?.drafts.length, 2);
+    assert.equal(pending.generation?.validation, undefined);
+    assert.equal(pending.generation?.rejectedDrafts?.length, 1);
+    assert.equal(pending.rows.length, 0);
+    const calls = f.aiCalls.length;
+    f.setReviewOutput({ issues: [] });
+    const result = await f.flow.generate(f.resource.key);
+    assert.equal(f.aiCalls.length, calls);
+    assert.equal(result.generation?.status, "completed");
+    assert.deepEqual(result.generation?.drafts, pending.generation?.drafts);
+    assert.equal(result.generation?.rejectedDrafts, undefined);
+    assert.deepEqual(result.links, before.links);
+    assert.equal(f.counts().creates, 0);
   } finally {
     await f.cleanup();
   }

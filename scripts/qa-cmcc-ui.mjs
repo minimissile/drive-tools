@@ -6,8 +6,12 @@ async function cmccUiMock(method, args) {
   const state = (window.__cmccUi ??= {
     base: null,
     calls: [],
-    created: sessionStorage.getItem("cmcc-ui-mode") === "files",
-    connected: sessionStorage.getItem("cmcc-ui-mode") === "files",
+    created: ["files", "membership"].includes(
+      sessionStorage.getItem("cmcc-ui-mode"),
+    ),
+    connected: ["files", "membership"].includes(
+      sessionStorage.getItem("cmcc-ui-mode"),
+    ),
     status: "completed",
   });
   const time = "2026-11-25T02:00:00Z";
@@ -27,7 +31,7 @@ async function cmccUiMock(method, args) {
     capacity: state.connected
       ? {
           ownerUid: "cmcc-owner",
-          value: { totalBytes: 1024 ** 4, usedBytes: 1024 ** 3 },
+          value: { totalBytes: 4430258765824, usedBytes: 0 },
           updatedAt: time,
           attemptedAt: time,
           error: null,
@@ -36,10 +40,14 @@ async function cmccUiMock(method, args) {
     membership: state.connected
       ? {
           ownerUid: "cmcc-owner",
-          value: null,
-          updatedAt: null,
+          value: {
+            status: "active",
+            tier: "白银会员",
+            expiresAt: "2027-02-24T15:52:32.000Z",
+          },
+          updatedAt: time,
           attemptedAt: time,
-          error: "移动云盘会员状态与到期时间暂未接入，请在官网查看。",
+          error: null,
         }
       : null,
   };
@@ -201,7 +209,8 @@ export async function run({ page, windowId }) {
       await page.getByRole("button", { name: "登录", exact: true }).click();
       await page.getByRole("button", { name: "核验登录", exact: true }).click();
       await page.getByText("云端资料归档", { exact: true }).waitFor();
-      await page.getByText("会员信息暂未接入", { exact: true }).waitFor();
+      await page.getByText("白银会员", { exact: true }).waitFor();
+      await page.getByText(/到期时间：2027\/2\/24 23:52:32/).waitFor();
       assert.ok(
         (await page.evaluate(() => window.__cmccUi.calls)).some(
           (c) =>
@@ -212,6 +221,14 @@ export async function run({ page, windowId }) {
         ),
       );
       await page.screenshot({ path: out + "/account.png", fullPage: false });
+    } else if (mode === "membership") {
+      await page.getByText("白银会员", { exact: true }).waitFor();
+      await page.getByText(/到期时间：2027\/2\/24 23:52:32/).waitFor();
+      await page
+        .locator(".capacity-values > span")
+        .filter({ hasText: "4.03 TB" })
+        .waitFor();
+      await page.screenshot({ path: out + "/membership.png", fullPage: false });
     } else {
       await page
         .getByRole("combobox", { name: "本人账号", exact: true })

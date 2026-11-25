@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { AppError, ProviderHttpError, safeMessage } from "./errors";
 import { parseShare } from "./links";
+import type { PassphraseScope } from "./share-passphrases";
 import {
   shareCreationCapabilities,
   shareCreationOptionsError,
@@ -222,6 +223,26 @@ export class ShareCreation {
   async result(operationId: string) {
     const record = this.record(operationId);
     return record ? this.receipt(record) : null;
+  }
+  async passphraseScope(
+    copyId: string,
+    operationId: string,
+  ): Promise<PassphraseScope> {
+    const record = this.record(operationId);
+    if (!record || record.receipt.copyId !== copyId)
+      throw new AppError("NOT_FOUND", "此资源的新分享创建记录不存在。");
+    const receipt = await this.receipt(record);
+    if (receipt.state !== "success" || !receipt.url || !record.shareId)
+      throw new AppError("SHARE_NOT_READY", "请先完成这条新分享的创建与核对。");
+    return {
+      key: `share-passphrase:creation:${operationId}`,
+      provider: record.provider,
+      accountId: record.accountId,
+      ownerUid: record.ownerUid,
+      shareId: record.shareId,
+      url: receipt.url,
+      code: receipt.code || "",
+    };
   }
   async options(copyId: string): Promise<ShareCreationContext> {
     const copy = this.d.repo.getCopy(copyId);

@@ -1,4 +1,7 @@
-import type { WechatTiebaImportSource } from "../../shared/wechat";
+import {
+  isTiebaArticleImageHost,
+  type WechatTiebaImportSource,
+} from "../../shared/wechat";
 import {
   linkifyWechatMarkdown,
   wechatArticleImages,
@@ -64,11 +67,9 @@ function proseUrls(prose: string) {
 }
 
 function shareIdentities(body: string) {
-  return articleLinkOccurrences(wechatImportedBody(body)).map(({ share }) => [
-    share.provider,
-    share.url,
-    share.code,
-  ]);
+  return articleLinkOccurrences(wechatImportedBody(body)).map(
+    ({ share: { provider, url, code } }) => ({ provider, url, code }),
+  );
 }
 
 export function canRestoreTiebaImageOrder(
@@ -92,4 +93,92 @@ export function canRestoreTiebaImageOrder(
     JSON.stringify(shareIdentities(previous.body)) ===
       JSON.stringify(shareIdentities(incoming.body))
   );
+}
+
+const unlinkedBaiduLabel = /^[\t ]*百度网盘(?=[\t ]*\r?$)/;
+const linkedBaiduLabel =
+  /^[\t ]*\[百度网盘\]\((https:\/\/pan\.baidu\.com\/s\/[a-zA-Z0-9_-]+)\)(?=[\t ]*\r?$)/;
+
+function uniqueBaiduLabel(body: string, label: RegExp) {
+  let found: { index: number; markup: string; url?: string } | undefined;
+  let offset = 0;
+  let fence = "";
+  for (const line of body.split("\n")) {
+    const delimiter = line.match(/^[\t ]*(`{3,}|~{3,})/)?.[1];
+    if (delimiter) {
+      if (!fence) fence = delimiter;
+      else if (delimiter.startsWith(fence)) fence = "";
+    } else if (!fence) {
+      const match = label.exec(line);
+      if (match) {
+        if (found) return null;
+        found = { index: offset, markup: match[0], url: match[1] };
+      }
+    }
+    offset += line.length + 1;
+  }
+  return found;
+}
+
+export function hasUnlinkedTiebaBaiduLabel(body: string) {
+  return !!uniqueBaiduLabel(body, unlinkedBaiduLabel);
+}
+
+function withoutTiebaImageTokens(body: string) {
+  let result = "";
+  let offset = 0;
+  for (const { index, markup, url } of wechatArticleImages(body)) {
+    const target = URL.parse(url);
+    if (
+      !target ||
+      target.protocol !== "https:" ||
+      target.username ||
+      target.password ||
+      target.port ||
+      !isTiebaArticleImageHost(target.hostname) ||
+      !target.searchParams.has("tbpicau")
+    )
+      continue;
+    target.searchParams.delete("tbpicau");
+    result +=
+      body.slice(offset, index) +
+      markup.slice(0, -url.length - 1) +
+      target.href +
+      ")";
+    offset = index + markup.length;
+  }
+  return result + body.slice(offset);
+}
+
+/** Use the label at its proven source position, with the original draft's image URLs. */
+export function restoreUncodedTiebaBaiduShare(
+  previous: string,
+  incoming: string,
+) {
+  const oldLabel = uniqueBaiduLabel(previous, unlinkedBaiduLabel);
+  const newLabel = uniqueBaiduLabel(incoming, linkedBaiduLabel);
+  if (!oldLabel || !newLabel?.url) return null;
+  const demoted =
+    incoming.slice(0, newLabel.index) +
+    newLabel.markup.replace(`[百度网盘](${newLabel.url})`, "百度网盘") +
+    incoming.slice(newLabel.index + newLabel.markup.length);
+  if (
+    wechatImportedBody(withoutTiebaImageTokens(previous)) !==
+    wechatImportedBody(withoutTiebaImageTokens(demoted))
+  )
+    return null;
+  const repaired =
+    previous.slice(0, oldLabel.index) +
+    oldLabel.markup.replace("百度网盘", `[百度网盘](${newLabel.url})`) +
+    previous.slice(oldLabel.index + oldLabel.markup.length);
+  const before = shareIdentities(previous);
+  const after = shareIdentities(repaired);
+  const added = after.filter(({ url }) => url === newLabel.url);
+  return !before.some(({ url }) => url === newLabel.url) &&
+    added.length === 1 &&
+    added[0].code === "" &&
+    JSON.stringify(before) ===
+      JSON.stringify(after.filter(({ url }) => url !== newLabel.url))
+    ? repaired
+    : null;
 }

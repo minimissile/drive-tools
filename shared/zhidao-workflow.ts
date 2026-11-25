@@ -93,6 +93,7 @@ export interface PublishingGeneration {
   status: "running" | "paused" | "failed" | "completed";
   targets: number[];
   drafts: PublishingGenerationDraft[];
+  rejectedDrafts?: PublishingGenerationDraft[];
   message?: string;
   upgradeLegacy?: true;
   topics?: {

@@ -183,14 +183,16 @@ test("modern desktop Tieba reads the original body and ignores replies, includin
 
 test("Tieba page fallback unwraps only validated Baidu mini-program anchors", async () => {
   const route = `tiebaclient://swan/${"a".repeat(32)}/pages/outsite-chain/share-code/index`;
-  const anchor = (url: string, title: string, extra = "") =>
-    `<p><a href="${route}?url=${encodeURIComponent(url)}&amp;pwdcode=Test${extra}">${title}</a></p>`;
+  const anchor = (url: string, title: string, extra = "", code = "Test") =>
+    `<p><a href="${route}?url=${encodeURIComponent(url)}&amp;pwdcode=${code}${extra}">${title}</a></p>`;
   const share = "https://pan.baidu.com/s/1FixtureBaidu";
+  const oldShare = "https://pan.baidu.com/s/1FixtureLegacy";
   const result = await extract(
     modernThread(
       mainPost(
         anchor(share, "百度网盘") +
           "<p>提取码：Test</p>" +
+          anchor(oldShare.replace("https:", "http:"), "旧版分享", "", "") +
           anchor("https://example.org/s/1FixtureBaidu", "外站标签") +
           anchor("javascript:alert(1)", "脚本标签") +
           anchor(
@@ -205,7 +207,7 @@ test("Tieba page fallback unwraps only validated Baidu mini-program anchors", as
     assert.fail(`Unexpected reading: ${result.status}`);
   assert.equal(
     result.source.body,
-    `[百度网盘](${share}?pwd=Test)\n\n提取码：Test\n\n外站标签\n\n脚本标签\n\n重复参数标签`,
+    `[百度网盘](${share}?pwd=Test)\n\n提取码：Test\n\n[旧版分享](${oldShare})\n\n外站标签\n\n脚本标签\n\n重复参数标签`,
   );
 });
 

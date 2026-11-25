@@ -73,6 +73,18 @@ export function removeResourceRecords(
     db.run("DELETE FROM jobs WHERE copy_id=?", copy.id);
     db.run("DELETE FROM secrets WHERE key=?", `share:${copy.id}`);
     db.run(
+      "DELETE FROM secrets WHERE key=?",
+      `share-passphrase:copy:${copy.id}`,
+    );
+    for (const creation of db.all<{ key: string }>(
+      "SELECT key FROM settings WHERE key LIKE 'share-creation:%' AND json_valid(value) AND json_extract(value,'$.receipt.copyId')=?",
+      copy.id,
+    ))
+      db.run(
+        "DELETE FROM secrets WHERE key=?",
+        `share-passphrase:creation:${creation.key.slice("share-creation:".length)}`,
+      );
+    db.run(
       "DELETE FROM settings WHERE key=?",
       `share-creation-latest:${copy.id}`,
     );

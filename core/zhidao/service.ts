@@ -1243,15 +1243,24 @@ export class ZhidaoOperations {
     );
   }
   templatesPage(page = 1) {
+    // A source remains ready after upload so that its immutable submission can
+    // be traced. Exclude sent or unconfirmed attempts without deleting it.
+    const where = `r.kind IN ('template','answer') AND i.status='ready'
+      AND NOT EXISTS (
+        SELECT 1 FROM operation_runs published
+        JOIN operation_items attempt ON attempt.run_id=published.id
+        WHERE published.kind='publish' AND attempt.item_key=i.id
+          AND attempt.status IN ('submitted','submitting','uncertain')
+      )`;
     return {
       items: this.repo.db
         .all<{ data: string }>(
-          "SELECT i.data FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE r.kind IN ('template','answer') AND i.status='ready' ORDER BY i.rowid DESC LIMIT 25 OFFSET ?",
+          `SELECT i.data FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE ${where} ORDER BY i.rowid DESC LIMIT 25 OFFSET ?`,
           (page - 1) * 25,
         )
         .map((r) => JSON.parse(r.data) as OperationItem),
       total: this.repo.db.get<{ n: number }>(
-        "SELECT count(*) n FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE r.kind IN ('template','answer') AND i.status='ready'",
+        `SELECT count(*) n FROM operation_items i JOIN operation_runs r ON r.id=i.run_id WHERE ${where}`,
       )!.n,
     };
   }

@@ -20,7 +20,7 @@ export function tiebaBaiduMiniAppShare(value: string): URL | null {
   const target = URL.parse(wrapper.searchParams.get("url") ?? "");
   if (
     !target ||
-    target.protocol !== "https:" ||
+    !["http:", "https:"].includes(target.protocol) ||
     !["pan.baidu.com", "yun.baidu.com"].includes(target.hostname) ||
     target.username ||
     target.password ||
@@ -40,7 +40,10 @@ export function tiebaBaiduMiniAppShare(value: string): URL | null {
   )
     return null;
 
-  const share = new URL(target.pathname, "https://pan.baidu.com");
+  const share = new URL(
+    target.pathname.replace(/\/$/, ""),
+    "https://pan.baidu.com",
+  );
   if (code || targetCode) share.searchParams.set("pwd", code || targetCode);
   return share;
 }

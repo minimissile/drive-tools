@@ -47,6 +47,7 @@ import {
 } from "../articles/ArticleResources";
 import { ArticleImages } from "./ArticleImages";
 import { ArticleComparison } from "./ArticleComparison";
+import { ArticleSourcePreview } from "./ArticleSourcePreview";
 import { ArticleRewriteDialog } from "./ArticleRewriteDialog";
 import { TrafficWordsDialog } from "./TrafficWordsDialog";
 import { stageLabel } from "./labels";
@@ -96,7 +97,7 @@ const editorSchema = z.object({
   imageAddress: z.string().max(4000).nullable().default(null),
   revision: z.number().int().positive(),
   textEdited: z.boolean().optional(),
-  tab: z.enum(["body", "resources", "images"]),
+  tab: z.enum(["body", "resources", "images", "source"]),
   instruction: z.string().max(1000),
   styleId: wechatRewriteStyleSchema.default(defaultWechatRewriteStyle),
   accountId: z.string().max(100),
@@ -687,6 +688,7 @@ export function ArticleEditor({
                 ["body", "正文"],
                 ["resources", `网盘链接 · ${article.links.length}`],
                 ["images", "插图与封面"],
+                ["source", "原文"],
               ]}
             />
             <Button
@@ -829,6 +831,9 @@ export function ArticleEditor({
               onImageAddress={(imageAddress) => draft.update({ imageAddress })}
               onBusy={setResourceBusy}
             />
+          </TabPanel>
+          <TabPanel value="source">
+            <ArticleSourcePreview key={article.id} source={article.source} />
           </TabPanel>
         </Tabs>
       </Panel>

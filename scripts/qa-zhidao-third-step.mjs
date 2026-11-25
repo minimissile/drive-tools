@@ -224,7 +224,13 @@ export async function run({ page, windowId, checkpoint }) {
     await page.screenshot({ path: `${out}/resource-${index + 1}.png` });
     if (record.generation.status === "failed") {
       await page
-        .getByRole("button", { name: "返回调整关键词", exact: true })
+        .getByRole("button", {
+          name:
+            record.generation.validation?.status === "failed"
+              ? "修正问题并重新检查"
+              : "返回调整关键词",
+          exact: true,
+        })
         .waitFor();
     } else {
       await page.getByLabel("第1条问题标题", { exact: true }).waitFor();

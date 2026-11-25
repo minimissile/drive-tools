@@ -477,3 +477,94 @@ test("旧逐条发布任务继续时仅上传剩余项，名称截断后含序�
     await f.cleanup();
   }
 });
+
+test("待发布列表排除已提交/提交中/待核对来源，分页计数一致，保留失败重试和原始历史", async () => {
+  const f = await publishingFixture();
+  try {
+    const sources = f.seed(55);
+    const original = sources.map((source) =>
+      f.service.zhidao.store.item(source.id),
+    );
+    const run = f.service.zhidao.store.create(
+      "publish",
+      "提交历史",
+      {
+        accountId: f.account.id,
+        taskName: "提交历史",
+        itemIds: sources.slice(0, 21).map((source) => source.id),
+      },
+      21,
+    );
+    let uncertainId = "";
+    for (const [index, source] of sources.slice(0, 21).entries()) {
+      const status =
+        index < 7 ? "submitted" : index < 14 ? "pending" : "uncertain";
+      const item = f.service.zhidao.store.put(run.id, source.id, {
+        ...source,
+        id: `attempt-${source.id}`,
+        runId: run.id,
+        key: source.id,
+        status,
+        taskId: status === "submitted" ? "123456" : "",
+      });
+      if (index >= 7 && index < 14) f.service.zhidao.store.submitting(item);
+      if (index === 14) uncertainId = item.id;
+    }
+    const rejected = f.service.zhidao.store.create(
+      "publish",
+      "明确失败的上传",
+      { accountId: f.account.id },
+      1,
+    );
+    f.service.zhidao.store.put(rejected.id, sources[21].id, {
+      ...sources[21],
+      id: `rejected-${sources[21].id}`,
+      runId: rejected.id,
+      key: sources[21].id,
+      status: "failed",
+      message: "平台明确拒绝，尚未提交",
+    });
+    const pages = await Promise.all(
+      [1, 2, 3].map((page) => f.invoke("zhidao.templates", { page })),
+    );
+    assert.ok(pages.every((page) => page.total === 34));
+    assert.deepEqual(
+      pages.map((page) => page.items.length),
+      [25, 9, 0],
+    );
+    const pendingIds = new Set(
+      pages.flatMap((page) => page.items.map((item) => item.id)),
+    );
+    assert.equal(pendingIds.size, 34);
+    assert.ok(
+      sources.slice(0, 21).every((source) => !pendingIds.has(source.id)),
+    );
+    assert.ok(sources.slice(21).every((source) => pendingIds.has(source.id)));
+    assert.deepEqual(
+      sources.map((source) => f.service.zhidao.store.item(source.id)),
+      original,
+    );
+    assert.equal(f.service.zhidao.store.items(run.id).length, 21);
+    // A confirmed decision to retry releases only this previously uncertain source.
+    f.service.zhidao.resolve(uncertainId, "retry");
+    const retry = await f.invoke("zhidao.templates", { page: 2 });
+    assert.equal(retry.total, 35);
+    assert.ok(retry.items.some((item) => item.id === sources[14].id));
+    // A restored old selection still cannot submit a source with a known receipt.
+    await assert.rejects(
+      f.invoke("zhidao.start", {
+        kind: "publish",
+        authorized: true,
+        input: {
+          accountId: f.account.id,
+          taskName: "旧选择",
+          itemIds: [sources[0].id],
+        },
+      }),
+      { code: "ALREADY_SUBMITTED" },
+    );
+    assert.equal(f.events.filter((event) => event.type === "upload").length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});

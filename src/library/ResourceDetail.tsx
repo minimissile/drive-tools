@@ -24,6 +24,7 @@ import {
 } from "../state";
 import { Button } from "../ui/primitives";
 import { CreateShare } from "../resources/CreateShareDialog";
+import { SharePassphrase } from "../resources/SharePassphrase";
 import { ResourceLinkPanel } from "../resources/ResourceLinkPanel";
 import { copyShareStatus } from "../../shared/share-status";
 import { accountLabel, providerName } from "../resources/labels";
@@ -230,6 +231,15 @@ export function ResourceDetail({
           <div className="link-box">
             {copy.shareUrl ?? "转存与核验完成后，生成本人分享链接。"}
           </div>
+          {copy.shareId &&
+          copy.shareUrl &&
+          copy.shareOwnerUid &&
+          ["baidu", "quark"].includes(resource.provider) ? (
+            <SharePassphrase
+              key={`${copy.id}:${copy.shareVersion}`}
+              target={{ copyId: copy.id }}
+            />
+          ) : null}
           <div className="resource-share-status" data-kind={share.kind}>
             <span>{share.label}</span>
             {checkedAt ? (
@@ -279,13 +289,19 @@ export function ResourceDetail({
             {isIndexedOwnSource(resource.sourceUrl)
               ? "本人网盘目录登记；对外交付前创建并核验分享。"
               : resource.sourceKind === "owned"
-              ? "已录入的自有资源链接；对外交付前核验所属账号。"
-              : "来源链接仅作内部记录，禁止用于对外分发。"}
+                ? "已录入的自有资源链接；对外交付前核验所属账号。"
+                : "来源链接仅作内部记录，禁止用于对外分发。"}
           </small>
-          <p>{isIndexedOwnSource(resource.sourceUrl) ? copy.files.map(file => file.name).join("、") : resource.sourceUrl}</p>
+          <p>
+            {isIndexedOwnSource(resource.sourceUrl)
+              ? copy.files.map((file) => file.name).join("、")
+              : resource.sourceUrl}
+          </p>
           <small>保存目录</small>
           <p>
-            {resource.sourceKind === "owned" && !copy.folderId && !isIndexedOwnSource(resource.sourceUrl)
+            {resource.sourceKind === "owned" &&
+            !copy.folderId &&
+            !isIndexedOwnSource(resource.sourceUrl)
               ? "未记录原网盘目录；直接入库不创建目录。"
               : copy.directory}
           </p>
@@ -294,7 +310,7 @@ export function ResourceDetail({
       <div className="resource-detail-footer">
         <Button
           primary
-          title="复制时自动检查分享有效性"
+          title="复制已保存的分享链接和提取码"
           disabled={!share.canCopy || busy > 0}
           onClick={async () => {
             const result = await command("copy.link", { copyId: copy.id });
@@ -302,7 +318,7 @@ export function ResourceDetail({
               await command(
                 "system.copyText",
                 { text: result.text },
-                "本人分享已核验并复制。",
+                "分享链接已复制。",
               );
           }}
         >

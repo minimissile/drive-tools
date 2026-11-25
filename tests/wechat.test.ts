@@ -884,6 +884,102 @@ test("贴吧旧稿已移除百度网盘标签时仅修复原文对照", async ()
   }
 });
 
+test("贴吧重导恢复原文无明码的百度网盘链接，保留原图和已存稿件", async () => {
+  const url = "https://tieba.baidu.com/p/7775971548";
+  const target = "https://pan.baidu.com/s/1UncodedFixture";
+  const image =
+    "https://tiebapic.baidu.com/forum/pic/item/no-code.jpg?size=original&tbpicau=old";
+  const alreadyKnown = `[帮助文档](${sourceShare}?pwd=orig)`;
+  const prior = `主楼内容\n\n![贴吧配图](${image})\n\n${alreadyKnown}\n\n百度网盘\n\n后续说明`;
+  const fresh = prior
+    .replace("tbpicau=old", "tbpicau=new")
+    .replace("百度网盘", `[百度网盘](${target})`);
+  let sourceBody = prior;
+  const f = await fixture(undefined, async () => ({
+    kind: "tieba",
+    url,
+    title: "帖子标题",
+    author: "",
+    publishedAt: "",
+    body: sourceBody,
+    imageCount: 1,
+    preservesImageOrder: true,
+    warnings: [],
+  }));
+  try {
+    const current = await f.invoke("wechat.import", { url });
+    const edited = await f.save(current, { title: "自定义草稿标题" });
+    for (const difference of [
+      fresh.replace("后续说明", "另一个说明"),
+      fresh.replace("size=original", "size=small"),
+      fresh.replace(
+        target,
+        "https://pan.baidu.com.evil.example/s/1UncodedFixture",
+      ),
+      fresh.replace("[百度网盘]", "[备用链接]"),
+      `${fresh}\n\n[百度网盘](https://pan.baidu.com/s/1AnotherUncodedFixture)`,
+    ]) {
+      sourceBody = difference;
+      assert.deepEqual(
+        (await f.invoke("wechat.import", { url })).article,
+        edited.article,
+      );
+    }
+    sourceBody = fresh;
+    const repaired = (await f.invoke("wechat.import", { url })).article;
+    const restored = prior.replace("百度网盘", `[百度网盘](${target})`);
+    assert.equal(repaired.id, edited.article.id);
+    assert.equal(repaired.title, edited.article.title);
+    assert.equal(repaired.coverUrl, image);
+    assert.equal(repaired.revision, edited.article.revision + 1);
+    assert.equal(repaired.source.body, restored);
+    assert.equal(repaired.body, restored);
+    assert.deepEqual(repaired.links[0], edited.article.links[0]);
+    assert.equal(repaired.links[1].url, target);
+    assert.equal(repaired.links[1].code, "");
+    assert.equal(
+      (await f.invoke("wechat.get", { id: repaired.id })).resources.length,
+      2,
+    );
+    assert.deepEqual(
+      (await f.invoke("wechat.import", { url })).article,
+      repaired,
+    );
+    assert.equal(f.control.reads, 7);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("贴吧无明码链接只补原文对照，保留已编辑正文", async () => {
+  const url = "https://tieba.baidu.com/p/111000220";
+  const target = "https://pan.baidu.com/s/1ComparisonFixture";
+  let label = "百度网盘";
+  const f = await fixture(undefined, async () => ({
+    kind: "tieba",
+    url,
+    title: "帖子标题",
+    author: "",
+    publishedAt: "",
+    body: `原文\n\n${label}\n\n后续段落`,
+    imageCount: 0,
+    preservesImageOrder: true,
+    warnings: [],
+  }));
+  try {
+    const current = await f.invoke("wechat.import", { url });
+    const edited = await f.save(current, { body: "编辑后的正文\n\n百度网盘" });
+    label = `[百度网盘](${target})`;
+    const repaired = (await f.invoke("wechat.import", { url })).article;
+    assert.equal(repaired.revision, edited.article.revision);
+    assert.equal(repaired.body, edited.article.body);
+    assert.deepEqual(repaired.links, []);
+    assert.ok(repaired.source.body.includes(label));
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("贴吧重导恢复旧稿配图位置和百度链接，并保留其他稿件数据", async () => {
   const url = "https://tieba.baidu.com/p/111000224";
   const first =

@@ -11,6 +11,71 @@ const none = (): DriveMembership => ({
   tier: null,
   expiresAt: null,
 });
+function cmccMemberExpiry(raw: unknown) {
+  const compact =
+    typeof raw === "string" &&
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(raw);
+  if (!compact) return membershipExpiry(raw);
+  const [, year, month, day, hour, minute, second] = compact;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59)
+    return null;
+  return membershipExpiry(
+    `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`,
+  );
+}
+
+/** CMCC's subscribed-member list is authoritative; quota is not a VIP signal. */
+export function cmccMembership(
+  data: JsonObject,
+  time = Date.now(),
+): DriveMembership {
+  if (!Array.isArray(data.userSubMemberList))
+    throw new AppError(
+      "MEMBERSHIP_UNAVAILABLE",
+      "移动云盘未返回会员订购信息。",
+    );
+  if (data.userSubMemberList.length === 0) return none();
+  const rows = data.userSubMemberList.filter(
+    (row: JsonObject) =>
+      row &&
+      ["number", "string"].includes(typeof row.memberLevel) &&
+      /^[0-3]$/.test(String(row.memberLevel)),
+  );
+  if (!rows.length) return unknown();
+  const expiryOf = (row: JsonObject) => {
+    if (!Array.isArray(row.chargingPolicyList)) return null;
+    const dates = row.chargingPolicyList.flatMap((policy: JsonObject) => {
+      if (!policy) return [];
+      const starts = cmccMemberExpiry(policy.effectiveTime);
+      const expires = cmccMemberExpiry(policy.expiredTime);
+      return expires &&
+        (!starts || Date.parse(starts) <= time) &&
+        (!starts || Date.parse(expires) >= Date.parse(starts))
+        ? [expires]
+        : [];
+    });
+    return dates.sort().at(-1) ?? null;
+  };
+  rows.sort((a: JsonObject, b: JsonObject) => {
+    const expired = (row: JsonObject) => {
+      const expiry = expiryOf(row);
+      return expiry && Date.parse(expiry) <= time ? 1 : 0;
+    };
+    return (
+      expired(a) - expired(b) || Number(b.memberLevel) - Number(a.memberLevel)
+    );
+  });
+  const row = rows[0];
+  const name = row.memberLvName || row.chargingPolicyList?.[0]?.prodName;
+  // The member product's effectiveTime/expiredTime is authoritative. Billing
+  // cycles, cancellation dates and quota validity are not member expiry fields.
+  return value(
+    "active",
+    typeof name === "string" ? name.slice(0, 80) : "移动云盘会员",
+    expiryOf(row),
+    time,
+  );
+}
 function validCalendarDate(year: string, month: string, day: string) {
   const text = `${year}-${month}-${day}`;
   const date = new Date(`${text}T00:00:00Z`);
