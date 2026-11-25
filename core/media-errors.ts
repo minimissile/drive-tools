@@ -46,6 +46,10 @@ export function describeMediaError(
   const providerReason = String(
     cleanKnowledge(safeMessage(error), context.key),
   ).replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "[参考图已省略]");
+  const relayRejected =
+    error instanceof ServiceHttpError &&
+    error.status === 400 &&
+    /\bRequest path cannot be relayed\b/i.test(providerReason);
   const label = context.kind === "image" ? "图片" : "视频";
   const code =
     reason === "human-face"
@@ -64,7 +68,9 @@ export function describeMediaError(
         ? `${label}服务商拒绝了本次${context.reference ? "参考图" : "主题生成"}请求。请检查素材与描述，或上传自己的图片。`
         : code === "MEDIA_ACCESS_DENIED"
           ? `当前连接无法使用此${label}模型。请在连接与设置中检查模型权限。`
-          : providerReason;
+          : relayRejected
+            ? `OpenRouter 未能转发${label}生成请求，请稍后重试。`
+            : providerReason;
   return new AppError(
     code,
     message,

@@ -2,6 +2,7 @@ import { intakeOptions, addIntakeOption } from "../intake-options";
 import { z } from "zod";
 import {
   localResourceDraftSchema,
+  providerSchema,
   resourceInputSchema,
 } from "../../shared/schemas";
 import { readResourceCover } from "../cover-assets";
@@ -188,6 +189,7 @@ export function createResourcesHandlers(
           .object({
             query: z.string().max(200).default(""),
             category: z.string().max(60).default("all"),
+            provider: providerSchema.or(z.literal("all")).default("all"),
             accountId: z.string().max(100).default("all"),
             page: z.number().int().min(1).max(100000).default(1),
             pageSize: z.number().int().min(1).max(100).default(25),

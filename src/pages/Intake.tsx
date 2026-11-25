@@ -40,6 +40,7 @@ import {
   ArrowRight,
   ImagePlus,
   LogIn,
+  RotateCcw,
   Upload,
   X,
 } from "lucide-react";
@@ -124,6 +125,8 @@ export default function Intake() {
   const isOwnResource = intakeModeLocked ? priorOwnResource : draftOwnResource;
   const [step, setStep] = useState<"info" | "keywords" | "files">("info");
   const [keywordSearching, setKeywordSearching] = useState(false);
+  const [resetRevision, setResetRevision] = useState(0);
+  const formRevision = useRef(0);
   const keywordWords = parseResourceKeywordText(keywords.text);
   const tooManyKeywords = keywordWords.length > resourceKeywordLimit;
   const canTransfer = !isOwnResource && priorCopy?.status !== "ready";
@@ -168,7 +171,7 @@ export default function Intake() {
       { id: "0", name: "分享根目录" },
     ]);
   const inspectionRevision = useRef(0);
-  const inspectionPending = useRef(false);
+  const inspectionPending = useRef<number | null>(null);
   const [requestedCheckAccount, setRequestedCheckAccount] = useState("");
   const account = data!.accounts.find((a) => a.id === accountId);
   const duplicateCopy = !priorCopy
@@ -274,9 +277,9 @@ export default function Intake() {
     cursor?: string,
     nextParents?: ShareParent[],
   ) => {
-    if (inspectionPending.current) return;
-    inspectionPending.current = true;
+    if (inspectionPending.current === inspectionRevision.current) return;
     const requestRevision = ++inspectionRevision.current;
+    inspectionPending.current = requestRevision;
     setInspectionLoading(true);
     setInspectionError("");
     try {
@@ -318,9 +321,11 @@ export default function Intake() {
           error instanceof Error ? error.message : "读取分享失败，请重试。",
         );
     } finally {
-      inspectionPending.current = false;
-      if (mounted.current && requestRevision === inspectionRevision.current)
+      if (inspectionPending.current === requestRevision)
+        inspectionPending.current = null;
+      if (mounted.current && requestRevision === inspectionRevision.current) {
         setInspectionLoading(false);
+      }
     }
   };
   const readImage = (file?: File) => {
@@ -333,13 +338,66 @@ export default function Intake() {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setCover(String(reader.result));
+    const revision = formRevision.current;
+    reader.onload = () => {
+      if (mounted.current && revision === formRevision.current)
+        setCover(String(reader.result));
+    };
     reader.readAsDataURL(file);
   };
   const saveInFlight = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const nextInFlight = useRef(false);
   const [preparing, setPreparing] = useState(false);
+  const reset = () => {
+    if (existing || submitting || preparing) return;
+    formRevision.current++;
+    inspectionRevision.current++;
+    inspectionPending.current = null;
+    link.invalidate();
+    draft.reset({
+      provider,
+      accountId,
+      directory,
+      sourceText: "",
+      code: "",
+      title: "",
+      category: "效率办公",
+      tags: "",
+      summary: "",
+      keywords: initialIntakeKeywords(),
+      isOwnResource: false,
+    });
+    setCover(null);
+    if (imageInput.current) imageInput.current.value = "";
+    setRequestedCheckAccount("");
+    setInspection(null);
+    setInspectionLoading(false);
+    setInspectionError("");
+    setSelected([]);
+    setParents([{ id: "0", name: "分享根目录" }]);
+    setKeywordSearching(false);
+    setStep("info");
+    setResetRevision(formRevision.current);
+    requestAnimationFrame(() => {
+      if (mounted.current) {
+        stepRegion.current?.scrollIntoView({ block: "start" });
+        stepRegion.current
+          ?.querySelector<HTMLTextAreaElement>("textarea")
+          ?.focus({ preventScroll: true });
+      }
+    });
+  };
+  const resetButton = !existing ? (
+    <Button
+      disabled={submitting || preparing}
+      onClick={reset}
+      title="清空资源资料、封面和全部流量词，保留账号与保存目录"
+    >
+      <RotateCcw size={15} />
+      重置
+    </Button>
+  ) : null;
   const requiredDetailsHint =
     !title.trim() || !sourceText.trim() || !accountId
       ? "请填写资源标题和分享链接，并选择分类和账号。"
@@ -504,6 +562,7 @@ export default function Intake() {
                   <ArrowLeft size={15} />
                   上一步：资源信息
                 </Button>
+                {!canTransfer ? resetButton : null}
                 <Button
                   primary={!canTransfer}
                   disabled={formBlocked}
@@ -520,25 +579,31 @@ export default function Intake() {
                         : "保存资料草稿"}
                 </Button>
                 {canTransfer ? (
-                  <Button
-                    primary
-                    disabled={formBlocked}
-                    onClick={() => void next("files")}
-                  >
-                    {preparing ? "正在识别链接…" : "下一步：选择文件"}
-                    <ArrowRight size={15} />
-                  </Button>
+                  <>
+                    {resetButton}
+                    <Button
+                      primary
+                      disabled={formBlocked}
+                      onClick={() => void next("files")}
+                    >
+                      {preparing ? "正在识别链接…" : "下一步：选择文件"}
+                      <ArrowRight size={15} />
+                    </Button>
+                  </>
                 ) : null}
               </>
             ) : (
-              <Button
-                primary
-                disabled={formBlocked}
-                onClick={() => void next("keywords")}
-              >
-                {preparing ? "正在识别链接…" : "下一步：检索流量词"}
-                <ArrowRight size={15} />
-              </Button>
+              <>
+                {resetButton}
+                <Button
+                  primary
+                  disabled={formBlocked}
+                  onClick={() => void next("keywords")}
+                >
+                  {preparing ? "正在识别链接…" : "下一步：检索流量词"}
+                  <ArrowRight size={15} />
+                </Button>
+              </>
             )}
           </ActionBar>
         ) : null
@@ -575,6 +640,7 @@ export default function Intake() {
       ) : (
         <>
           <div
+            key={resetRevision}
             ref={stepRegion}
             tabIndex={-1}
             className="intake-step-region"

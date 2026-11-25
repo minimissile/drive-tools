@@ -6,7 +6,7 @@ import { resourceLinksTarget } from "./resource-links-network";
 import { openRouterTarget } from "../core/ai-network";
 import { pipixNetworkTarget } from "./pipix-network";
 import { musicNetworkTarget } from "../core/music/network";
-import { normalizeCover } from "./cover-image";
+import { cropImageToSize, normalizeCover } from "./cover-image";
 import { watchDevParent } from "./dev-parent";
 import { loadProviderPage } from "./provider-navigation";
 import { WorkbenchWindows, type WorkbenchWindowIdentity } from "./workbench-windows";
@@ -45,6 +45,8 @@ import { createDistributionSessions } from "./distribution-sessions";
 import { createEnvironmentSessions } from "./browser-environment-session";
 import { readTableBytes } from "../core/table-files";
 import { QuarkProvider } from "../core/providers/quark";
+import { createQuarkPassphrases } from "../core/providers/quark-passphrase";
+import { QuarkShareSigner } from "./quark-share-signer";
 import { createPhotoPostSessions } from "./photo-post-session";
 import { UcProvider } from "../core/providers/uc";
 import { PikPakProvider } from "../core/providers/pikpak";
@@ -127,6 +129,17 @@ let installingUpdate = false;
 let quitting = false;
 let videoQuitPending = false;
 let devRestarting = false;
+const quarkShareSigner = new QuarkShareSigner();
+const quarkPassphrases = createQuarkPassphrases({
+  withSigner: (action) => quarkShareSigner.withSigner(action),
+  request: (url, init) =>
+    session.fromPartition("panxu-quark-utoken-network", { cache: false }).fetch(url, {
+      ...init,
+      credentials: "omit",
+      redirect: "error",
+      bypassCustomProtocolHandlers: true,
+    }),
+});
 let devUpdates: DevUpdateState | null = null;
 const developmentUrl = `http://127.0.0.1:${Number(process.env.PANXU_DEV_PORT || 8070)}`;
 const development =
@@ -766,6 +779,7 @@ const ports: AppPorts = {
     }, 300);
   },
   normalizeCover,
+  cropImageToSize,
   async openPath(path) {
     const error = await shell.openPath(path);
     if (error)
@@ -1031,7 +1045,7 @@ else {
         app.getPath("userData"),
         codec,
         {
-          quark: new QuarkProvider(transport),
+          quark: new QuarkProvider(transport, "quark", quarkPassphrases),
           baidu: new BaiduProvider(transport),
           uc: new UcProvider(transport),
           xunlei: new XunleiProvider(transport),
@@ -1327,6 +1341,7 @@ else {
     service?.distribution.close();
     service?.queue.stop();
     updater?.dispose();
+    quarkShareSigner.close();
   });
   app.on("window-all-closed", () => app.quit());
 }

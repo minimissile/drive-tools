@@ -7,7 +7,8 @@ export function openRouterTarget(raw: string, method = "GET") {
     method.toUpperCase() === "GET"
       ? ["/api/v1/key", "/api/v1/models"].includes(url.pathname)
       : method.toUpperCase() === "POST" &&
-        url.pathname === "/api/v1/chat/completions";
+        (url.pathname === "/api/v1/chat/completions" ||
+          url.href === "https://openrouter.ai/api/v1/images");
   if (
     url.origin !== "https://openrouter.ai" ||
     url.username ||

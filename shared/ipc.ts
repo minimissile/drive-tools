@@ -58,6 +58,7 @@ import type {
   AppSnapshot,
   BrowserBinding,
   Resource,
+  Provider,
   ResourcePage,
   SimilarResource,
   SplitRun,
@@ -207,6 +208,7 @@ export interface IpcContract
     {
       query?: string;
       category?: string;
+      provider?: Provider;
       accountId?: string;
       page?: number;
       pageSize?: number;

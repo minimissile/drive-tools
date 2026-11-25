@@ -15,6 +15,7 @@ import type {
   PoolSummary,
   Publication,
   Resource,
+  Provider,
   ResourcePage,
   ResourceTotals,
   ResourceCopy,
@@ -155,6 +156,7 @@ export class Repository {
   resourcePage(input: {
     query: string;
     category: string;
+    provider?: Provider | "all";
     accountId: string;
     page: number;
     pageSize: number;
@@ -177,6 +179,10 @@ export class Repository {
     if (input.category !== "all") {
       where.push("r.category=?");
       values.push(input.category);
+    }
+    if (input.provider && input.provider !== "all") {
+      where.push("r.provider=?");
+      values.push(input.provider);
     }
     if (input.accountId !== "all") {
       where.push(

@@ -40,8 +40,10 @@ import { redactPromptText } from "./text-safety";
 import { readResourceCover } from "./cover-assets";
 import { loadMediaModelCatalog } from "./media-model-catalog";
 import { describeMediaError, mediaRejectionReason } from "./media-errors";
+import type { AppPorts } from "./ports";
 
 const base = "https://openrouter.ai/api/v1";
+const imageGenerationUrl = `${base}/images`;
 const clean = redactPromptText;
 const fingerprint = (s: string) => createHash("sha256").update(s).digest("hex");
 export const studioAssetPattern = /^[a-f0-9]{64}\.(png|mp4)$/;
@@ -49,8 +51,12 @@ const cost = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
     ? Math.round(value * 1_000_000)
     : null;
-async function mediaJson(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, {
+async function mediaJson(
+  url: string,
+  init: RequestInit = {},
+  transport: NonNullable<AppPorts["openrouterFetch"]> = fetch,
+) {
+  const response = await transport(url, {
     ...init,
     signal: init.signal ?? AbortSignal.timeout(120_000),
     redirect: "error",
@@ -82,6 +88,18 @@ async function mediaJson(url: string, init: RequestInit = {}) {
   }
   return data;
 }
+
+export function studioMediaRequest(imageFetch?: AppPorts["openrouterFetch"]) {
+  return (url: string, init?: RequestInit) =>
+    mediaJson(
+      url,
+      init,
+      url === imageGenerationUrl && init?.method === "POST"
+        ? imageFetch
+        : undefined,
+    );
+}
+
 export class StudioService {
   private active = new Map<string, Promise<StudioJob>>();
   constructor(
@@ -777,14 +795,17 @@ export class StudioService {
     key: string,
     payload: Record<string, unknown>,
   ) {
-    return this.request(`${base}/${kind === "image" ? "images" : "videos"}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
+    return this.request(
+      kind === "image" ? imageGenerationUrl : `${base}/videos`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+    );
   }
   private async decodeImage(response: Record<string, any>) {
     const raw = response.data?.[0]?.b64_json;
@@ -843,20 +864,37 @@ export class StudioService {
   generateReferenceImage(bytes: Buffer, prompt: string) {
     return this.generateArticleImage(prompt, bytes);
   }
-  generateThemeImage(prompt: string) {
-    return this.generateArticleImage(prompt);
+  generateThemeImage(
+    prompt: string,
+    size?: { width: number; height: number },
+    model?: string,
+    styleReference?: Buffer,
+  ) {
+    return this.generateArticleImage(
+      prompt,
+      undefined,
+      size,
+      model,
+      styleReference,
+    );
   }
-  private async generateArticleImage(prompt: string, bytes?: Buffer) {
+  private async generateArticleImage(
+    prompt: string,
+    bytes?: Buffer,
+    size?: { width: number; height: number },
+    modelOverride?: string,
+    styleReference?: Buffer,
+  ) {
+    const modelId = modelOverride ?? this.ai.modelFor("image");
     const model = this.repo.db
       .setting<MediaModel[]>("studio:modelCatalog", [])
-      .find(
-        (item) =>
-          item.kind === "image" && item.id === this.ai.modelFor("image"),
-      );
+      .find((item) => item.kind === "image" && item.id === modelId);
     if (!model)
       throw new AppError(
         "MEDIA_MODEL_REQUIRED",
-        "请在连接与设置中配置默认图片模型，并刷新模型列表。",
+        modelOverride
+          ? "所选图片模型不在当前列表中，请刷新图片模型列表后重新选择。"
+          : "请在连接与设置中配置默认图片模型，并刷新模型列表。",
       );
     if (bytes && !model.reference)
       throw new AppError(
@@ -866,9 +904,13 @@ export class StudioService {
     const key = await this.secrets.get("openrouter");
     if (!key)
       throw new AppError("API_KEY_REQUIRED", "请先配置 OpenRouter Key。");
-    const reference = bytes ? await this.normalize(bytes) : null;
-    const width = reference?.readUInt32BE(16) ?? 4,
-      height = reference?.readUInt32BE(20) ?? 3;
+    const referenceBytes =
+      bytes ?? (model.reference ? styleReference : undefined);
+    const reference = referenceBytes
+      ? await this.normalize(referenceBytes)
+      : null;
+    const width = size?.width ?? reference?.readUInt32BE(16) ?? 4,
+      height = size?.height ?? reference?.readUInt32BE(20) ?? 3;
     const ratios = (
       model.ratios.length ? model.ratios : ["1:1", "4:3", "3:4", "16:9", "9:16"]
     ).flatMap((label) => {
@@ -878,6 +920,9 @@ export class StudioService {
         : [];
     });
     const ratio = ratios.sort((a, b) => a.distance - b.distance)[0]?.label;
+    const resolution = size
+      ? model.resolutions?.find((value) => value.toUpperCase() === "1K")
+      : undefined;
     const lines = model.priceLines ?? [];
     const billables = reference
       ? ["output_image", "input_image", "input_reference"]
@@ -909,6 +954,7 @@ export class StudioService {
         prompt: clean(prompt),
         n: 1,
         ...(ratio ? { aspect_ratio: ratio } : {}),
+        ...(resolution ? { resolution } : {}),
         ...(reference
           ? {
               input_references: [

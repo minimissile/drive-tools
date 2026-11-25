@@ -221,6 +221,10 @@ export interface AppPorts {
   activateDataPath(path: string): Promise<void>;
   /** PNG by default for existing content workflows; resource intake requests bounded WebP. */
   normalizeCover(bytes: Buffer, format?: "png" | "webp"): Promise<Buffer>;
+  cropImageToSize?(
+    bytes: Buffer,
+    size: { width: number; height: number },
+  ): Buffer;
   openPath(path: string): Promise<void>;
   openAccountPage(account: Account, url: string): Promise<void>;
   openExternal(url: string): Promise<void>;

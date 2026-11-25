@@ -1,12 +1,17 @@
+import { providerIds } from "../../shared/providers";
+import type { Provider } from "../../shared/types";
+
 export interface LibraryView {
   query: string;
   category: string;
+  provider: Provider | "all";
   accountId: string;
   page: number;
 }
 const defaults: LibraryView = {
   query: "",
   category: "all",
+  provider: "all",
   accountId: "all",
   page: 1,
 };
@@ -23,6 +28,7 @@ export function readLibraryView(
     return {
       query: text(raw.query, 200, ""),
       category: text(raw.category, 200, "all"),
+      provider: providerIds.includes(raw.provider) ? raw.provider : "all",
       accountId: text(raw.accountId, 100, "all"),
       page:
         Number.isSafeInteger(raw.page) && raw.page > 0 && raw.page <= 100000

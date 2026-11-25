@@ -4,6 +4,7 @@ import type { Repository } from "./repository";
 import type { SecretStore } from "./secrets";
 import { AppError, safeMessage } from "./errors";
 import { parseShare } from "./links";
+import { saveReturnedSharePassphrase } from "./share-passphrases";
 import {
   normalizedDirectory,
   type DriveProvider,
@@ -426,6 +427,7 @@ export class DriveFiles {
           prior.id,
         );
       });
+      await this.savePassphrase(prior.id, account, share);
       await this.d.afterShareSaved?.(prior.id);
       return prior.id;
     }
@@ -476,9 +478,25 @@ export class DriveFiles {
         time,
       );
     });
+    await this.savePassphrase(copyId, account, share);
     if (!oldResource) await this.d.afterResourceSaved?.(resourceId);
     await this.d.afterShareSaved?.(copyId);
     return copyId;
+  }
+  private savePassphrase(copyId: string, account: Account, share: OwnShare) {
+    return saveReturnedSharePassphrase(
+      this.d.secrets,
+      {
+        key: `share-passphrase:copy:${copyId}`,
+        provider: account.provider,
+        accountId: account.id,
+        ownerUid: account.uid!,
+        shareId: share.id,
+        url: parseShare(share.url).url,
+        code: share.code,
+      },
+      share,
+    );
   }
   reset(accountId: string, fileIds: string[]) {
     this.d.assertNoActiveJobs(accountId);

@@ -47,6 +47,11 @@ import {
   linkifyWechatMarkdown,
 } from "../../shared/wechat-markup";
 import {
+  defaultWechatCoverVariant,
+  wechatUnifiedCover,
+  type WechatCoverVariant,
+} from "../../shared/wechat-image-styles";
+import {
   resolveWechatReadMore,
   type WechatReadMoreEntry,
 } from "../../shared/wechat-read-more";
@@ -95,10 +100,12 @@ import {
   wechatImportedBody,
 } from "./tieba-draft-layout";
 import { wechatImagePrompt } from "./image-prompts";
+import coverStyleReferences from "./cover-style-references.json";
 import {
   wechatTrafficWordsInput,
   wechatTrafficWordUsage,
 } from "../../shared/wechat-traffic-words";
+import { resourceTrafficWords } from "./resource-traffic-words";
 import {
   recordWechatTrafficWords,
   wechatDeliveryWordCoverage,
@@ -123,7 +130,13 @@ interface Dependencies {
   readClipboardImage?: AppPorts["readWechatClipboardImage"];
   readRemoteImage?(url: string): Promise<{ bytes: Buffer }>;
   generateImage(bytes: Buffer, prompt: string): Promise<Buffer>;
-  generateThemeImage(prompt: string): Promise<Buffer>;
+  generateThemeImage(
+    prompt: string,
+    size?: { width: number; height: number },
+    model?: string,
+    styleReference?: Buffer,
+  ): Promise<Buffer>;
+  cropImageToSize?: AppPorts["cropImageToSize"];
   saveResource(
     input: ResourceInput,
   ): Promise<{ resourceId: string; copyId: string }>;
@@ -315,11 +328,16 @@ export class WechatArticles {
       wechatSourceKey(article.source),
     )!;
   }
+  private trafficWords(article: WechatArticle) {
+    if (article.trafficWords) return article.trafficWords;
+    const words = resourceTrafficWords(this.d.repo.db, article.links);
+    return words.length ? { words, revision: 0 } : undefined;
+  }
   private trafficWordPlan(
     article: WechatArticle,
+    words: readonly string[],
     family = this.articleFamily(article),
   ) {
-    const words = article.trafficWords?.words ?? [];
     return wechatTrafficWordPlan(
       this.d.repo.db,
       wechatSourceKey(article.source),
@@ -376,7 +394,7 @@ export class WechatArticles {
         accountName: this.accountName(article.remote!.accountId),
         rewriteStyleId: article.rewriteStyleId,
         trafficWordUsage: wechatTrafficWordUsage(
-          article.trafficWords?.words ?? [],
+          this.trafficWords(article)?.words ?? [],
           article.title,
           article.body,
         ),
@@ -527,14 +545,26 @@ export class WechatArticles {
   get(id: string): WechatDetail {
     const article = this.load(id);
     const family = this.articleFamily(article);
+    const trafficWords = this.trafficWords(article);
     return {
-      article,
+      article:
+        trafficWords === article.trafficWords
+          ? article
+          : { ...article, trafficWords },
       templateSupport: true,
+      unifiedCoverSupport: this.d.cropImageToSize ? true : undefined,
+      coverModelSelection: this.d.cropImageToSize ? true : undefined,
+      coverVariantSelection: this.d.cropImageToSize ? true : undefined,
+      coverStyleReferences: this.d.cropImageToSize ? true : undefined,
       supportedTemplates: wechatTemplateIds,
       supportedRewriteStyles: wechatRewriteStyleIds,
       readMoreEntries: this.readMoreEntries(article),
       editions: this.editionHistory(article, family),
-      trafficWordPlan: this.trafficWordPlan(article, family),
+      trafficWordPlan: this.trafficWordPlan(
+        article,
+        trafficWords?.words ?? [],
+        family,
+      ),
       issues: this.issues(article),
       resources: article.links.map((link) => {
         const candidates = this.d.repo.db
@@ -1046,6 +1076,8 @@ export class WechatArticles {
     input: WechatRegenerateImagesInput & {
       mode?: WechatImageGenerationMode;
       description?: string;
+      model?: string;
+      coverVariant?: WechatCoverVariant;
     },
   ): Promise<WechatRegenerateImagesResult> {
     const article = this.load(input.id);
@@ -1066,12 +1098,28 @@ export class WechatArticles {
         "图片列表已变化，请刷新草稿后重新选择。",
       );
     }
-    const theme = input.mode === "theme";
+    const coverSize =
+      input.mode === wechatUnifiedCover.id
+        ? wechatUnifiedCover.size
+        : undefined;
+    const cropImageToSize = this.d.cropImageToSize;
+    if (coverSize && !cropImageToSize)
+      throw new AppError("WECHAT_IMAGE", "当前客户端无法裁切统一风格封面。");
+    const coverReference = coverSize
+      ? Buffer.from(
+          coverStyleReferences[input.coverVariant ?? defaultWechatCoverVariant],
+          "base64",
+        )
+      : undefined;
+    const modelId =
+      input.model ?? (coverSize ? wechatUnifiedCover.defaultModel : undefined);
+    const theme = input.mode === "theme" || !!coverSize;
     const prompt = wechatImagePrompt({ ...input, title: article.title });
     const failed: WechatRegenerateImagesResult["failed"] = [];
     const results = new Map<
       string,
-      { url: string } | { message: string; code?: string }
+      | { url: string }
+      | Omit<WechatRegenerateImagesResult["failed"][number], "position">
     >();
     const replacements = new Map<
       (typeof input.targets)[number]["position"],
@@ -1091,21 +1139,36 @@ export class WechatArticles {
                 "WECHAT_IMAGE_SKIPPED",
                 "未提交，请先处理本次生成错误。",
               );
-            const bytes = theme
-              ? await this.d.generateThemeImage(prompt)
+            const generated = theme
+              ? await this.d.generateThemeImage(
+                  prompt,
+                  coverSize,
+                  modelId,
+                  coverReference,
+                )
               : await this.d.generateImage(
                   await this.referenceImage(url),
                   prompt,
                 );
             if (this.closed)
               throw new AppError("WECHAT_CLOSED", "工作空间已关闭。");
+            const bytes =
+              coverSize && cropImageToSize
+                ? cropImageToSize(generated, coverSize)
+                : generated;
             const saved = await saveContentImage(
               this.d.dataPath,
               bytes,
-              "AI 配图.png",
+              coverSize ? "AI 封面.png" : "AI 配图.png",
             );
             result = { url: `panxu-media://wechat/${saved.file}` };
           } catch (error) {
+            const reportedModel =
+              error instanceof AppError ? error.details?.model : undefined;
+            const model =
+              typeof reportedModel === "string" && reportedModel
+                ? reportedModel
+                : modelId;
             if (!(
               error instanceof AppError && error.code === "WECHAT_IMAGE_SKIPPED"
             ))
@@ -1124,7 +1187,7 @@ export class WechatArticles {
                   ...(error instanceof AppError ? error.details : {}),
                   code: error instanceof AppError ? error.code : "UNKNOWN",
                   position,
-                  mode: theme ? "theme" : "reference",
+                  mode: input.mode ?? "reference",
                   ...(!theme ? { style: input.style ?? "natural" } : {}),
                 },
               });
@@ -1146,6 +1209,7 @@ export class WechatArticles {
             result = {
               message: safeMessage(error),
               code: error instanceof AppError ? error.code : undefined,
+              ...(model ? { model } : {}),
             };
           }
           results.set(url, result);
@@ -1352,15 +1416,15 @@ export class WechatArticles {
   saveTrafficWords(id: string, wordsRevision: number, raw: string[]) {
     const article = this.load(id);
     this.editable(article);
-    const previous = article.trafficWords ?? { words: [], revision: 0 };
-    if (previous.revision !== wordsRevision)
+    const previous = article.trafficWords;
+    if ((previous?.revision ?? 0) !== wordsRevision)
       throw new AppError(
         "WECHAT_WORDS_CHANGED",
         "流量词已在其他窗口更新，输入已保留，请载入最新流量词后再保存。",
       );
     const words = wechatTrafficWordsInput.parse(raw);
-    if (JSON.stringify(previous.words) !== JSON.stringify(words)) {
-      article.trafficWords = { words, revision: previous.revision + 1 };
+    if (!previous || JSON.stringify(previous.words) !== JSON.stringify(words)) {
+      article.trafficWords = { words, revision: wordsRevision + 1 };
       this.persist(article);
     }
     return this.get(id);
@@ -1383,10 +1447,10 @@ export class WechatArticles {
           "WECHAT_REWRITE",
           "没有可独立改写的正文段落，原稿已保留。请补充正文，或将正文与图片、链接分行后重试。",
         );
-      const trafficWords = article.trafficWords?.words ?? [];
+      const trafficWords = this.trafficWords(article)?.words ?? [];
       const layout = wechatRewriteLayout(sections);
       const family = this.articleFamily(article);
-      const wordPlan = this.trafficWordPlan(article, family);
+      const wordPlan = this.trafficWordPlan(article, trafficWords, family);
       const priority = new Set(wordPlan.priorityWords);
       const targetCoverage =
         wordPlan.mode === "uncovered" ? Math.min(2, priority.size) : 0;
@@ -1613,7 +1677,8 @@ export class WechatArticles {
     this.active.add(id);
     try {
       let retryFeedback = "";
-      const wordPlan = this.trafficWordPlan(article);
+      const trafficWords = this.trafficWords(article)?.words ?? [];
+      const wordPlan = this.trafficWordPlan(article, trafficWords);
       const claims = ["免费", "微信版", "小程序"];
       const stated = wechatTrafficWordUsage(claims, "", text.body).used;
       const unsupportedClaims = claims.filter(
@@ -1631,7 +1696,7 @@ export class WechatArticles {
               currentTitle: text.title,
               sections: wechatRewriteBody(text.body).sections,
               sourceAuthor: article.source.author,
-              trafficWords: article.trafficWords?.words ?? [],
+              trafficWords,
               priorityTrafficWords: wordPlan.priorityWords,
               previousTitles: this.editionHistory(article)
                 .map((item) => item.title)

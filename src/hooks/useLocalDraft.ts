@@ -16,6 +16,7 @@ export function useLocalDraft<T extends object>(
     }
   }, []);
   const [initial] = useState(() => readDraft(storage, key, parse));
+  const [restored, setRestored] = useState(!!initial);
   const [value, setValue] = useState(initial ?? defaults);
   const latest = useRef(value);
   const [error, setError] = useState("");
@@ -39,5 +40,19 @@ export function useLocalDraft<T extends object>(
       /* Saved business data remains authoritative. */
     }
   }, [key]);
-  return { value, update, clear, error, restored: !!initial };
+  const reset = useCallback(
+    (next: T) => {
+      latest.current = next;
+      setValue(next);
+      setRestored(false);
+      try {
+        storage?.removeItem(key);
+        setError("");
+      } catch {
+        setError("未能清除本机暂存，请再次重置后再离开页面。");
+      }
+    },
+    [key, storage],
+  );
+  return { value, update, clear, reset, error, restored };
 }

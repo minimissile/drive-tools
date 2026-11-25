@@ -37,3 +37,13 @@ npm run test:session -- --module scripts/qa-drive-sync-ui.mjs --label 整盘同�
 单元测试使用隔离数据库和所需平台传输，覆盖递归分页、重复分页、恢复、部分失败、改名、目录循环、身份变化、资源关联、十万级索引分页及无分享资源编辑。界面测试使用任务窗口的页面级模拟，覆盖未登录账号浏览、同步操作、目录与搜索、选择、登记及导航恢复。真实只读扫描使用 `scripts/qa-drive-sync-real.mjs`，不登记业务资源或执行远端写入；验收结果以实际报告为准。
 
 设计依据：[整盘同步与本地资源关联设计](drive-full-sync-design.md)。
+
+## 迅雷真实验收 · 2026-11-25
+
+运行后端 #167。首次整盘扫描完成，根目录与3个空子目录均已读取，本地索引为3个目录、0个文件。随后按用户指定的真实迅雷链接完成“分享预览 → 转存 → 本人分享核验 → 资源归档”，简介、标签和用户提供的封面保存成功，资源与副本的 SQLite 记录及账号 UID 核对通过。无付费关键词查询。
+
+录入后再次全盘扫描完成：10个视频文件、7个目录（含根目录），本地保存16个文件／目录索引，待处理和失败均为0。两次对该资源目标目录执行正式登记接口，均返回原资源 ID，未重复创建资源；已登记目录及原清单对象为已录入，未独立登记的子文件按既有规则保留待核对。
+
+进一步只读遍历来源分享，将完整清单与本地数据库逐项比较，相对路径、类型与大小全部一致。来源实际含第1、3–11集，共10个 MKV、26649692111字节，缺第2集；保留用户原来的“更新至11集”标题。1440×900页面验收确认资源分享可用、封面可读、同步显示已完成，无页面异常。官网会话验证过期时通过原账号官网的正常只读初始化恢复，未绕过验证。
+
+脚本：`scripts/qa-xunlei-shared-intake-live.mjs`、`scripts/qa-xunlei-sync-intake-live.mjs`、`scripts/qa-xunlei-manifest-local-check.mjs`、`scripts/qa-drive-intake-final-ui.mjs`。用户提供的真实链接、提取码及封面路径放在受控临时输入文件，未写入测试源码。日志与报告：`/private/tmp/panxu-xunlei-shared-intake-live.log`、`/private/tmp/panxu-xunlei-sync-intake-result.json`、`/private/tmp/panxu-xunlei-manifest-result.json`；截图：`/private/tmp/panxu-drive-intake-final/xunlei-library.png`、`/private/tmp/panxu-drive-intake-final/xunlei-index.png`。

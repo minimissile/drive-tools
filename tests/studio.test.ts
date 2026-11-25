@@ -19,7 +19,10 @@ const mp4 = Buffer.concat([
   Buffer.from("ftypisom"),
   Buffer.alloc(12),
 ]);
-async function setup() {
+async function setup(
+  imageRatios = ["3:4", "9:16"],
+  imageResolutions: string[] = [],
+) {
   const f = await fixture(),
     saved = await f.add(true, {
       title: "英语课堂资料",
@@ -63,7 +66,8 @@ async function setup() {
             id: "qa/image",
             name: "测试图片",
             supported_parameters: {
-              aspect_ratio: { values: ["3:4", "9:16"] },
+              aspect_ratio: { values: imageRatios },
+              resolution: { values: imageResolutions },
               input_references: { max: 1 },
             },
           },
@@ -703,6 +707,88 @@ test("公众号图片 403 保留拒绝原因，主题生成沿用全局模型且
       )?.message ?? "",
       /Terms Of Service/,
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("公众号封面主题生成选择最接近的横幅比例并优先使用 1K", async () => {
+  const f = await setup(["4:3", "16:9", "21:9"], ["2K", "1K"]);
+  try {
+    f.app.db.setSetting("aiModels", { image: "qa/image" });
+    const bytes = Buffer.from(png, "base64");
+    assert.deepEqual(
+      await f.app.studio.generateThemeImage("原标题为封面创作一张插画", {
+        width: 900,
+        height: 383,
+      }),
+      bytes,
+    );
+    const cover = f.qa.payloads.at(-1);
+    assert.equal(cover.aspect_ratio, "21:9");
+    assert.equal(cover.resolution, "1K");
+    assert.ok(!("input_references" in cover));
+    await f.app.studio.generateThemeImage("为正文创作一张插画");
+    assert.equal(f.qa.payloads.at(-1).aspect_ratio, "4:3");
+    assert.ok(!("resolution" in f.qa.payloads.at(-1)));
+    assert.equal(f.qa.posts, 2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("公众号封面使用桌面 OpenRouter 传输，转发失败只提交一次并保留账本事实", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const f = await fixture(
+    {},
+    {
+      openrouterFetch: async (url, init) => {
+        assert.equal(url, "https://openrouter.ai/api/v1/images");
+        assert.equal(init.method, "POST");
+        assert.equal(init.redirect, "error");
+        assert.ok(init.signal instanceof AbortSignal);
+        assert.equal(
+          new Headers(init.headers).get("Authorization"),
+          "Bearer fixture-only",
+        );
+        calls.push(JSON.parse(String(init.body)));
+        return calls.length === 1
+          ? Response.json(
+              { error: { message: "Request path cannot be relayed" } },
+              { status: 400 },
+            )
+          : Response.json({ data: [{ b64_json: png }], usage: { cost: 0.02 } });
+      },
+    },
+  );
+  try {
+    await f.app.secrets.set("openrouter", "fixture-only");
+    f.app.db.setSetting("aiModels", { image: "qa/image" });
+    f.app.db.setSetting("studio:modelCatalog", [
+      { id: "qa/image", kind: "image", ratios: ["16:9", "21:9"] },
+    ]);
+    const generate = () =>
+      f.app.studio.generateThemeImage("原创横版封面", {
+        width: 900,
+        height: 383,
+      });
+    await assert.rejects(generate(), {
+      code: "MEDIA_REJECTED",
+      message: "OpenRouter 未能转发图片生成请求，请稍后重试。",
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].aspect_ratio, "21:9");
+    assert.ok(!("input_references" in calls[0]));
+    const failed = f.app.db.get<{
+      status: string;
+      confirmed_micros: number | null;
+    }>(
+      "SELECT status,confirmed_micros FROM api_calls WHERE phase='wechat_image'",
+    )!;
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.confirmed_micros, null);
+    assert.deepEqual(await generate(), Buffer.from(png, "base64"));
+    assert.equal(calls.length, 2);
   } finally {
     await f.cleanup();
   }

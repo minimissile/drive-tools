@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fixture, file, removeV5, currentSchemaVersion } from "./helpers";
 import { Database } from "../core/database";
 import { AppError } from "../core/errors";
+import { removeResourceRecords } from "../core/resource-records";
 import type { DriveProvider, OwnShare } from "../core/providers/provider";
 import type {
   Account,
@@ -649,6 +650,78 @@ test("v4升级前创建v5快照且保留原任务种类，重开不重复备份"
       name.includes("old-v4.db.before-v5-"),
     );
     assert.equal(snapshots.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("拆分建链自动保存口令，批量入库后保留同一口令，重复入库不重复创建分享", async () => {
+  const f = await readyTree("baidu");
+  try {
+    const phrase = "@@囟梨霹稀勺轩且诈竌千#";
+    const original = f.p.createShare.bind(f.p);
+    f.p.createShare = async (...args) => ({
+      ...(await original(...args)),
+      passphrase: phrase,
+    });
+    const run = await preview(f, 1);
+    const chosen = run.items.find((item) => !item.file.isDirectory)!;
+    await f.app.invoke("split.start", {
+      id: run.id,
+      itemIds: [chosen.id],
+      rightsConfirmed: true,
+    });
+    await f.app.queue.execute(
+      f.app.operations
+        .split(run.id)
+        .items.find((item) => item.id === chosen.id)!.jobId!,
+    );
+    const created = f.provider.shares;
+    await f.app.invoke("split.archive", { id: run.id, itemIds: [chosen.id] });
+    await f.app.queue.execute(
+      f.app.operations
+        .split(run.id)
+        .items.find((item) => item.id === chosen.id)!.jobId!,
+    );
+    assert.equal(f.provider.shares, created, "已建链的拆分项入库不重新建链");
+    const archived = f.app.operations
+      .split(run.id)
+      .items.find((item) => item.id === chosen.id)!;
+    assert(archived.archivedResourceId);
+    const copy = f.app.repo.getResource(archived.archivedResourceId).copies[0];
+    assert.deepEqual(
+      await f.app.invoke("share.copyPassphrase", { copyId: copy.id }),
+      { text: phrase },
+    );
+    const raw = f.app.db.get<{ value: string }>(
+      "SELECT value FROM secrets WHERE key=?",
+      `share-passphrase:split:${chosen.id}`,
+    )!;
+    assert(raw && !raw.value.includes(phrase));
+    const shares = f.provider.shares;
+    await f.app.invoke("split.archive", {
+      id: run.id,
+      itemIds: [chosen.id],
+    });
+    assert.equal(f.provider.shares, shares);
+    f.app.db.transaction(() =>
+      removeResourceRecords(
+        f.app.db,
+        f.app.repo.getResource(f.saved.resourceId),
+      ),
+    );
+    assert.equal(
+      f.app.db.get(
+        "SELECT key FROM secrets WHERE key=?",
+        `share-passphrase:split:${chosen.id}`,
+      ),
+      undefined,
+    );
+    assert.deepEqual(
+      await f.app.invoke("share.copyPassphrase", { copyId: copy.id }),
+      { text: phrase },
+      "删除原资料不删除已独立入库副本的口令",
+    );
   } finally {
     await f.cleanup();
   }

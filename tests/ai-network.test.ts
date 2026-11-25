@@ -25,6 +25,34 @@ test("OpenRouter系统网络只接收固定官方接口和方法，凭据不会�
     });
 });
 
+test("OpenRouter 系统网络只允许向官方图片端点提交 POST", () => {
+  const imageUrl = "https://openrouter.ai/api/v1/images";
+  assert.equal(openRouterTarget(imageUrl, "POST").href, imageUrl);
+  for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    assert.throws(() => openRouterTarget(imageUrl, method), {
+      code: "AI_NETWORK_TARGET",
+    });
+  }
+  for (const [url, method] of [
+    [`${imageUrl}/models`, "GET"],
+    [`${imageUrl}/`, "POST"],
+    [`${imageUrl}/generations`, "POST"],
+    [`${imageUrl}/edits`, "POST"],
+    [`${imageUrl}?`, "POST"],
+    [`${imageUrl}?redirect=https://example.test`, "POST"],
+    [`${imageUrl}#image`, "POST"],
+    ["http://openrouter.ai/api/v1/images", "POST"],
+    ["https://openrouter.ai.example.test/api/v1/images", "POST"],
+    ["https://user:token@openrouter.ai/api/v1/images", "POST"],
+    ["https://openrouter.ai:444/api/v1/images", "POST"],
+    ["https://openrouter.ai/api/v1/videos", "POST"],
+  ]) {
+    assert.throws(() => openRouterTarget(url, method), {
+      code: "AI_NETWORK_TARGET",
+    });
+  }
+});
+
 test("系统网络适配保留请求、超时与HTTP回执，失败只请求一次，不静默回落重发", async () => {
   let calls = 0;
   const controller = new AbortController();
@@ -54,6 +82,7 @@ test("系统网络适配保留请求、超时与HTTP回执，失败只请求一�
           body: '{"model":"fixture"}',
           headers: { Authorization: "Bearer fixture-only" },
           signal: controller.signal,
+          redirect: "follow",
         },
         1000,
         (_body, status) => observed.push(status),

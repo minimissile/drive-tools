@@ -3,10 +3,18 @@ import assert from "node:assert/strict";
 import {
   documentPages,
   extractLandingDocument,
+  omitLandingResumeContactBlock,
 } from "../core/landing-document";
+import { readLandingFolder } from "../core/landing-directory";
+import type { DriveProvider } from "../core/providers/provider";
+import type { Account, RemoteFile, ResourceCopy } from "../shared/types";
 import { documentDownloadAllowed } from "../desktop/resource-document-network";
 import { article, source, review } from "./resource-landing-fixture";
-import { landingQuality, landingDraftSchema } from "../shared/resource-landing";
+import {
+  landingCandidateSchema,
+  landingDraftSchema,
+  landingQuality,
+} from "../shared/resource-landing";
 
 test("正文与评分是发布前提，模型总分不能掩盖单项薄弱，短而具体可以通过", () => {
   const s = source(),
@@ -65,6 +73,9 @@ test("文本提取保留原文件指纹，拒绝格式/乱码/文字不足，抽
     code: "DOCUMENT_NO_TEXT",
   });
   await assert.rejects(extractLandingDocument("原文件.docx", bytes), {
+    code: "DOCUMENT_PARSE_FAILED",
+  });
+  await assert.rejects(extractLandingDocument("原文件.doc", bytes), {
     code: "DOCUMENT_FORMAT",
   });
   const pages = documentPages(104);
@@ -75,6 +86,104 @@ test("文本提取保留原文件指纹，拒绝格式/乱码/文字不足，抽
   );
   assert(pages.length <= 48);
   assert.equal(new Set(pages).size, pages.length);
+});
+
+test("简历公开摘录省略联系信息开头并保留正文", () => {
+  const body = "教育背景：项目经历从课程实习开始。";
+  const full = `简历示例\n示例姓名 138xxxx1234\n${body}`;
+  assert.equal(omitLandingResumeContactBlock("简历模板.docx", full), body);
+  assert.equal(omitLandingResumeContactBlock("课程资料.docx", full), full);
+});
+
+test("超长模型摘要能进入修订流程，不能直接发布", () => {
+  const draft = { ...article(), description: "这段内容还需要缩短。".repeat(20) };
+  assert(landingCandidateSchema.safeParse(draft).success);
+  assert(!landingDraftSchema.safeParse(draft).success);
+});
+
+test("从已核验网盘目录读取关联正文，拒绝跨资源或跨账号查找", async () => {
+  const bytes = Buffer.from("这里是网盘目录中用于核验的文档正文。".repeat(10));
+  const folder = (id: string, name: string, parentId: string): RemoteFile => ({
+    id,
+    name,
+    parentId,
+    isDirectory: true,
+    size: null,
+  });
+  const file = (id: string, name: string, parentId: string): RemoteFile => ({
+    id,
+    name,
+    parentId,
+    isDirectory: false,
+    size: bytes.length,
+  });
+  const root = folder("root", "目录资料", "0");
+  const sibling = folder("sibling", "独立资料", "0");
+  const nested = folder("nested", "教程", root.id);
+  const ad = file("ad", "广告介绍.pdf", root.id);
+  const document = file("doc", "正文.txt", nested.id);
+  const filesByDirectory = new Map([
+    ["0", [root, sibling]],
+    [root.id, [ad, nested]],
+    [nested.id, [document]],
+  ]);
+  const listed: string[] = [];
+  const fetched: string[] = [];
+  const provider = {
+    id: "quark",
+    async list(_account: Account, id: string) {
+      listed.push(id);
+      return filesByDirectory.get(id) ?? [];
+    },
+    async readFile(_account: Account, item: RemoteFile) {
+      fetched.push(item.id);
+      return bytes;
+    },
+  } as unknown as DriveProvider;
+  const account: Account = {
+    id: "account",
+    provider: "quark",
+    alias: "测试",
+    uid: "owner",
+    status: "connected",
+    enabled: true,
+    isDefault: true,
+    defaultDirectory: "/",
+    lastVerifiedAt: null,
+    error: null,
+  };
+  const copy: ResourceCopy = {
+    id: "copy",
+    resourceId: "resource",
+    accountId: account.id,
+    directory: "/",
+    folderId: "0",
+    files: [root],
+    status: "ready",
+    ownerUid: account.uid,
+    verifiedAt: "2026-11-25T00:00:00.000Z",
+    shareId: null,
+    shareUrl: null,
+    shareOwnerUid: null,
+    shareVersion: 0,
+    shareVerifiedAt: null,
+    noteStatus: "none",
+    error: null,
+  };
+  await assert.rejects(readLandingFolder(account, provider, copy, sibling.id), {
+    code: "DOCUMENT_REQUIRED",
+  });
+  await assert.rejects(
+    readLandingFolder({ ...account, uid: "other" }, provider, copy, root.id),
+    { code: "OWNERSHIP_UNVERIFIED" },
+  );
+  assert.deepEqual(listed, []);
+  const reading = await readLandingFolder(account, provider, copy, root.id);
+  assert.deepEqual(listed, ["0", root.id, nested.id]);
+  assert.deepEqual(fetched, [document.id]);
+  assert.deepEqual(reading.rootFolder, { id: root.id, name: root.name });
+  assert.equal(reading.fileId, document.id);
+  assert.equal(reading.pages[0].text, bytes.toString());
 });
 test("签名下载只访问网盘CDN，拒绝跨账号提供方、凭据、仿冒域名与非HTTPS", () => {
   assert(

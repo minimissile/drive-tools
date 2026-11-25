@@ -55,6 +55,7 @@ import { queryMethods } from "../shared/ipc";
 import { ShareCreation } from "./share-creation";
 import { ResourceLinks } from "./resource-links";
 import { ResourceLanding } from "./resource-landing";
+import { readLandingFolder } from "./landing-directory";
 import {
   assertResourceUnique,
   duplicateResourceError,
@@ -97,7 +98,7 @@ import { openRouterJsonRequest } from "./ai-network";
 import { fetchJson } from "./http";
 import { KeywordIdeas } from "./ideas";
 import { ResourceExports } from "./resource-export";
-import { StudioService, studioAssetPattern } from "./studio";
+import { StudioService, studioAssetPattern, studioMediaRequest } from "./studio";
 import { VideoService } from "./video-service";
 import { MusicService, stopMusicForBackup } from "./music/service";
 import { readMusicAsset } from "./music/assets";
@@ -339,7 +340,9 @@ export class AppService {
       readRemoteImage: browserPorts.readWechatRemoteImage,
       generateImage: (bytes, prompt) =>
         this.studio.generateReferenceImage(bytes, prompt),
-      generateThemeImage: (prompt) => this.studio.generateThemeImage(prompt),
+      generateThemeImage: (prompt, size, model, styleReference) =>
+        this.studio.generateThemeImage(prompt, size, model, styleReference),
+      cropImageToSize: browserPorts.cropImageToSize,
       saveResource: (input) => this.saveResource(input, "local-draft"),
       assertOwnCopy: (copy) => this.assertOwnCopy(copy),
       checkShare: (copyId) => this.checkShare(copyId),
@@ -387,6 +390,7 @@ export class AppService {
       dataPath,
       (bytes) => ports.normalizeCover(bytes),
       changed,
+      studioMediaRequest(browserPorts.openrouterFetch),
     );
     this.video = new VideoService(this.db, dataPath, changed, {
       bundlePath: ports.localVideoBundlePath,
@@ -651,6 +655,16 @@ export class AppService {
       changed: () => this.changed(),
       readContent: (copyId, fileId, limit) =>
         this.driveFiles.readContent(copyId, fileId, limit),
+      readFolderContent: (copyId, folderId) =>
+        this.authenticated(
+          this.repo.getCopy(copyId).accountId,
+          (account, provider) => {
+            const copy = this.repo.getCopy(copyId);
+            if (copy.accountId !== account.id)
+              throw new AppError("COPY_MISMATCH", "资源账号已变化，请重新读取。");
+            return readLandingFolder(account, provider, copy, folderId);
+          },
+        ),
       readLocal: this.ports.readLandingDocument,
     });
     this.accountDeletion = new AccountDeletion({

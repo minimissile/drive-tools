@@ -1,5 +1,7 @@
 import { articleHtml } from "./article-markup";
 import { providerSpecs } from "./providers";
+import { collectionLinkKey, collectionShare } from "./resource-collection";
+import type { SmzdmResourceLink } from "./smzdm";
 import type { WechatTemplateId } from "./wechat-templates";
 import {
   typesetWechatHtml,
@@ -39,7 +41,8 @@ export function isWechatImageUrl(url: URL) {
     const file = url.pathname.slice(1);
     return (
       url.hostname === "wechat" &&
-      (wechatImageFilePattern.test(file) || wechatCoverFilePattern.test(file)) &&
+      (wechatImageFilePattern.test(file) ||
+        wechatCoverFilePattern.test(file)) &&
       !url.search &&
       !url.hash
     );
@@ -105,7 +108,10 @@ export function wechatLegacyHtml(body: string) {
 }
 
 /** Visible resource addresses in reading order, without code examples or image URLs. */
-export function wechatReadMoreUrls(body: string) {
+export function wechatReadMoreUrls(
+  body: string,
+  acceptsUrl: (url: URL) => boolean = isWechatResourceUrl,
+) {
   const prose = body.replace(
     /```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))/g,
     "",
@@ -115,13 +121,31 @@ export function wechatReadMoreUrls(body: string) {
   for (const match of html.matchAll(/<a href="([^"]+)"/g)) {
     try {
       const url = new URL(match[1].replace(/&amp;/g, "&"));
-      if (isWechatResourceUrl(url) && !urls.includes(url.href))
-        urls.push(url.href);
+      if (acceptsUrl(url) && !urls.includes(url.href)) urls.push(url.href);
     } catch {
       /* Generated links are validated; ignore any unsupported address. */
     }
   }
   return urls;
+}
+
+export function wechatArticleShareUrl(body: string, link: SmzdmResourceLink) {
+  const current = link.ownUrl || link.url;
+  const key = collectionLinkKey(current);
+  const addresses = wechatReadMoreUrls(
+    body,
+    (url) =>
+      collectionShare(url.href) !== null && collectionLinkKey(url.href) === key,
+  );
+  const withCode = addresses.find((address) => collectionShare(address)?.code);
+  const url = new URL(withCode ?? addresses[0] ?? current);
+  // An original share's extraction code never belongs to its replacement.
+  if (!link.ownUrl && link.code && !collectionShare(url.href)?.code)
+    url.searchParams.set(
+      link.provider === "guangya" ? "code" : "pwd",
+      link.code,
+    );
+  return url.href;
 }
 
 export function wechatReadMoreUrl(body: string) {

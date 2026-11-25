@@ -5,6 +5,12 @@
   min-width: 0;
 }
 
+@media (hover: hover) {
+  .tieba-analysis :is(tbody > tr, .tieba-followed-forums > li, .tieba-discovery-sources > li, .tieba-discovery-log > li):hover {
+    background-color: var(--blue-bg);
+  }
+}
+
 .tieba-analysis-modes > .page-heading {
   align-items: flex-end;
   flex-wrap: wrap;

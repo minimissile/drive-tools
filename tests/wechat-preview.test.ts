@@ -6,9 +6,53 @@ import {
 } from "../src/wechat/image-preview";
 import {
   linkifyWechatMarkdown,
+  wechatArticleShareUrl,
   wechatHtml,
   wechatReadMoreUrl,
 } from "../shared/wechat-markup";
+import type { SmzdmResourceLink } from "../shared/smzdm";
+
+test("打开网盘链接使用正文的替换地址及其提取码", () => {
+  const original = "https://pan.baidu.com/s/1original";
+  const ownUrl = "https://pan.baidu.com/s/1replacement";
+  const link: SmzdmResourceLink = {
+    id: "resource-1",
+    url: original,
+    sourceText: `${original} 提取码：old4`,
+    code: "old4",
+    provider: "baidu",
+    copyId: "copy-1",
+    resourceId: "resource-1",
+    ownUrl,
+  };
+  const body = `[原分享](${original}?pwd=old4)\n[当前分享](${ownUrl}?pwd=new4&from=article)`;
+  assert.equal(
+    wechatArticleShareUrl(body, link),
+    `${ownUrl}?pwd=new4&from=article`,
+  );
+  assert.equal(wechatArticleShareUrl(`[原分享](${original})`, link), ownUrl);
+  assert.equal(
+    wechatArticleShareUrl(`[原分享](${original})`, { ...link, ownUrl: null }),
+    `${original}?pwd=old4`,
+  );
+});
+
+test("打开移动云盘手动替换链接保留提取码和分享片段", () => {
+  const url = "https://yun.139.com/shareweb/#/w/i/replacement";
+  const address = "https://yun.139.com/shareweb/?pwd=new4#/w/i/replacement";
+  const link: SmzdmResourceLink = {
+    id: "resource-1",
+    url,
+    sourceText: url,
+    code: "new4",
+    provider: "cmcc",
+    copyId: null,
+    resourceId: null,
+    ownUrl: null,
+    manual: true,
+  };
+  assert.equal(wechatArticleShareUrl(`[资源](${address})`, link), address);
+});
 
 test("裸资源地址转换为 Markdown 超链接，保留提取码参数及多个链接", () => {
   const first = "https://pan.quark.cn/s/own123?pwd=abcd&from=article";

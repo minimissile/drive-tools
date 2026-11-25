@@ -53,6 +53,10 @@ export function removeResourceRecords(
       copy.id,
     )) {
       db.run("DELETE FROM secrets WHERE key=?", `split:${item.id}`);
+      db.run(
+        "DELETE FROM secrets WHERE key=?",
+        `share-passphrase:split:${item.id}`,
+      );
       db.run("DELETE FROM settings WHERE key=?", `split-archive:${item.id}`);
     }
     db.run(

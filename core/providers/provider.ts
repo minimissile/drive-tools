@@ -41,6 +41,10 @@ export interface OwnShare {
   url: string;
   code: string;
   ownerUid: string;
+  /** Official App command returned by the provider, never derived from the URL. */
+  passphrase?: string;
+  /** Link creation succeeded, but the independent command step could not finish. */
+  passphraseIssue?: string;
   /** Present only when the provider returned an actual expiry; null is permanent. */
   expiresAt?: string | null;
 }
@@ -50,6 +54,7 @@ export interface TransferResult {
   taskId: string | null;
 }
 export interface DriveProvider {
+  readSharePassphrase?(account: Account, share: OwnShare): Promise<string>;
   fileCapabilities?(account: Account): Promise<import("../../shared/drive-files").DriveDirectory["capabilities"]>;
   membership?(account: Account): Promise<import("../../shared/drive-membership").DriveMembership>;
   readFile?(

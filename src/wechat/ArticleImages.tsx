@@ -14,15 +14,22 @@ import {
   type WechatRegenerateImagesResult,
 } from "../../shared/wechat";
 import {
+  defaultWechatCoverVariant,
   defaultWechatImageStyle,
+  wechatCoverVariants,
+  wechatCoverVariantSchema,
   wechatImageStyles,
+  wechatUnifiedCover,
+  type WechatCoverVariant,
   type WechatImageStyle,
 } from "../../shared/wechat-image-styles";
 import { wechatArticleImages } from "../../shared/wechat-markup";
 import { ipc } from "../api/client";
+import { useIpcQuery } from "../api/useIpcQuery";
 import { updateSelection } from "../lib/selection";
 import { useAppActions } from "../state";
 import { Dialog } from "../ui/Dialog";
+import { QueryError } from "../ui/QueryError";
 import { Select } from "../ui/Select";
 import { wechatImagePreviewUrl } from "./image-preview";
 import {
@@ -56,7 +63,10 @@ type ImageRequest = {
   targets: Targets;
   mode: WechatImageGenerationMode;
   style: WechatImageStyle;
+  coverVariant: WechatCoverVariant;
   description: string;
+  model?: string;
+  retryModel?: { rejected?: string };
 };
 type Position = Targets[number]["position"];
 type ImageTarget = "body" | "cover" | ArticleImage;
@@ -66,6 +76,18 @@ const selectionKey = ({ position, url }: Targets[number]) =>
   `${position}:${url}`;
 const imageLabel = (position: Position) =>
   position === "cover" ? "文章封面" : `插图 ${position + 1}`;
+const existingImageOptions = [
+  ...wechatImageStyles.map(({ id, label }) => ({ value: id, label })),
+  { value: "theme", label: "按文章主题生成" },
+];
+const unifiedCoverOption = {
+  value: wechatUnifiedCover.id,
+  label: wechatUnifiedCover.label,
+};
+const coverVariantOptions = wechatCoverVariantSchema.options.map((value) => ({
+  value,
+  label: wechatCoverVariants[value].label,
+}));
 
 function ImagePreview({
   url,
@@ -237,6 +259,8 @@ export function ArticleImages({
   coverAddress,
   imageAddress,
   disabled,
+  coverModelSelection,
+  coverStyleReferences,
   onBody,
   onCover,
   onCoverAddress,
@@ -250,6 +274,8 @@ export function ArticleImages({
   coverAddress: string | null;
   imageAddress: string | null;
   disabled: boolean;
+  coverModelSelection: boolean;
+  coverStyleReferences: boolean;
   onBody(body: string): void;
   onCover(url: string): void;
   onCoverAddress(url: string | null): void;
@@ -272,6 +298,8 @@ export function ArticleImages({
   const [report, setReport] = useState<
     | (Pick<WechatRegenerateImagesResult, "failed" | "replaced"> & {
         retry: Targets;
+        modelRetry?: ImageRequest;
+        newCover: boolean;
       })
     | null
   >(null);
@@ -290,6 +318,36 @@ export function ArticleImages({
   const retryTargets = candidates.filter((target) =>
     report?.retry.some((item) => selectionKey(item) === selectionKey(target)),
   );
+  const coverOnly =
+    confirm?.targets.length === 1 && confirm.targets[0].position === "cover";
+  const newCover = coverOnly && !confirm.targets[0].url;
+  const unifiedCover = confirm?.mode === wechatUnifiedCover.id;
+  const coverVariant = confirm?.coverVariant ?? defaultWechatCoverVariant;
+  const coverUpdatePending = unifiedCover && !coverStyleReferences;
+  const selectCoverModel = coverModelSelection && unifiedCover;
+  const modelCatalog = useIpcQuery("studio.modelCatalog", undefined, {
+    enabled: selectCoverModel,
+    keepPrevious: true,
+  });
+  const imageModels = modelCatalog.data?.filter(
+    (model) => model.kind === "image",
+  );
+  const modelOptions = imageModels?.filter(
+    (model) => model.id !== confirm?.retryModel?.rejected,
+  );
+  const modelId = selectCoverModel
+    ? (confirm?.model ??
+      (confirm?.retryModel ? "" : wechatUnifiedCover.defaultModel))
+    : undefined;
+  const chosenModel = modelOptions?.find((model) => model.id === modelId);
+  const rejectedModel = imageModels?.find(
+    (model) => model.id === confirm?.retryModel?.rejected,
+  );
+  const needsModel = selectCoverModel && !chosenModel;
+  const modelRetry =
+    report?.modelRetry?.targets[0]?.url === coverUrl
+      ? report?.modelRetry
+      : undefined;
   const openGenerate = (
     targets: Targets,
     mode: WechatImageGenerationMode = "reference",
@@ -299,6 +357,7 @@ export function ArticleImages({
       targets,
       mode,
       style: defaultWechatImageStyle,
+      coverVariant: defaultWechatCoverVariant,
       description,
     });
   const selectImage = (position: Position, url: string) => {
@@ -406,20 +465,33 @@ export function ArticleImages({
     setPreview({ src, label });
   };
   const generate = async () => {
-    if (!confirm || blocked || lock.current) return;
+    if (!confirm || blocked || needsModel || coverUpdatePending || lock.current)
+      return;
     lock.current = true;
     setPending("ai");
     onBusy(true);
     setError("");
     setReport(null);
     try {
-      const result = await onRegenerate(confirm);
+      const result = await onRegenerate({
+        ...confirm,
+        coverVariant,
+        model: modelId,
+      });
       if (!mounted.current) return;
       const failedTargets = confirm.targets.filter((target) =>
         result.failed.some(({ position }) => target.position === position),
       );
       setSelected(failedTargets.map(selectionKey));
       if (result.failed.length) {
+        const [failure] = result.failed;
+        const canRetryWithModel =
+          selectCoverModel &&
+          failure.position === "cover" &&
+          failedTargets.length === 1 &&
+          ["MEDIA_POLICY_REJECTED", "MEDIA_ACCESS_DENIED"].includes(
+            failure.code ?? "",
+          );
         const themeTargets =
           confirm.mode === "reference"
             ? failedTargets.filter((target) =>
@@ -438,6 +510,17 @@ export function ArticleImages({
           replaced: result.replaced,
           failed: result.failed,
           retry: themeTargets,
+          modelRetry: canRetryWithModel
+            ? {
+                ...confirm,
+                targets: failedTargets,
+                model: undefined,
+                retryModel: {
+                  rejected: failure.model || modelId,
+                },
+              }
+            : undefined,
+          newCover,
         });
       } else setBatch(false);
     } catch (cause) {
@@ -464,10 +547,9 @@ export function ArticleImages({
       {report ? (
         <Notice warning>
           <div role="status">
-            {report.replaced
-              ? `已替换 ${report.replaced} 处。`
-              : "本次未替换图片。"}{" "}
-            {report.failed.length} 处保留原图。
+            {report.newCover
+              ? "本次未生成封面。"
+              : `${report.replaced ? `已替换 ${report.replaced} 处。` : "本次未替换图片。"}${report.failed.length} 处保留原图。`}
             <ul className="wechat-issues">
               {report.failed.map(({ position, message }) => (
                 <li key={position}>
@@ -475,6 +557,15 @@ export function ArticleImages({
                 </li>
               ))}
             </ul>
+            {modelRetry ? (
+              <Button
+                size="compact"
+                disabled={blocked}
+                onClick={() => setConfirm(modelRetry)}
+              >
+                换模型重试
+              </Button>
+            ) : null}
             {retryTargets.length ? (
               <Button
                 size="compact"
@@ -580,21 +671,24 @@ export function ArticleImages({
               </small>
             </div>
             <div className="wechat-image-item-actions">
-              {coverUrl ? (
-                batch ? (
+              {batch ? (
+                coverUrl ? (
                   selectImage("cover", coverUrl)
-                ) : (
-                  <Button
-                    size="compact"
-                    disabled={blocked}
-                    onClick={() =>
-                      openGenerate([{ position: "cover", url: coverUrl }])
-                    }
-                  >
-                    <AiIcon size={14} /> AI 换封面
-                  </Button>
-                )
-              ) : null}
+                ) : null
+              ) : (
+                <Button
+                  size="compact"
+                  disabled={blocked}
+                  onClick={() =>
+                    openGenerate(
+                      [{ position: "cover", url: coverUrl }],
+                      coverUrl ? "reference" : wechatUnifiedCover.id,
+                    )
+                  }
+                >
+                  <AiIcon size={14} /> {coverUrl ? "AI 换封面" : "AI 生成封面"}
+                </Button>
+              )}
               {!batch ? (
                 <>
                   {pasteButton("cover", "文章封面")}
@@ -791,7 +885,7 @@ export function ArticleImages({
       ) : null}
       {confirm ? (
         <Dialog
-          title="AI 生成替换图"
+          title={newCover ? "AI 生成封面" : "AI 生成替换图"}
           focus="container"
           busy={pending === "ai"}
           onClose={() => setConfirm(null)}
@@ -805,41 +899,156 @@ export function ArticleImages({
               </Button>
               <Button
                 primary
-                disabled={blocked}
+                disabled={blocked || needsModel || coverUpdatePending}
                 onClick={() => void generate()}
               >
-                {pending === "ai" ? "正在生成…" : "开始生成并替换"}
+                {pending === "ai"
+                  ? "正在生成…"
+                  : newCover
+                    ? "开始生成封面"
+                    : "开始生成并替换"}
               </Button>
             </>
           }
         >
           <Field label="生成方式">
             <Select
-              value={confirm.mode === "theme" ? "theme" : confirm.style}
-              disabled={blocked}
-              items={[
-                ...wechatImageStyles.map(({ id, label }) => ({
-                  value: id,
-                  label,
-                })),
-                { value: "theme", label: "按文章主题生成" },
-              ]}
-              onValueChange={(mode) =>
-                setConfirm({
-                  ...confirm,
-                  mode: mode === "theme" ? "theme" : "reference",
-                  style: mode === "vivid" ? "vivid" : "natural",
-                })
+              value={
+                confirm.mode === "reference" ? confirm.style : confirm.mode
               }
+              disabled={blocked || !!confirm.retryModel}
+              items={
+                newCover
+                  ? [unifiedCoverOption]
+                  : coverOnly
+                    ? [...existingImageOptions, unifiedCoverOption]
+                    : existingImageOptions
+              }
+              onValueChange={(option) => {
+                if (option === "theme" || option === wechatUnifiedCover.id) {
+                  setConfirm({ ...confirm, mode: option });
+                  return;
+                }
+                const style = wechatImageStyles.find(({ id }) => id === option);
+                if (style)
+                  setConfirm({
+                    ...confirm,
+                    mode: "reference",
+                    style: style.id,
+                  });
+              }}
             />
           </Field>
-          {confirm.mode === "theme" ? (
-            <Field label="画面描述" hint="可选，留空使用文章标题">
+          {unifiedCover ? (
+            <Field
+              label="封面风格"
+              hint={wechatCoverVariants[coverVariant].description}
+            >
+              <Select
+                value={coverVariant}
+                items={coverVariantOptions}
+                disabled={blocked}
+                onValueChange={(value) => {
+                  const next = wechatCoverVariantSchema.safeParse(value);
+                  if (next.success)
+                    setConfirm({ ...confirm, coverVariant: next.data });
+                }}
+              />
+            </Field>
+          ) : null}
+          {coverUpdatePending ? (
+            <Notice warning>
+              请先点击顶部「应用更新并重启」，再使用新封面风格。
+            </Notice>
+          ) : null}
+          {selectCoverModel ? (
+            <>
+              <Field
+                label="图片模型"
+                hint={
+                  confirm.retryModel?.rejected
+                    ? `上次被拒的模型 ${rejectedModel?.name ?? confirm.retryModel.rejected}`
+                    : "所选模型仅用于这次生成"
+                }
+              >
+                <Select
+                  value={modelId ?? ""}
+                  disabled={blocked || !modelOptions?.length}
+                  items={[
+                    ...(!modelId
+                      ? [
+                          {
+                            value: "",
+                            label: "请选择其他图片模型",
+                            disabled: true,
+                          },
+                        ]
+                      : !chosenModel
+                        ? [
+                            {
+                              value: modelId,
+                              label:
+                                modelId === wechatUnifiedCover.defaultModel
+                                  ? wechatUnifiedCover.defaultModelLabel
+                                  : modelId,
+                              disabled: true,
+                            },
+                          ]
+                        : []),
+                    ...(modelOptions ?? []).map((model) => ({
+                      value: model.id,
+                      label: model.name,
+                    })),
+                  ]}
+                  onValueChange={(model) =>
+                    setConfirm({ ...confirm, model: model || undefined })
+                  }
+                />
+              </Field>
+              {modelCatalog.loading && !imageModels ? (
+                <Loading label="正在读取图片模型…" />
+              ) : null}
+              <QueryError
+                error={modelCatalog.error}
+                title="图片模型暂时无法读取"
+                loading={modelCatalog.loading}
+                onRetry={modelCatalog.reload}
+              />
+              {imageModels && !modelOptions?.length && !modelCatalog.error ? (
+                <p className="muted">
+                  暂无可选图片模型。可在「连接与设置」刷新模型列表。
+                </p>
+              ) : null}
+              {imageModels &&
+              modelOptions?.length &&
+              modelId &&
+              !chosenModel &&
+              !modelCatalog.error ? (
+                <p className="muted">
+                  所选模型尚未出现在本地目录。可在「连接与设置」刷新模型列表，或先改选其他模型。
+                </p>
+              ) : null}
+              {chosenModel?.pricing ? (
+                <p className="muted">缓存报价 {chosenModel.pricing}</p>
+              ) : null}
+            </>
+          ) : null}
+          {confirm.mode !== "reference" ? (
+            <Field
+              label={
+                confirm.mode === wechatUnifiedCover.id ? "画面主体" : "画面描述"
+              }
+              hint="可选，留空使用文章标题"
+            >
               <input
                 value={confirm.description}
                 maxLength={300}
                 disabled={blocked}
-                placeholder="例如，古籍与笔墨的简洁插画"
+                placeholder={
+                  confirm.mode === wechatUnifiedCover.id
+                    ? "例如，蓝色立体时钟叠在浅黄日历前"
+                    : "例如，古籍与笔墨的简洁插画"
+                }
                 onChange={(event) =>
                   setConfirm({ ...confirm, description: event.target.value })
                 }
@@ -847,11 +1056,19 @@ export function ArticleImages({
             </Field>
           ) : null}
           <p className="muted">
-            {confirm.mode === "theme"
-              ? "使用文章主题创作，不上传原图。"
-              : `${wechatImageStyles.find(({ id }) => id === confirm.style)!.description}两种重绘都使用参考图，忽略水印，不添加海报文字。`}
-            替换选中的 {confirm.targets.length}{" "}
-            处图片。使用全局默认图片模型，按服务商计费。失败项保留原图。
+            {confirm.mode === wechatUnifiedCover.id
+              ? `生成 ${wechatUnifiedCover.size.width} × ${wechatUnifiedCover.size.height} 像素头条横版封面。左侧是根据文章标题提炼的短标题，右侧是立体主图。`
+              : confirm.mode === "theme"
+                ? "使用文章主题创作，不上传原图。"
+                : `${wechatImageStyles.find(({ id }) => id === confirm.style)!.description}使用参考图，忽略水印，不添加海报文字。`}
+            {newCover ? "" : `替换选中的 ${confirm.targets.length} 处图片。`}
+            {unifiedCover && chosenModel?.reference
+              ? "按所选风格的样稿参考版式和配色。"
+              : ""}
+            {selectCoverModel
+              ? "按所选模型的服务商标准计费。"
+              : "使用全局默认图片模型，按服务商计费。"}
+            {newCover ? "" : "失败项保留原图。"}
           </p>
         </Dialog>
       ) : null}

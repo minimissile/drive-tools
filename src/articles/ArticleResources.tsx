@@ -48,6 +48,7 @@ export function ArticleResources<T extends ResourceDetail>({
   onChanged,
   onBusy,
   actions,
+  onOpenLink,
   partialSync = false,
 }: {
   detail: T;
@@ -55,6 +56,7 @@ export function ArticleResources<T extends ResourceDetail>({
   partialSync?: boolean;
   busy: boolean;
   onBusy(value: boolean): void;
+  onOpenLink?(link: SmzdmResourceLink): Promise<unknown>;
   beforeAction(): Promise<T>;
   onChanged(next: T): void;
 }) {
@@ -70,6 +72,7 @@ export function ArticleResources<T extends ResourceDetail>({
     alive = useRef(true);
   const [viewing, setViewing] = useState<DriveResourceTarget | null>(null);
   const [viewLoading, setViewLoading] = useState("");
+  const [opening, setOpening] = useState("");
   const replacementForm = useId();
   const [replacement, setReplacement] = useState<{
     link: SmzdmResourceLink;
@@ -475,6 +478,27 @@ export function ArticleResources<T extends ResourceDetail>({
                         {!link.manual && !ready ? controls : null}
                         <div className="article-resource-actions">
                           {viewButton}
+                          {onOpenLink ? (
+                            <Button
+                              size="compact"
+                              quiet
+                              disabled={!!opening}
+                              onClick={async () => {
+                                setOpening(link.id);
+                                setError("");
+                                try {
+                                  await onOpenLink(link);
+                                } catch {
+                                  if (alive.current)
+                                    setError("无法打开网盘链接，请重试。");
+                                } finally {
+                                  if (alive.current) setOpening("");
+                                }
+                              }}
+                            >
+                              {opening === link.id ? "正在打开…" : "打开链接"}
+                            </Button>
+                          ) : null}
                           <Button
                             size="compact"
                             quiet

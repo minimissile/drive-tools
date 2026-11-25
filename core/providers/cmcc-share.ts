@@ -225,6 +225,7 @@ export class CmccShares {
       {
         queryBatchOprTaskDetailReq: {
           taskID: taskId,
+          msisdn: c.account,
           commonAccountInfo: { account: c.account, accountType: 1 },
         },
       },
@@ -240,8 +241,8 @@ export class CmccShares {
     if (
       [3, 4].includes(Number(task.taskStatus)) ||
       (Number(task.taskStatus) === 2 &&
-        task.taskResultCode != null &&
-        Number(task.taskResultCode) !== 0)
+        (Number(task.taskResultCode) !== 1 ||
+          (task.resultCode != null && Number(task.resultCode) !== 0)))
     )
       throw new AppError(
         "PARTIAL_SUCCESS",
@@ -304,6 +305,8 @@ export class CmccShares {
         "/IOutLink/getOutLink",
         {
           getOutLinkReq: {
+            linkType: 0,
+            userDomainId: c.uid,
             subLinkType: 0,
             encrypt: 1,
             coIDLst: {
@@ -315,7 +318,7 @@ export class CmccShares {
             pubType: 1,
             dedicatedName: title.slice(0, 60),
             periodUnit: 1,
-            viewerLst: { item: [] },
+            viewerLst: {},
             extInfo: { isWatermark: 0, shareChannel: "3001" },
             ...(settings.expiresInDays
               ? { period: settings.expiresInDays }
@@ -326,7 +329,8 @@ export class CmccShares {
         true,
       ),
     );
-    const row = data.getOutLinkRes?.getOutLinkResSet?.[0];
+    const row = (data.getOutLinkResSet ??
+      data.getOutLinkRes?.getOutLinkResSet)?.[0];
     const id = validText(row?.linkID, "本人分享ID"),
       code = String(row.passwd ?? "");
     await onCreated?.({ id, url: this.source(id).url, code, ownerUid: c.uid });
@@ -355,7 +359,7 @@ export class CmccShares {
           srtDr: 0,
           bNum: page * 100 + 1,
           eNum: (page + 1) * 100,
-          qryType: 0,
+          qryType: 1,
           commonAccountInfo: { account: c.account, accountType: 1 },
         },
       });

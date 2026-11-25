@@ -4,6 +4,7 @@ import { parseShare } from "./links";
 import type { SecretStore } from "./secrets";
 import type { Provider } from "../shared/types";
 import type { SavedSharePassphrase } from "../shared/share-passphrase";
+import type { OwnShare } from "./providers/provider";
 
 export interface PassphraseScope {
   key: string;
@@ -28,7 +29,7 @@ const matches = (a: StoredPassphrase["scope"], b: PassphraseScope) =>
   a.url === b.url &&
   a.code === b.code;
 
-/** Parse a pasted official share, never manufacture a platform command from a URL. */
+/** Parse an official share, never manufacture a platform command from a URL. */
 export function officialSharePassphrase(text: string, scope: PassphraseScope) {
   if (!["baidu", "quark"].includes(scope.provider))
     throw new AppError(
@@ -101,8 +102,61 @@ export async function readSharePassphrase(
     !stored.scope ||
     !matches(stored.scope, scope) ||
     typeof stored.text !== "string" ||
-    !stored.text
+    typeof stored.savedAt !== "string" ||
+    (stored.issue != null && typeof stored.issue !== "string") ||
+    (!stored.text && !stored.issue)
   )
     return null;
-  return { text: stored.text, savedAt: stored.savedAt };
+  return {
+    text: stored.text,
+    savedAt: stored.savedAt,
+    ...(stored.issue ? { issue: stored.issue } : {}),
+  };
+}
+
+/** Called by share workflows only after checking the provider/account/link binding. */
+export async function saveReturnedSharePassphrase(
+  secrets: SecretStore,
+  scope: PassphraseScope,
+  share: OwnShare,
+) {
+  if (!share.passphrase && !share.passphraseIssue) return;
+  const parsed = parseShare(share.url, share.code);
+  if (
+    share.id !== scope.shareId ||
+    share.ownerUid !== scope.ownerUid ||
+    parsed.provider !== scope.provider ||
+    parsed.url !== scope.url ||
+    parsed.code !== scope.code
+  )
+    throw new AppError(
+      "PASSPHRASE_SHARE_MISMATCH",
+      "口令与本次分享的归属不一致，未保存。",
+    );
+  try {
+    if (!share.passphrase) {
+      const previous = await readSharePassphrase(secrets, scope);
+      if (previous?.text) return previous;
+      const value: StoredPassphrase = {
+        scope: binding(scope),
+        original: "",
+        text: "",
+        issue: share.passphraseIssue,
+        savedAt: now(),
+      };
+      await secrets.set(scope.key, JSON.stringify(value));
+      return { text: value.text, issue: value.issue, savedAt: value.savedAt };
+    }
+    return await saveSharePassphrase(
+      secrets,
+      scope,
+      `${share.passphrase}\n${parsed.url}${parsed.code ? `?pwd=${encodeURIComponent(parsed.code)}` : ""}`,
+    );
+  } catch {
+    throw new AppError(
+      "PASSPHRASE_SAVE_FAILED",
+      "分享链接已创建，但中文口令未能保存，请核对原分享，勿重复建链。",
+      true,
+    );
+  }
 }

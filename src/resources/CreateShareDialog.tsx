@@ -296,6 +296,7 @@ export function CreateShareDialog({
                     <SharePassphrase
                       key={receipt.operationId}
                       target={{ copyId, operationId: receipt.operationId }}
+                      provider={context.provider}
                     />
                   ) : null}
                 </>

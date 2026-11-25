@@ -2,6 +2,44 @@ import { BrowserWindow, nativeImage } from "electron";
 import { AppError } from "../core/errors";
 import { assertWebpCover, resourceCoverMaxBytes } from "../core/cover-assets";
 
+function readNativeCover(bytes: Buffer) {
+  const image = nativeImage.createFromBuffer(bytes);
+  if (image.isEmpty())
+    throw new AppError("INVALID_COVER", "图片内容无法解码。");
+  const { width, height } = image.getSize();
+  if (width * height > 60_000_000)
+    throw new AppError(
+      "COVER_TOO_LARGE",
+      "图片分辨率过大，请使用封面尺寸的图片。",
+    );
+  return { image, width, height };
+}
+
+export function cropImageToSize(
+  bytes: Buffer,
+  size: { width: number; height: number },
+): Buffer {
+  const { image, width, height } = readNativeCover(bytes);
+  const scale = Math.min(width / size.width, height / size.height);
+  const cropWidth = Math.max(
+    1,
+    Math.min(width, Math.round(size.width * scale)),
+  );
+  const cropHeight = Math.max(
+    1,
+    Math.min(height, Math.round(size.height * scale)),
+  );
+  return image
+    .crop({
+      x: Math.floor((width - cropWidth) / 2),
+      y: Math.floor((height - cropHeight) / 2),
+      width: cropWidth,
+      height: cropHeight,
+    })
+    .resize({ ...size, quality: "best" })
+    .toPNG();
+}
+
 // Runs only in an isolated local renderer; all inputs are passed explicitly.
 async function encodeCover(
   dataUrl: string,
@@ -66,15 +104,7 @@ export async function normalizeCover(
   // Keep existing PNG workflows lightweight. WebP decoding uses Chromium because
   // NativeImage only guarantees PNG/JPEG support across desktop platforms.
   if (format === "png" && !isWebp) {
-    const image = nativeImage.createFromBuffer(bytes);
-    if (image.isEmpty())
-      throw new AppError("INVALID_COVER", "图片内容无法解码。");
-    const { width, height } = image.getSize();
-    if (width * height > 60_000_000)
-      throw new AppError(
-        "COVER_TOO_LARGE",
-        "图片分辨率过大，请使用封面尺寸的图片。",
-      );
+    const { image, width, height } = readNativeCover(bytes);
     return (
       Math.max(width, height) > 1600
         ? image.resize({

@@ -68,7 +68,7 @@ export const landingEditableDraftSchema = z.object({
 /** Accept short model candidates for one repair pass; publication stays strict. */
 export const landingCandidateSchema = landingDraftSchema.extend({
   title: text(1, 90),
-  description: text(1, landingDescriptionLimit),
+  description: text(1, 600),
   summary: text(1, 600),
   highlights: z.array(text(1, 160)).max(6),
   sections: z
@@ -355,6 +355,7 @@ export interface LandingContext {
   stale: boolean;
   published: RemoteLanding | null;
   pageUrl: string | null;
+  canReadFolder?: boolean;
   canPublish: boolean;
   targetIssue: string | null;
   pending: boolean;

@@ -374,7 +374,9 @@ function LandingEditor({
                 {context.source.files.map((f) => (
                   <li key={f.evidenceId}>
                     <span>{f.name}</span>
-                    {!f.directory && isLandingDocument(f.name) ? (
+                    {(f.directory
+                      ? context.canReadFolder
+                      : isLandingDocument(f.name)) ? (
                       <div className="landing-reading-actions">
                         <Button
                           size="compact"
@@ -391,27 +393,29 @@ function LandingEditor({
                             )
                           }
                         >
-                          读取正文
+                          {f.directory ? "查找并读取正文" : "读取正文"}
                         </Button>
-                        <Button
-                          size="compact"
-                          quiet
-                          disabled={busy || context.pending}
-                          onClick={() =>
-                            void run(
-                              "read",
-                              () =>
-                                ipc("resourceLanding.readDocument", {
-                                  resourceId: context.resourceId,
-                                  fileEvidenceId: f.evidenceId,
-                                  local: true,
-                                }),
-                              "本地正文读取完成。",
-                            )
-                          }
-                        >
-                          导入原文件
-                        </Button>
+                        {!f.directory ? (
+                          <Button
+                            size="compact"
+                            quiet
+                            disabled={busy || context.pending}
+                            onClick={() =>
+                              void run(
+                                "read",
+                                () =>
+                                  ipc("resourceLanding.readDocument", {
+                                    resourceId: context.resourceId,
+                                    fileEvidenceId: f.evidenceId,
+                                    local: true,
+                                  }),
+                                "本地正文读取完成。",
+                              )
+                            }
+                          >
+                            导入原文件
+                          </Button>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="landing-editor-help">
@@ -443,7 +447,8 @@ function LandingEditor({
             ) : (
               <p className="landing-editor-help">
                 {context.source.files.some(
-                  (f) => !f.directory && isLandingDocument(f.name),
+                  (f) =>
+                    f.directory ? context.canReadFolder : isLandingDocument(f.name),
                 )
                   ? "读取上方文件正文后，即可生成草稿。"
                   : "当前文件尚不能读取正文，请绑定支持的文档后再生成。"}

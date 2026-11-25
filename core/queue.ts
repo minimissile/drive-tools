@@ -1,4 +1,5 @@
-import type { DriveProvider } from "./providers/provider";
+import type { DriveProvider, OwnShare } from "./providers/provider";
+import { saveReturnedSharePassphrase } from "./share-passphrases";
 import { assertManifest } from "./providers/provider";
 import type { Job, Provider, RemoteFile, ShareInput } from "../shared/types";
 import { Repository } from "./repository";
@@ -474,11 +475,7 @@ export class TransferQueue {
       this.changed();
     }
   }
-  private async storeShare(
-    copyId: string,
-    uid: string,
-    share: { id: string; url: string; code: string; ownerUid: string },
-  ) {
+  private async storeShare(copyId: string, uid: string, share: OwnShare) {
     if (share.ownerUid !== uid)
       throw new AppError(
         "OWNERSHIP_UNVERIFIED",
@@ -517,6 +514,19 @@ export class TransferQueue {
       copyId,
       "completed",
       "cancelled",
+    );
+    await saveReturnedSharePassphrase(
+      this.secrets,
+      {
+        key: `share-passphrase:copy:${copyId}`,
+        provider: resource.provider,
+        accountId: copy.accountId,
+        ownerUid: uid,
+        shareId: share.id,
+        url: parsed.url,
+        code: share.code,
+      },
+      share,
     );
   }
 }

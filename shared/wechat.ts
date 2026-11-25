@@ -13,7 +13,11 @@ import type {
   WechatSaveArticleModuleInput,
 } from "./wechat-article-modules";
 import { isWechatImageUrl } from "./wechat-markup";
-import { wechatImageStyleSchema } from "./wechat-image-styles";
+import {
+  wechatCoverVariantSchema,
+  wechatImageStyleSchema,
+  wechatUnifiedCover,
+} from "./wechat-image-styles";
 import {
   wechatTemplateSchema,
   type WechatTemplateId,
@@ -183,6 +187,10 @@ export interface WechatArticle extends WechatText {
 export interface WechatDetail {
   article: WechatArticle;
   templateSupport?: true;
+  unifiedCoverSupport?: true;
+  coverModelSelection?: true;
+  coverVariantSelection?: true;
+  coverStyleReferences?: true;
   supportedTemplates?: readonly WechatTemplateId[];
   supportedRewriteStyles?: readonly WechatRewriteStyleId[];
   readMoreEntries?: WechatReadMoreEntry[];
@@ -253,25 +261,47 @@ export interface WechatPort {
   open(account: WebsiteAccount, url?: string): Promise<void>;
 }
 export const wechatImageBatchLimit = 20;
-export type WechatImageGenerationMode = "reference" | "theme";
+export type WechatImageGenerationMode =
+  "reference" | "theme" | typeof wechatUnifiedCover.id;
+const wechatImageTarget = z.object({
+  position: z.union([z.literal("cover"), z.number().int().nonnegative()]),
+  url: z.string().min(1).max(4000),
+});
 export const wechatRegenerateImagesInput = z.object({
   id: z.string().min(1).max(100),
   revision: z.number().int().positive(),
-  targets: z
-    .array(
-      z.object({
-        position: z.union([z.literal("cover"), z.number().int().nonnegative()]),
-        url: z.string().min(1).max(4000),
-      }),
-    )
-    .min(1)
-    .max(wechatImageBatchLimit),
+  targets: z.array(wechatImageTarget).min(1).max(wechatImageBatchLimit),
   confirmed: z.literal(true),
   style: wechatImageStyleSchema.optional(),
 });
 export const wechatThemeImagesInput = wechatRegenerateImagesInput
-  .omit({ style: true })
-  .extend({ description: z.string().trim().max(300).optional() });
+  .extend({
+    description: z.string().trim().max(300).optional(),
+    style: z.literal(wechatUnifiedCover.id).optional(),
+    coverVariant: wechatCoverVariantSchema.optional(),
+    model: z.string().trim().min(1).max(200).optional(),
+    targets: z
+      .array(wechatImageTarget.extend({ url: z.string().max(4000) }))
+      .min(1)
+      .max(wechatImageBatchLimit),
+  })
+  .refine(
+    ({ style, targets }) =>
+      style
+        ? targets.length === 1 && targets[0].position === "cover"
+        : targets.every(({ url }) => !!url),
+    { path: ["targets"], message: "请为当前生成方式选择可用的图片位置。" },
+  )
+  .refine(
+    ({ style, model }) =>
+      model === undefined || style === wechatUnifiedCover.id,
+    { path: ["model"], message: "仅统一风格封面支持为本次生成指定模型。" },
+  )
+  .refine(
+    ({ style, coverVariant }) =>
+      coverVariant === undefined || style === wechatUnifiedCover.id,
+    { path: ["coverVariant"], message: "封面风格仅适用于公众号统一风格。" },
+  );
 export type WechatRegenerateImagesInput = z.infer<
   typeof wechatRegenerateImagesInput
 >;
@@ -282,6 +312,7 @@ export interface WechatRegenerateImagesResult {
     position: WechatRegenerateImagesInput["targets"][number]["position"];
     message: string;
     code?: string;
+    model?: string;
   }[];
 }
 type Contract<A, V> = { args: A; value: V };

@@ -582,6 +582,10 @@ export class BaiduProvider implements DriveProvider {
           channel_list: "[]",
           period: String(options.expiresInDays),
           pwd: code,
+          // Official mobile share panel (13.37.9): Chinese command, same share.
+          // Verified against /share/set as well as /share/pset with web sessions.
+          share_type: "9",
+          command_type: "1",
         },
       );
     const result = verifyOptions
@@ -605,6 +609,11 @@ export class BaiduProvider implements DriveProvider {
         url: parsed.url,
         code,
         ownerUid: session.uid,
+        ...(typeof result.command_word === "string" &&
+        /^[\p{Script=Han}]{4,40}$/u.test(result.command_word)
+          ? // One of the official App's default recognition marker pairs (@@_#).
+            { passphrase: `@@${result.command_word}#` }
+          : {}),
       };
       await onCreated?.(share);
       if (verification === "receipt") return share;

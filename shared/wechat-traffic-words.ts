@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const wechatTrafficWordLimit = 100;
+export const wechatTrafficWordLengthLimit = 80;
+
 export function normalizeWechatTrafficWords(value: string | readonly string[]) {
   const seen = new Set<string>();
   return (typeof value === "string" ? [value] : value)
@@ -19,8 +22,15 @@ export const wechatTrafficWordsInput = z
   .transform(normalizeWechatTrafficWords)
   .pipe(
     z
-      .array(z.string().max(80, "单个流量词最多 80 个字，请精简后保存。"))
-      .max(100, "每篇最多保存 100 个流量词，请精简后保存。"),
+      .array(
+        z
+          .string()
+          .max(
+            wechatTrafficWordLengthLimit,
+            "单个流量词最多 80 个字，请精简后保存。",
+          ),
+      )
+      .max(wechatTrafficWordLimit, "每篇最多保存 100 个流量词，请精简后保存。"),
   );
 
 export interface WechatTrafficWords {

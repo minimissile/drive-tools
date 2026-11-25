@@ -3,7 +3,10 @@ import { randomBytes } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { AppError, ProviderHttpError, safeMessage } from "./errors";
 import { parseShare } from "./links";
-import type { PassphraseScope } from "./share-passphrases";
+import {
+  saveReturnedSharePassphrase,
+  type PassphraseScope,
+} from "./share-passphrases";
 import {
   shareCreationCapabilities,
   shareCreationOptionsError,
@@ -218,6 +221,20 @@ export class ShareCreation {
         if (share.url) throw error;
       }
     }
+    if (share.url)
+      await saveReturnedSharePassphrase(
+        this.d.secrets,
+        {
+          key: `share-passphrase:creation:${record.receipt.operationId}`,
+          provider: record.provider,
+          accountId: record.accountId,
+          ownerUid: record.ownerUid,
+          shareId: share.id,
+          url: record.receipt.url!,
+          code: code || "",
+        },
+        share,
+      );
     return code || undefined;
   }
   async result(operationId: string) {

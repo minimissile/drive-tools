@@ -1,4 +1,5 @@
 import { ownPage } from "./own-list-page";
+import type { QuarkPassphraseGenerator } from "./quark-passphrase";
 import { quarkMembership } from "./membership";
 import { quarkIdentity } from "./quark-identity";
 import { uploadQuark } from "./quark-upload";
@@ -33,6 +34,7 @@ export class QuarkProvider implements DriveProvider {
   constructor(
     private transport: ProviderTransport,
     readonly id: "quark" | "uc" = "quark",
+    private passphrases?: QuarkPassphraseGenerator,
   ) {}
   private get label() {
     return this.id === "uc" ? "UC" : "夸克";
@@ -40,11 +42,25 @@ export class QuarkProvider implements DriveProvider {
   async readFile(account: Account, file: RemoteFile, maxBytes: number) {
     if (!this.transport.fileBytes)
       throw new AppError("UNSUPPORTED", "当前环境不能读取文件正文。");
-    const result = await this.request(account, "file/download", {}, { fids: [file.id] });
-    const item = Array.isArray(result.data) ? result.data.find((v: JsonObject) => String(v.fid) === file.id) : null;
+    const result = await this.request(
+      account,
+      "file/download",
+      {},
+      { fids: [file.id] },
+    );
+    const item = Array.isArray(result.data)
+      ? result.data.find((v: JsonObject) => String(v.fid) === file.id)
+      : null;
     if (!item?.download_url)
-      throw new AppError("DOWNLOAD_UNAVAILABLE", "网盘未返回此文件的读取地址，请检查登录或使用本地文件。");
-    return this.transport.fileBytes(account.id, String(item.download_url), maxBytes);
+      throw new AppError(
+        "DOWNLOAD_UNAVAILABLE",
+        "网盘未返回此文件的读取地址，请检查登录或使用本地文件。",
+      );
+    return this.transport.fileBytes(
+      account.id,
+      String(item.download_url),
+      maxBytes,
+    );
   }
   private url(path: string, query: Record<string, string | number> = {}) {
     const url = new URL(
@@ -126,13 +142,22 @@ export class QuarkProvider implements DriveProvider {
       account.id,
       `https://${this.id === "uc" ? "drive.uc.cn" : "pan.quark.cn"}/account/info?fr=pc&platform=pc`,
     );
-    return quarkIdentity(result, this.label, () =>
-      this.transport.principalId?.(account.id, this.id) ?? Promise.resolve(null),
+    return quarkIdentity(
+      result,
+      this.label,
+      () =>
+        this.transport.principalId?.(account.id, this.id) ??
+        Promise.resolve(null),
     );
   }
 
   async membership(account: Account) {
-    const result=await this.request(account,"member",{fetch_subscribe:"true",_ch:"home",fetch_identity:"true"});return quarkMembership(result.data??{});
+    const result = await this.request(account, "member", {
+      fetch_subscribe: "true",
+      _ch: "home",
+      fetch_identity: "true",
+    });
+    return quarkMembership(result.data ?? {});
   }
   async capacity(account: Account) {
     const result = await this.request(account, "member", {
@@ -205,14 +230,35 @@ export class QuarkProvider implements DriveProvider {
   }
   async listPage(account: Account, parentId: string, cursor = "") {
     const page = ownPage(cursor);
-    const result = await this.request(account, "file/sort", { pdir_fid: parentId, _page: page, _size: 100, _fetch_total: 1, _sort: "file_type:asc,file_name:asc", fetch_all_file: 1 });
+    const result = await this.request(account, "file/sort", {
+      pdir_fid: parentId,
+      _page: page,
+      _size: 100,
+      _fetch_total: 1,
+      _sort: "file_type:asc,file_name:asc",
+      fetch_all_file: 1,
+    });
     const rows = result.data?.list;
-    if (!Array.isArray(rows)) throw new AppError("REMOTE_SCHEMA_CHANGED", `${this.label}目标文件列表格式变化。`);
+    if (!Array.isArray(rows))
+      throw new AppError(
+        "REMOTE_SCHEMA_CHANGED",
+        `${this.label}目标文件列表格式变化。`,
+      );
     const total = result.metadata?._total;
-    const hasTotal = total != null && Number.isFinite(Number(total)) && Number(total) >= 0;
+    const hasTotal =
+      total != null && Number.isFinite(Number(total)) && Number(total) >= 0;
     const more = hasTotal ? page * 100 < Number(total) : rows.length >= 100;
-    if (!rows.length && more) throw new AppError("INCOMPLETE_LIST", "平台返回空分页但仍有剩余文件，请重试此目录。");
-    return { files: rows.map((r: JsonObject) => normalizeRemoteFile(r, this.id, parentId)), next: more ? String(page + 1) : null };
+    if (!rows.length && more)
+      throw new AppError(
+        "INCOMPLETE_LIST",
+        "平台返回空分页但仍有剩余文件，请重试此目录。",
+      );
+    return {
+      files: rows.map((r: JsonObject) =>
+        normalizeRemoteFile(r, this.id, parentId),
+      ),
+      next: more ? String(page + 1) : null,
+    };
   }
   async list(account: Account, parentId: string) {
     const files: RemoteFile[] = [];
@@ -244,10 +290,14 @@ export class QuarkProvider implements DriveProvider {
     throw new AppError("TOO_MANY_FILES", "目录过大，请选择更小的目标目录。");
   }
   async upload(account: Account, parentId: string, asset: UploadAsset) {
-    await uploadQuark(this.id, parentId, asset,
+    await uploadQuark(
+      this.id,
+      parentId,
+      asset,
       (path, body) => this.request(account, path, {}, body),
       this.transport.storageRequest
-        ? (_provider, url, init) => this.transport.storageRequest!(account.id, url.href, init)
+        ? (_provider, url, init) =>
+            this.transport.storageRequest!(account.id, url.href, init)
         : undefined,
     );
   }
@@ -462,12 +512,22 @@ export class QuarkProvider implements DriveProvider {
     account: Account,
     shareId: string,
     ownerUid?: string,
+    commandPlan = false,
   ) {
     const result = await this.request(
       account,
       "share/password",
       {},
-      { share_id: shareId },
+      {
+        share_id: shareId,
+        ...(commandPlan
+          ? {
+              fetch_file_category_num: 0,
+              distribute_share_plan: 1,
+              utoken_version: "v2",
+            }
+          : {}),
+      },
     );
     const identity = ownerUid
       ? { uid: ownerUid }
@@ -497,6 +557,45 @@ export class QuarkProvider implements DriveProvider {
   }
   async createShare(account: Account, files: RemoteFile[], title: string) {
     return this.createNewShare(account, files, title);
+  }
+  async readSharePassphrase(account: Account, share: OwnShare) {
+    if (this.id !== "quark" || !this.passphrases)
+      throw new AppError(
+        "QUARK_SIGN_UNAVAILABLE",
+        "当前客户端没有可用的夸克官方签名组件。",
+      );
+    const { share: current, detail } = await this.shareDetails(
+      account,
+      share.id,
+      undefined,
+      true,
+    );
+    if (
+      current.ownerUid !== share.ownerUid ||
+      current.url !== share.url ||
+      current.code !== share.code
+    )
+      throw new AppError(
+        "PASSPHRASE_SHARE_MISMATCH",
+        "分享归属、地址或提取码已变化，请先核对原分享。",
+      );
+    return this.commandForShare(
+      current,
+      detail,
+      String(detail.title || "分享资源"),
+    );
+  }
+  private commandForShare(share: OwnShare, detail: JsonObject, title: string) {
+    if (
+      !this.passphrases ||
+      Number(detail.command_type) !== 1 ||
+      !detail.plan_id
+    )
+      throw new AppError(
+        "QUARK_CHINESE_PASSPHRASE_UNAVAILABLE",
+        "当前分享未获得中文口令生成方案，分享链接已保留。",
+      );
+    return this.passphrases.create(share, title, String(detail.plan_id));
   }
   async createShareWithOptions(
     account: Account,
@@ -585,6 +684,7 @@ export class QuarkProvider implements DriveProvider {
         account,
         String(shareId),
         ownerUid,
+        this.id === "quark" && !!this.passphrases,
       );
       await onCreated?.(share);
       const row = options
@@ -617,7 +717,7 @@ export class QuarkProvider implements DriveProvider {
           "OWNERSHIP_UNVERIFIED",
           "未在本人分享记录中确认目标文件，暂不允许分发。",
         );
-      return options
+      const completed: OwnShare = options
         ? {
             ...share,
             expiresAt:
@@ -630,6 +730,19 @@ export class QuarkProvider implements DriveProvider {
                   ),
           }
         : share;
+      if (this.id === "quark" && this.passphrases) {
+        try {
+          completed.passphrase = await this.commandForShare(
+            completed,
+            detail,
+            title,
+          );
+        } catch (error) {
+          completed.passphraseIssue = safeMessage(error);
+        }
+        await onCreated?.(completed);
+      }
+      return completed;
     } catch (error) {
       throw new AppError(
         error instanceof AppError ? error.code : "UNCERTAIN_SHARE_RESULT",

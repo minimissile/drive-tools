@@ -3,37 +3,63 @@ import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fixture, file } from "../tests/helpers.ts";
 
-/** Isolated business fixture bridged only into this task's renderer. No real share creation. */
+// Browser plugin not available. Dedicated Electron test session + isolated business fixture.
+// Flow: saved share -> automatic receipt persistence -> local command copy -> independent share.
 export async function run({ page, windowId }) {
   console.log(JSON.stringify({ windowId, phase: "started" }));
   page.setDefaultTimeout(15000);
   const f = await fixture();
   const copied = [],
     errors = [];
-  const phrase = "祄五低诶及并词玄符一已汢";
-  const url = "https://pan.quark.cn/s/259effdd6c9a";
-  const original = `我用夸克网盘给你分享了「2024年Flu...(完结)」，点击链接或复制整段内容，打开「夸克APP」即可获取。\n${phrase}\n/~720e3cXFG4~:/\n链接：${url}`;
+  const phrase = "@@囟梨霹稀勺轩且诈竌千#";
+  const independent = "@@钱犁忐辣卡褒尺以乒庄#";
   try {
     const saved = await f.add(false, { title: "办公练习清单" });
     const uid = f.provider.uid;
     f.app.db.run(
-      "UPDATE copies SET status='ready',owner_uid=?,verified_at='2026-11-25',files=?,share_id='saved-share',share_url=?,share_owner_uid=?,share_verified_at='2026-11-25' WHERE id=?",
+      "UPDATE accounts SET provider='baidu' WHERE id=?",
+      f.account.id,
+    );
+    f.app.db.run(
+      "UPDATE resources SET provider='baidu' WHERE id=?",
+      saved.resourceId,
+    );
+    f.app.db.run(
+      "UPDATE copies SET status='ready',owner_uid=?,verified_at='2026-11-25',files=?,folder_id='0',share_id='saved-share',share_url='https://pan.baidu.com/s/1saved',share_owner_uid=?,share_verified_at='2026-11-25' WHERE id=?",
       uid,
       JSON.stringify([file]),
-      url,
       uid,
       saved.copyId,
     );
-    f.provider.createShareWithOptions = async (_a, _f, _t, options) => ({
-      id: "independent-share",
-      url: "https://pan.quark.cn/s/independent",
+    f.provider.actual = [file];
+    f.provider.findOwnShare = async () => null;
+    f.provider.createShare = async () => ({
+      id: "auto-own",
+      url: "https://pan.baidu.com/s/1auto",
+      code: "8002",
       ownerUid: uid,
-      code: options.extractionCode,
+      passphrase: phrase,
     });
-    const operationId = randomUUID();
+    f.provider.createShareWithOptions = async (
+      _a,
+      _f,
+      _t,
+      options,
+      onCreated,
+    ) => {
+      const share = {
+        id: "independent-share",
+        url: "https://pan.baidu.com/s/1independent",
+        ownerUid: uid,
+        code: options.extractionCode,
+        passphrase: independent,
+      };
+      await onCreated?.(share);
+      return share;
+    };
     await f.app.shareCreation.createIndependent({
       copyId: saved.copyId,
-      operationId,
+      operationId: randomUUID(),
       expiresInDays: 0,
       extractionCode: "8002",
     });
@@ -58,30 +84,34 @@ export async function run({ page, windowId }) {
         ),
       });
     });
+    const show = async () => {
+      await page.reload();
+      await page
+        .getByRole("navigation", { name: "主导航" })
+        .getByRole("button", { name: "资源库", exact: true })
+        .click();
+      await page
+        .locator("button.resource-row")
+        .filter({ hasText: "办公练习清单" })
+        .click();
+      return page.getByRole("region", { name: "本人分享" });
+    };
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.reload();
-    await page
-      .getByRole("navigation", { name: "主导航" })
-      .getByRole("button", { name: "资源库", exact: true })
-      .click();
-    await page
-      .locator("button.resource-row")
-      .filter({ hasText: "办公练习清单" })
-      .click();
-    const own = page.getByRole("region", { name: "本人分享" });
+    let own = await show();
     await own.getByText("中文口令 · 未获取", { exact: true }).waitFor();
     assert(
       await own
         .getByRole("button", { name: "复制口令", exact: true })
         .isDisabled(),
     );
-    await own
-      .getByRole("button", { name: "保存官方口令", exact: true })
-      .click();
-    await own
-      .getByRole("textbox", { name: "App 官方分享内容", exact: true })
-      .fill(original);
-    await own.getByRole("button", { name: "保存口令", exact: true }).click();
+    assert.equal(
+      await own
+        .getByRole("button", { name: "保存官方口令", exact: true })
+        .count(),
+      0,
+    );
+    await f.app.invoke("copy.createShare", { copyId: saved.copyId });
+    own = await show();
     await own.getByText(phrase, { exact: true }).waitFor();
     await own.getByRole("button", { name: "复制口令", exact: true }).click();
     await page
@@ -89,52 +119,79 @@ export async function run({ page, windowId }) {
       .filter({ hasText: "中文口令已复制。" })
       .waitFor();
     assert.deepEqual(copied, [phrase]);
+    await mkdir("/private/tmp/panxu-share-passphrase", { recursive: true });
+    await page.screenshot({
+      path: "/private/tmp/panxu-share-passphrase/automatic-library.png",
+    });
     await own.getByRole("button", { name: "创建新分享", exact: true }).click();
     const dialog = page.getByRole("dialog", {
       name: "创建新分享",
       exact: true,
     });
-    await dialog
-      .getByRole("button", { name: "保存官方口令", exact: true })
-      .click();
-    await dialog
-      .getByRole("textbox", { name: "App 官方分享内容", exact: true })
-      .fill(original);
-    await dialog.getByRole("button", { name: "保存口令", exact: true }).click();
-    await page
-      .getByRole("alert")
-      .filter({ hasText: "这段内容中的分享链接或提取码与当前分享不一致" })
-      .waitFor();
+    await dialog.getByText(independent, { exact: true }).waitFor();
     assert.equal(
-      await dialog
-        .getByRole("textbox", { name: "App 官方分享内容" })
-        .inputValue(),
-      original,
+      await dialog.getByRole("textbox", { name: "App 官方分享内容" }).count(),
+      0,
     );
-    const independent = "独立分享中文口令";
-    await dialog
-      .getByRole("textbox", { name: "App 官方分享内容" })
-      .fill(`${independent}\nhttps://pan.quark.cn/s/independent?pwd=8002`);
-    await dialog.getByRole("button", { name: "保存口令", exact: true }).click();
     await dialog.getByRole("button", { name: "复制口令", exact: true }).click();
     await page
       .getByRole("status")
       .filter({ hasText: "中文口令已复制。" })
       .waitFor();
     assert.deepEqual(copied, [phrase, independent]);
-    assert.equal(
-      (await f.app.invoke("share.copyPassphrase", { copyId: saved.copyId }))
-        .text,
-      phrase,
+    assert.deepEqual(
+      await f.app.invoke("share.copyPassphrase", { copyId: saved.copyId }),
+      { text: phrase },
     );
-    await mkdir("/private/tmp/panxu-share-passphrase", { recursive: true });
     await page.screenshot({
-      path: "/private/tmp/panxu-share-passphrase/new-share.png",
+      path: "/private/tmp/panxu-share-passphrase/automatic-new-share.png",
     });
     await dialog.getByRole("button", { name: "关闭弹窗", exact: true }).click();
-    await page.screenshot({
-      path: "/private/tmp/panxu-share-passphrase/library.png",
+    // A failed command step leaves a working link; retry must not create a share.
+    f.app.db.run(
+      "UPDATE accounts SET provider='quark' WHERE id=?",
+      f.account.id,
+    );
+    f.app.db.run(
+      "UPDATE resources SET provider='quark' WHERE id=?",
+      saved.resourceId,
+    );
+    f.provider.createShare = async () => ({
+      id: "quark-existing",
+      url: "https://pan.quark.cn/s/owned",
+      code: "8002",
+      ownerUid: uid,
+      passphraseIssue: "官方组件暂不可用，分享链接已保留。",
     });
+    await f.app.invoke("copy.createShare", { copyId: saved.copyId });
+    let lookups = 0;
+    const quarkWord = "祄二七三一并词玄页娃枫汢";
+    f.provider.readSharePassphrase = async (_a, share) => {
+      lookups++;
+      assert.equal(share.id, "quark-existing");
+      return quarkWord;
+    };
+    f.provider.createShare = async () => assert.fail("重试口令不得重新建分享");
+    own = await show();
+    await own.getByText("中文口令 · 未获取", { exact: true }).waitFor();
+    assert(
+      await own
+        .getByRole("button", { name: "复制口令", exact: true })
+        .isDisabled(),
+    );
+    await own.getByRole("button", { name: "重试获取", exact: true }).click();
+    await own.getByText(quarkWord, { exact: true }).waitFor();
+    await own.getByRole("button", { name: "复制口令", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "中文口令已复制。" })
+      .waitFor();
+    assert.equal(lookups, 1);
+    assert.deepEqual(copied, [phrase, independent, quarkWord]);
+    await page.screenshot({
+      path: "/private/tmp/panxu-share-passphrase/quark-retrieved.png",
+    });
+    assert.equal(await page.locator("vite-error-overlay").count(), 0);
     assert.deepEqual(errors, []);
     console.log(
       JSON.stringify({
@@ -142,6 +199,7 @@ export async function run({ page, windowId }) {
         copied,
         pageErrors: errors,
         realSharesCreated: 0,
+        viewport: "1440x900",
       }),
     );
   } finally {

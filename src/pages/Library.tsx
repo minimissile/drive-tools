@@ -31,6 +31,7 @@ import {
 } from "../ui/primitives";
 import { ResourceKindIcon, resourceFiles } from "../resources/ResourceKindIcon";
 import { providerName } from "../resources/labels";
+import { providerIds, providerDriveName } from "../../shared/providers";
 import { updateSelection } from "../lib/selection";
 import { Pagination } from "../ui/Pagination";
 import type { Resource, ResourcePage } from "../../shared/types";
@@ -55,19 +56,31 @@ export default function LibraryPage() {
         ? initial.category
         : "all",
     ),
+    [provider, setProvider] = useState(initial.provider),
     [accountId, setAccountId] = useState(
-      data!.accounts.some((a) => a.id === initial.accountId)
+      data!.accounts.some(
+        (a) =>
+          a.id === initial.accountId &&
+          (initial.provider === "all" || a.provider === initial.provider),
+      )
         ? initial.accountId
         : "all",
     );
+  const accounts = data!.accounts.filter(
+    (a) => provider === "all" || a.provider === provider,
+  );
   useEffect(() => {
     listBody.current?.scrollTo(0, 0);
-  }, [page, category, accountId, deferredQuery]);
+  }, [page, category, provider, accountId, deferredQuery]);
   const hasFilters =
-    !!query.trim() || category !== "all" || accountId !== "all";
+    !!query.trim() ||
+    category !== "all" ||
+    provider !== "all" ||
+    accountId !== "all";
   const clearFilters = () => {
     setQuery("");
     setCategory("all");
+    setProvider("all");
     setAccountId("all");
     setPage(1);
     setChecked([]);
@@ -76,10 +89,11 @@ export default function LibraryPage() {
     saveLibraryView(windowStorage, data!.dataPath, {
       query,
       category,
+      provider,
       accountId,
       page,
     });
-  }, [data!.dataPath, query, category, accountId, page]);
+  }, [data!.dataPath, query, category, provider, accountId, page]);
   const {
     data: result,
     loading,
@@ -90,6 +104,7 @@ export default function LibraryPage() {
     {
       query: deferredQuery,
       category: category === "all" ? undefined : category,
+      provider: provider === "all" ? undefined : provider,
       accountId: accountId === "all" ? undefined : accountId,
       page,
       pageSize: 25,
@@ -235,6 +250,30 @@ export default function LibraryPage() {
                 ]}
               />
               <Select
+                aria-label="网盘类型筛选"
+                className="library-provider-filter"
+                value={provider}
+                onValueChange={(nextValue) => {
+                  setProvider(nextValue as typeof provider);
+                  if (
+                    nextValue !== "all" &&
+                    !data!.accounts.some(
+                      (a) => a.id === accountId && a.provider === nextValue,
+                    )
+                  )
+                    setAccountId("all");
+                  setChecked([]);
+                  setPage(1);
+                }}
+                items={[
+                  { value: "all", label: "全部网盘" },
+                  ...providerIds.map((value) => ({
+                    value,
+                    label: providerDriveName(value),
+                  })),
+                ]}
+              />
+              <Select
                 aria-label="资源账号筛选"
                 value={accountId}
                 onValueChange={(nextValue) => {
@@ -244,7 +283,7 @@ export default function LibraryPage() {
                 }}
                 items={[
                   { value: "all", label: "全部账号" },
-                  ...data!.accounts.map((a) => ({
+                  ...accounts.map((a) => ({
                     value: a.id,
                     label: a.alias,
                   })),

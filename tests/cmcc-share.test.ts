@@ -30,6 +30,8 @@ function fixture() {
   const state = {
     owner: "own-user",
     status: 2,
+    resultCode: 1,
+    flatReceipt: false,
     writes: 0,
     broken: false,
     hasMore: false,
@@ -77,23 +79,36 @@ function fixture() {
       if (path.endsWith("queryBatchOprTaskDetail"))
         return {
           queryBatchOprTaskDetailRes: {
-            batchOprTask: { taskStatus: state.status, taskResultCode: 0 },
+            batchOprTask: {
+              taskStatus: state.status,
+              taskResultCode: state.resultCode,
+              resultCode: 0,
+            },
           },
         };
       if (path.endsWith("getOutLink"))
-        return {
-          getOutLinkRes: {
-            getOutLinkResSet: [{ linkID: "own-link", passwd: "abcd" }],
-          },
-        };
+        return state.flatReceipt
+          ? { getOutLinkResSet: [{ linkID: "own-link", passwd: "abcd" }] }
+          : {
+              getOutLinkRes: {
+                getOutLinkResSet: [{ linkID: "own-link", passwd: "abcd" }],
+              },
+            };
       throw Error("unexpected endpoint");
     },
-    async () => ({
-      getOutLinkLstRes: {
-        outLinks: state.history,
-        count: state.history.length,
-      },
-    }),
+    async (_a, _path, data) => {
+      assert.equal(
+        data.getOutLinkLstReq.qryType,
+        1,
+        "only own shares, never received shares",
+      );
+      return {
+        getOutLinkLstRes: {
+          outLinks: state.history,
+          count: state.history.length,
+        },
+      };
+    },
   );
   return { share, state, calls };
 }
@@ -170,6 +185,18 @@ test("CMCC transfer uses verified source owner and full source paths; polls neve
   assert.equal(await f.share.poll(account, "remote-task"), false);
   f.state.status = 2;
   assert.equal(await f.share.poll(account, "remote-task"), true);
+  const polled = f.calls.find((c) =>
+    c.path.endsWith("queryBatchOprTaskDetail"),
+  )!.data;
+  assert.equal(polled.queryBatchOprTaskDetailReq.msisdn, "13800000000");
+  for (const code of [0, 2, 3]) {
+    f.state.resultCode = code;
+    await assert.rejects(f.share.poll(account, "remote-task"), {
+      code: "PARTIAL_SUCCESS",
+      uncertain: true,
+    });
+  }
+  f.state.resultCode = 1;
   f.state.status = 4;
   await assert.rejects(f.share.poll(account, "remote-task"), {
     code: "PARTIAL_SUCCESS",
@@ -179,17 +206,25 @@ test("CMCC transfer uses verified source owner and full source paths; polls neve
 });
 test("CMCC own share validates account UID and exact files, then recovers from authenticated history", async () => {
   const f = fixture();
+  f.state.flatReceipt = true;
   const own = await f.share.create(account, [local], "归档资料");
   assert.equal(own.ownerUid, account.uid);
   assert.equal(own.code, "abcd");
   assert.equal(own.url, "https://yun.139.com/shareweb/#/w/i/own-link");
   assert.equal(own.expiresAt, null);
   assert.equal(f.state.writes, 1);
-  const submitted=f.calls.find(c=>c.path.endsWith('/IOutLink/getOutLink'))!.data;
-  assert.deepEqual(submitted.getOutLinkReq.coIDLst,{item:['file-a']});
-  assert.deepEqual(submitted.getOutLinkReq.caIDLst,{item:[]});
-  assert.deepEqual(submitted.getOutLinkReq.commonAccountInfo,{account:'13800000000',accountType:1});
-  assert.equal(submitted.commonAccountInfo,undefined);
+  const submitted = f.calls.find((c) =>
+    c.path.endsWith("/IOutLink/getOutLink"),
+  )!.data;
+  assert.deepEqual(submitted.getOutLinkReq.coIDLst, { item: ["file-a"] });
+  assert.deepEqual(submitted.getOutLinkReq.caIDLst, { item: [] });
+  assert.deepEqual(submitted.getOutLinkReq.commonAccountInfo, {
+    account: "13800000000",
+    accountType: 1,
+  });
+  assert.equal(submitted.commonAccountInfo, undefined);
+  assert.equal(submitted.getOutLinkReq.userDomainId, account.uid);
+  assert.equal(submitted.getOutLinkReq.linkType, 0);
   f.state.history = [
     { linkID: "own-link", passwd: "abcd", isOutLinkInvalid: 0, expireTime: "" },
   ];

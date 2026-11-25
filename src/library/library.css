@@ -75,12 +75,13 @@
 .library-filters {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-4);
   flex: none;
 }
 .library-filters > .search {
-  flex: 0 1 360px;
+  flex: 1 1 160px;
   min-width: 160px;
   max-width: 360px;
 }
@@ -94,7 +95,8 @@
 .library-filter-options .select-control {
   width: 148px;
 }
-.library-filter-options .library-category-filter {
+.library-filter-options .library-category-filter,
+.library-filter-options .library-provider-filter {
   width: 128px;
 }
 .library-filter-reset {

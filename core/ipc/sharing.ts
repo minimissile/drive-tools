@@ -4,6 +4,7 @@ import { now } from "../database";
 import { AppError, safeMessage } from "../errors";
 import { parseShare, shareUrlWithCode } from "../links";
 import { assertManifest } from "../providers/provider";
+import { saveReturnedSharePassphrase } from "../share-passphrases";
 import type { ShareCheck, ShareValidationResult } from "../../shared/types";
 
 import type { HandlerServices, HandlerMap, IpcHandler } from "./types";
@@ -161,6 +162,19 @@ export function createSharingHandlers(
         );
         services.notes.enqueue(copyId);
       });
+      await saveReturnedSharePassphrase(
+        services.secrets,
+        {
+          key: `share-passphrase:copy:${copyId}`,
+          provider: resource.provider,
+          accountId: copy.accountId,
+          ownerUid: a.uid,
+          shareId: share.id,
+          url: parsedShare.url,
+          code: share.code,
+        },
+        share,
+      );
       await services.resourceLinks.afterShareSaved(copyId);
       await services.notes.flush();
       services.changed();

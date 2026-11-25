@@ -104,7 +104,19 @@ export async function run({ page, windowId, checkpoint }) {
       copyId: prior.id,
       jobId: job?.id ?? null,
     };
-    if (job && ["failed", "needs_review", "waiting_login"].includes(job.stage))
+    if (process.env.PANXU_CMCC_RECOVER_EXISTING_SHARE) {
+      const recovered = JSON.parse(
+        await readFile(process.env.PANXU_CMCC_RECOVER_EXISTING_SHARE, "utf8"),
+      );
+      assert.equal(recovered.ownerUid, cached.ownerUid);
+      await page.evaluate(
+        (input) => window.panxu.invoke("copy.recoverShare", input),
+        { copyId: prior.id, text: recovered.url, code: recovered.code },
+      );
+    } else if (
+      job &&
+      ["failed", "needs_review", "waiting_login"].includes(job.stage)
+    )
       await page.evaluate(
         (id) => window.panxu.invoke("job.retry", { id }),
         job.id,

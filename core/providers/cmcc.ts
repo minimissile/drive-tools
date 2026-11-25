@@ -107,7 +107,7 @@ export class CmccProvider implements DriveProvider {
           write,
           {
             ...(path === "/IOutLink/getOutLink"
-              ? {}
+              ? { "x-yun-userDomainId": "enabled" }
               : { "hcy-cool-flag": "1" }),
             "mcloud-client": "10702",
             "mcloud-version": "7.13.3",

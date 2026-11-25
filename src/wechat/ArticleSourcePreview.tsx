@@ -22,7 +22,10 @@ export function ArticleSourcePreview({
   const headingId = comparison ? "wechat-comparison-source" : readerHeadingId;
   const [error, setError] = useState("");
   const sourceLabel = source.kind ? sourceLabels[source.kind] : "原文";
-  const html = useMemo(() => wechatPreviewHtml(source.body), [source.body]);
+  const html = useMemo(
+    () => (comparison ? wechatPreviewHtml(source.body) : ""),
+    [comparison, source.body],
+  );
   const author = source.author ? (
     <p className="muted">{source.author}</p>
   ) : null;
@@ -85,10 +88,20 @@ export function ArticleSourcePreview({
             ))}
           </ul>
         ) : null}
-        <article
-          className="wechat-preview"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        {comparison ? (
+          <article
+            className="wechat-preview"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        ) : (
+          <textarea
+            className="wechat-body"
+            aria-label="原文正文"
+            value={source.body}
+            readOnly
+            spellCheck={false}
+          />
+        )}
       </div>
     </section>
   );

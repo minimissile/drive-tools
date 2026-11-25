@@ -20,12 +20,3 @@
   overflow-wrap: anywhere;
   user-select: all;
 }
-.share-passphrase-editor {
-  display: grid;
-  gap: var(--space-2);
-}
-.share-passphrase-editor textarea {
-  width: 100%;
-  min-height: 112px;
-  resize: vertical;
-}

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CmccProvider, cmccSignature } from "../core/providers/cmcc";
+import { decodeCmccShare, encodeCmccShare } from "../core/providers/cmcc-share";
 import { WebTokenSession } from "../core/providers/web-token-session";
 import {
   providerApiAllowed,
@@ -170,6 +171,75 @@ function mock() {
     files,
   };
 }
+test("139 分享传输按明文签名、按官方端点编码，建链后核对归属", async () => {
+  const f = mock();
+  let writes = 0;
+  f.transport.text = async (id, address, init) => {
+    assert.equal(id, account.id);
+    const url = new URL(address),
+      headers = new Headers(init?.headers);
+    const writing = url.pathname.endsWith("/IOutLink/getOutLink");
+    const body = writing
+      ? JSON.parse(String(init?.body))
+      : decodeCmccShare(String(init?.body));
+    const [time, nonce, signature] = headers.get("mcloud-sign")!.split(",");
+    assert.equal(signature, cmccSignature(JSON.stringify(body), time, nonce));
+    assert.equal(headers.get("authorization"), authorization);
+    assert.equal(headers.get("hcy-cool-flag"), writing ? null : "1");
+    assert.equal(headers.get("x-yun-userDomainId"), writing ? "enabled" : null);
+    let data: JsonObject;
+    if (writing) {
+      writes++;
+      assert.deepEqual(body.getOutLinkReq.coIDLst, { item: ["file-1"] });
+      data = {
+        getOutLinkRes: {
+          getOutLinkResSet: [{ linkID: "own-link", passwd: "abcd" }],
+        },
+      };
+    } else if (url.pathname.endsWith("getOutLinkGeneral")) {
+      data = {
+        isPasswd: 1,
+        getOutLinkGeneralResp: {
+          outLinkGeneral: [
+            { linkID: "own-link", ownerUserId: account.uid, expireTime: "" },
+          ],
+        },
+      };
+    } else {
+      assert.equal(body.getOutLinkInfoReq.passwd, "abcd");
+      data = {
+        nodNum: 1,
+        caLst: null,
+        coLst: [
+          {
+            coID: "file-1",
+            coName: "资源说明.txt",
+            coSize: 6,
+            path: "root/file-1",
+          },
+        ],
+      };
+    }
+    const response = JSON.stringify({ success: true, code: "0", data });
+    return writing ? response : encodeCmccShare(response);
+  };
+  const own = await f.provider.createShare(
+    account,
+    [
+      {
+        id: "file-1",
+        name: "资源说明.txt",
+        isDirectory: false,
+        size: 6,
+        parentId: "target",
+      },
+    ],
+    "归档资料",
+  );
+  assert.equal(own.ownerUid, account.uid);
+  assert.equal(own.expiresAt, null);
+  assert.equal(writes, 1);
+});
 test("139 按官方名称注册，接口与登录域名不跨渠道", () => {
   assert.ok(providerIds.includes("cmcc"));
   assert.equal(providerDriveName("cmcc"), "移动云盘");

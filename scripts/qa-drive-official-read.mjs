@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createDecipheriv } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
 import { devConnection } from "./dev-session-client.mjs";
 
 /** Only attach to this task's newly opened account page. No existing-page inventory. */
@@ -124,7 +126,7 @@ export async function run({ page, checkpoint }) {
             return Object.fromEntries(
               Object.entries(value).map(([key, val]) => [
                 key,
-                /token|cookie|sign|secret|pass|phone|account|owner|url/i.test(
+                /token|cookie|sign|secret|pass|phone|account|owner|creator|url/i.test(
                   key,
                 )
                   ? "[redacted]"
@@ -325,13 +327,17 @@ export async function run({ page, checkpoint }) {
         },
         sessionId,
       );
-      console.log(
-        JSON.stringify({
-          shareRequests,
-          shareResponses,
-          visible: visible.result?.value,
-        }),
-      );
+      if (
+        process.env.PANXU_CMCC_INTAKE_TASK_READ !== "1" &&
+        process.env.PANXU_CMCC_INTAKE_HISTORY_READ !== "1"
+      )
+        console.log(
+          JSON.stringify({
+            shareRequests,
+            shareResponses,
+            visible: visible.result?.value,
+          }),
+        );
       if (process.env.PANXU_CMCC_TEST_PROVIDER_SOURCE === "1") {
         assert.ok(
           cmccHeaders?.authorization?.startsWith("Basic "),
@@ -389,6 +395,13 @@ export async function run({ page, checkpoint }) {
           .toString()
           .split(":")[1];
         const { CmccShares } = await import("../core/providers/cmcc-share.ts");
+        const historyRead = async (_account, _path, data) =>
+          providerClient.request(
+            account,
+            "https://yun.139.com/orchestration/personalCloud-rebuild",
+            "/outlink/v1.0/getOutLinkList",
+            data,
+          );
         const shareClient = new CmccShares(
           async () => ({ uid: account.uid, account: phone }),
           (account, path, data, write) =>
@@ -408,10 +421,149 @@ export async function run({ page, checkpoint }) {
               },
               "encrypted",
             ),
-          async () => {
-            throw Error("未授权的历史调用");
-          },
+          historyRead,
         );
+        if (process.env.PANXU_CMCC_INTAKE_HISTORY_READ === "1") {
+          const result = await historyRead(account, "", {
+            getOutLinkLstReq: {
+              needSetAccount: true,
+              srt: 1,
+              srtDr: 0,
+              bNum: 1,
+              eNum: 100,
+              qryType: 1,
+              commonAccountInfo: { account: phone, accountType: 1 },
+            },
+          });
+          await writeFile(
+            "/private/tmp/panxu-cmcc-own-share-history.json",
+            JSON.stringify(result),
+            { mode: 0o600 },
+          );
+          const shape = (value, depth = 0) => {
+            if (depth > 4) return "[nested]";
+            if (Array.isArray(value))
+              return {
+                length: value.length,
+                sample: value[0] ? shape(value[0], depth + 1) : null,
+              };
+            if (value && typeof value === "object")
+              return Object.fromEntries(
+                Object.entries(value).map(([k, v]) => [
+                  k,
+                  /count|num|total|invalid/i.test(k) && typeof v !== "object"
+                    ? v
+                    : shape(v, depth + 1),
+                ]),
+              );
+            return value == null ? null : typeof value;
+          };
+          console.log(
+            JSON.stringify({
+              phase: "own-share-history",
+              shape: shape(result),
+              scope: "authenticated history only; no new share",
+            }),
+          );
+          const ids = JSON.parse(
+            await readFile(
+              "/private/tmp/panxu-cmcc-intake-result.json",
+              "utf8",
+            ),
+          );
+          const resource = await page.evaluate(
+            (id) => window.panxu.invoke("resource.get", { id }),
+            ids.resourceId,
+          );
+          const copy = resource.copies.find((c) => c.id === ids.copyId);
+          const recovered = await shareClient.find(account, copy.files);
+          assert.ok(recovered, "本人分享的归属与文件未匹配");
+          assert.equal(recovered.ownerUid, account.uid);
+          await writeFile(
+            "/private/tmp/panxu-cmcc-recovered-share.json",
+            JSON.stringify(recovered),
+            { mode: 0o600 },
+          );
+          console.log(
+            JSON.stringify({
+              phase: "existing-share-verified",
+              title: resource.title,
+              fileCount: copy.files.length,
+              hasCode: !!recovered.code,
+              expiresAt: recovered.expiresAt,
+              scope:
+                "existing share found and ownership/manifest verified; no creation",
+            }),
+          );
+          return;
+        }
+        if (process.env.PANXU_CMCC_INTAKE_TASK_READ === "1") {
+          const ids = JSON.parse(
+            await readFile(
+              "/private/tmp/panxu-cmcc-intake-result.json",
+              "utf8",
+            ),
+          );
+          const dataPath = await page.evaluate(
+            async () => (await window.panxu.invoke("snapshot", {})).dataPath,
+          );
+          const db = new DatabaseSync(join(dataPath, "panxu.db"), {
+            readOnly: true,
+          });
+          let metadata;
+          try {
+            metadata = JSON.parse(
+              db
+                .prepare("SELECT metadata FROM jobs WHERE id=? AND copy_id=?")
+                .get(ids.jobId, ids.copyId).metadata,
+            );
+          } finally {
+            db.close();
+          }
+          assert.ok(metadata.taskId);
+          const result = await providerClient.request(
+            account,
+            "https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp",
+            "/IBatchOprTask/queryBatchOprTaskDetail",
+            {
+              queryBatchOprTaskDetailReq: {
+                taskID: metadata.taskId,
+                msisdn: phone,
+                commonAccountInfo: { account: phone, accountType: 1 },
+              },
+            },
+            false,
+            {
+              "hcy-cool-flag": "1",
+              "mcloud-client": "10702",
+              "mcloud-version": "7.13.3",
+              "x-yun-channel-source": "10213406",
+              "x-huawei-channelSrc": "10213406",
+              "x-yun-app-channel": "10213406",
+            },
+            "encrypted",
+          );
+          const task =
+            result.queryBatchOprTaskDetailRes?.batchOprTask ??
+            result.batchOprTask;
+          console.log(
+            JSON.stringify({
+              phase: "existing-transfer-task",
+              keys: Object.keys(result),
+              task: task
+                ? {
+                    taskStatus: task.taskStatus,
+                    taskResultCode: task.taskResultCode,
+                    resultCode: task.resultCode,
+                    progress: task.progress,
+                  }
+                : null,
+              sourcePoll: await shareClient.poll(account, metadata.taskId),
+              scope: "read existing task only; no transfer/share creation",
+            }),
+          );
+          return;
+        }
         const root = await shareClient.inspect(account, shareDraft.source);
         const child = root.files[0]?.isDirectory
           ? await shareClient.inspect(

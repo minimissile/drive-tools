@@ -138,11 +138,10 @@ export function createWechatHandlers({
     },
     "wechat.regenerateImages": (raw) =>
       wechat.regenerateImages(wechatRegenerateImagesInput.parse(raw)),
-    "wechat.generateThemeImages": (raw) =>
-      wechat.regenerateImages({
-        ...wechatThemeImagesInput.parse(raw),
-        mode: "theme",
-      }),
+    "wechat.generateThemeImages": (raw) => {
+      const { style, ...input } = wechatThemeImagesInput.parse(raw);
+      return wechat.regenerateImages({ ...input, mode: style ?? "theme" });
+    },
     "wechat.send": (raw) => {
       const i = version
         .extend({ accountId: identifier, confirmed: z.literal(true) })

@@ -2,12 +2,21 @@ import { z } from "zod";
 import type { HandlerMap, HandlerServices } from "./types";
 import { AppError } from "../errors";
 import { parseShare } from "../links";
-import { readSharePassphrase, saveSharePassphrase } from "../share-passphrases";
+import {
+  readSharePassphrase,
+  saveSharePassphrase,
+  saveReturnedSharePassphrase,
+} from "../share-passphrases";
 
 export function createShareCreationHandlers(
   services: Pick<
     HandlerServices,
-    "shareCreation" | "baiduDiscoveryQuestions" | "repo" | "secrets" | "changed"
+    | "shareCreation"
+    | "baiduDiscoveryQuestions"
+    | "repo"
+    | "secrets"
+    | "changed"
+    | "authenticated"
   >,
 ) {
   const copy = z.object({ copyId: z.string().min(1).max(100) });
@@ -58,6 +67,49 @@ export function createShareCreationHandlers(
   };
   return {
     "share.passphrase": async (input) => readFor(target.parse(input)),
+    "share.fetchPassphrase": async (input) => {
+      const value = target.parse(input),
+        scope = await scopeFor(value);
+      if (scope.provider !== "quark")
+        throw new AppError(
+          "UNSUPPORTED",
+          "此操作仅用于获取现有夸克分享的中文口令。",
+        );
+      return services.authenticated(
+        scope.accountId,
+        async (account, provider) => {
+          if (!provider.readSharePassphrase)
+            throw new AppError(
+              "QUARK_SIGN_UNAVAILABLE",
+              "当前客户端没有可用的夸克官方签名组件。",
+            );
+          const share = {
+            id: scope.shareId,
+            url: scope.url,
+            code: scope.code,
+            ownerUid: scope.ownerUid,
+          };
+          const passphrase = await provider.readSharePassphrase(account, share);
+          if (!sameScope(scope, await scopeFor(value)))
+            throw new AppError(
+              "SHARE_CHANGED",
+              "获取期间分享发生变化，请查看当前分享后重试。",
+            );
+          const saved = await saveReturnedSharePassphrase(
+            services.secrets,
+            scope,
+            { ...share, passphrase },
+          );
+          if (!sameScope(scope, await scopeFor(value)))
+            throw new AppError(
+              "SHARE_CHANGED",
+              "保存期间分享发生变化，请核对后重试。",
+            );
+          services.changed();
+          return saved!;
+        },
+      );
+    },
     "share.savePassphrase": async (input) => {
       const value = target
         .extend({ text: z.string().min(1).max(8000) })
@@ -81,10 +133,10 @@ export function createShareCreationHandlers(
     },
     "share.copyPassphrase": async (input) => {
       const value = await readFor(target.parse(input));
-      if (!value)
+      if (!value?.text)
         throw new AppError(
           "PASSPHRASE_NOT_SAVED",
-          "尚未获取当前分享的中文口令，请先保存 App 的完整官方分享内容。",
+          "尚未保存当前分享的中文口令。新建分享时会自动获取平台返回的口令。",
         );
       return { text: value.text };
     },

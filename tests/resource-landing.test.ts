@@ -106,10 +106,13 @@ function setup() {
   const ai = {
     assertTextConfigured() {},
     modelFor: () => "fixture/model",
-    resourceExport: async (name: string) => {
+    resourceExport: async (
+      name: string,
+      schema: { parse(value: unknown): unknown },
+    ) => {
       calls++;
       if (failAI) throw new AppError("AI_FAILED", "生成失败");
-      return name.endsWith("review")
+      const result = name.endsWith("review")
         ? rejectReview
           ? {
               ...review,
@@ -120,6 +123,7 @@ function setup() {
             }
           : review
         : article();
+      return schema.parse(result);
     },
   };
   const service = new ResourceLanding({
@@ -277,6 +281,25 @@ test("中断的生成不自动重试，显式新生成成功后不残留中断�
       )?.status,
       "failed",
     );
+  } finally {
+    f.db.close();
+  }
+});
+test("已有审核缺少分项时重新审核再发布", async () => {
+  const f = setup();
+  try {
+    const draft = await f.service.generate("resource-test", randomUUID(), "");
+    f.db.run(
+      `UPDATE resource_landing_pages
+       SET data=json_remove(data,'$.review.dimensions') WHERE resource_id=?`,
+      "resource-test",
+    );
+    const staleReview = await f.service.get("resource-test");
+    assert.equal(staleReview.quality?.eligible, false);
+    const published = await f.service.publish("resource-test", draft.draftVersion);
+    assert.ok(published.published?.document?.review.dimensions);
+    assert.equal(f.calls, 3);
+    assert.equal(f.writes.length, 1);
   } finally {
     f.db.close();
   }

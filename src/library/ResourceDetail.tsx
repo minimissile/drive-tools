@@ -238,6 +238,7 @@ export function ResourceDetail({
             <SharePassphrase
               key={`${copy.id}:${copy.shareVersion}`}
               target={{ copyId: copy.id }}
+              provider={resource.provider}
             />
           ) : null}
           <div className="resource-share-status" data-kind={share.kind}>

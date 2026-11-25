@@ -16,6 +16,7 @@ import { TrafficWordPriority } from "./TrafficWordPriority";
 const schema = z.object({
   text: z.string().max(12000),
   revision: z.number().int().nonnegative(),
+  edited: z.boolean().optional(),
 });
 export function TrafficWordsDialog({
   storageKey,
@@ -36,7 +37,11 @@ export function TrafficWordsDialog({
 }) {
   const draft = useLocalDraft(
     storageKey,
-    { text: saved.words.join("\n"), revision: saved.revision },
+    {
+      text: saved.words.join("\n"),
+      revision: saved.revision,
+      edited: false as boolean | undefined,
+    },
     (value) => schema.parse(value),
   );
   const [pending, setPending] = useState(false),
@@ -44,13 +49,20 @@ export function TrafficWordsDialog({
   const hintId = useId();
   const words = normalizeWechatTrafficWords(draft.value.text);
   const usage = wechatTrafficWordUsage(words, title, body);
-  const dirty = JSON.stringify(words) !== JSON.stringify(saved.words);
+  const matchesSaved = JSON.stringify(words) === JSON.stringify(saved.words);
+  const edited =
+    draft.value.edited ?? (draft.value.revision > 0 || words.length > 0);
+  const dirty = edited && !matchesSaved;
   const coverage = !dirty ? plan.deliveryCoverage : undefined;
   const conflict = draft.value.revision !== saved.revision && dirty;
   useEffect(() => {
-    if (!dirty && draft.value.revision !== saved.revision)
-      draft.update({ text: saved.words.join("\n"), revision: saved.revision });
-  }, [dirty, saved, draft.value.revision, draft.update]);
+    if (!dirty && (!matchesSaved || draft.value.revision !== saved.revision))
+      draft.update({
+        text: saved.words.join("\n"),
+        revision: saved.revision,
+        edited: false,
+      });
+  }, [dirty, matchesSaved, saved, draft.value.revision, draft.update]);
   const save = async () => {
     const parsed = wechatTrafficWordsInput.safeParse(
       draft.value.text.split(/\r\n?|\n/),
@@ -108,6 +120,7 @@ export function TrafficWordsDialog({
               draft.update({
                 text: saved.words.join("\n"),
                 revision: saved.revision,
+                edited: false,
               });
               setError("");
             }}
@@ -135,7 +148,7 @@ export function TrafficWordsDialog({
               })
             }
             onChange={(event) => {
-              draft.update({ text: event.target.value });
+              draft.update({ text: event.target.value, edited: true });
               setError("");
             }}
             placeholder={"例如：\n电子版\n学习资料\n资料整理"}

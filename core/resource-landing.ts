@@ -5,6 +5,7 @@ import {
   landingEditableDraftSchema,
   landingDescriptionSchema,
   landingCandidateSchema,
+  landingDimensionsSchema,
   landingReviewSchema,
   landingSourceSchema,
   landingQuality,
@@ -29,6 +30,7 @@ import { providerDriveName } from "../shared/providers";
 import {
   extractLandingDocument,
   landingDocumentLimit,
+  omitLandingResumeContactBlock,
   type LandingReading,
 } from "./landing-document";
 import type { AppPorts } from "./ports";
@@ -95,6 +97,12 @@ const cleanEditableDraft = (draft: LandingDraft): LandingDraft => ({
     answer: clean(faq.answer, 12000),
   })),
 });
+const publicReadingText = (
+  name: string,
+  page: number,
+  text: string,
+  max: number,
+) => clean(page === 1 ? omitLandingResumeContactBlock(name, text) : text, max);
 const remoteSchema = z.object({
   linkId: z.string(),
   version: z.number().int().min(1),
@@ -113,7 +121,7 @@ sections按材料自然组织，通常2–4节。facts为对真实资源的分�
 const reviewInstruction = `你是独立、严格的资源落地页编辑。对照source和reading逐句检查article。不要因为语句流畅、篇幅长或结构齐全而给高分。
 必须执行反事实检查：把资源标题替换为另一份同类资料，如果大半正文仍成立，specificity最多8/20并判revise。只有文件名、录入宣传说明，或主要内容为泛化建议/阅读方法，一律revise；引用了页码但论述与该页无关同样失败。
 检查标题和摘要是否概括实际内容、正文是否回答包含什么/适合何种需求/有什么局限，是否提供目录导航、具体内容对比、可定位主题等超出下载链接的价值。避免整篇复述原文，必须有独立的取舍和解释。不要为了去AI味添加假经历、错误、口语或无关修辞。
-评分dimensions五项：evidence 0–25（正文事实与页码一致、准确、不把抽样当全文）；intent 0–25（读者能判断是否需要并找到具体内容）；specificity 0–20（这份资源特有的信息和编辑分析，非套壳）；readability 0–15（自然简洁、无重复和机械结构）；trust 0–15（来源范围诚实、观点归因、无伪造身份/效果/授权）。score必须是五项之和。>=82且每项>=其满分70%、无unsupportedClaims才可以pass。8分以上意味着细节充分可用，不能只因有正文便打高分。
+必须返回dimensions，其中包含五项整数分值：evidence 0–25（正文事实与页码一致、准确、不把抽样当全文）；intent 0–25（读者能判断是否需要并找到具体内容）；specificity 0–20（这份资源特有的信息和编辑分析，非套壳）；readability 0–15（自然简洁、无重复和机械结构）；trust 0–15（来源范围诚实、观点归因、无伪造身份/效果/授权）。总分由程序计算。五项总分>=82且每项>=其满分70%、无unsupportedClaims才可以pass。8分以上意味着细节充分可用，不能只因有正文便打高分。
 所有事实块必须引用实际支持该句的evidenceIds；没有证据的内容列入unsupportedClaims。reason要指出具体问题与可操作修改，不能只写通过。若原始资料不足以达到82分，明确revise并指出需补充的资料，不能靠改写抬分。`;
 const groundingInstruction = `\n事实边界：仅根据已提供正文，不补造未读取章节、页数、版本、作者、版权或测试结果。PDF物理页数来自解析器，不从MB推断内容量。DOCX/TXT/Markdown的文本片段编号不是页码；DOCX文字提取不证明实际排版、页数、字体、图片或编辑效果。标题/摘要/要点/FAQ与facts同样受约束。引文不可混入正文占位符，引用单独放evidenceIds。`;
 const editorialInstruction = `\n质量优先于长度。事实不足时生成简短诚实草稿并等待补充，不能用通用攻略替代资源内容。不要宣称SEO/GEO评分或保证收录。`;
@@ -143,6 +151,10 @@ export class ResourceLanding {
         fileId: string,
         maxBytes: number,
       ): Promise<Uint8Array>;
+      readFolderContent?(
+        copyId: string,
+        folderId: string,
+      ): Promise<LandingReading>;
       readLocal?: AppPorts["readLandingDocument"];
     },
   ) {}
@@ -242,18 +254,30 @@ export class ResourceLanding {
     const readings = (this.record(resourceId).readings ?? []).filter(
       (r) =>
         r.copyId === copy?.id &&
-        copy.files.some(
-          (f) =>
+        copy.files.slice(0, 80).some((f) => {
+          if (r.rootFolder)
+            return (
+              f.isDirectory &&
+              f.id === r.rootFolder.id &&
+              f.name === r.rootFolder.name &&
+              !!copy.verifiedAt
+            );
+          return (
+            !f.isDirectory &&
             f.id === r.fileId &&
             f.name === r.name &&
-            (f.size == null || f.size === r.bytes),
-        ),
+            (f.size == null || f.size === r.bytes)
+          );
+        }),
     );
     const documents = readings.map((r, i) => {
-      const fileIndex = copy!.files.findIndex((f) => f.id === r.fileId);
+      const fileIndex = copy!.files.findIndex(
+        (f) => f.id === (r.rootFolder?.id ?? r.fileId),
+      );
+      const name = clean(r.name, 300);
       facts.push({
         id: `doc-${i + 1}`,
-        label: `${r.name} · 读取范围`,
+        label: `${name.slice(0, 80)} · 读取范围`,
         text: /\.pdf$/i.test(r.name)
           ? `PDF/文本物理页数：${r.pageCount}；已提取第${r.pages.map((p) => p.page).join("、")}页${r.sampled ? "，抽样或部分文字，不能视为通读全文" : "文字"}。`
           : `已提取文本${r.sampled ? "的部分文字，不能视为全文" : "全文"}；引用按文本片段定位，不表示物理页码。`,
@@ -261,17 +285,19 @@ export class ResourceLanding {
       for (const p of r.pages)
         facts.push({
           id: `doc-${i + 1}-p${p.page}`,
-          label: /\.pdf$/i.test(r.name)
-            ? `${r.name} · 第${p.page}页`
-            : `${r.name} · 文本片段${p.page}`,
-          text: clean(
+          label: /\.pdf$/i.test(name)
+            ? `${name.slice(0, 80)} · 第${p.page}页`
+            : `${name.slice(0, 80)} · 文本片段${p.page}`,
+          text: publicReadingText(
+            r.name,
+            p.page,
             p.text.replace(/^[^\n]{0,180}保留所有权利[^\n]*\n/, ""),
             80,
-          ),
+          ) || "此段暂无可公开摘要。",
         });
       return {
         fileEvidenceId: `file-${fileIndex + 1}`,
-        name: r.name,
+        name,
         sha256: r.sha256,
         pageCount: r.pageCount,
         pages: r.pages.map((p) => p.page),
@@ -349,7 +375,10 @@ export class ResourceLanding {
       .map((term) => clean(term, 100))
       .filter((term) => term && !term.includes("[联系方式已省略]") && !term.includes("[联系信息已省略]"))
       .slice(0, 30);
-    return { source, context, targetIssue, readings, searchKeywords };
+    const canReadFolder =
+      !!this.d.readFolderContent &&
+      (resource.provider === "quark" || resource.provider === "uc");
+    return { source, context, targetIssue, readings, searchKeywords, canReadFolder };
   }
   async readDocument(resourceId: string, evidenceId: string, local = false) {
     return this.exclusive(resourceId, async () => {
@@ -366,11 +395,26 @@ export class ResourceLanding {
             hasVerifiedShare(c, this.d.repo.getAccount(c.accountId)),
         ) ?? resource.copies.find((c) => c.verifiedAt && c.files.length);
       const file = copy?.files[index];
-      if (!copy || !file || file.isDirectory || !source.files[index])
+      if (!copy || !file || !source.files[index])
         throw new AppError(
           "DOCUMENT_REQUIRED",
           "请选择当前资源中的 PDF、DOCX 或文本文件。",
         );
+      if (file.isDirectory) {
+        if (local || !this.d.readFolderContent)
+          throw new AppError(
+            "DOCUMENT_REQUIRED",
+            "请选择网盘文件夹读取其中的正文。",
+          );
+        const reading = await this.d.readFolderContent(copy.id, file.id);
+        if (this.d.repo.getResource(resourceId).revision !== resource.revision)
+          throw new AppError(
+            "LANDING_SOURCE_CHANGED",
+            "读取期间资源已变化，请重新读取。",
+          );
+        this.store(resourceId, { ...original, readings: [reading] });
+        return this.get(resourceId);
+      }
       if (!isLandingDocument(file.name))
         throw new AppError(
           "DOCUMENT_FORMAT",
@@ -420,7 +464,7 @@ export class ResourceLanding {
   }
   async get(resourceId: string): Promise<LandingContext> {
     const record = this.record(resourceId),
-      { source, context, targetIssue } = await this.source(
+      { source, context, targetIssue, canReadFolder } = await this.source(
         resourceId,
         record.notes,
       );
@@ -448,6 +492,7 @@ export class ResourceLanding {
         !!record.source && record.source.fingerprint !== source.fingerprint,
       published: record.published,
       pageUrl: context.link?.url ?? null,
+      canReadFolder,
       canPublish: !targetIssue && !record.pending,
       targetIssue,
       pending: !!record.pending,
@@ -580,7 +625,7 @@ export class ResourceLanding {
               sampled,
               pages: pages.map((p) => ({
                 page: p.page,
-                text: clean(p.text, 60000),
+                text: publicReadingText(name, p.page, p.text, 60000),
               })),
             })),
             ...(optimization
@@ -625,7 +670,7 @@ export class ResourceLanding {
                 sampled,
                 pages: pages.map((p) => ({
                   page: p.page,
-                  text: clean(p.text, 60000),
+                  text: publicReadingText(name, p.page, p.text, 60000),
                 })),
               })),
               previous: draft,
@@ -713,11 +758,14 @@ export class ResourceLanding {
   ) {
     const result = await this.d.ai.resourceExport(
       "resource_landing_review",
-      landingReviewSchema.omit({ policyVersion: true }),
+      landingReviewSchema
+        .omit({ policyVersion: true, score: true })
+        .extend({ dimensions: landingDimensionsSchema }),
       reviewInstruction +
         groundingInstruction +
         searchCopyInstruction +
         landingSearchReviewInstruction +
+        "\n标题、description、summary和highlights须有正文依据，这几个字段的结构没有evidenceIds。仅正文段落和FAQ使用evidenceIds，不能仅因其他字段未附该属性而拒绝。" +
         "\n审核intent与readability时检查：标题是否自然包含资源主词和适用的格式/获取意图，摘要是否用实际主题与具体场景提供点击理由；纯情绪钩子但资源身份不清、无关热词、同义词堆砌或与正文不一致，均应修订。不得仅因缺少某个示例词或没有固定词数而拒绝。" +
         "\n必须逐项检查上述边界；出现任何一个越界句子，即使其余内容有用也判revise。",
       {
@@ -730,7 +778,7 @@ export class ResourceLanding {
           sampled,
           pages: pages.map((p) => ({
             page: p.page,
-            text: clean(p.text, 60000),
+            text: publicReadingText(name, p.page, p.text, 60000),
           })),
         })),
       },
@@ -745,9 +793,7 @@ export class ResourceLanding {
     return {
       ...result,
       policyVersion: landingSearchPolicyVersion,
-      score: result.dimensions
-        ? Object.values(result.dimensions).reduce((a, b) => a + b, 0)
-        : 0,
+      score: Object.values(result.dimensions).reduce((a, b) => a + b, 0),
     };
   }
   async saveDraft(
@@ -817,7 +863,11 @@ export class ResourceLanding {
           "资源资料已变化，请依据最新资料重新生成，避免发布过时说明。",
         );
       const draft = record.draft;
-      if (record.reviewHash !== hash(record.draft) || record.review?.policyVersion !== landingSearchPolicyVersion) {
+      if (
+        record.reviewHash !== hash(record.draft) ||
+        record.review?.policyVersion !== landingSearchPolicyVersion ||
+        !record.review.dimensions
+      ) {
         const review = await this.review(
           record.draft, source, readings, searchKeywords,
         );

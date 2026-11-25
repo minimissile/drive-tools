@@ -51,7 +51,11 @@ import { ArticleSourcePreview } from "./ArticleSourcePreview";
 import { ArticleRewriteDialog } from "./ArticleRewriteDialog";
 import { TrafficWordsDialog } from "./TrafficWordsDialog";
 import { stageLabel } from "./labels";
-import { linkifyWechatMarkdown } from "../../shared/wechat-markup";
+import {
+  linkifyWechatMarkdown,
+  wechatArticleShareUrl,
+} from "../../shared/wechat-markup";
+import { wechatUnifiedCover } from "../../shared/wechat-image-styles";
 import { ArticleEditionsDialog } from "./ArticleEditionsDialog";
 import { ArticleEditionSwitcher } from "./ArticleEditionSwitcher";
 import { ArticleTitlesDialog } from "./ArticleTitlesDialog";
@@ -795,6 +799,11 @@ export function ArticleEditor({
               onBusy={setResourceBusy}
               beforeAction={saved}
               onChanged={apply}
+              onOpenLink={(link) =>
+                ipc("system.external", {
+                  url: wechatArticleShareUrl(article.body, link),
+                })
+              }
             />
           </TabPanel>
           <TabPanel value="images" keepMounted>
@@ -805,7 +814,31 @@ export function ArticleEditor({
               coverAddress={draft.value.coverAddress}
               imageAddress={draft.value.imageAddress}
               disabled={busy || !editable || conflict}
-              onRegenerate={async ({ targets, mode, style, description }) => {
+              coverModelSelection={!!detail.coverModelSelection}
+              coverStyleReferences={!!detail.coverStyleReferences}
+              onRegenerate={async ({
+                targets,
+                mode,
+                style,
+                coverVariant,
+                description,
+                model,
+              }) => {
+                if (
+                  mode === wechatUnifiedCover.id &&
+                  !detail.coverStyleReferences
+                )
+                  throw new Error(
+                    "请先点击顶部「应用更新并重启」，再使用新封面风格。",
+                  );
+                if (
+                  mode === wechatUnifiedCover.id &&
+                  model &&
+                  !detail.coverModelSelection
+                )
+                  throw new Error(
+                    "请先点击顶部「应用更新并重启」，再换模型生成封面。",
+                  );
                 const current = await saved();
                 const input = {
                   id: article.id,
@@ -814,15 +847,29 @@ export function ArticleEditor({
                   confirmed: true as const,
                 };
                 const result =
-                  mode === "theme"
-                    ? await ipc("wechat.generateThemeImages", {
+                  mode === "reference"
+                    ? await ipc("wechat.regenerateImages", { ...input, style })
+                    : await ipc("wechat.generateThemeImages", {
                         ...input,
                         description,
-                      })
-                    : await ipc("wechat.regenerateImages", { ...input, style });
+                        style: mode === "theme" ? undefined : mode,
+                        ...(mode === wechatUnifiedCover.id
+                          ? { coverVariant, model }
+                          : {}),
+                      });
                 apply(result.detail);
-                if (alive.current && result.replaced && !result.failed.length)
-                  notify(`已替换 ${result.replaced} 处配图。`, "success");
+                if (alive.current && result.replaced && !result.failed.length) {
+                  const coverOnly =
+                    targets.length === 1 && targets[0].position === "cover";
+                  notify(
+                    coverOnly
+                      ? targets[0].url
+                        ? "已更换封面。"
+                        : "已生成封面。"
+                      : `已替换 ${result.replaced} 处配图。`,
+                    "success",
+                  );
+                }
                 return result;
               }}
               onBody={(body) => update({ body })}

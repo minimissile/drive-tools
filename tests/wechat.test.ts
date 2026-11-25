@@ -143,6 +143,10 @@ async function fixture(
       bytes: Buffer;
     } | null,
     clipboardImage: null as { name: string; bytes: Buffer } | null,
+    cropImageToSize: (
+      bytes: Buffer,
+      _size: { width: number; height: number },
+    ) => bytes,
   };
   const ports: AppPorts = {
     login: async () => {},
@@ -152,6 +156,7 @@ async function fixture(
     readText: async () => null,
     activateDataPath: async () => {},
     normalizeCover: async (bytes) => bytes,
+    cropImageToSize: (bytes, size) => control.cropImageToSize(bytes, size),
     openPath: async () => {},
     openAccountPage: async () => {},
     openExternal: async () => {},
@@ -2022,6 +2027,120 @@ test("公众号流量词：按草稿保存、冲突保护、独立版本且不�
   }
 });
 
+test("公众号流量词：已有稿件读取同源资源默认词，标题和改写使用同一词表", async () => {
+  const f = await fixture();
+  try {
+    const imported = await f.imported();
+    const { id, revision, body } = imported.article;
+    assert.deepEqual(imported.article.trafficWords?.words ?? [], []);
+    const key = `wechat:article:v1:${id}`;
+    const stored = f.app.db.setting<WechatArticle | null>(key, null);
+    const words = ["阅读资料", "适用条件"];
+    const matching = await f.app.saveResource({
+      sourceText: sourceShare,
+      title: "同源资料",
+      category: resourceCategory,
+      tags: ["资源标签"],
+      searchKeywords: [" 阅读资料 ", "阅读资料", "适用条件", "词".repeat(81)],
+      summary: "资料介绍",
+      accountId: f.account.id,
+      directory: "",
+      enqueue: false,
+    });
+    const initial = await f.invoke("wechat.get", { id });
+    assert.deepEqual(initial.article.trafficWords, { words, revision: 0 });
+    assert.deepEqual(initial.trafficWordPlan?.priorityWords, words);
+    assert.equal(initial.article.links[0].copyId, null);
+    assert.equal(initial.article.revision, revision);
+    assert.equal(initial.article.body, body);
+    assert.deepEqual(f.app.db.setting(key, null), stored);
+    const bound = await f.invoke("wechat.bindResource", {
+      id,
+      linkId: initial.article.links[0].id,
+      copyId: matching.copyId,
+    });
+    assert.deepEqual(bound.article.trafficWords, { words, revision: 0 });
+
+    await f.invoke("wechat.generateTitles", {
+      id,
+      revision: bound.article.revision,
+    });
+    assert.deepEqual(f.control.titleCalls.at(-1)?.input.trafficWords, words);
+    f.control.aiReply = (input) => ({
+      title: "阅读资料前先核对适用条件",
+      sections: rewrittenSections(input),
+      digest: "资料阅读说明。",
+    });
+    const rewritten = await f.invoke("wechat.rewrite", { id });
+    assert.deepEqual(f.control.aiCalls.at(-1)?.input.trafficWords, words);
+    assert.deepEqual(rewritten.article.trafficWords, { words, revision: 0 });
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("公众号流量词：本人分享查回资源关键词，手动清空后保留选择", async () => {
+  const f = await fixture();
+  try {
+    const imported = await f.imported();
+    const ownUrl = "https://pan.quark.cn/s/keyword-copy456";
+    const resource = {
+      sourceText: sourceShare,
+      title: "已入库的资料",
+      category: resourceCategory,
+      tags: [],
+      searchKeywords: ["资料整理"],
+      summary: "资料介绍",
+      accountId: f.account.id,
+      directory: "",
+      enqueue: false,
+    };
+    const saved = await f.app.saveResource(resource);
+    f.app.db.run(
+      "UPDATE copies SET share_url=? WHERE id=?",
+      ownUrl,
+      saved.copyId,
+    );
+    const rewrittenLink = await f.save(imported, {
+      body: imported.article.body.replace(sourceShare, ownUrl),
+    });
+    const { id, revision } = rewrittenLink.article;
+    assert.deepEqual(rewrittenLink.article.trafficWords, {
+      words: ["资料整理"],
+      revision: 0,
+    });
+    const cleared = await f.invoke("wechat.saveTrafficWords", {
+      id,
+      wordsRevision: 0,
+      words: [],
+    });
+    assert.deepEqual(cleared.article.trafficWords, { words: [], revision: 1 });
+    assert.equal(cleared.article.revision, revision);
+    await f.app.saveResource({
+      ...resource,
+      id: saved.resourceId,
+      copyId: saved.copyId,
+      searchKeywords: ["新查到的资源词"],
+    });
+    assert.deepEqual(
+      (await f.invoke("wechat.get", { id })).article.trafficWords,
+      { words: [], revision: 1 },
+    );
+    const manual = await f.invoke("wechat.saveTrafficWords", {
+      id,
+      wordsRevision: 1,
+      words: ["手工编辑词"],
+    });
+    assert.deepEqual(manual.article.trafficWords, {
+      words: ["手工编辑词"],
+      revision: 2,
+    });
+    assert.equal(manual.article.revision, revision);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("公众号流量词：使用保存词表统一改写标题正文摘要，词表不进入系统指令", async () => {
   const f = await fixture();
   try {
@@ -3698,6 +3817,219 @@ test("公众号吸睛增强：单张与批量均传入参考图，未知风格�
     assert.equal(batch.replaced, 2);
     assert.deepEqual(batch.failed, []);
     assert.deepEqual(batch.detail.article.source, current.article.source);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("公众号统一风格：旧封面与空封面均按头条尺寸生成，裁切失败保留原稿", async () => {
+  const f = await fixture();
+  try {
+    const current = await f.imported();
+    assert.equal(current.unifiedCoverSupport, true);
+    assert.equal(current.coverVariantSelection, true);
+    assert.equal(current.coverStyleReferences, true);
+    const prompts: string[] = [];
+    const references = new Set<string>();
+    const size = { width: 900, height: 383 };
+    f.app.studio.generateThemeImage = async (
+      prompt,
+      dimensions,
+      model,
+      reference,
+    ) => {
+      assert.deepEqual(dimensions, size);
+      assert.equal(model, "bytedance-seed/seedream-5-0-flash");
+      assert.equal(reference?.subarray(0, 3).toString("hex"), "ffd8ff");
+      references.add(createHash("sha256").update(reference!).digest("hex"));
+      assert.match(prompt, /固定左文右图/);
+      assert.match(prompt, /封面短标题/);
+      assert.match(prompt, /1:1 方形缩略图/);
+      assert.match(prompt, /所有文字都必须依据文章标题/);
+      assert.match(prompt, /右侧不出现文字、日期、菜单、软件窗口/);
+      prompts.push(prompt);
+      return png;
+    };
+    let crops = 0;
+    f.control.cropImageToSize = (bytes, dimensions) => {
+      assert.deepEqual(bytes, png);
+      assert.deepEqual(dimensions, size);
+      crops++;
+      if (crops === 1) throw new AppError("INVALID_COVER", "测试裁切失败");
+      return bytes;
+    };
+    const input = {
+      id: current.article.id,
+      revision: current.article.revision,
+      targets: [{ position: "cover" as const, url: current.article.coverUrl }],
+      confirmed: true as const,
+      style: "unified-cover" as const,
+    };
+    await assert.rejects(
+      f.invoke("wechat.generateThemeImages", {
+        ...input,
+        targets: [{ position: 0, url: sourceImage }],
+      }),
+    );
+    await assert.rejects(
+      f.invoke("wechat.generateThemeImages", {
+        ...input,
+        targets: [{ position: "cover", url: "" }],
+      }),
+      { code: "WECHAT_IMAGE_CHANGED" },
+    );
+    await assert.rejects(
+      f.app.invoke("wechat.generateThemeImages", {
+        ...input,
+        coverVariant: "unknown",
+      }),
+    );
+    await assert.rejects(
+      f.invoke("wechat.generateThemeImages", {
+        ...input,
+        style: undefined,
+        coverVariant: "lemon-pop",
+      }),
+    );
+    assert.equal(prompts.length, 0);
+    const failed = await f.invoke("wechat.generateThemeImages", input);
+    assert.equal(failed.failed[0]?.code, "INVALID_COVER");
+    assert.deepEqual(failed.detail.article, current.article);
+    const replaced = await f.invoke("wechat.generateThemeImages", {
+      ...input,
+      coverVariant: "cream-stationery",
+    });
+    assert.equal(replaced.replaced, 1);
+    assert.match(replaced.detail.article.coverUrl, /^panxu-media:/);
+    assert.equal(replaced.detail.article.body, current.article.body);
+
+    const empty = await f.save(replaced.detail, {
+      title: "古籍影印资料",
+      coverUrl: "",
+    });
+    const created = await f.invoke("wechat.generateThemeImages", {
+      ...input,
+      revision: empty.article.revision,
+      targets: [{ position: "cover", url: "" }],
+      description: "古籍和一方砚台",
+      coverVariant: "lemon-pop",
+    });
+    assert.equal(created.replaced, 1);
+    assert.match(created.detail.article.coverUrl, /^panxu-media:/);
+    assert.equal(created.detail.article.body, empty.article.body);
+    assert.match(prompts[0], /公众号来源文章/);
+    assert.match(prompts[0], /晴空蓝.*#2EBDEF/);
+    assert.match(prompts[1], /奶油手账.*#FFF7E3/);
+    assert.match(prompts[2], /亮黄波普.*#FFDA19/);
+    assert.match(prompts[2], /古籍影印资料/);
+    assert.match(prompts[2], /古籍和一方砚台/);
+    assert.equal(f.control.remoteImageReads, 0);
+    assert.equal(references.size, 3);
+    assert.equal(crops, 3);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("统一封面可临时指定已缓存的图片模型，失败返回模型且不自动重发", async () => {
+  const f = await fixture();
+  try {
+    const draft = await f.imported();
+    assert.equal(draft.coverModelSelection, true);
+    await f.app.secrets.set("openrouter", "fixture-only");
+    f.app.db.setSetting("dailyAiBudgetMicros", 20_000_000);
+    f.app.db.setSetting("aiModels", { image: "qa/default" });
+    const seedream = "bytedance-seed/seedream-5-0-flash";
+    f.app.db.setSetting("studio:modelCatalog", [
+      { id: "qa/default", kind: "image", ratios: ["16:9"] },
+      { id: seedream, kind: "image", ratios: ["21:9"], reference: true },
+      { id: "qa/alternate", kind: "image", ratios: ["16:9", "21:9"] },
+      { id: "qa/video", kind: "video", ratios: ["16:9"] },
+    ]);
+    const requests: Record<string, unknown>[] = [];
+    Object.assign(f.app.studio, {
+      normalize: async () => png,
+      request: async (url: string, init: RequestInit) => {
+        assert.equal(url, "https://openrouter.ai/api/v1/images");
+        assert.equal(init.method, "POST");
+        const request = JSON.parse(String(init.body));
+        requests.push(request);
+        if (request.model === seedream) {
+          throw new ServiceHttpError(
+            403,
+            "Permission denied",
+            "MEDIA_REJECTED",
+          );
+        }
+        return {
+          data: [{ b64_json: png.toString("base64") }],
+          usage: { cost: 0.02 },
+        };
+      },
+    });
+    const input = {
+      id: draft.article.id,
+      revision: draft.article.revision,
+      targets: [{ position: "cover" as const, url: draft.article.coverUrl }],
+      confirmed: true as const,
+    };
+    await assert.rejects(
+      f.invoke("wechat.generateThemeImages", {
+        ...input,
+        model: "qa/alternate",
+      }),
+    );
+    const cover = { ...input, style: "unified-cover" as const };
+    for (const model of ["qa/missing", "qa/video"]) {
+      const result = await f.invoke("wechat.generateThemeImages", {
+        ...cover,
+        model,
+      });
+      assert.equal(result.failed[0]?.code, "MEDIA_MODEL_REQUIRED");
+      assert.equal(result.failed[0]?.model, model);
+      assert.equal(result.replaced, 0);
+    }
+    assert.equal(requests.length, 0);
+    const ledger = () =>
+      f.app.db
+        .all<{ status: string; confirmed_micros: number | null }>(
+          "SELECT status,confirmed_micros FROM api_calls WHERE phase='wechat_image' ORDER BY rowid",
+        )
+        .map((item) => ({ ...item }));
+    assert.deepEqual(ledger(), []);
+
+    const rejected = await f.invoke("wechat.generateThemeImages", cover);
+    assert.equal(rejected.failed[0]?.model, seedream);
+    assert.equal(rejected.failed[0]?.code, "MEDIA_ACCESS_DENIED");
+    assert.deepEqual(rejected.detail.article, draft.article);
+    assert.equal(requests.length, 1);
+
+    const generated = await f.invoke("wechat.generateThemeImages", {
+      ...cover,
+      model: "qa/alternate",
+    });
+    assert.equal(generated.replaced, 1);
+    assert.match(generated.detail.article.coverUrl, /^panxu-media:/);
+    assert.equal(generated.detail.article.body, draft.article.body);
+    assert.deepEqual(
+      requests.map(({ model, aspect_ratio }) => [model, aspect_ratio]),
+      [
+        [seedream, "21:9"],
+        ["qa/alternate", "21:9"],
+      ],
+    );
+    assert.deepEqual(requests[0].input_references, [
+      {
+        type: "image_url",
+        image_url: { url: `data:image/png;base64,${png.toString("base64")}` },
+      },
+    ]);
+    assert.ok(!("input_references" in requests[1]));
+    assert.deepEqual(ledger(), [
+      { status: "failed", confirmed_micros: null },
+      { status: "success", confirmed_micros: 20_000 },
+    ]);
+    assert.equal(f.app.ai.modelFor("image"), "qa/default");
   } finally {
     await f.cleanup();
   }

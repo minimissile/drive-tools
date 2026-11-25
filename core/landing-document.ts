@@ -12,8 +12,22 @@ export interface LandingReading {
   pages: { page: number; text: string }[];
   sampled: boolean;
   readAt: string;
+  rootFolder?: { id: string; name: string };
 }
 export const landingDocumentLimit = 20 * 1024 * 1024;
+/** Resume examples often begin with a name and partial contact details. */
+export function omitLandingResumeContactBlock(name: string, text: string) {
+  if (!/简历|\bresume\b/i.test(name)) return text;
+  const heading =
+    /(?:^|\n)[ \t]*(?:个人介绍|个人简介|求职意向|教育背景|教育经历|工作经历|profile|education|experience)(?=[\s:：]|$)/im.exec(
+      text,
+    );
+  if (!heading || heading.index > 400) return text;
+  const preface = text.slice(0, heading.index);
+  return /简历|姓名|联系|\b1[3-9]\d[xX＊*]+|@/u.test(preface)
+    ? text.slice(heading.index).trimStart()
+    : text;
+}
 export function documentPages(count: number) {
   if (count <= 48) return Array.from({ length: count }, (_, i) => i + 1);
   // Front matter / contents, an evenly spaced body sample, and the ending.

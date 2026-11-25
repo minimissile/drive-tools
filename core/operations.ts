@@ -1,6 +1,10 @@
 import { id, now, parseJson } from "./database";
 import { AppError, safeMessage } from "./errors";
 import { parseShare } from "./links";
+import {
+  readSharePassphrase,
+  saveReturnedSharePassphrase,
+} from "./share-passphrases";
 import { Repository, type Row } from "./repository";
 import { SecretStore } from "./secrets";
 import { NoteExporter } from "./notes";
@@ -906,8 +910,28 @@ export class Operations {
       Number(item.shareId !== share.id || item.shareUrl !== parsed.url),
       item.id,
     );
+    await saveReturnedSharePassphrase(
+      this.secrets,
+      this.splitPassphraseScope(item, account, share),
+      share,
+    );
     this.notes.enqueue(item.copyId);
     this.changed();
+  }
+  private splitPassphraseScope(
+    item: SplitItem,
+    account: Account,
+    share: OwnShare,
+  ) {
+    return {
+      key: `share-passphrase:split:${item.id}`,
+      provider: account.provider,
+      accountId: account.id,
+      ownerUid: share.ownerUid,
+      shareId: share.id,
+      url: parseShare(share.url).url,
+      code: share.code,
+    };
   }
   private async shareSplit(job: Job) {
     const item = this.splitItem(job.targetId!);
@@ -938,6 +962,13 @@ export class Operations {
       this.step(job.id, "sharing", "share_requested");
       share = await provider.createShare(account, [item.file], item.file.name);
     }
+    if (!share.passphrase)
+      share.passphrase = (
+        await readSharePassphrase(
+          this.secrets,
+          this.splitPassphraseScope(item, account, share),
+        )
+      )?.text;
     await this.storeSplit(item, account, provider, share);
     if (this.splitItem(item.id).archiveRequested) {
       this.step(job.id, "archiving", "share_verified");
