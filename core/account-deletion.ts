@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { now } from "./database";
 import { AppError } from "./errors";
 import { pendingAccountAliasKey } from "./account-alias";
+import { driveSyncAutoRegisterKey } from "./drive-sync-resource";
 import type { Repository } from "./repository";
 import type { ResourceDeletion } from "./resource-deletion";
 import type {
@@ -174,6 +175,10 @@ export class AccountDeletion {
             "DELETE FROM drive_share_intents WHERE account_id=?",
             accountId,
           );
+          this.db.run(
+            "DELETE FROM runtime_logs WHERE domain='drive-sync' AND account_id=?",
+            accountId,
+          );
           for (const row of this.db.all<{ key: string }>(
             "SELECT key FROM settings WHERE key LIKE 'share-creation:%' AND json_valid(value) AND json_extract(value,'$.accountId')=?",
             accountId,
@@ -207,11 +212,12 @@ export class AccountDeletion {
             `drive-auth:${provider}:${accountId}`,
           );
           this.db.run(
-            "DELETE FROM settings WHERE key IN (?,?,?,?)",
+            "DELETE FROM settings WHERE key IN (?,?,?,?,?)",
             `account:capacity:${accountId}`,
             `account:membership:${accountId}`,
             `intake:directories:${accountId}`,
             pendingAccountAliasKey(accountId),
+            driveSyncAutoRegisterKey(accountId),
           );
           this.db.run("DELETE FROM browser_environment_accounts WHERE kind='drive' AND account_id=?", accountId);
           this.db.run("DELETE FROM settings WHERE key=?", `drive-browser:${accountId}`);

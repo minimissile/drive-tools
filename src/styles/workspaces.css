@@ -102,11 +102,6 @@ textarea.tall {
   font-size: 12px;
   font-weight: 500;
 }
-.cover-drop img {
-  max-height: 220px;
-  max-width: 100%;
-  object-fit: contain;
-}
 .folder-breadcrumb {
   margin-bottom: 12px;
   color: var(--muted);

@@ -680,13 +680,14 @@ export function PublishingWorkflow({
                 {activeRecord.contentFirst &&
                 !activeRecord.generation.topics ? (
                   activeRecord.generation.status === "running" ? (
-                    "正在归并相关关键词，整理最多20条问答。"
+                    activeRecord.generation.message ||
+                    "正在按不同需求整理最多20条问答。"
                   ) : (
                     "关键词归并未完成，请核对错误后继续。"
                   )
                 ) : (
                   <>
-                    AI 标题与简介 · 已完成{" "}
+                    AI 标题与回答 · 已完成{" "}
                     {activeRecord.generation.drafts.length} /{" "}
                     {activeRecord.generation.targets.length}{" "}
                     条。已完成批次与原有问答保留。
@@ -701,7 +702,8 @@ export function PublishingWorkflow({
                     activeRecord.generation.drafts.length ===
                       activeRecord.generation.targets.length
                       ? "正在检查问答意图与相似内容…"
-                      : "正在使用 AI 生成标题与简介…"
+                      : activeRecord.generation.message ||
+                        "正在使用 AI 生成标题与回答…"
                   }
                 />
               ) : (
@@ -747,7 +749,7 @@ export function PublishingWorkflow({
                               .finally(records.reload)
                           }
                         >
-                          {activeRecord.generation.planVersion === 2 &&
+                          {activeRecord.generation.planVersion &&
                           activeRecord.generation.drafts.length ===
                             activeRecord.generation.targets.length
                             ? "重新检查问答"
@@ -773,13 +775,18 @@ export function PublishingWorkflow({
               upgrading={action.pending === "zhidao.workflow.generate"}
               editingVersion={editingVersion}
               conflict={generationConflict}
-              onOptimize={() => {
+              onOptimize={(expand) => {
                 if (busy || draft.value.pendingReviews.includes(active.key))
                   return;
                 void action
                   .run(
                     "zhidao.workflow.generate",
-                    { id: active.key, optimize: true },
+                    {
+                      id: active.key,
+                      ...(expand
+                        ? { expand: true as const }
+                        : { optimize: true as const }),
+                    },
                     (updated) => {
                       reviewDrafts.current.delete(
                         publishingReviewDraftKey(

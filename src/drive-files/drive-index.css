@@ -67,12 +67,20 @@
   margin: var(--space-1) 0 0;
   overflow-wrap: anywhere;
 }
+.drive-index-auto-hint {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 .drive-index-message {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--amber);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+.modal.drive-index-log-dialog {
+  max-width: 720px;
 }
 .drive-index-content {
   display: flex;

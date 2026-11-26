@@ -34,11 +34,12 @@ import { decodeHtml } from "./parsers";
 import { publicationWorkbook } from "./publishing";
 import {
   generatePublishingBatch,
-  publishingGenerationBatchSize,
+  publishingDraftBatches,
   publishingTextKey,
   planPublishingTopics,
   reviewPublishingDrafts,
 } from "./publishing-generation";
+import { researchPublishingTopics } from "./publishing-research";
 
 type Dependencies = Pick<
   HandlerServices,
@@ -826,9 +827,26 @@ export class ZhidaoPublishingWorkflow {
       }
     });
   }
-  async generate(id: string, upgradeLegacy = false, optimize = false) {
+  async generate(
+    id: string,
+    upgradeLegacy = false,
+    optimize = false,
+    expand = false,
+  ) {
     return this.locked(id, async () => {
       const record = this.get(id);
+      if (
+        expand &&
+        (!record.contentFirst ||
+          record.rows.some((row) => row.reviewed) ||
+          record.links.length ||
+          Object.keys(record.rowShares ?? {}).length ||
+          record.publicationRunId)
+      )
+        throw new AppError(
+          "REVIEW_CHANGED",
+          "已确认、建链或发布的问答保留，不能重新分组；请用新流程创建本次问答。",
+        );
       if (!record.contentFirst && record.stage !== "ready")
         throw new AppError("NOT_READY", "请先完成本资源的转存与分享。");
       const copy = record.contentFirst
@@ -839,7 +857,8 @@ export class ZhidaoPublishingWorkflow {
       const resuming =
         record.generation &&
         record.generation.status !== "completed" &&
-        !optimize;
+        !optimize &&
+        !expand;
       const correcting =
         optimize &&
         record.generation?.status === "failed" &&
@@ -867,7 +886,7 @@ export class ZhidaoPublishingWorkflow {
         };
       } else if (!resuming) {
         if (record.rows.length) {
-          if (!optimize && (!upgradeLegacy || record.legacyUpgraded))
+          if (!optimize && !expand && (!upgradeLegacy || record.legacyUpgraded))
             return record;
           if (upgradeLegacy && !canUpgradeLegacy(record))
             throw new AppError(
@@ -894,9 +913,16 @@ export class ZhidaoPublishingWorkflow {
         record.generation = {
           id: randomUUID(),
           status: "running",
-          targets: record.contentFirst && !record.rows.length ? [] : targets,
+          targets:
+            record.contentFirst && (!record.rows.length || expand)
+              ? []
+              : targets,
           drafts: [],
-          ...(record.contentFirst && record.rows.length
+          ...(expand ? { replacesRows: true as const } : {}),
+          ...(previousGeneration?.research
+            ? { research: previousGeneration.research }
+            : {}),
+          ...(record.contentFirst && record.rows.length && !expand
             ? {
                 topics: record.rows.map((row) => ({
                   id: row.id!,
@@ -905,10 +931,16 @@ export class ZhidaoPublishingWorkflow {
                   intent: previousGeneration?.topics?.find(
                     (topic) => topic.id === row.id,
                   )?.intent,
+                  kind: previousGeneration?.topics?.find(
+                    (topic) => topic.id === row.id,
+                  )?.kind,
+                  answerPoints: previousGeneration?.topics?.find(
+                    (topic) => topic.id === row.id,
+                  )?.answerPoints,
                 })),
-                ...(previousGeneration?.planVersion === 2
+                ...(previousGeneration?.planVersion
                   ? {
-                      planVersion: 2 as const,
+                      planVersion: previousGeneration.planVersion,
                       excludedKeywords: previousGeneration.excludedKeywords,
                     }
                   : {}),
@@ -938,6 +970,24 @@ export class ZhidaoPublishingWorkflow {
       };
       try {
         if (record.contentFirst && !generation.topics) {
+          if (
+            !generation.research &&
+            /剧情|结局|演员|男主|更新|推荐|最火|十部|教程|使用|怎么|如何|设置|故障|区别|对比|其他作品/u.test(
+              record.resource.keywords.join(" "),
+            )
+          ) {
+            generation.message = "正在检索补充资料，扩展可回答的关键词需求…";
+            this.store(record);
+            const research = await researchPublishingTopics(
+              this.d.ai,
+              record,
+              assertCurrent,
+            );
+            assertCurrent();
+            generation.research = research;
+            delete generation.message;
+            this.store(record);
+          }
           const plan = await planPublishingTopics(
             this.d.ai,
             record,
@@ -949,7 +999,7 @@ export class ZhidaoPublishingWorkflow {
             ...topic,
             id: randomUUID(),
           }));
-          generation.planVersion = 2;
+          generation.planVersion = 3;
           generation.excludedKeywords = plan.excludedKeywords;
           record.keywordPlan = {
             topics: generation.topics,
@@ -961,29 +1011,25 @@ export class ZhidaoPublishingWorkflow {
         if (record.contentFirst && !generation.topics?.length)
           throw new AppError(
             "NO_PUBLISHING_TOPICS",
-            "没有适合生成资源获取问答的关键词。请展开关键词取舍明细，返回上一步调整关键词或补充资源事实。",
+            "目前没有资料充分且可直接回答的需求。请查看关键词取舍明细，补充资源说明或调整关键词后继续。",
           );
         const remaining = generation.targets.filter(
           (index) => !generation.drafts.some((row) => row.index === index),
         );
-        for (
-          let offset = 0;
-          offset < remaining.length;
-          offset += publishingGenerationBatchSize
-        ) {
+        for (const indexes of publishingDraftBatches(record, remaining)) {
           assertCurrent();
           const batch = await generatePublishingBatch(
             this.d.ai,
             record,
             copy?.files ?? [],
-            remaining.slice(offset, offset + publishingGenerationBatchSize),
+            indexes,
             assertCurrent,
           );
           assertCurrent();
           generation.drafts.push(...batch);
           this.store(record);
         }
-        if (generation.planVersion === 2) {
+        if (generation.planVersion) {
           // Rewriting has finished. If the review request fails, resuming only
           // rechecks these drafts instead of paying to rewrite them again.
           delete generation.validation;
@@ -1041,7 +1087,12 @@ export class ZhidaoPublishingWorkflow {
                 ? ""
                 : "<p><strong>点击链接获取网盘资源：</strong><br/></p>" +
                   `<p><a href="${url}">${url}</a><br/></p>`) +
-              `<p>${escapeHtml(draft.introduction)}</p>${cover}`,
+              draft.introduction
+                .split(/\n+/)
+                .filter((part) => part.trim())
+                .map((part) => `<p>${escapeHtml(part)}</p>`)
+                .join("") +
+              cover,
             reviewed: false,
           };
           const issue = publishingQuestionIssue(row, true);
@@ -1052,6 +1103,7 @@ export class ZhidaoPublishingWorkflow {
           record.linkedAnswerFormat = true;
         if (generation.upgradeLegacy) record.legacyUpgraded = true;
         delete generation.rejectedDrafts;
+        delete generation.replacesRows;
         generation.status = "completed";
         if (record.contentFirst && !record.copyId)
           record.message = `已生成 ${record.rows.length} 条问答，请检查并确认后准备独立链接。`;

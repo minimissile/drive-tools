@@ -1,4 +1,6 @@
-import { tiebaRunWindowMinutes } from "../../shared/tieba-timing";
+import { selectedTiebaActions } from "../../shared/tieba-actions";
+import { TiebaCareSetup } from "./CareSetup";
+import { Dialog } from "../ui/Dialog";
 import { tiebaAccountName } from "./account-label";
 import { useRef, useState } from "react";
 import { z } from "zod";
@@ -10,16 +12,8 @@ import { ipc } from "../api/client";
 import { useIpcQuery } from "../api/useIpcQuery";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { useAppActions, useAppData, useAppNavigation } from "../state";
-import {
-  Button,
-  Header,
-  LoadingState,
-  Notice,
-  Panel,
-  Status,
-} from "../ui/primitives";
+import { Button, Header, LoadingState, Notice } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
-import { Switch } from "../ui/Switch";
 import { TiebaTargets } from "./Targets";
 import { TiebaTasks } from "./Tasks";
 import { TiebaLogs } from "./Logs";
@@ -30,7 +24,6 @@ import { TiebaInsights } from "./Insights";
 import {
   sameTiebaTargets,
   tiebaSelectionView,
-  tiebaTime,
   tiebaAccountNeedsVerification,
 } from "./view-model";
 import type { FeedbackMessage } from "../lib/feedback";
@@ -40,7 +33,16 @@ import "./tieba.css";
 import "./console.css";
 
 const draftSchema = z.object({
-  config: tiebaAutocareConfigSchema,
+  config: tiebaAutocareConfigSchema.extend({
+    actions: z
+      .array(z.enum(["checkin", "like"]))
+      .max(2)
+      .optional(),
+  }),
+  baseActions: z
+    .array(z.enum(["checkin", "like"]))
+    .max(2)
+    .optional(),
   revision: z.number().int().positive(),
   baseTargetIds: z.array(z.string()).max(300),
 });
@@ -59,7 +61,7 @@ export default function TiebaWorkflow() {
     <div className="tieba-autocare" data-testid="tieba-autocare">
       <Header
         title="贴吧自动养号"
-        description="管理签到、回帖批次与主题创作，分别核对官网进度和发布可见性。"
+        description="选择账号与操作，一键开始；进度和异常统一查看。"
         action={
           <div className="row">
             <Button quiet onClick={() => navigate("tieba-publishing")}>
@@ -119,6 +121,7 @@ function TiebaControl({
       config: s.config,
       revision: s.revision,
       baseTargetIds: s.config.targetIds,
+      baseActions: selectedTiebaActions(s.config),
     },
     (value) => draftSchema.parse(value),
   );
@@ -130,13 +133,34 @@ function TiebaControl({
   } | null>(null);
   const [accountRefresh, setAccountRefresh] = useState(0);
   const lock = useRef(false);
-  const { selected, changed, stale } = tiebaSelectionView(draft.value, s);
+  const targetView = tiebaSelectionView(draft.value, s);
+  const ownActions = selectedTiebaActions(draft.value.config);
+  const baseActions = draft.value.baseActions ?? ["checkin"];
+  const actionsEdited =
+    ownActions.length !== baseActions.length ||
+    ownActions.some((value) => !baseActions.includes(value));
+  const chosenActions = actionsEdited
+    ? ownActions
+    : selectedTiebaActions(s.config);
+  const actionsChanged =
+    chosenActions.length !== selectedTiebaActions(s.config).length ||
+    chosenActions.some(
+      (value) => !selectedTiebaActions(s.config).includes(value),
+    );
+  const selected = targetView.selected,
+    changed = targetView.changed || actionsChanged,
+    stale =
+      targetView.stale ||
+      (actionsChanged && draft.value.revision !== s.revision);
+  const [manage, setManage] = useState(false);
+
   const reset = () => {
     draft.clear();
     draft.update({
       config: s.config,
       revision: s.revision,
       baseTargetIds: s.config.targetIds,
+      baseActions: selectedTiebaActions(s.config),
     });
     setError("");
   };
@@ -157,6 +181,7 @@ function TiebaControl({
           draft.update({
             revision: result.revision,
             baseTargetIds: result.config.targetIds,
+            baseActions: selectedTiebaActions(result.config),
           });
       } else {
         draft.clear();
@@ -164,6 +189,7 @@ function TiebaControl({
           config: result.config,
           revision: result.revision,
           baseTargetIds: result.config.targetIds,
+          baseActions: selectedTiebaActions(result.config),
         });
       }
       const feedback =
@@ -191,7 +217,7 @@ function TiebaControl({
         new Error("其他窗口已更新设置，请先恢复已保存设置，再重新选择目标。"),
       );
     return ipc("tieba.autocare.save", {
-      config: draft.value.config,
+      config: { targetIds: selected, actions: chosenActions },
       revision: s.revision,
     });
   };
@@ -208,7 +234,7 @@ function TiebaControl({
       },
       enabled
         ? "已开启自动签到，可在本轮计划查看具体安排"
-        : "已停止新签到，已提交的结果继续核对",
+        : "已停止新操作，已提交的结果继续核对",
       !enabled,
     );
   const names = new Map(
@@ -217,219 +243,247 @@ function TiebaControl({
   const disabled = busy || unavailable;
   return (
     <>
-      <Panel className="tieba-master">
-        <div className="tieba-master-status">
-          <Status kind={s.busy || s.enabled ? "normal" : "warning"}>
-            {s.busy
-              ? s.enabled
-                ? "正在执行"
-                : "正在收尾"
-              : s.enabled
-                ? "已开启"
-                : "已关闭"}
-          </Status>
-          <span>{s.message}</span>
-          {s.run ? (
-            <small>
-              本轮 {tiebaTime(s.run.startedAt)} — {tiebaTime(s.run.deadlineAt)}{" "}
-              · 北京时间
-            </small>
-          ) : (
-            <small>
-              开启后在{tiebaRunWindowMinutes}
-              分钟内按账号并行安排，每个目标吧每日最多签到一次。
-            </small>
-          )}
-        </div>
-        <label className="tieba-power">
-          自动签到
-          <Switch
-            checked={s.enabled}
-            disabled={disabled || (!s.enabled && (!selected.length || stale))}
-            onCheckedChange={toggle}
-            aria-label="开启贴吧自动签到"
-            data-testid="tieba-power"
-          />
-        </label>
-      </Panel>
-      {error ? <Notice danger>{error}</Notice> : null}
-      {draft.error ? <Notice warning>{draft.error}</Notice> : null}
-      {stale ? (
-        <Notice warning>
-          其他窗口已更新设置，当前目标草案尚未应用。请先恢复已保存设置，再重新选择目标。
-        </Notice>
-      ) : null}
-      <TiebaTargets
+      <TiebaCareSetup
         snapshot={s}
-        workspace={workspace}
         selected={selected}
+        actions={chosenActions}
         busy={disabled}
-        changed={changed}
         stale={stale}
         onSelection={(targetIds) =>
           draft.update({
-            config: { targetIds },
+            config: { targetIds, actions: chosenActions },
             revision: changed ? draft.value.revision : s.revision,
             baseTargetIds: changed
               ? draft.value.baseTargetIds
               : s.config.targetIds,
+            baseActions: changed
+              ? draft.value.baseActions
+              : selectedTiebaActions(s.config),
           })
         }
-        onStart={(accountIds) =>
+        onActions={(actions) =>
+          draft.update({
+            config: { targetIds: selected, actions },
+            revision: changed ? draft.value.revision : s.revision,
+            baseTargetIds: changed
+              ? draft.value.baseTargetIds
+              : s.config.targetIds,
+            baseActions: changed
+              ? draft.value.baseActions
+              : selectedTiebaActions(s.config),
+          })
+        }
+        onApply={() =>
           void action(
             () =>
-              ipc("tieba.autocare.start", {
-                accountIds,
+              ipc("tieba.autocare.apply", {
+                config: { targetIds: selected, actions: chosenActions },
                 revision: s.revision,
                 confirmed: true,
               }),
-            (result) => {
-              const results = result.startResult?.accounts ?? [];
-              const failed = results.filter((item) => item.status === "failed");
-              const count = results.reduce(
-                (sum, item) => sum + item.targets,
-                0,
-              );
-              return {
-                text: `${results.length - failed.length}/${results.length} 个账号已同步，${count} 个贴吧已安排签到。${failed.map((item) => `${names.get(item.accountId) ?? "贴吧账号"}：${item.message}`).join("；")}`,
-                tone: failed.length || !count ? "warning" : "success",
+            "所选操作已保存，自动化已开启",
+          )
+        }
+        onStop={() => toggle(false)}
+        onManage={() => setManage(true)}
+        onAccounts={() => navigate("website-accounts")}
+        onSync={() =>
+          void action(
+            async () => {
+              let latest = s;
+              for (const account of s.accounts)
+                latest = await ipc("tieba.autocare.sync", {
+                  accountId: account.id,
+                });
+              return latest;
+            },
+            "账号与关注贴吧已同步，请选择参与的账号",
+            true,
+          )
+        }
+      />
+      {error ? <Notice danger>{error}</Notice> : null}
+      {draft.error ? <Notice warning>{draft.error}</Notice> : null}
+      {stale ? (
+        <Notice warning>
+          其他窗口已更新设置，当前选择尚未应用。
+          <Button quiet size="compact" onClick={reset}>
+            恢复已保存设置
+          </Button>
+        </Notice>
+      ) : null}
+      {manage ? (
+        <Dialog
+          onClose={() => setManage(false)}
+          title="管理参与自动化的贴吧"
+          className="tieba-manage-dialog"
+          footer={
+            <Button primary onClick={() => setManage(false)}>
+              完成选择
+            </Button>
+          }
+        >
+          <TiebaTargets
+            selectionOnly
+            snapshot={s}
+            workspace={workspace}
+            selected={selected}
+            busy={disabled}
+            changed={changed}
+            stale={stale}
+            onSelection={(targetIds) =>
+              draft.update({
+                config: { targetIds, actions: chosenActions },
+                revision: changed ? draft.value.revision : s.revision,
+                baseTargetIds: changed
+                  ? draft.value.baseTargetIds
+                  : s.config.targetIds,
+                baseActions: changed
+                  ? draft.value.baseActions
+                  : selectedTiebaActions(s.config),
+              })
+            }
+            onSync={(accountId) =>
+              void action(
+                () => ipc("tieba.autocare.sync", { accountId }),
+                "关注吧已同步，新增贴吧默认未选",
+                true,
+              )
+            }
+            onPause={(target) =>
+              void action(
+                () =>
+                  ipc("tieba.autocare.pause", {
+                    targetId: target.id,
+                    paused: !target.paused,
+                    revision: s.revision,
+                  }),
+                target.paused
+                  ? "该贴吧已恢复，未来任务按原范围安排"
+                  : "该贴吧已暂停，其他目标继续运行",
+              )
+            }
+            onSave={() =>
+              void action(
+                save,
+                s.enabled
+                  ? "目标设置已应用于未来任务"
+                  : "目标已保存，开启后自动安排签到",
+              )
+            }
+            onReset={reset}
+            onAccounts={() => navigate("website-accounts")}
+            onObserved={receive}
+            onReload={reload}
+            onFollow={(target) =>
+              void action(
+                () =>
+                  ipc("tieba.autocare.follow", {
+                    targetId: target.id,
+                    revision: s.revision,
+                    confirmed: true,
+                  }),
+                (result) => ({
+                  text:
+                    result.followResult?.message ??
+                    "关注结果尚未完整返回，请核对原目标。",
+                  tone:
+                    result.followResult?.status === "followed"
+                      ? "success"
+                      : result.followResult?.status === "failed"
+                        ? "error"
+                        : "warning",
+                }),
+                true,
+              )
+            }
+            onVerifyAccount={(accountId) =>
+              void action(
+                async () => {
+                  const account = await ipc("websiteAccounts.check", {
+                    id: accountId,
+                  });
+                  if (tiebaAccountNeedsVerification(account) || !account.uid)
+                    throw new Error(
+                      account.message ||
+                        "账号登录尚未核实，请检查现有官网会话后再试。",
+                    );
+                  const snapshot = await ipc("tieba.autocare.snapshot");
+                  setAccountRefresh((value) => value + 1);
+                  return snapshot;
+                },
+                "账号身份已核实，可用目标与各面板状态已刷新",
+                true,
+              )
+            }
+            onRefreshProfiles={(targetIds) => {
+              let feedback: FeedbackMessage = {
+                text: "本次官网资料读取结果待核对。",
+                tone: "warning",
               };
-            },
-          )
-        }
-        onSync={(accountId) =>
-          void action(
-            () => ipc("tieba.autocare.sync", { accountId }),
-            "关注吧已同步，新增贴吧默认未选",
-            true,
-          )
-        }
-        onPause={(target) =>
-          void action(
-            () =>
-              ipc("tieba.autocare.pause", {
-                targetId: target.id,
-                paused: !target.paused,
-                revision: s.revision,
-              }),
-            target.paused
-              ? "该贴吧已恢复，未来任务按原范围安排"
-              : "该贴吧已暂停，其他目标继续运行",
-          )
-        }
-        onSave={() =>
-          void action(
-            save,
-            s.enabled
-              ? "目标设置已应用于未来任务"
-              : "目标已保存，开启后自动安排签到",
-          )
-        }
-        onReset={reset}
-        onAccounts={() => navigate("website-accounts")}
-        onObserved={receive}
-        onReload={reload}
-        onFollow={(target) =>
-          void action(
-            () =>
-              ipc("tieba.autocare.follow", {
-                targetId: target.id,
-                revision: s.revision,
-                confirmed: true,
-              }),
-            (result) => ({
-              text:
-                result.followResult?.message ??
-                "关注结果尚未完整返回，请核对原目标。",
-              tone:
-                result.followResult?.status === "followed"
-                  ? "success"
-                  : result.followResult?.status === "failed"
-                    ? "error"
-                    : "warning",
-            }),
-            true,
-          )
-        }
-        onVerifyAccount={(accountId) =>
-          void action(
-            async () => {
-              const account = await ipc("websiteAccounts.check", {
-                id: accountId,
-              });
-              if (tiebaAccountNeedsVerification(account) || !account.uid)
-                throw new Error(
-                  account.message ||
-                    "账号登录尚未核实，请检查现有官网会话后再试。",
-                );
-              const snapshot = await ipc("tieba.autocare.snapshot");
-              setAccountRefresh((value) => value + 1);
-              return snapshot;
-            },
-            "账号身份已核实，可用目标与各面板状态已刷新",
-            true,
-          )
-        }
-        onRefreshProfiles={(targetIds) => {
-          let feedback: FeedbackMessage = {
-            text: "本次官网资料读取结果待核对。",
-            tone: "warning",
-          };
-          void action(
-            async () => {
-              const result = await ipc("tieba.insights.refresh", {
-                targetIds,
-                publicationIds: [],
-              });
-              feedback = tiebaTargetRefreshFeedback(result, s.targets);
-              try {
-                const snapshot = await ipc("tieba.autocare.snapshot");
-                setAccountRefresh((value) => value + 1);
-                return snapshot;
-              } catch (cause) {
-                throw new Error(
-                  `官网资料读取已返回，但本地列表刷新失败，请先重试读取状态，无需重复刷新官网。${cause instanceof Error ? cause.message : ""}`,
-                );
-              }
-            },
-            () => feedback,
-            true,
-          );
-        }}
-      />
-      <TiebaTasks
-        snapshot={s}
-        workspace={workspace}
-        busy={disabled}
-        onReconcile={(taskId) =>
-          void action(
-            () => ipc("tieba.autocare.reconcile", { taskId }),
-            "已完成原结果查询，请查看任务状态",
-            true,
-          )
-        }
-      />
-      <TiebaAutomation
-        workspace={workspace}
-        refreshRevision={accountRefresh}
-        openReply={(candidateId) =>
-          setReplyRequest({ candidateId, requestId: crypto.randomUUID() })
-        }
-      />
-      <TiebaParticipation
-        workspace={workspace}
-        autocare={s}
-        request={replyRequest}
-        onAccounts={() => navigate("website-accounts")}
-        refreshRevision={accountRefresh}
-      />
-      <TiebaTopicComposer
-        workspace={workspace}
-        onAccounts={() => navigate("website-accounts")}
-        refreshRevision={accountRefresh}
-      />
-      <TiebaInsights workspace={workspace} refreshRevision={accountRefresh} />
+              void action(
+                async () => {
+                  const result = await ipc("tieba.insights.refresh", {
+                    targetIds,
+                    publicationIds: [],
+                  });
+                  feedback = tiebaTargetRefreshFeedback(result, s.targets);
+                  try {
+                    const snapshot = await ipc("tieba.autocare.snapshot");
+                    setAccountRefresh((value) => value + 1);
+                    return snapshot;
+                  } catch (cause) {
+                    throw new Error(
+                      `官网资料读取已返回，但本地列表刷新失败，请先重试读取状态，无需重复刷新官网。${cause instanceof Error ? cause.message : ""}`,
+                    );
+                  }
+                },
+                () => feedback,
+                true,
+              );
+            }}
+          />
+        </Dialog>
+      ) : null}
+      <details className="tieba-care-details">
+        <summary>查看任务与历史</summary>
+        <TiebaTasks
+          snapshot={s}
+          workspace={workspace}
+          busy={disabled}
+          onReconcile={(taskId) =>
+            void action(
+              () => ipc("tieba.autocare.reconcile", { taskId }),
+              "已完成原结果查询，请查看任务状态",
+              true,
+            )
+          }
+        />
+      </details>
       <TiebaLogs logs={s.logs} workspace={workspace} names={names} />
+      <details className="tieba-care-details">
+        <summary>回帖、发帖与数据工具</summary>
+        <TiebaAutomation
+          workspace={workspace}
+          refreshRevision={accountRefresh}
+          openReply={(candidateId) =>
+            setReplyRequest({ candidateId, requestId: crypto.randomUUID() })
+          }
+        />
+        <TiebaParticipation
+          workspace={workspace}
+          autocare={s}
+          request={replyRequest}
+          onAccounts={() => navigate("website-accounts")}
+          refreshRevision={accountRefresh}
+        />
+        <TiebaTopicComposer
+          workspace={workspace}
+          onAccounts={() => navigate("website-accounts")}
+          refreshRevision={accountRefresh}
+        />
+        <TiebaInsights workspace={workspace} refreshRevision={accountRefresh} />
+      </details>
     </>
   );
 }

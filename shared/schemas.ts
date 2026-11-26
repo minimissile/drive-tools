@@ -2,6 +2,7 @@ import { z } from "zod";
 import { platformIds, contentFormatIds, linkPositionIds } from "./channels";
 import { resourceKeywordsSchema } from "./resource-keywords";
 import { providerIds } from "./providers";
+import { resourceImageIdPattern, resourceImageLimit } from "./resource-images";
 export const providerSchema = z.enum(providerIds);
 export const platformSchema = z.enum(platformIds);
 export const contentFormatSchema = z.enum(contentFormatIds);
@@ -31,6 +32,10 @@ export const resourceInputSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(60)).max(30),
   summary: z.string().max(30_000),
   coverData: z.string().max(12_000_000).nullable().optional(),
+  images: z.array(z.union([
+    z.object({ id: z.string().regex(resourceImageIdPattern) }),
+    z.object({ data: z.string().min(1).max(12_000_000) }),
+  ])).max(resourceImageLimit, "一份资源最多保存3张图片。").optional(),
   accountId: z.string().min(1),
   directory: z.string().max(500),
   rightsConfirmed: z.boolean().optional(),

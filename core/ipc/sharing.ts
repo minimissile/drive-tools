@@ -5,6 +5,7 @@ import { AppError, safeMessage } from "../errors";
 import { parseShare, shareUrlWithCode } from "../links";
 import { assertManifest } from "../providers/provider";
 import { saveReturnedSharePassphrase } from "../share-passphrases";
+import { copySource, driveLinkCodeKey, readDriveSourceCode } from "../resource-drive-links";
 import type { ShareCheck, ShareValidationResult } from "../../shared/types";
 
 import type { HandlerServices, HandlerMap, IpcHandler } from "./types";
@@ -30,9 +31,24 @@ export function createSharingHandlers(
     code: z.string().max(30).optional(),
     accountId: z.string().min(1).optional(),
     resourceId: z.string().optional(),
+    sourceLinkId: z.string().max(100).optional(),
   });
   const validationSource = async (input: z.infer<typeof validationInput>) => {
     const source = parseShare(input.sourceText, input.code);
+    if (input.sourceLinkId) {
+      const link = services.db.get<{ url: string; needs_code: number }>(
+        "SELECT url,needs_code FROM resource_drive_links WHERE id=? AND resource_id=?",
+        input.sourceLinkId, input.resourceId ?? "",
+      );
+      if (!link)
+        throw new AppError("RESOURCE_SOURCE_MISSING", "补充来源已变化，请重新打开资料。");
+      if (!source.code && link.url === source.url)
+        source.code = await readDriveSourceCode(services.secrets, {
+          codeKey: driveLinkCodeKey(input.sourceLinkId),
+          needsCode: !!link.needs_code,
+        });
+      return source;
+    }
     if (
       !source.code &&
       input.resourceId &&
@@ -53,15 +69,15 @@ export function createSharingHandlers(
     const copy = services.repo.getCopy(copyId),
       resource = services.repo.getResource(copy.resourceId),
       source = text ? parseShare(text, code) : null;
+    const origin = copySource(copy, resource);
     if (
       !copy.folderId ||
       !copy.ownerUid ||
       !copy.verifiedAt ||
       !copy.files.length ||
       (source &&
-        ((source.url === resource.sourceUrl &&
-          resource.sourceKind !== "owned") ||
-          source.provider !== resource.provider)) ||
+        ((source.url === origin.url && origin.kind !== "owned") ||
+          source.provider !== origin.provider)) ||
       (method === "copy.recoverShare" && !source)
     )
       throw new AppError(
@@ -120,9 +136,8 @@ export function createSharingHandlers(
       }
       const parsedShare = parseShare(share.url);
       if (
-        parsedShare.provider !== resource.provider ||
-        (parsedShare.url === resource.sourceUrl &&
-          resource.sourceKind !== "owned") ||
+        parsedShare.provider !== origin.provider ||
+        (parsedShare.url === origin.url && origin.kind !== "owned") ||
         !(await p.verifyShare(a, share.id, copy.files, share.code))
       )
         throw new AppError(
@@ -166,7 +181,7 @@ export function createSharingHandlers(
         services.secrets,
         {
           key: `share-passphrase:copy:${copyId}`,
-          provider: resource.provider,
+          provider: origin.provider,
           accountId: copy.accountId,
           ownerUid: a.uid,
           shareId: share.id,
@@ -270,22 +285,16 @@ export function createSharingHandlers(
           sourceText: z.string().max(8000),
           code: z.string().max(30).optional(),
           resourceId: z.string().optional(),
+          sourceLinkId: z.string().max(100).optional(),
         })
         .parse(object);
-      const source = parseShare(input.sourceText, input.code);
+      const source = await validationSource(input);
       const account = services.account(input.accountId);
       if (account.provider !== source.provider)
         throw new AppError(
           "CROSS_PROVIDER_UNSUPPORTED",
           "请使用与分享相同网盘的本人账号。",
         );
-      if (
-        !source.code &&
-        input.resourceId &&
-        services.repo.getResource(input.resourceId).sourceUrl === source.url
-      )
-        source.code =
-          (await services.secrets.get(`source:${input.resourceId}`)) ?? "";
       services.assertNoActiveJobs(account.id);
       if (source.provider === "baidu" && services.ports.baiduShareReader) {
         await services.ports.baiduShareReader.open(source);
@@ -307,19 +316,13 @@ export function createSharingHandlers(
             sourceText: z.string().max(8000),
             code: z.string().max(30).optional(),
             resourceId: z.string().optional(),
+            sourceLinkId: z.string().max(100).optional(),
             parentId: z.string().max(1000).default("0"),
             page: z.number().int().min(1).max(100).default(1),
             cursor: z.string().max(8000).optional(),
           })
           .parse(object),
-        source = parseShare(input.sourceText, input.code);
-      if (
-        !source.code &&
-        input.resourceId &&
-        services.repo.getResource(input.resourceId).sourceUrl === source.url
-      )
-        source.code =
-          (await services.secrets.get(`source:${input.resourceId}`)) ?? "";
+        source = await validationSource(input);
       if (source.provider === "baidu" && services.ports.baiduShareReader) {
         const account = services.account(input.accountId);
         if (account.provider !== source.provider)
@@ -359,11 +362,18 @@ export function createSharingHandlers(
           "尚未保存本人分享链接，请先创建或填写分享。",
         );
       const resource = services.repo.getResource(copy.resourceId);
+      const origin = copySource(copy, resource);
+      if (copy.source && (copy.status !== "ready" || !copy.shareId ||
+        !copy.ownerUid || copy.shareOwnerUid !== copy.ownerUid ||
+        copy.ownerUid !== services.repo.getAccount(copy.accountId).uid))
+        throw new AppError("SHARE_NOT_READY", "补充副本尚未完成本人分享归档。");
       const code = await services.secrets.get(`share:${copy.id}`);
+      if (copy.source && code === null)
+        throw new AppError("SHARE_NOT_READY", "本机缺少此分享的提取码记录，请先核对本人分享。");
       const share = parseShare(copy.shareUrl, code ?? "");
-      if (share.provider !== resource.provider)
+      if (share.provider !== origin.provider)
         throw new AppError("INVALID_LINK", "本人分享与资源网盘不一致。");
-      if (share.url === resource.sourceUrl && resource.sourceKind !== "owned")
+      if (share.url === origin.url && origin.kind !== "owned")
         throw new AppError(
           "FOREIGN_SHARE_BLOCKED",
           "未保存本人分享，不能将来源链接当作本人分享复制。",
@@ -389,14 +399,15 @@ export function createSharingHandlers(
       const { id: copyId } = z.object({ id: z.string() }).parse(object);
       const copy = services.repo.getCopy(copyId),
         resource = services.repo.getResource(copy.resourceId);
+      const origin = copySource(copy, resource);
       services.assertNoActiveJobs(copy.accountId);
-      let target = providerSpecs[resource.provider].home as string;
+      let target = providerSpecs[origin.provider].home as string;
       if (copy.shareUrl) {
         const source = parseShare(
           copy.shareUrl,
           (await services.secrets.get(`share:${copy.id}`)) ?? "",
         );
-        if (source.provider !== resource.provider)
+        if (source.provider !== origin.provider)
           throw new AppError("INVALID_LINK", "本人分享与资源网盘不一致。");
         const url = new URL(source.url);
         if (source.code)

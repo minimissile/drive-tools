@@ -6,7 +6,7 @@ import {
   wechatResourceCards,
 } from "./wechat-resource-cards";
 
-export const wechatTypesettingVersion = 5;
+export const wechatTypesettingVersion = 8;
 
 function providerName(url: URL) {
   const host =
@@ -31,10 +31,12 @@ export function typesetWechatHtml(
     entryLabels?: boolean;
     resourceBlocks?: boolean;
     templateId?: WechatTemplateId;
+    templateVersion?: number;
   } = {},
 ) {
   const { bodyStyle, styles, resource, sectionLayout } = getWechatTemplate(
     options.templateId,
+    options.templateVersion,
   );
   if (options.compactLists !== false)
     html = html.replace(

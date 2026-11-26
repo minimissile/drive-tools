@@ -3,23 +3,32 @@ import type { RuntimeLogEntry } from "../../shared/runtime-logs";
 import { formatTime } from "../lib/format";
 import "./log-window.css";
 
+type LogWindowEntry = Pick<
+  RuntimeLogEntry,
+  "id" | "createdAt" | "level" | "message"
+> &
+  Partial<Pick<RuntimeLogEntry, "event" | "taskId" | "details">>;
+
 /** Read-only log presentation. Filtering, transport and clipboard belong to callers. */
-export function LogWindow({
+export function LogWindow<Entry extends LogWindowEntry>({
   items,
   label,
   context,
   follow,
   onFollowChange,
+  newestFirst = false,
   simple = false,
   formatMessage,
 }: {
-  items: RuntimeLogEntry[];
+  /** Entries arrive in descending order from the log query. */
+  items: Entry[];
   label: string;
-  context(entry: RuntimeLogEntry): string;
+  context?(entry: NoInfer<Entry>): string;
   follow: boolean;
   onFollowChange(value: boolean): void;
+  newestFirst?: boolean;
   simple?: boolean;
-  formatMessage?(entry: RuntimeLogEntry): string;
+  formatMessage?(entry: NoInfer<Entry>): string;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -34,14 +43,20 @@ export function LogWindow({
         element.contains(selection.anchorNode))
     )
       return;
-    element.scrollTop = element.scrollHeight;
-  }, [items, follow]);
+    element.scrollTop = newestFirst ? 0 : element.scrollHeight;
+  }, [items, follow, newestFirst]);
   return (
     <div className={`log-window${simple ? " log-window-simple" : ""}`}>
       <div className="log-window-columns" aria-hidden="true">
         <span>时间</span>
         <span>{simple ? "状态" : "级别"}</span>
-        <span>{simple ? "账号 · 运行情况" : "账号 · 事件 · 消息"}</span>
+        <span>
+          {context
+            ? simple
+              ? "账号 · 运行情况"
+              : "账号 · 事件 · 消息"
+            : "消息"}
+        </span>
       </div>
       <div
         className="log-window-viewport"
@@ -52,12 +67,14 @@ export function LogWindow({
         tabIndex={0}
         onScroll={(event) => {
           const e = event.currentTarget;
-          if (follow && e.scrollHeight - e.clientHeight - e.scrollTop > 24)
-            onFollowChange(false);
+          const distanceFromLatest = newestFirst
+            ? e.scrollTop
+            : e.scrollHeight - e.clientHeight - e.scrollTop;
+          if (follow && distanceFromLatest > 24) onFollowChange(false);
         }}
       >
         <ol className="log-window-lines">
-          {[...items].reverse().map((entry) => (
+          {(newestFirst ? items : [...items].reverse()).map((entry) => (
             <li
               key={entry.id}
               className="log-window-line"
@@ -90,13 +107,16 @@ export function LogWindow({
                       : "INFO"}
               </span>
               <div className="log-window-content">
-                <div className="log-window-context">
-                  <span>{context(entry)}</span>
-                  {!simple ? <code>{entry.event}</code> : null}
-                </div>
+                {context || (!simple && entry.event) ? (
+                  <div className="log-window-context">
+                    {context ? <span>{context(entry)}</span> : null}
+                    {!simple && entry.event ? <code>{entry.event}</code> : null}
+                  </div>
+                ) : null}
                 <p>{formatMessage ? formatMessage(entry) : entry.message}</p>
                 {!simple &&
-                (Object.keys(entry.details).length || entry.taskId) ? (
+                ((entry.details && Object.keys(entry.details).length) ||
+                  entry.taskId) ? (
                   <details
                     onToggle={(e) => {
                       if (e.currentTarget.open) onFollowChange(false);

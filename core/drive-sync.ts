@@ -6,15 +6,22 @@ import type {
   DriveIndexPage,
   DriveIndexQuery,
   DriveRegistration,
+  DriveSyncAutoRegister,
+  DriveSyncLog,
   DriveSyncRun,
   DriveSyncStatus,
 } from "../shared/drive-sync";
 import { driveSyncActive } from "../shared/drive-sync";
-import { ownedFileSource } from "../shared/owned-file-source";
 import { Database, id, now, parseJson } from "./database";
 import { AppError, safeMessage } from "./errors";
 import type { DriveProvider } from "./providers/provider";
-import { assertResourceUnique } from "./resource-duplicates";
+import {
+  driveSyncAutoRegisterKey,
+  registeredDriveResource,
+  registerScannedDriveFiles,
+  writeIndexedDriveResource,
+} from "./drive-sync-resource";
+import { writeRuntimeLog } from "./runtime-log";
 
 interface Dependencies {
   db: Database;
@@ -59,6 +66,15 @@ type Entry = {
   state: DriveIndexEntry["state"];
 };
 const root = "@root";
+const logDomain = "drive-sync";
+const logLimit = 100;
+const progressIntervalMs = 15_000;
+type LogEvent = Pick<DriveSyncLog, "level" | "message"> & { event: string };
+type LogScope = Pick<DriveSyncRun, "id" | "accountId">;
+type AutoRegisterSetting = Omit<DriveSyncAutoRegister, "requiresRescan"> & {
+  runId: string;
+  includesFolders?: true;
+};
 const identityCodes = new Set([
   "AUTH_EXPIRED",
   "ACCOUNT_UID_MISMATCH",
@@ -67,6 +83,34 @@ const identityCodes = new Set([
   "ACCOUNT_DISABLED",
   "USER_ACTION_REQUIRED",
 ]);
+const failureMessages = new Map([
+  ["AUTH_EXPIRED", "登录已失效，请在原账号环境重新登录。"],
+  ["ACCOUNT_DISABLED", "账号已停用，请启用后继续。"],
+  ["ACCOUNT_UID_MISMATCH", "网盘账号身份已变化，请核对原账号。"],
+  ["DUPLICATE_ACCOUNT", "此网盘账号已关联其他记录，请核对账号。"],
+  ["ENVIRONMENT_CHANGED", "账号身份或环境已变化，请核对原账号环境。"],
+  ["USER_ACTION_REQUIRED", "请在原账号环境完成网盘验证后继续。"],
+  ["REMOTE_SCHEMA_CHANGED", "网盘返回的目录数据异常。"],
+  ["INCOMPLETE_LIST", "网盘未完整返回目录数据。"],
+]);
+
+function logFailure(error: unknown, fallback: string) {
+  return error instanceof AppError
+    ? (failureMessages.get(error.code) ?? fallback)
+    : fallback;
+}
+
+function progress(run: DriveSyncRun) {
+  const found = `已发现 ${run.files} 个文件、${run.folders} 个目录`;
+  const failed = run.failed ? `，${run.failed} 个未完成` : "";
+  return `${found}，${run.pending} 个待处理${failed}。${autoRegisterSummary(run.autoRegister)}`;
+}
+
+function autoRegisterSummary(autoRegister?: DriveSyncAutoRegister) {
+  return autoRegister
+    ? `自动录入新增 ${autoRegister.added} 项，跳过 ${autoRegister.skipped} 项。`
+    : "";
+}
 
 /** Read-only, durable metadata scans. Registering a resource never creates a share. */
 export class DriveSync {
@@ -77,10 +121,20 @@ export class DriveSync {
   >();
   private closed = false;
   constructor(private d: Dependencies) {
-    d.db.run(
-      "UPDATE drive_sync_runs SET status='interrupted',message='上次同步已中断，请手动继续。',updated_at=? WHERE status IN ('running','pausing')",
-      now(),
-    );
+    d.db.transaction(() => {
+      const message = "上次同步已中断，请手动继续。";
+      const interrupted = d.db.all<LogScope>(
+        "UPDATE drive_sync_runs SET status='interrupted',message=?,updated_at=? WHERE status IN ('running','pausing') RETURNING id,account_id AS accountId",
+        message,
+        now(),
+      );
+      for (const run of interrupted)
+        this.record(run, {
+          event: "sync.interrupted",
+          level: "warning",
+          message: message + autoRegisterSummary(this.autoRegister(run)),
+        });
+    });
   }
   get isBusy() {
     return this.active.size > 0;
@@ -116,6 +170,39 @@ export class DriveSync {
       accountId,
     );
   }
+  private autoRegister(
+    run: LogScope,
+    status?: DriveSyncStatus,
+  ): DriveSyncAutoRegister | undefined {
+    const setting = this.d.db.setting<AutoRegisterSetting | null>(
+      driveSyncAutoRegisterKey(run.accountId),
+      null,
+    );
+    if (setting?.runId !== run.id) return undefined;
+    return {
+      enabled: setting.enabled,
+      added: setting.added,
+      skipped: setting.skipped,
+      // Older auto runs may have completed directories without enrolling them or their children.
+      ...(setting.enabled &&
+      setting.includesFolders !== true &&
+      status !== "completed"
+        ? { requiresRescan: true as const }
+        : {}),
+    };
+  }
+  private setAutoRegister(
+    run: LogScope,
+    { enabled, added, skipped }: DriveSyncAutoRegister,
+  ) {
+    this.d.db.setSetting(driveSyncAutoRegisterKey(run.accountId), {
+      enabled,
+      added,
+      skipped,
+      runId: run.id,
+      includesFolders: true,
+    } satisfies AutoRegisterSetting);
+  }
   current(accountId: string): DriveSyncRun | null {
     const row = this.row(accountId);
     if (!row) return null;
@@ -147,20 +234,66 @@ export class DriveSync {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       completedAt: row.completed_at,
+      autoRegister: this.autoRegister({ id: row.id, accountId }, row.status),
     };
   }
-  private update(runId: string, status: DriveSyncStatus, message = "") {
+  logs(accountId: string): DriveSyncLog[] {
+    const account = this.d.account(accountId);
+    return this.d.db.all<DriveSyncLog>(
+      `SELECT l.id,l.created_at AS at,l.level,l.message
+       FROM runtime_logs l JOIN drive_sync_runs r ON r.id=l.task_id
+       WHERE l.domain=? AND l.account_id=? AND r.account_id=l.account_id AND r.owner_uid=?
+       ORDER BY l.id DESC LIMIT ?`,
+      logDomain,
+      accountId,
+      account.uid,
+      logLimit,
+    );
+  }
+  private record(run: LogScope, entry: LogEvent) {
+    writeRuntimeLog(this.d.db, logDomain, {
+      ...entry,
+      accountId: run.accountId,
+      taskId: run.id,
+    });
+    this.d.db.run(
+      `DELETE FROM runtime_logs WHERE domain=? AND account_id=? AND id<(
+         SELECT id FROM runtime_logs WHERE domain=? AND account_id=?
+         ORDER BY id DESC LIMIT 1 OFFSET ?
+       )`,
+      logDomain,
+      run.accountId,
+      logDomain,
+      run.accountId,
+      logLimit - 1,
+    );
+  }
+  private update(
+    run: LogScope,
+    status: DriveSyncStatus,
+    message = "",
+    log?: LogEvent,
+  ) {
     if (this.closed) return;
+    this.d.db.transaction(() => this.setStatus(run, status, message, log));
+    this.d.changed();
+  }
+  private setStatus(
+    run: LogScope,
+    status: DriveSyncStatus,
+    message: string,
+    log?: LogEvent,
+  ) {
     this.d.db.run(
       "UPDATE drive_sync_runs SET status=?,message=?,updated_at=? WHERE id=?",
       status,
       message,
       now(),
-      runId,
+      run.id,
     );
-    this.d.changed();
+    if (log) this.record(run, log);
   }
-  start(accountId: string, restart = false) {
+  start(accountId: string, restart = false, autoRegister = false) {
     const account = this.d.account(accountId);
     if (this.closed) throw new AppError("SYNC_CLOSED", "同步服务已停止。");
     if (!account.enabled)
@@ -195,6 +328,21 @@ export class DriveSync {
         root,
         account.provider === "baidu" ? "/" : "0",
       );
+      const scope = { id: runId, accountId };
+      if (autoRegister)
+        this.setAutoRegister(scope, { enabled: true, added: 0, skipped: 0 });
+      else if (prior?.autoRegister)
+        this.d.db.run(
+          "DELETE FROM settings WHERE key=?",
+          driveSyncAutoRegisterKey(accountId),
+        );
+      this.record(scope, {
+        event: "sync.started",
+        level: "info",
+        message:
+          (prior ? "开始更新本地目录。" : "开始同步整个网盘。") +
+          (autoRegister ? "已开启自动录入资源库。" : ""),
+      });
     });
     this.launch(accountId);
     return this.current(accountId)!;
@@ -203,24 +351,56 @@ export class DriveSync {
     const run = this.current(accountId);
     if (!run) throw new AppError("SYNC_NOT_FOUND", "尚未启动整盘同步。");
     if (driveSyncActive(run)) {
-      this.update(run.id, "pausing", "正在结束当前目录请求，随后暂停。");
+      this.update(
+        run,
+        "pausing",
+        "正在结束当前目录请求，随后暂停。",
+        run.status === "running"
+          ? {
+              event: "sync.pause_requested",
+              level: "info",
+              message: "正在暂停，等待当前目录请求结束。",
+            }
+          : undefined,
+      );
       this.active.get(accountId)?.controller.abort();
     }
     return this.current(accountId)!;
   }
-  resume(accountId: string) {
+  resume(accountId: string, autoRegister?: boolean) {
     const run = this.current(accountId);
-    if (!run) return this.start(accountId);
+    if (!run) return this.start(accountId, false, autoRegister);
     if (this.active.has(accountId) || driveSyncActive(run))
       throw new AppError("SYNC_BUSY", "请等待当前请求结束。");
-    if (run.status === "completed") return this.start(accountId);
+    if (run.status === "completed")
+      return this.start(accountId, false, autoRegister);
+    if (
+      (autoRegister !== false && run.autoRegister?.requiresRescan) ||
+      (autoRegister && !run.autoRegister?.enabled)
+    )
+      throw new AppError(
+        "AUTO_REGISTER_RESTART_REQUIRED",
+        "请从头同步，才能将文件和文件夹自动录入资源库。",
+      );
     this.assertIdentity(run);
-    // Page numbers/cursors can be stale after a pause: restart unfinished directories.
-    this.d.db.run(
-      "UPDATE drive_sync_folders SET status='pending',cursor='',cursors='[]',error=NULL WHERE run_id=? AND status!='completed'",
-      run.id,
-    );
-    this.update(run.id, "running");
+    const disable = autoRegister === false && run.autoRegister?.enabled;
+    this.d.db.transaction(() => {
+      // Page numbers/cursors can be stale after a pause: restart unfinished directories.
+      this.d.db.run(
+        "UPDATE drive_sync_folders SET status='pending',cursor='',cursors='[]',error=NULL WHERE run_id=? AND status!='completed'",
+        run.id,
+      );
+      if (disable && run.autoRegister)
+        this.setAutoRegister(run, { ...run.autoRegister, enabled: false });
+      this.setStatus(run, "running", "", {
+        event: "sync.resumed",
+        level: "info",
+        message:
+          (run.status === "partial"
+            ? `重试 ${run.failed} 个未完成目录。`
+            : "继续同步未完成的目录。") + (disable ? "已关闭自动录入。" : ""),
+      });
+    });
     this.launch(accountId);
     return this.current(accountId)!;
   }
@@ -243,13 +423,20 @@ export class DriveSync {
     const task = Promise.resolve()
       .then(() => this.execute(accountId, controller.signal))
       .catch((error) => {
+        if (this.closed) return;
         const run = this.current(accountId);
-        if (run && !this.closed)
-          this.update(
-            run.id,
-            controller.signal.aborted ? "paused" : "blocked",
-            safeMessage(error),
-          );
+        if (!run) return;
+        if (controller.signal.aborted) {
+          this.pauseRun(run, safeMessage(error));
+          return;
+        }
+        this.update(run, "blocked", safeMessage(error), {
+          event: "sync.blocked",
+          level: "error",
+          message:
+            logFailure(error, "同步遇到异常，已停止。") +
+            autoRegisterSummary(run.autoRegister),
+        });
       })
       .finally(() => {
         this.active.delete(accountId);
@@ -258,8 +445,20 @@ export class DriveSync {
     this.active.set(accountId, { controller, task });
     this.d.changed();
   }
+  private pauseRun(
+    run: DriveSyncRun,
+    message = "已暂停，已读取目录保留。点击继续可恢复未完成目录。",
+  ) {
+    this.update(run, "paused", message, {
+      event: "sync.paused",
+      level: "info",
+      message: `已暂停。${progress(run)}`,
+    });
+  }
   private async execute(accountId: string, signal: AbortSignal) {
     const run = this.current(accountId)!;
+    let lastProgressAt = Date.now();
+    let loggedFailures = 0;
     while (!this.closed && !signal.aborted) {
       this.assertIdentity(run);
       const folder = this.d.db.get<Folder>(
@@ -319,7 +518,16 @@ export class DriveSync {
             if (fingerprint) history.push(fingerprint);
             if (result.next) history.push("cursor:" + result.next);
             const time = now();
-            this.d.db.transaction(() => {
+            const loggedAutoRegister = this.d.db.transaction(() => {
+              const autoRegister = run.autoRegister?.enabled
+                ? this.autoRegister(run)
+                : undefined;
+              const previouslySeen = autoRegister?.enabled
+                ? this.d.db.db.prepare(
+                    "SELECT 1 FROM drive_index_entries WHERE account_id=? AND owner_uid=? AND file_id=? AND last_seen=?",
+                  )
+                : undefined;
+              const candidates: (RemoteFile & { path: string })[] = [];
               const put = this.d.db.db
                 .prepare(`INSERT INTO drive_index_entries(account_id,owner_uid,file_id,parent_id,name,path,is_directory,size,last_seen,observed_at,missing)
               VALUES(?,?,?,?,?,?,?,?,?,?,0) ON CONFLICT(account_id,owner_uid,file_id) DO UPDATE SET parent_id=excluded.parent_id,name=excluded.name,path=excluded.path,is_directory=excluded.is_directory,size=excluded.size,last_seen=excluded.last_seen,observed_at=excluded.observed_at,missing=0`);
@@ -336,6 +544,17 @@ export class DriveSync {
                     "网盘返回了无效文件身份或名称。",
                   );
                 const path = folder.path.replace(/\/$/, "") + "/" + file.name;
+                const size =
+                  file.size != null &&
+                  Number.isFinite(file.size) &&
+                  file.size >= 0
+                    ? file.size
+                    : null;
+                if (
+                  previouslySeen &&
+                  !previouslySeen.get(accountId, run.ownerUid, file.id, run.id)
+                )
+                  candidates.push({ ...file, path, size });
                 const knownDirectory = file.isDirectory
                   ? this.d.db.get<{ path: string }>(
                       "SELECT path FROM drive_sync_folders WHERE run_id=? AND file_id=?",
@@ -391,11 +610,7 @@ export class DriveSync {
                   file.name,
                   path,
                   Number(file.isDirectory),
-                  file.size != null &&
-                    Number.isFinite(file.size) &&
-                    file.size >= 0
-                    ? file.size
-                    : null,
+                  size,
                   run.id,
                   time,
                 );
@@ -421,7 +636,34 @@ export class DriveSync {
                 time,
                 run.id,
               );
+              if (!autoRegister || !candidates.length) return false;
+              const registration = registerScannedDriveFiles(
+                this.d.db,
+                {
+                  id: accountId,
+                  uid: run.ownerUid,
+                  provider: account.provider,
+                },
+                folder.path,
+                candidates,
+                time,
+              );
+              const totals = {
+                enabled: true,
+                added: autoRegister.added + registration.added,
+                skipped: autoRegister.skipped + registration.skipped,
+              };
+              this.setAutoRegister(run, totals);
+              const firstBatch = !autoRegister.added && !autoRegister.skipped;
+              if (firstBatch)
+                this.record(run, {
+                  event: "sync.auto_registered",
+                  level: "info",
+                  message: autoRegisterSummary(totals),
+                });
+              return firstBatch;
             });
+            if (loggedAutoRegister) lastProgressAt = Date.now();
           },
           signal,
         );
@@ -436,26 +678,57 @@ export class DriveSync {
           run.id,
           folder.file_id,
         );
-        this.update(run.id, "running", `${folder.path}：${safeMessage(error)}`);
+        const log =
+          loggedFailures < 3
+            ? {
+                event: "sync.folder_failed",
+                level: "warning" as const,
+                message: `目录「${safeMessage(new Error(folder.path)).replace(/\s+/g, " ").slice(0, 180)}」读取失败。${logFailure(error, "")}`,
+              }
+            : undefined;
+        this.update(
+          run,
+          "running",
+          `${folder.path}：${safeMessage(error)}`,
+          log,
+        );
+        if (log) loggedFailures++;
       }
-      if (!this.closed) this.d.changed();
+      if (this.closed) return;
+      if (
+        !signal.aborted &&
+        Date.now() - lastProgressAt >= progressIntervalMs
+      ) {
+        const latest = this.current(accountId)!;
+        if (latest.pending)
+          this.record(latest, {
+            event: "sync.progress",
+            level: "info",
+            message: `正在同步。${progress(latest)}`,
+          });
+        lastProgressAt = Date.now();
+      }
+      this.d.changed();
       await delay(this.d.intervalMs ?? 400 + Math.floor(Math.random() * 601));
     }
     if (this.closed) return;
+    const latest = this.current(accountId)!;
     if (signal.aborted) {
-      this.update(
-        run.id,
-        "paused",
-        "已暂停，已读取目录保留。点击继续可恢复未完成目录。",
-      );
+      this.pauseRun(latest);
       return;
     }
-    const latest = this.current(accountId)!;
     if (latest.failed) {
       this.update(
-        run.id,
+        run,
         "partial",
         `${latest.failed} 个目录未完成。${latest.message} 可重试未完成目录。`,
+        {
+          event: "sync.partial",
+          level: "warning",
+          message:
+            `同步部分完成，${latest.failed} 个目录未完成，可重试。` +
+            autoRegisterSummary(latest.autoRegister),
+        },
       );
       return;
     }
@@ -466,6 +739,13 @@ export class DriveSync {
         run.ownerUid,
         run.id,
       );
+      this.record(run, {
+        event: "sync.completed",
+        level: "info",
+        message:
+          `同步完成，共发现 ${latest.files} 个文件、${latest.folders} 个目录。` +
+          autoRegisterSummary(latest.autoRegister),
+      });
       this.d.db.run(
         "UPDATE drive_sync_runs SET status='completed',completed_at=?,updated_at=?,message='' WHERE id=?",
         now(),
@@ -504,7 +784,24 @@ export class DriveSync {
     }
     const match =
       "EXISTS(SELECT 1 FROM drive_resource_entries l WHERE l.account_id=e.account_id AND l.owner_uid=e.owner_uid AND l.file_id=e.file_id)";
-    const under = `EXISTS(SELECT 1 FROM drive_resource_entries l JOIN drive_index_entries r ON r.account_id=l.account_id AND r.owner_uid=l.owner_uid AND r.file_id=l.file_id AND r.is_directory=1 WHERE l.account_id=e.account_id AND l.owner_uid=e.owner_uid AND substr(e.path,1,length(r.path)+1)=r.path||'/')`;
+    // Compute linked folders once per query. File-level registrations can
+    // leave thousands of links that are irrelevant to ancestor coverage.
+    const linkedFolders = `WITH linked_folders AS MATERIALIZED (
+      SELECT DISTINCT r.path FROM drive_resource_entries l
+      JOIN drive_index_entries r ON r.account_id=l.account_id AND r.owner_uid=l.owner_uid AND r.file_id=l.file_id
+      WHERE l.account_id=? AND l.owner_uid=? AND r.is_directory=1
+    )`;
+    // Only prefixes ending at a path separator can match an ancestor folder.
+    const under = `EXISTS(
+      WITH RECURSIVE separators(position) AS (
+        SELECT instr(e.path,'/')
+        UNION ALL
+        SELECT position+instr(substr(e.path,position+1),'/') FROM separators
+        WHERE position>0 AND instr(substr(e.path,position+1),'/')>0
+      )
+      SELECT 1 FROM separators
+      WHERE position>0 AND substr(e.path,1,position-1) IN (SELECT path FROM linked_folders)
+    )`;
     const state = `CASE WHEN e.missing=1 THEN 'review' WHEN ${match} THEN 'recorded' WHEN ${under} THEN 'review' ELSE 'unrecorded' END`;
     const values: (string | number | null)[] = [account.id, owner];
     let where = "e.account_id=? AND e.owner_uid=?";
@@ -521,11 +818,15 @@ export class DriveSync {
       values.push(input.state);
     }
     const total = this.d.db.get<{ n: number }>(
-      `SELECT count(*) AS n FROM drive_index_entries e WHERE ${where}`,
+      `${linkedFolders} SELECT count(*) AS n FROM drive_index_entries e WHERE ${where}`,
+      account.id,
+      owner,
       ...values,
     )!.n;
     const rows = this.d.db.all<Entry>(
-      `SELECT e.*,(${state}) AS state FROM drive_index_entries e WHERE ${where} ORDER BY e.is_directory DESC,e.name,e.file_id LIMIT ? OFFSET ?`,
+      `${linkedFolders} SELECT e.*,(${state}) AS state FROM drive_index_entries e WHERE ${where} ORDER BY e.is_directory DESC,e.name,e.file_id LIMIT ? OFFSET ?`,
+      account.id,
+      owner,
       ...values,
       pageSize,
       (page - 1) * pageSize,
@@ -556,6 +857,8 @@ export class DriveSync {
       run,
       lastCompleteAt,
       breadcrumbs,
+      autoRegisterSupported: true,
+      autoRegisterIncludesFolders: true,
     };
   }
   async register(input: DriveRegistration) {
@@ -566,6 +869,11 @@ export class DriveSync {
       ...new Map(input.entries.map((e) => [e.fileId, e])).values(),
     ];
     return this.withAccount(input.accountId, async (account, provider) => {
+      const owner = {
+        id: account.id,
+        uid: account.uid!,
+        provider: account.provider,
+      };
       const environment = this.d.environment(account.id);
       const selected = entries.map((inputEntry) => {
         const file = this.d.db.get<Entry>(
@@ -602,14 +910,9 @@ export class DriveSync {
               "INDEX_CHANGED",
               "此文件尚未发现或已失效，请先更新目录。",
             );
-          const old = this.d.db.get<{ resource_id: string }>(
-            "SELECT c.resource_id FROM drive_resource_entries l JOIN copies c ON c.id=l.copy_id WHERE l.account_id=? AND l.owner_uid=? AND l.file_id=? LIMIT 1",
-            account.id,
-            account.uid,
-            item.fileId,
-          );
+          const old = registeredDriveResource(this.d.db, owner, item.fileId);
           if (old) {
-            results.push({ fileId: item.fileId, resourceId: old.resource_id });
+            results.push({ fileId: item.fileId, resourceId: old });
             continue;
           }
           const directory =
@@ -640,47 +943,15 @@ export class DriveSync {
               "DIRECTORY_CHANGED",
               "网盘文件位置或名称已变化，请先更新本地目录。",
             );
-          const resourceId = id("resource"),
-            copyId = id("copy"),
-            time = now();
-          const sourceUrl = ownedFileSource(
-            account.provider,
-            account.id,
-            account.uid!,
-            item.fileId,
-          );
-          this.d.db.transaction(() => {
-            assertResourceUnique(this.d.db, {
-              resourceId,
-              sourceUrl,
+          const path = item.file.path;
+          const resourceId = this.d.db.transaction(() =>
+            writeIndexedDriveResource(this.d.db, owner, {
               title: item.title,
-              provider: account.provider,
-              accountId: account.id,
-            });
-            this.d.db.run(
-              "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,source_kind,created_at,updated_at) VALUES(?,?,?,?,?,'未分类','[]','','owned',?,?)",
-              resourceId,
-              item.title,
-              sourceUrl,
-              item.fileId,
-              account.provider,
-              time,
-              time,
-            );
-            // The copy contains the selected object in its actual parent. Children are not falsely recorded.
-            this.d.db.run(
-              "INSERT INTO copies(id,resource_id,account_id,directory,files,status,owner_uid,verified_at,created_at,updated_at) VALUES(?,?,?,?,?,'recorded',?,?,?,?)",
-              copyId,
-              resourceId,
-              account.id,
               directory,
-              JSON.stringify([{ ...current, path: item.file!.path }]),
-              account.uid,
-              time,
-              time,
-              time,
-            );
-          });
+              file: { ...current, path },
+              time: now(),
+            }),
+          );
           results.push({ fileId: item.fileId, resourceId });
         } catch (error) {
           if (error instanceof AppError && identityCodes.has(error.code))
@@ -698,7 +969,14 @@ export class DriveSync {
   close() {
     for (const [accountId, active] of this.active) {
       const run = this.current(accountId);
-      if (run) this.update(run.id, "interrupted", "同步已中断，请手动继续。");
+      if (run) {
+        const message = "同步已中断，请手动继续。";
+        this.update(run, "interrupted", message, {
+          event: "sync.interrupted",
+          level: "warning",
+          message: message + autoRegisterSummary(run.autoRegister),
+        });
+      }
       active.controller.abort();
     }
     this.closed = true;

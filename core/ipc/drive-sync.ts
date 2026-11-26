@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { HandlerMap, HandlerServices } from "./types";
 const account = z.object({ accountId: z.string().min(1).max(100) });
+const syncMode = account.extend({ autoRegister: z.boolean().optional() });
 export function createDriveSyncHandlers(s: Pick<HandlerServices, "driveSync">) {
   return {
     "driveSync.index": (raw) =>
@@ -17,15 +18,22 @@ export function createDriveSyncHandlers(s: Pick<HandlerServices, "driveSync">) {
           })
           .parse(raw),
       ),
+    "driveSync.logs": (raw) => s.driveSync.logs(account.parse(raw).accountId),
     "driveSync.start": (raw) => {
-      const input = account
+      const input = syncMode
         .extend({ restart: z.boolean().optional() })
         .parse(raw);
-      return s.driveSync.start(input.accountId, input.restart);
+      return s.driveSync.start(
+        input.accountId,
+        input.restart,
+        input.autoRegister,
+      );
     },
     "driveSync.pause": (raw) => s.driveSync.pause(account.parse(raw).accountId),
-    "driveSync.resume": (raw) =>
-      s.driveSync.resume(account.parse(raw).accountId),
+    "driveSync.resume": (raw) => {
+      const input = syncMode.parse(raw);
+      return s.driveSync.resume(input.accountId, input.autoRegister);
+    },
     "driveSync.register": (raw) =>
       s.driveSync.register(
         account

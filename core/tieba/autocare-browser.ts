@@ -1,3 +1,4 @@
+import { tiebaLikeBrowser } from "./like-browser";
 import { modernTiebaSnapshot } from "./modern-page";
 import { errors, type BrowserContext, type Page } from "playwright-core";
 import type { WebsiteAccount } from "../../shared/website-accounts";
@@ -9,6 +10,7 @@ import {
   assertTiebaViewer,
   assertTiebaAccount,
   withTiebaBusinessPage,
+  clickTiebaControl,
 } from "./browser-runtime";
 import type { TiebaAutocareBrowser, TiebaBrowserProfile } from "./types";
 import { tiebaForumDiscoveryBrowser } from "./forum-discovery";
@@ -220,6 +222,7 @@ export function tiebaAutocareBrowser(
   };
   return {
     ...tiebaForumDiscoveryBrowser(profile, options),
+    ...tiebaLikeBrowser(profile),
     resolveForum: (account, expectedUid, input) => {
       const name = normalizeTiebaForumName(input);
       return withAccount(account, expectedUid, (context) =>
@@ -331,7 +334,7 @@ export function tiebaAutocareBrowser(
                 "关注检查点后官网身份、目标或控件已变化，保留原任务供只读核对。",
                 true,
               );
-            await button.click({ timeout: 10000 });
+            await clickTiebaControl(button);
             try {
               await page.waitForFunction(
                 `(()=>{const value=${tiebaAutocarePageScript};return value.challenge||value.login||value.followButtonCount!==1;})()`,
@@ -397,13 +400,14 @@ export function tiebaAutocareBrowser(
           const button = page
             .locator(tiebaSignSelector)
             .filter({ visible: true });
-          if ((await button.count()) !== 1)
+          if ((await button.count()) !== 1 || !(await button.isEnabled()))
             throw new AppError(
               "TIEBA_SIGN_UNAVAILABLE",
               "官网签到控件不唯一，本次未提交。",
             );
           // This must persist the intent and recheck scope before any site mutation.
           await beforeSubmit();
+          let stage = "点击普通签到控件";
           try {
             const finalPage = await snapshot(page);
             const finalReading = parseTiebaForum(finalPage, expectedUid, forum);
@@ -420,7 +424,8 @@ export function tiebaAutocareBrowser(
                 "签到前官网状态已变化，请只读核对原任务。",
                 true,
               );
-            await button.click({ timeout: 10000 });
+            await clickTiebaControl(button);
+            stage = "读取签到结果";
             const until = Date.now() + (options.resultTimeoutMs ?? 12000);
             while (Date.now() < until) {
               const value = await snapshot(page);
@@ -442,6 +447,7 @@ export function tiebaAutocareBrowser(
             ) {
               // The new UI can keep a stale label after a successful mutation.
               // Reload only to read the original result; never click again.
+              stage = "只读重载原签到结果";
               await go(tiebaForumUrl(forum.name));
               after = await settledSnapshot(page, "forum", {
                 followed: true,
@@ -474,7 +480,7 @@ export function tiebaAutocareBrowser(
             }
             throw new AppError(
               "TIEBA_SIGN_UNCERTAIN",
-              "签到提交后未能读取确定结果，请只读核对原任务，不会自动再次签到。",
+              `${stage}${error instanceof errors.TimeoutError ? "超时" : "失败"}，请只读核对原任务，不会自动再次签到。`,
               true,
             );
           }

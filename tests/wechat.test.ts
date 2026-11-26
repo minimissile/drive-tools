@@ -1879,7 +1879,7 @@ test("排版模板随稿保存并由新稿继承，切换不改正文、不调�
     assert.equal(current.templateSupport, true);
     current = await f.send(current);
     const original = structuredClone(current.article);
-    current = await f.save(current, { templateId: "minimal" });
+    current = await f.save(current, { templateId: "ice-blue" });
     assert.equal(current.article.revision, original.revision + 1);
     for (const key of [
       "body",
@@ -1891,28 +1891,28 @@ test("排版模板随稿保存并由新稿继承，切换不改正文、不调�
       "trafficWords",
     ] as const)
       assert.deepEqual(current.article[key], original[key]);
-    const same = await f.save(current, { templateId: "minimal" });
+    const same = await f.save(current, { templateId: "ice-blue" });
     assert.equal(same.article.revision, current.article.revision);
     current = await f.send(same);
     assert.equal(current.article.remote?.draftId, original.remote?.draftId);
     assert.match(
       f.control.payloads.at(-1)!.html,
-      /font-size:17px;line-height:1.95/,
+      /border:1px solid #a9cde2;border-radius:10px;background-color:#eaf5ff/,
     );
     assert.equal(f.control.aiCalls.length, 0);
     current = await f.save(current, { title: "只改标题仍保留模板选择" });
-    assert.equal(current.article.templateId, "minimal");
+    assert.equal(current.article.templateId, "ice-blue");
     const next = await f.invoke("wechat.newEdition", {
       id: current.article.id,
       revision: current.article.revision,
       requestId: randomUUID(),
     });
-    assert.equal(next.article.templateId, "minimal");
+    assert.equal(next.article.templateId, "ice-blue");
     const changed = await f.save(next, { templateId: "classic" });
     assert.equal(changed.article.templateId, "classic");
     assert.equal(
       f.app.wechat.get(current.article.id).article.templateId,
-      "minimal",
+      "ice-blue",
     );
     await assert.rejects(
       f.app.invoke("wechat.save", {
@@ -1934,7 +1934,7 @@ test("排版模板随稿保存并由新稿继承，切换不改正文、不调�
 test("模板送稿取得成功回执后直接完成，旧未知回执仍按当时模板恢复", async () => {
   const f = await fixture();
   try {
-    let current = await f.save(await f.ready(), { templateId: "minimal" });
+    let current = await f.ready();
     f.control.checkpoint = true;
     f.control.afterWrite = async () => {
       throw Error("回读暂未完成");
@@ -1942,10 +1942,12 @@ test("模板送稿取得成功回执后直接完成，旧未知回执仍按当�
     current = await f.send(current);
     assert.equal(current.article.stage, "synced");
     assert.equal(current.article.pendingDraft, null);
-    const expected = f.control.payloads.at(-1)!.html;
+    const expected = wechatHtml(current.article.body, 5, undefined, "minimal");
     assert.match(expected, /font-size:17px;line-height:1.95/);
     f.app.db.setSetting(`wechat:article:v1:${current.article.id}`, {
       ...current.article,
+      templateId: "minimal",
+      typesettingVersion: 5,
       stage: "uncertain",
       pendingAccount: { id: f.publisher.id, uid: f.publisher.uid! },
       pendingDraft: null,
@@ -1958,6 +1960,14 @@ test("模板送稿取得成功回执后直接完成，旧未知回执仍按当�
     assert.equal(verified.article.templateId, "minimal");
     assert.equal(f.control.verifications.at(-1)!.proof.html, expected);
     assert.equal(f.control.writes, 1);
+    const next = await f.invoke("wechat.newEdition", {
+      id: verified.article.id,
+      revision: verified.article.revision,
+      requestId: randomUUID(),
+    });
+    assert.equal(next.article.templateId, "classic");
+    const saved = await f.save(verified, { title: "旧稿继续编辑" });
+    assert.equal(saved.article.templateId, "classic");
   } finally {
     await f.cleanup();
   }
@@ -4554,13 +4564,16 @@ test("冰蓝模板通过能力列表、保存、新稿继承和微信交付全�
   const f = await fixture();
   try {
     const current = await f.ready();
-    assert(current.supportedTemplates?.includes("ice-blue"));
+    assert.deepEqual(current.supportedTemplates, ["classic", "ice-blue"]);
     const saved = await f.save(current, { templateId: "ice-blue" });
     assert.equal(saved.article.body, current.article.body);
     const sent = await f.send(saved);
     assert.equal(sent.article.stage, "synced");
     assert.match(f.control.payloads.at(-1)!.html, /background-color:#f6fcff/);
-    assert.match(f.control.payloads.at(-1)!.html, /border-radius:20px 0/);
+    assert.match(
+      f.control.payloads.at(-1)!.html,
+      /border:1px solid #a9cde2;border-radius:10px/,
+    );
     const clone = await f.invoke("wechat.newEdition", {
       id: sent.article.id,
       revision: sent.article.revision,

@@ -54,6 +54,9 @@ export function ResourceDetail({
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const shareCheck = data!.shareChecks.find((c) => c.copyId === copy.id);
   const account = data!.accounts.find((item) => item.id === copy.accountId);
+  const provider = copy.source?.provider ?? resource.provider;
+  const sourceUrl = copy.source?.url ?? resource.sourceUrl;
+  const sourceKind = copy.source ? "share" : resource.sourceKind;
   const share = copyShareStatus(copy, account, shareCheck);
   const currentCheck =
     shareCheck &&
@@ -146,11 +149,11 @@ export function ResourceDetail({
             <small className="resource-meta">
               <span className="resource-provider">
                 <ProviderIcon
-                  provider={resource.provider}
+                  provider={provider}
                   size="small"
                   decorative
                 />
-                {providerName(resource.provider)}网盘
+                {providerName(provider)}网盘
               </span>
               <span className="resource-meta-separator" aria-hidden="true">
                 ·
@@ -179,7 +182,7 @@ export function ResourceDetail({
               items={[
                 ...copies.map((c) => ({
                   value: c.id,
-                  label: accountLabel(data!.accounts, c.accountId),
+                    label: `${providerName(c.source?.provider ?? resource.provider)} · ${accountLabel(data!.accounts, c.accountId)}`,
                 })),
               ]}
             />
@@ -234,11 +237,11 @@ export function ResourceDetail({
           {copy.shareId &&
           copy.shareUrl &&
           copy.shareOwnerUid &&
-          ["baidu", "quark"].includes(resource.provider) ? (
+          ["baidu", "quark"].includes(provider) ? (
             <SharePassphrase
               key={`${copy.id}:${copy.shareVersion}`}
               target={{ copyId: copy.id }}
-              provider={resource.provider}
+              provider={provider}
             />
           ) : null}
           <div className="resource-share-status" data-kind={share.kind}>
@@ -287,22 +290,22 @@ export function ResourceDetail({
         <details className="private-source">
           <summary>内部追溯信息</summary>
           <small>
-            {isIndexedOwnSource(resource.sourceUrl)
+            {isIndexedOwnSource(sourceUrl)
               ? "本人网盘目录登记；对外交付前创建并核验分享。"
-              : resource.sourceKind === "owned"
+              : sourceKind === "owned"
                 ? "已录入的自有资源链接；对外交付前核验所属账号。"
                 : "来源链接仅作内部记录，禁止用于对外分发。"}
           </small>
           <p>
-            {isIndexedOwnSource(resource.sourceUrl)
+            {isIndexedOwnSource(sourceUrl)
               ? copy.files.map((file) => file.name).join("、")
-              : resource.sourceUrl}
+              : sourceUrl}
           </p>
           <small>保存目录</small>
           <p>
-            {resource.sourceKind === "owned" &&
+            {sourceKind === "owned" &&
             !copy.folderId &&
-            !isIndexedOwnSource(resource.sourceUrl)
+            !isIndexedOwnSource(sourceUrl)
               ? "未记录原网盘目录；直接入库不创建目录。"
               : copy.directory}
           </p>

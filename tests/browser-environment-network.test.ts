@@ -196,8 +196,39 @@ test("临时页清理租约不触发环境准备或网络探测，也不撤销�
   const env = await f.add();
   const revision = f.environments.get(env.id).revision;
   f.setFailure("清理不应启动浏览器探测网络");
-  assert.equal(await f.environments.controlWindow(env.id, async () => "cleaned", revision, { invalidate: false }), "cleaned");
+  assert.equal(
+    await f.environments.controlWindow(
+      env.id,
+      async () => "cleaned",
+      revision,
+      { invalidate: false },
+    ),
+    "cleaned",
+  );
   assert.equal(f.environments.get(env.id).revision, revision);
   await f.environments.controlWindow(env.id, async () => true, revision);
   assert.equal(f.environments.get(env.id).revision, revision + 1);
+});
+
+test("贴吧共享环境的出口检查允许复用可见窗口，单任务与队列一致；知乎约束不变", async (t) => {
+  const f = await fixture(t);
+  const env = await f.add();
+  const tieba = f.accounts.add("tieba", "贴吧", env.id);
+  const zhihu = f.accounts.add("zhihu", "知乎", env.id);
+  const modes: (boolean | undefined)[] = [];
+  f.environments.setExternalNetworkChecker(async (_id, headless) => {
+    modes.push(headless);
+    return "203.0.113.10";
+  });
+  await f.environments.run({ kind: "website", id: tieba.id }, async () => {});
+  await f.environments.runMany(
+    [{ kind: "website", id: tieba.id }],
+    async () => {},
+  );
+  assert.deepEqual(modes, [false, false]);
+  await f.environments.runMany(
+    [{ kind: "website", id: zhihu.id }],
+    async () => {},
+  );
+  assert.deepEqual(modes, [false, false, true]);
 });

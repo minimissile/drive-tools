@@ -12,6 +12,12 @@ export type DriveSyncStatus =
   | "partial"
   | "completed"
   | "blocked";
+export interface DriveSyncAutoRegister {
+  enabled: boolean;
+  added: number;
+  skipped: number;
+  requiresRescan?: true;
+}
 export interface DriveSyncRun {
   id: string;
   accountId: string;
@@ -26,6 +32,13 @@ export interface DriveSyncRun {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  autoRegister?: DriveSyncAutoRegister;
+}
+export interface DriveSyncLog {
+  id: number;
+  at: string;
+  level: "info" | "warning" | "error";
+  message: string;
 }
 export type DriveIndexState = "recorded" | "unrecorded" | "review";
 export interface DriveIndexEntry extends RemoteFile {
@@ -52,6 +65,8 @@ export interface DriveIndexPage {
   run: DriveSyncRun | null;
   lastCompleteAt: string | null;
   breadcrumbs: { id: string; name: string }[];
+  autoRegisterSupported?: boolean;
+  autoRegisterIncludesFolders?: true;
 }
 export interface DriveRegistration {
   entries: { fileId: string; title: string }[];
@@ -59,12 +74,16 @@ export interface DriveRegistration {
 }
 export interface DriveSyncContract {
   "driveSync.index": { args: DriveIndexQuery; value: DriveIndexPage };
+  "driveSync.logs": { args: { accountId: string }; value: DriveSyncLog[] };
   "driveSync.start": {
-    args: { accountId: string; restart?: boolean };
+    args: { accountId: string; restart?: boolean; autoRegister?: boolean };
     value: DriveSyncRun;
   };
   "driveSync.pause": { args: { accountId: string }; value: DriveSyncRun };
-  "driveSync.resume": { args: { accountId: string }; value: DriveSyncRun };
+  "driveSync.resume": {
+    args: { accountId: string; autoRegister?: boolean };
+    value: DriveSyncRun;
+  };
   "driveSync.register": {
     args: DriveRegistration;
     value: { fileId: string; resourceId?: string; error?: string }[];

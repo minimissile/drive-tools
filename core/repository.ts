@@ -79,10 +79,20 @@ export class Repository {
     return this.account(row);
   }
   copy(row: Row): ResourceCopy {
+    const source = row.source_link_id ? this.db.get<{
+      linkId: string; provider: Provider; url: string; needsCode: number;
+    }>(
+      "SELECT id linkId,provider,url,needs_code needsCode FROM resource_drive_links WHERE id=? AND resource_id=?",
+      row.source_link_id,
+      row.resource_id,
+    ) : undefined;
+    if (row.source_link_id && !source)
+      throw new AppError("RESOURCE_SOURCE_MISSING", "副本补充来源已丢失，请核对本地记录。");
     return {
       id: row.id,
       resourceId: row.resource_id,
       accountId: row.account_id,
+      ...(source ? { source: { ...source, needsCode: !!source.needsCode } } : {}),
       directory: row.directory,
       folderId: row.folder_id,
       files: parseJson(row.files, []),
@@ -115,6 +125,11 @@ export class Repository {
       searchKeywords: parseJson<string[]>(row.search_keywords, []),
       summary: row.summary,
       coverId: row.cover_id,
+      imageIds: [row.cover_id, ...parseJson<string[]>(row.additional_image_ids, [])].filter(Boolean),
+      driveLinkProviders: this.db.all<{ provider: Provider }>(
+        "SELECT provider FROM resource_drive_links WHERE resource_id=? ORDER BY provider",
+        row.id,
+      ).map((link) => link.provider),
       revision: row.revision,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -181,14 +196,16 @@ export class Repository {
       values.push(input.category);
     }
     if (input.provider && input.provider !== "all") {
-      where.push("r.provider=?");
-      values.push(input.provider);
+      where.push("(r.provider=? OR EXISTS(SELECT 1 FROM resource_drive_links l WHERE l.resource_id=r.id AND l.provider=?))");
+      values.push(input.provider, input.provider);
     }
     if (input.accountId !== "all") {
-      where.push(
-        "EXISTS(SELECT 1 FROM copies c WHERE c.resource_id=r.id AND c.account_id=?)",
-      );
+      const provider = input.provider === "all" ? undefined : input.provider;
+      where.push(provider
+        ? "EXISTS(SELECT 1 FROM copies c JOIN accounts a ON a.id=c.account_id WHERE c.resource_id=r.id AND c.account_id=? AND a.provider=?)"
+        : "EXISTS(SELECT 1 FROM copies c WHERE c.resource_id=r.id AND c.account_id=?)");
       values.push(input.accountId);
+      if (provider) values.push(provider);
     }
     const filter = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const total = this.db.get<{ n: number }>(

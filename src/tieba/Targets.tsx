@@ -28,6 +28,7 @@ import { AddForums } from "./AddForums";
 import { tiebaAccountLabel, tiebaAccountName } from "./account-label";
 
 export function TiebaTargets({
+  selectionOnly = false,
   snapshot: s,
   workspace,
   selected,
@@ -36,7 +37,6 @@ export function TiebaTargets({
   stale,
   onSelection,
   onSync,
-  onStart,
   onPause,
   onSave,
   onReset,
@@ -47,6 +47,7 @@ export function TiebaTargets({
   onVerifyAccount,
   onRefreshProfiles,
 }: {
+  selectionOnly?: boolean;
   snapshot: TiebaAutocareSnapshot;
   workspace: string;
   selected: string[];
@@ -55,7 +56,6 @@ export function TiebaTargets({
   stale: boolean;
   onSelection(ids: string[]): void;
   onSync(accountId: string): void;
-  onStart(accountIds: string[]): void;
   onPause(target: TiebaAutocareTarget): void;
   onSave(): void;
   onReset(): void;
@@ -106,7 +106,9 @@ export function TiebaTargets({
     <Panel
       className="tieba-targets"
       title="目标贴吧"
-      extra={<small>已选 {selected.length} / 300 个 · 每吧每日签到一次</small>}
+      extra={
+        <small>已选 {selected.length} / 300 个 · 选择参与自动化的贴吧</small>
+      }
     >
       <div className="tieba-target-tools">
         <Field label="贴吧账号">
@@ -130,15 +132,6 @@ export function TiebaTargets({
             }}
           />
         </Field>
-        <Button
-          primary
-          disabled={busy || !s.accounts.length || changed}
-          data-testid="tieba-start-followed"
-          title="逐个核实全部贴吧账号，将已关注且未手动暂停的贴吧加入签到"
-          onClick={() => onStart(s.accounts.map((item) => item.id))}
-        >
-          全部账号同步并启动
-        </Button>
         <Button
           disabled={busy || !account}
           data-testid="tieba-verify-account"
@@ -404,29 +397,31 @@ export function TiebaTargets({
           />
         </>
       )}
-      <div className="tieba-target-footer">
-        <span className="muted">
-          {changed ? "目标选择尚未保存" : "已保存的目标会在开启后安排签到"}
-        </span>
-        <div className="row compact">
-          <Button
-            size="compact"
-            disabled={busy || (!changed && !stale)}
-            onClick={onReset}
-          >
-            恢复已保存设置
-          </Button>
-          <Button
-            primary
-            size="compact"
-            disabled={busy || !changed || stale}
-            onClick={onSave}
-            data-testid="tieba-save"
-          >
-            {s.enabled ? "保存并应用" : "保存目标"}
-          </Button>
+      {!selectionOnly ? (
+        <div className="tieba-target-footer">
+          <span className="muted">
+            {changed ? "目标选择尚未保存" : "已保存的目标会在开启后安排签到"}
+          </span>
+          <div className="row compact">
+            <Button
+              size="compact"
+              disabled={busy || (!changed && !stale)}
+              onClick={onReset}
+            >
+              恢复已保存设置
+            </Button>
+            <Button
+              primary
+              size="compact"
+              disabled={busy || !changed || stale}
+              onClick={onSave}
+              data-testid="tieba-save"
+            >
+              {s.enabled ? "保存并应用" : "保存目标"}
+            </Button>
+          </div>
         </div>
-      </div>
+      ) : null}
     </Panel>
   );
 }

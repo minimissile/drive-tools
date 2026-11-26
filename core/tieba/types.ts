@@ -1,3 +1,4 @@
+import type { TiebaLikeReading } from "../../shared/tieba-actions";
 import type { BrowserContext } from "playwright-core";
 import type { WebsiteAccount } from "../../shared/website-accounts";
 import type { TiebaForumDiscoveryResult } from "../../shared/tieba-forum-discovery";
@@ -13,6 +14,21 @@ export type TiebaBrowserProfile = <T>(
 ) => Promise<T>;
 
 export interface TiebaAutocareBrowser {
+  likePost?(
+    account: WebsiteAccount,
+    expectedUid: string,
+    forum: TiebaForumReading,
+    excludedUids: string[],
+    excludedThreads: string[],
+    beforeSubmit: (post: TiebaLikeReading) => Promise<void>,
+  ): Promise<TiebaLikeReading | null>;
+  readLike?(
+    account: WebsiteAccount,
+    expectedUid: string,
+    forum: TiebaForumReading,
+    threadId: string,
+  ): Promise<TiebaLikeReading>;
+
   /** Bounded, explicit, read-only discovery; does not add or follow candidates. */
   findForums?(
     account: WebsiteAccount,

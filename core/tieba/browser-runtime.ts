@@ -5,11 +5,35 @@ import {
 } from "../browser-page-lifecycle";
 import { captureTiebaModernPage } from "./modern-page";
 import { tiebaPageError } from "./page-errors";
-import type { BrowserContext, Page } from "playwright-core";
+import type { BrowserContext, Page, Locator } from "playwright-core";
 import type { WebsiteAccount } from "../../shared/website-accounts";
 import { AppError } from "../errors";
 import { officialBrowserPage } from "../browser-pages";
 import { verifyBitTieba } from "./browser-session";
+
+/** A background forum can stop producing the animation frames used by a
+ * coordinate click. Recheck the ordinary control in the current document and
+ * invoke its DOM click once, without activating the user's browser window. */
+export async function clickTiebaControl(control: Locator) {
+  await control.evaluate(
+    (element) => {
+      const node = element as HTMLElement & { disabled?: boolean };
+      const style = getComputedStyle(node);
+      if (
+        !node.isConnected ||
+        !node.getClientRects().length ||
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        node.disabled ||
+        node.getAttribute("aria-disabled") === "true"
+      )
+        throw new Error("官网操作控件已不可用，未点击。");
+      node.click();
+    },
+    undefined,
+    { timeout: 10000 },
+  );
+}
 
 export async function assertTiebaViewer(
   context: BrowserContext,

@@ -472,9 +472,10 @@ export class QuarkProvider implements DriveProvider {
       total,
     };
   }
-  private async ownRows(account: Account) {
+  private async ownRows(account: Account, shareId?: string, complete = false) {
     const rows: JsonObject[] = [];
-    for (let page = 1; page <= 30; page++) {
+    const seenPages = new Set<string>();
+    for (let page = 1; complete || page <= 30; page++) {
       const result = await this.request(account, "share/mypage/detail", {
         _page: page,
         _size: 100,
@@ -489,9 +490,52 @@ export class QuarkProvider implements DriveProvider {
           "未能读取本人分享记录，不能核验分享归属。",
         );
       rows.push(...data);
+      if (shareId && data.some((row) => String(row.share_id) === shareId)) break;
+      if (complete) {
+        const total = numericCount(result.metadata?._total ?? result.metadata?.total);
+        const fingerprint = JSON.stringify(data.map((row) => [row.share_id, row.created_at, row.title]));
+        if ((data.length && seenPages.has(fingerprint)) ||
+            (!data.length && total != null && rows.length < total))
+          throw new AppError("INCOMPLETE_SHARE_HISTORY", "本人分享记录分页未读完，等待核对后再补录。");
+        if (total != null ? rows.length >= total : data.length < 100) break;
+        seenPages.add(fingerprint);
+        continue;
+      }
       if (data.length < 100) break;
     }
     return rows;
+  }
+  async ownShareLookup(account: Account) {
+    const byId = new Map<string, JsonObject>();
+    const byFirstFile = new Map<string, JsonObject[]>();
+    const withoutFiles: JsonObject[] = [];
+    for (const row of await this.ownRows(account, undefined, true)) {
+      if (!row.share_id || (row.status != null && Number(row.status) !== 1)) continue;
+      byId.set(String(row.share_id), row);
+      const ids = row.fid_list ?? row.fids ?? row.file_list?.map((file: JsonObject) => file.fid);
+      if (Array.isArray(ids) && ids.length) {
+        for (const fid of ids.map(String)) {
+          const known = byFirstFile.get(fid) ?? [];
+          known.push(row);
+          byFirstFile.set(fid, known);
+        }
+      } else if (row.first_fid && Number(row.file_num) === 1) {
+        const fid = String(row.first_fid);
+        const known = byFirstFile.get(fid) ?? [];
+        known.push(row);
+        byFirstFile.set(fid, known);
+      } else withoutFiles.push(row);
+    }
+    return async (files: RemoteFile[], shareId?: string) => {
+      const exact = shareId ? byId.get(shareId) : undefined;
+      const candidates = shareId
+        ? exact ? [exact] : []
+        : [...(byFirstFile.get(files[0]?.id ?? "") ?? []), ...withoutFiles];
+      for (const row of candidates)
+        if (await this.containsFiles(account, row, files))
+          return this.shareInfo(account, String(row.share_id));
+      return null;
+    };
   }
   private matches(row: JsonObject, files: RemoteFile[]) {
     if (
@@ -688,7 +732,7 @@ export class QuarkProvider implements DriveProvider {
       );
       await onCreated?.(share);
       const row = options
-        ? (await this.ownRows(account)).find(
+        ? (await this.ownRows(account, share.id)).find(
             (item) => String(item.share_id) === share.id,
           )
         : undefined;
@@ -894,7 +938,7 @@ export class QuarkProvider implements DriveProvider {
     return null;
   }
   async verifyShare(account: Account, shareId: string, files: RemoteFile[]) {
-    const row = (await this.ownRows(account)).find(
+    const row = (await this.ownRows(account, shareId)).find(
       (r) => String(r.share_id) === shareId,
     );
     return !!row && this.containsFiles(account, row, files);

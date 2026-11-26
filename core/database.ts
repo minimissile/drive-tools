@@ -23,7 +23,7 @@ import {
 export const now = () => new Date().toISOString();
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const json = (v: unknown) => JSON.stringify(v);
-export const databaseSchemaVersion = 45;
+export const databaseSchemaVersion = 48;
 export const parseJson = <T>(value: unknown, fallback: T): T => {
   try {
     return JSON.parse(String(value)) as T;
@@ -91,12 +91,49 @@ export class Database {
     if (version > databaseSchemaVersion)
       throw new Error("数据库来自更新版本，请升级盘序后打开。");
     if (version === databaseSchemaVersion) return;
+    if (version === 47) {
+      this.transaction(() => {
+        if (!this.get("SELECT 1 FROM pragma_table_info('copies') WHERE name='source_link_id'"))
+          this.db.exec("ALTER TABLE copies ADD COLUMN source_link_id TEXT REFERENCES resource_drive_links(id);");
+        this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS copies_supplemental_source ON copies(source_link_id) WHERE source_link_id IS NOT NULL; PRAGMA user_version=48;");
+      });
+      return;
+    }
+    if (version === 46) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS resource_drive_links(
+            id TEXT PRIMARY KEY,
+            resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            url TEXT NOT NULL,
+            needs_code INTEGER NOT NULL,
+            UNIQUE(resource_id,provider)
+          );
+          CREATE INDEX IF NOT EXISTS resource_drive_links_by_provider
+            ON resource_drive_links(provider,resource_id);
+          PRAGMA user_version=47;
+        `);
+      });
+      this.migrate(false);
+      return;
+    }
+    if (version === 45) {
+      this.transaction(() => {
+        if (!this.get("SELECT 1 FROM pragma_table_info('resources') WHERE name='additional_image_ids'"))
+          this.db.exec("ALTER TABLE resources ADD COLUMN additional_image_ids TEXT NOT NULL DEFAULT '[]';");
+        this.db.exec("PRAGMA user_version=46;");
+      });
+      this.migrate(false);
+      return;
+    }
     if (version === 44) {
       // Development clients may already have created the initial sync tables.
       this.transaction(() => {
         this.db.exec("CREATE INDEX IF NOT EXISTS drive_index_seen ON drive_index_entries(account_id,owner_uid,last_seen,is_directory); DROP INDEX IF EXISTS drive_index_parent; CREATE INDEX drive_index_parent ON drive_index_entries(account_id,owner_uid,parent_id,is_directory DESC,name,file_id);");
         this.db.exec("PRAGMA user_version=45;");
       });
+      this.migrate(false);
       return;
     }
     if (version === 43) {

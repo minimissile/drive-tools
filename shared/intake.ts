@@ -7,6 +7,7 @@ export const defaultResourceCategories = [
   "其他",
 ];
 export interface IntakeOptions {
+  imageLimit?: number;
   categories: string[];
   directories: string[];
 }

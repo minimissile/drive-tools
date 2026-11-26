@@ -3,7 +3,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { wechatTemplateIds } from "../shared/wechat-templates.ts";
-import { wechatArticleImages } from "../shared/wechat-markup.ts";
 
 /** Page-scoped business transport only; no shared drafts, AI calls, or remote writes. */
 export async function run({ page, windowId }) {
@@ -16,16 +15,16 @@ export async function run({ page, windowId }) {
     return window.panxu.invoke("wechat.get", { id: list[0].id });
   });
   const detail = structuredClone(source);
-  const image = wechatArticleImages(source.article.body)[0]?.url;
+  const resourceUrl =
+    "https://pan.quark.cn/s/template123WithALongShareAddress?pwd=AB12";
   const originalBody = [
     "这份资料整理了使用范围与操作说明，阅读时请保留**已有条件**，根据自己的实际需要查阅。",
     "## 阅读与使用步骤",
     "先查看资料介绍，再按已有顺序阅读相关内容。",
     "1. 阅读资料说明\n2. 核对适用范围\n3. 保留必要提醒",
-    ...(image ? [`![内容配图](${image})`] : []),
     "> 结果仅供参考，请保留原文的条件与限制。",
     "## 资料获取",
-    "入口链接：[查看资源](https://pan.quark.cn/s/template123?pwd=AB12)",
+    `入口链接：[查看资源](${resourceUrl}) 提取码：AB12`,
   ].join("\n\n");
   Object.assign(detail.article, {
     id: `template-${windowId}`,
@@ -33,7 +32,7 @@ export async function run({ page, windowId }) {
     body: originalBody,
     author: "",
     coverUrl: "https://mmbiz.qpic.cn/cover.png",
-    templateId: undefined,
+    templateId: "minimal",
     readMore: undefined,
     remote: null,
     pendingAccount: null,
@@ -43,8 +42,8 @@ export async function run({ page, windowId }) {
     links: [
       {
         id: "template-link",
-        url: "https://pan.quark.cn/s/template123",
-        ownUrl: "https://pan.quark.cn/s/template123",
+        url: resourceUrl,
+        ownUrl: resourceUrl,
         copyId: "template-copy",
         provider: "quark",
       },
@@ -66,7 +65,7 @@ export async function run({ page, windowId }) {
     {
       linkId: "template-link",
       title: "资料附件",
-      driveUrl: "https://pan.quark.cn/s/template123",
+      driveUrl: resourceUrl,
       landingUrl: null,
       redirectUrl: null,
       landingIssue: "尚未发布落地页",
@@ -141,20 +140,25 @@ export async function run({ page, windowId }) {
   const body = editor.getByRole("textbox", { name: "文章正文", exact: true });
   const choose = async (control, name) => {
     await control.click();
+    await page.getByRole("option", { name, exact: true }).waitFor();
+    assert.deepEqual(await page.getByRole("option").allTextContents(), [
+      "清爽卡片",
+      "冰蓝图文",
+    ]);
     await page.getByRole("option", { name, exact: true }).click();
   };
   await selector.waitFor();
   assert.equal(await selector.getAttribute("data-value"), "classic");
   const edited = originalBody + "\n\n保留这句未保存的补充说明。";
   await body.fill(edited);
-  await choose(selector, "简约阅读");
+  await choose(selector, "冰蓝图文");
   const preview = editor.locator("article.wechat-preview");
   await preview.waitFor();
   assert.equal(
     await preview
       .locator(":scope > section")
       .evaluate((node) => getComputedStyle(node).fontSize),
-    "17px",
+    "14px",
   );
   assert.match(await preview.innerText(), /保留这句未保存/);
   assert.equal(calls.length, 0, "换模板不调用AI、不写业务数据");
@@ -164,7 +168,6 @@ export async function run({ page, windowId }) {
       .evaluate((node) => node.scrollWidth > node.clientWidth),
     false,
   );
-  await page.screenshot({ path: join(out, "minimal-editor.png") });
   await editor.getByRole("button", { name: "全屏预览", exact: true }).click();
   const comparison = page.getByRole("dialog", {
     name: "全屏预览",
@@ -194,14 +197,6 @@ export async function run({ page, windowId }) {
     "16px",
   );
   await page.screenshot({ path: join(out, "classic-comparison.png") });
-  await choose(fullSelector, "简约阅读");
-  assert.equal(
-    await current
-      .locator("article.wechat-preview > section")
-      .evaluate((node) => getComputedStyle(node).fontSize),
-    "17px",
-  );
-  await page.screenshot({ path: join(out, "minimal-comparison.png") });
   await choose(fullSelector, "冰蓝图文");
   assert.equal(
     await current
@@ -209,19 +204,18 @@ export async function run({ page, windowId }) {
       .evaluate((node) => getComputedStyle(node).backgroundColor),
     "rgb(246, 252, 255)",
   );
-  assert.equal(
-    await current
-      .locator("article.wechat-preview > section > section")
-      .first()
-      .evaluate((node) => getComputedStyle(node).borderTopLeftRadius),
-    "20px",
+  const sections = current.locator(
+    "article.wechat-preview > section > section",
   );
-  assert.equal(
+  assert.deepEqual(
     await current
       .locator("article.wechat-preview h3 > span:not([aria-hidden])")
       .first()
-      .evaluate((node) => getComputedStyle(node).backgroundColor),
-    "rgb(45, 105, 156)",
+      .evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.backgroundColor, style.borderRadius];
+      }),
+    ["rgb(45, 105, 156)", "0px"],
   );
   assert.equal(
     await sourceSection
@@ -231,9 +225,51 @@ export async function run({ page, windowId }) {
   );
   assert.equal(calls.length, 0);
   await page.screenshot({ path: join(out, "ice-blue-comparison.png") });
-  await current
-    .getByText("夸克网盘资源", { exact: true })
-    .scrollIntoViewIfNeeded();
+  const resourceTitle = current.getByText("夸克网盘资源", { exact: true });
+  const card = resourceTitle.locator("..");
+  await card.scrollIntoViewIfNeeded();
+  const frame = (node) => {
+    const style = getComputedStyle(node);
+    return [style.borderWidth, style.borderColor, style.borderRadius];
+  };
+  assert.deepEqual(await sections.first().evaluate(frame), [
+    "1px",
+    "rgb(108, 161, 195)",
+    "20px 0px",
+  ]);
+  assert.deepEqual(await sections.last().evaluate(frame), [
+    "1px",
+    "rgb(108, 161, 195)",
+    "0px",
+  ]);
+  assert.deepEqual(await card.evaluate(frame), [
+    "1px",
+    "rgb(169, 205, 226)",
+    "10px",
+  ]);
+  assert.deepEqual(
+    await resourceTitle.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.backgroundColor, style.color, style.borderRadius];
+    }),
+    ["rgb(45, 105, 156)", "rgb(255, 255, 255)", "6px"],
+  );
+  const link = card.getByRole("link", { name: resourceUrl, exact: true });
+  assert.equal(await link.getAttribute("href"), resourceUrl);
+  assert.equal(
+    await link.evaluate((node) => getComputedStyle(node).fontWeight),
+    "600",
+  );
+  assert.equal(
+    await card.getByText("提取码：AB12", { exact: true }).count(),
+    1,
+  );
+  assert.equal(
+    await card
+      .getByText("点击文末“阅读原文”打开资源", { exact: true })
+      .evaluate((node) => getComputedStyle(node).fontWeight),
+    "700",
+  );
   await page.screenshot({ path: join(out, "ice-blue-resources.png") });
   await comparison
     .getByRole("button", { name: "退出全屏", exact: true })
@@ -266,7 +302,7 @@ export async function run({ page, windowId }) {
         .querySelector(".wechat-template-control .select-control")
         ?.getAttribute("data-value") === "classic",
   );
-  await choose(selector, "简约阅读");
+  await choose(selector, "冰蓝图文");
   const count = calls.length;
   await editor
     .getByRole("button", { name: "保存本地草稿", exact: true })
@@ -276,7 +312,7 @@ export async function run({ page, windowId }) {
     .filter({ hasText: "排版模板更新尚未加载" })
     .waitFor();
   assert.equal(calls.length, count, "旧后端不能静默丢掉新模板字段");
-  assert.equal(await selector.getAttribute("data-value"), "minimal");
+  assert.equal(await selector.getAttribute("data-value"), "ice-blue");
   await editor.getByRole("button", { name: "再发一篇", exact: true }).click();
   await editor
     .getByRole("alert")
@@ -304,13 +340,13 @@ export async function run({ page, windowId }) {
     windowId,
     out,
     checks: [
-      "旧稿默认清爽卡片",
+      "旧简约阅读稿件默认清爽卡片，两处菜单均移除旧项",
       "切换自动预览且无AI或业务调用",
       "1366×768工具栏不溢出",
       "全屏中可切换且原文列保持原样",
       "模板与未保存正文切换不丢失",
       "保存与刷新恢复选择",
-      "冰蓝模板导语、标题和资源分区",
+      "冰蓝导语、正文和分节标题沿用原样式，资源卡使用等宽细边",
       "正文和全屏预览保持同一模板",
       "旧后端按支持列表拦截新增模板",
       "旧后端保存前明确拦截且保留选择",

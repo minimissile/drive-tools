@@ -1,3 +1,8 @@
+import {
+  selectedTiebaActions,
+  type TiebaLikeReading,
+  type TiebaCareAction,
+} from "../../shared/tieba-actions";
 import { latestTiebaSubmission } from "../tieba/submissions";
 import {
   tiebaRunDurationMs as runDuration,
@@ -16,6 +21,7 @@ import { AppError, safeMessage } from "../errors";
 import { RuntimeLog } from "../runtime-log";
 import {
   tiebaAutocareConfigSchema,
+  type tiebaAutocareApplySchema,
   tiebaAutocareObserveSchema,
   tiebaAutocareFollowSchema,
   tiebaAutocareAddSchema,
@@ -224,20 +230,64 @@ export class TiebaAutocare {
     const tasks = this.store
       .tasks()
       .slice(0, 500)
-      .map(({ stamp: _stamp, configSnapshot: _config, ...task }) => task);
+      .map(
+        ({
+          stamp: _stamp,
+          configSnapshot: _config,
+          reconcileAttempts: _attempts,
+          reconcileAfter: _after,
+          ...task
+        }) => task,
+      );
     const today = tasks.filter((task) => task.day === day);
+    const done = (task: TiebaAutocareSnapshot["tasks"][number]) =>
+      ["verified", "already_signed", "skipped"].includes(task.status);
+    const requested = selectedTiebaActions(state.config);
     const completed =
       state.config.targetIds.length > 0 &&
-      state.config.targetIds.every((targetId) =>
-        today.some(
-          (task) =>
-            task.targetId === targetId &&
-            ["verified", "already_signed"].includes(task.status),
-        ),
+      requested.every((action) =>
+        action === "checkin"
+          ? state.config.targetIds.every((id) =>
+              today.some(
+                (task) =>
+                  task.targetId === id && task.action === action && done(task),
+              ),
+            )
+          : [
+              ...new Set(
+                targets
+                  .filter((t) => state.config.targetIds.includes(t.id))
+                  .map((t) => t.uid),
+              ),
+            ].every((uid) =>
+              today.some(
+                (task) =>
+                  task.uid === uid && task.action === action && done(task),
+              ),
+            ),
       );
     const issues = today.some((task) =>
       ["uncertain", "failed"].includes(task.status),
     );
+    const unknownAccounts = new Set(
+      today
+        .filter(
+          (task) =>
+            task.status === "uncertain" &&
+            state.authorities.some((a) => a.uid === task.uid),
+        )
+        .map((task) => task.uid),
+    ).size;
+    const autoRecoverable = this.store
+      .tasks()
+      .some(
+        (task) =>
+          task.day === day &&
+          task.status === "uncertain" &&
+          task.submittedAt &&
+          (task.reconcileAttempts ?? 0) < 3 &&
+          state.authorities.some((a) => a.uid === task.uid),
+      );
     const pending = today.some((task) =>
       ["pending", "running", "submitting"].includes(task.status),
     );
@@ -247,29 +297,37 @@ export class TiebaAutocare {
         (id) => targets.find((target) => target.id === id)?.paused,
       );
     const message = this.adding.size
-      ? "正在逐项添加贴吧并核实关注，签到范围保持原选择"
+      ? "正在逐项添加贴吧并核实关注，执行范围保持原选择"
       : this.disposed
         ? "调度已停止"
         : !state.enabled
           ? this.isBusy
-            ? "正在收尾，停止新的签到提交"
-            : "已关闭，开启后按所选目标自动签到"
+            ? "正在收尾，停止新的操作提交"
+            : "已停止，勾选操作后保存并开启"
           : completed
-            ? "今日所选目标均已签到，等待下一业务日"
-            : issues
-              ? "部分任务需要处理，请查看具体原因，其他目标继续执行"
-              : allPaused
-                ? "所选目标均已暂停，请在目标行查看原因并恢复"
-                : this.isBusy
-                  ? "正在核对账号和贴吧签到结果"
-                  : state.run &&
-                      (state.run.status !== "running" ||
-                        Date.parse(state.run.deadlineAt) <= this.time())
-                    ? "本轮已结束，未完成任务保留原因，不集中补签"
-                    : pending
-                      ? "等待下一项签到任务"
-                      : "本轮签到已完成，等待下一业务日";
+            ? requested.length === 1 && requested[0] === "checkin"
+              ? "今日所选目标均已签到，等待下一业务日"
+              : "今日所选操作已完成，等待下一业务日"
+            : unknownAccounts
+              ? `${unknownAccounts} 个账号有原结果待核对；${autoRecoverable ? "自动只读核对中" : "请在任务与历史核对原结果"}，其他可用签到继续`
+              : issues
+                ? "部分任务需要处理，请查看具体原因，其他目标继续执行"
+                : allPaused
+                  ? "所选目标均已暂停，请在目标行查看原因并恢复"
+                  : this.isBusy
+                    ? "正在核对账号和所选操作结果"
+                    : state.run &&
+                        (state.run.status !== "running" ||
+                          Date.parse(state.run.deadlineAt) <= this.time())
+                      ? "本轮已结束，未完成任务保留原因，不集中补签"
+                      : pending
+                        ? "等待下一项自动化任务"
+                        : "本轮操作已完成，等待下一业务日";
     return {
+      availableActions:
+        this.d.ports.tieba?.likePost && this.d.ports.tieba?.readLike
+          ? ["checkin", "like"]
+          : ["checkin"],
       revision: state.revision,
       enabled: state.enabled,
       busy: this.isBusy,
@@ -281,6 +339,64 @@ export class TiebaAutocare {
       logs: this.logs.read({}),
       message,
     };
+  }
+  apply(input: z.infer<typeof tiebaAutocareApplySchema>) {
+    this.assertAlive();
+    const state = this.revision(input.revision),
+      config = tiebaAutocareConfigSchema.parse(input.config);
+    if (!config.targetIds.length)
+      throw new AppError(
+        "TIEBA_TARGET_REQUIRED",
+        "请选择要自动化的账号或贴吧。",
+      );
+    if (
+      selectedTiebaActions(config).includes("like") &&
+      (!this.browser().likePost || !this.browser().readLike)
+    )
+      throw new AppError(
+        "TIEBA_LIKE_UNAVAILABLE",
+        "当前后台尚未接入点赞，请应用更新后重试。",
+      );
+    const next = {
+      ...state,
+      config,
+      enabled: true,
+      revision: state.revision + 1,
+    };
+    next.authorities = this.authorities(next);
+    if (this.selected(next).every((target) => target.paused))
+      throw new AppError(
+        "TIEBA_TARGET_PAUSED",
+        "所选贴吧均已暂停，请在管理贴吧中恢复至少一个。",
+      );
+    if (
+      !next.run ||
+      next.run.day !== tiebaDay(this.time()) ||
+      Date.parse(next.run.deadlineAt) <= this.time()
+    )
+      next.run = this.newRun();
+    this.d.db.transaction(() => {
+      this.store.saveState(next);
+      this.cancelUnselected(next);
+      for (const task of this.store.tasks())
+        if (
+          task.day === tiebaDay(this.time()) &&
+          !task.submittedAt &&
+          next.config.targetIds.includes(task.targetId) &&
+          selectedTiebaActions(config).includes(task.action) &&
+          ["failed", "expired"].includes(task.status)
+        ) {
+          task.deadlineAt = next.run!.deadlineAt;
+          this.finish(task, "cancelled", "已重新安排尚未提交的操作。");
+        }
+      this.plan(next);
+    });
+    this.event(
+      "automation.applied",
+      "已保存所选账号、贴吧和操作，自动化已开启。",
+    );
+    this.d.changed();
+    return this.snapshot();
   }
   save(input: z.infer<typeof tiebaAutocareSaveSchema>) {
     this.assertAlive();
@@ -338,7 +454,7 @@ export class TiebaAutocare {
             this.finish(
               task,
               "cancelled",
-              "总开关已关闭，取消尚未提交的签到。",
+              "自动化已停止，取消尚未提交的操作。",
             );
     });
     this.event(
@@ -490,7 +606,10 @@ export class TiebaAutocare {
           ),
           ...available.map((target) => target.id),
         ];
-        state.config = tiebaAutocareConfigSchema.parse({ targetIds: nextIds });
+        state.config = tiebaAutocareConfigSchema.parse({
+          targetIds: nextIds,
+          ...(state.config.actions ? { actions: state.config.actions } : {}),
+        });
         // Refresh only this request's verified authority, preserving other accounts.
         state.authorities = [
           ...state.authorities.filter(
@@ -1362,7 +1481,29 @@ export class TiebaAutocare {
     if (state.run.status !== "running") return;
     const tasks = this.store.tasks();
     const slots = new Map<string, number>();
-    for (const targetId of state.config.targetIds) {
+    const entries: { targetId: string; action: TiebaCareAction }[] = [],
+      likeUids = new Set<string>();
+    for (const targetId of state.config.targetIds)
+      for (const action of selectedTiebaActions(state.config)) {
+        const target = this.store.target(targetId);
+        if (!target || target.paused || target.source === "observed") continue;
+        if (action === "like") {
+          if (likeUids.has(target.uid)) continue;
+          likeUids.add(target.uid);
+          if (
+            tasks.some(
+              (t) =>
+                t.uid === target.uid &&
+                t.day === day &&
+                t.action === "like" &&
+                t.submittedAt,
+            )
+          )
+            continue;
+        }
+        entries.push({ targetId, action });
+      }
+    for (const { targetId, action } of entries) {
       const target = this.store.target(targetId);
       if (!target || target.paused || target.source === "observed") continue;
       const authority = state.authorities.find(
@@ -1373,6 +1514,7 @@ export class TiebaAutocare {
         (task) =>
           task.uid === target.uid &&
           task.forumId === target.forumId &&
+          task.action === action &&
           task.day === day,
       );
       if (previous && !["pending", "cancelled"].includes(previous.status))
@@ -1393,7 +1535,7 @@ export class TiebaAutocare {
             deadlineAt: state.run.deadlineAt,
             updatedAt: this.now(),
             message: outOfWindow
-              ? "本轮没有剩余排期时段，未提交签到，不集中补跑。"
+              ? "本轮没有剩余排期时段，未提交操作，不集中补跑。"
               : "等待原批次中的下一个可用时段",
           }
         : {
@@ -1403,7 +1545,7 @@ export class TiebaAutocare {
             uid: target.uid,
             forumId: target.forumId,
             forumName: target.name,
-            action: "checkin",
+            action,
             day,
             status: outOfWindow ? "expired" : "pending",
             plannedAt: new Date(slot).toISOString(),
@@ -1412,8 +1554,10 @@ export class TiebaAutocare {
             submittedAt: null,
             checkedAt: null,
             message: outOfWindow
-              ? "本轮没有剩余排期时段，未提交签到，不集中补跑。"
-              : "等待自动签到",
+              ? "本轮没有剩余排期时段，未提交操作，不集中补跑。"
+              : action === "like"
+                ? "等待自动点赞"
+                : "等待自动签到",
             configRevision: state.revision,
             configSnapshot: structuredClone(state.config),
             stamp: authority.stamp,
@@ -1428,7 +1572,8 @@ export class TiebaAutocare {
     for (const task of this.store.tasks())
       if (
         task.status === "pending" &&
-        !state.config.targetIds.includes(task.targetId)
+        (!state.config.targetIds.includes(task.targetId) ||
+          !selectedTiebaActions(state.config).includes(task.action))
       )
         this.finish(task, "cancelled", "此贴吧已移出执行范围。");
   }
@@ -1561,6 +1706,7 @@ export class TiebaAutocare {
       this.disposed ||
       !state.enabled ||
       !state.config.targetIds.includes(task.targetId) ||
+      !selectedTiebaActions(state.config).includes(task.action) ||
       target?.paused
     )
       throw new AppError(
@@ -1598,6 +1744,7 @@ export class TiebaAutocare {
     // Queued work can acquire a pending/unknown write after tick selected this task.
     // Recheck at every execution boundary, including the durable check-in checkpoint.
     if (
+      this.store.tasks().some((other) => this.receiptBlocks(other, task)) ||
       tiebaPublishingWriteState(this.d.db, task.uid).uncertain ||
       tiebaFollowWriteState(this.d.db, task.uid).uncertain ||
       this.d.db.get(
@@ -1712,6 +1859,37 @@ export class TiebaAutocare {
         this.plan(state);
       if (!state.enabled) return;
       const allTasks = this.store.tasks();
+      // An unresolved submission blocks writes, but must not silently strand an
+      // enabled account forever. Read only its original receipt, at most 3 times.
+      for (const task of allTasks) {
+        if (
+          task.status !== "uncertain" ||
+          !task.submittedAt ||
+          task.day !== tiebaDay(this.time()) ||
+          !state.authorities.some((a) => a.uid === task.uid) ||
+          (task.reconcileAttempts ?? 0) >= 3 ||
+          Date.parse(task.reconcileAfter ?? task.updatedAt) +
+            (task.reconcileAfter ? 0 : 60000) >
+            this.time() ||
+          [...this.executing.values()].some(
+            (other) =>
+              other.accountId === task.accountId ||
+              other.uid === task.uid ||
+              other.stamp.environmentId === task.stamp.environmentId,
+          )
+        )
+          continue;
+        task.reconcileAttempts = (task.reconcileAttempts ?? 0) + 1;
+        task.reconcileAfter = new Date(this.time() + 60000).toISOString();
+        this.store.saveTask(task);
+        this.executing.set(task.accountId, task);
+        started.push(
+          this.recoverOriginal(task).finally(() => {
+            this.executing.delete(task.accountId);
+            if (!this.disposed) this.d.changed();
+          }),
+        );
+      }
       const due = allTasks
         .filter(
           (task) =>
@@ -1730,12 +1908,7 @@ export class TiebaAutocare {
         )
           continue;
         if (
-          allTasks.some(
-            (other) =>
-              (other.accountId === task.accountId || other.uid === task.uid) &&
-              other.day === task.day &&
-              ["uncertain", "submitting"].includes(other.status),
-          ) ||
+          allTasks.some((other) => this.receiptBlocks(other, task)) ||
           tiebaPublishingWriteState(this.d.db, task.uid).uncertain ||
           tiebaFollowWriteState(this.d.db, task.uid).uncertain ||
           this.d.db.get(
@@ -1755,6 +1928,11 @@ export class TiebaAutocare {
         task.startedAt = this.now();
         task.updatedAt = this.now();
         if (!this.store.claim(task)) continue;
+        this.event(
+          "task.checking",
+          `正在核对「${task.forumName}吧」${task.action === "like" ? "点赞" : "签到"}条件。`,
+          task,
+        );
         this.executing.set(task.accountId, task);
         started.push(
           this.execute(task)
@@ -1785,12 +1963,177 @@ export class TiebaAutocare {
     }
     await Promise.all(started);
   }
+  private async recoverOriginal(task: TaskRecord) {
+    this.event(
+      "task.reconciling",
+      `正在只读核对「${task.forumName}吧」原结果（${task.reconcileAttempts}/3），不会重复提交。`,
+      task,
+    );
+    try {
+      await this.reconcile({ taskId: task.id });
+    } catch (error) {
+      if (this.disposed) return;
+      const fresh = this.store.task(task.id);
+      if (fresh?.status === "uncertain") {
+        this.finish(
+          fresh,
+          "uncertain",
+          `原结果只读核对未完成：${safeMessage(error)}${(fresh.reconcileAttempts ?? 0) >= 3 ? "；自动核对已达3次，请在任务与历史核对原结果。" : "；稍后继续只读核对。"}`,
+        );
+        this.event("task.reconcile_failed", fresh.message, fresh);
+      }
+    }
+    if (!this.disposed) {
+      const fresh = this.store.task(task.id);
+      if (
+        fresh?.status === "uncertain" &&
+        (fresh.reconcileAttempts ?? 0) >= 3
+      ) {
+        this.finish(
+          fresh,
+          "uncertain",
+          "自动只读核对3次仍未确认，已停止自动核对；请在任务与历史核对原结果，不会重复提交。",
+        );
+        this.event("task.reconcile_exhausted", fresh.message, fresh);
+      }
+    }
+  }
+  private receiptBlocks(other: TaskRecord, task: TaskRecord) {
+    return (
+      other.id !== task.id &&
+      (other.accountId === task.accountId || other.uid === task.uid) &&
+      other.day === task.day &&
+      ["uncertain", "submitting"].includes(other.status) &&
+      !(
+        other.status === "uncertain" &&
+        other.action === "checkin" &&
+        task.action === "checkin" &&
+        other.forumId !== task.forumId
+      )
+    );
+  }
+  private validateLike(task: TaskRecord, post: TiebaLikeReading) {
+    const managed = this.d.db
+      .all<{ uid: string | null }>(
+        "SELECT uid FROM website_accounts WHERE provider='tieba'",
+      )
+      .map((a) => a.uid);
+    if (
+      post.uid !== task.uid ||
+      post.forumId !== task.forumId ||
+      !/^[1-9]\d{0,19}$/.test(post.threadId) ||
+      post.url !== `https://tieba.baidu.com/p/${post.threadId}` ||
+      managed.includes(post.authorUid) ||
+      !/^[1-9]\d{0,19}$/.test(post.authorUid) ||
+      !Number.isFinite(Date.parse(post.checkedAt)) ||
+      Math.abs(Date.parse(post.checkedAt) - this.time()) > 10 * 60000
+    )
+      throw new AppError(
+        "TIEBA_LIKE_RECEIPT",
+        "帖子身份或点赞回执无法核实，已保留原记录。",
+      );
+  }
+  private async executeLike(
+    task: TaskRecord,
+    account: WebsiteAccount,
+    target: TargetRecord,
+  ) {
+    const port = this.browser();
+    if (!port.likePost)
+      throw new AppError("TIEBA_LIKE_UNAVAILABLE", "当前后台尚未接入点赞。");
+    const excludedUids = this.d.db
+      .all<{ uid: string | null }>(
+        "SELECT uid FROM website_accounts WHERE provider='tieba'",
+      )
+      .flatMap((a) => (a.uid ? [a.uid] : []));
+    const excludedThreads = this.store
+      .tasks()
+      .filter((t) => t.uid === task.uid && t.action === "like" && t.submittedAt)
+      .flatMap((t) => (t.threadId ? [t.threadId] : []));
+    const result = await port.likePost(
+      account,
+      task.uid,
+      target,
+      excludedUids,
+      excludedThreads,
+      async (post) => {
+        this.assertAllowed(task);
+        this.validateLike(task, post);
+        if (post.liked)
+          throw new AppError(
+            "TIEBA_LIKE_ALREADY",
+            "原帖子已经点赞，未再次点击。",
+          );
+        if (this.deferForSubmissionGap(task))
+          throw new AppError("TIEBA_DEFERRED", task.message);
+        if (
+          task.submittedAt ||
+          this.store
+            .tasks()
+            .some(
+              (t) =>
+                t.id !== task.id &&
+                t.uid === task.uid &&
+                t.day === task.day &&
+                t.action === "like" &&
+                t.submittedAt,
+            )
+        )
+          throw new AppError(
+            "TIEBA_LIKE_DAILY_LIMIT",
+            "该账号今日已有点赞尝试，未重复提交。",
+          );
+        task.threadId = post.threadId;
+        task.threadTitle = post.title;
+        task.threadUrl = post.url;
+        task.authorUid = post.authorUid;
+        task.submittedAt = this.now();
+        this.finish(task, "submitting", "已记录点赞请求，正在核对原帖子。");
+        this.d.changed();
+      },
+    );
+    this.assertAlive();
+    if (!result) {
+      this.finish(
+        task,
+        task.submittedAt ? "uncertain" : "skipped",
+        task.submittedAt
+          ? "点赞请求已记录但回执缺失，只能核对原帖子，不重复点击。"
+          : "未找到可点赞的普通帖子，已跳过本人、受管账号及已赞内容。",
+      );
+      return;
+    }
+    this.validateLike(task, result);
+    if (
+      task.submittedAt &&
+      (task.threadId !== result.threadId || task.authorUid !== result.authorUid)
+    )
+      throw new AppError(
+        "TIEBA_LIKE_RECEIPT",
+        "原帖子与点赞回执不一致，只能核对原结果。",
+      );
+    task.checkedAt = result.checkedAt;
+    const verified = tiebaDay(result.checkedAt) === task.day && result.liked;
+    this.finish(
+      task,
+      verified
+        ? task.submittedAt
+          ? "verified"
+          : "already_signed"
+        : task.submittedAt
+          ? "uncertain"
+          : "failed",
+      verified
+        ? "官网已核实原帖子点赞状态。"
+        : "官网尚未确认原点赞，只能只读核对，不重复点击。",
+    );
+  }
   private async execute(task: TaskRecord) {
     try {
       this.assertAllowed(task);
       await this.queued(
         task.accountId,
-        `贴吧签到 · ${task.forumName}`,
+        `贴吧${task.action === "like" ? "点赞" : "签到"} · ${task.forumName}`,
         async () => {
           const { account, target } = this.assertAllowed(task);
           const checked = await this.d.accounts.verify(account.id);
@@ -1801,6 +2144,10 @@ export class TiebaAutocare {
               checked.message || "贴吧账号身份未核实。",
             );
           this.assertAllowed(task);
+          if (task.action === "like") {
+            await this.executeLike(task, this.account(account.id), target);
+            return;
+          }
           const browser = this.browser(),
             reading = await browser.readForum(account, task.uid, target);
           this.assertAlive();
@@ -1936,7 +2283,7 @@ export class TiebaAutocare {
     if (!task || !["uncertain", "submitting"].includes(task.status))
       throw new AppError(
         "TIEBA_RECONCILE_REQUIRED",
-        "此任务无需补核，补核仅查询原签到结果。",
+        "此任务无需补核，补核仅查询原操作结果。",
       );
     if (task.day !== tiebaDay(this.time()))
       throw new AppError(
@@ -1952,7 +2299,7 @@ export class TiebaAutocare {
       );
     await this.queued(
       account.id,
-      `核对贴吧签到 · ${task.forumName}`,
+      `核对贴吧${task.action === "like" ? "点赞" : "签到"} · ${task.forumName}`,
       async () => {
         this.assertAlive();
         const fresh = this.store.task(input.taskId);
@@ -1976,6 +2323,41 @@ export class TiebaAutocare {
             "TIEBA_RECONCILE_PAST_DAY",
             "核验身份期间已跨业务日，原未知结果已保留。",
           );
+        if (task.action === "like") {
+          const port = this.browser();
+          if (!task.threadId || !port.readLike)
+            throw new AppError(
+              "TIEBA_LIKE_RECONCILE",
+              "缺少原帖子记录，不能重新点赞。",
+            );
+          const reading = await port.readLike(
+            this.account(account.id),
+            task.uid,
+            target,
+            task.threadId,
+          );
+          this.assertAlive();
+          this.validateLike(task, reading);
+          if (
+            reading.threadId !== task.threadId ||
+            reading.authorUid !== task.authorUid
+          )
+            throw new AppError(
+              "TIEBA_LIKE_RECEIPT",
+              "原帖子身份已变化，保留原未知记录。",
+            );
+          task.checkedAt = reading.checkedAt;
+          this.finish(
+            task,
+            reading.liked && tiebaDay(reading.checkedAt) === task.day
+              ? "verified"
+              : "uncertain",
+            reading.liked
+              ? "已只读核实原帖点赞，原请求不再提交。"
+              : "原帖子尚未确认点赞，未重复点击。",
+          );
+          return;
+        }
         const result = await this.browser().readForum(
           this.account(account.id),
           task.uid,
@@ -2010,6 +2392,12 @@ export class TiebaAutocare {
         void this.tick();
       }, 10000);
       this.timer.unref();
+      this.event(
+        "scheduler.started",
+        this.store.state().enabled
+          ? "已恢复自动调度，按已保存账号和操作继续执行。"
+          : "自动调度已就绪，开启后按所选操作执行。",
+      );
     }
   }
   dispose() {

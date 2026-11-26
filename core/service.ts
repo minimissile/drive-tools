@@ -66,7 +66,7 @@ import { resourceTags } from "./resource-tags";
 import { hasVerifiedShare } from "../shared/share-status";
 import { Distribution } from "./distribution";
 import { verifyRecordedOwnShare } from "./owned-resource-intake";
-import { coverFilePattern, saveResourceCover, readResourceCover } from "./cover-assets";
+import { coverFilePattern, prepareResourceImages, readResourceCover } from "./cover-assets";
 import { InsertionService } from "./insertion";
 import { DriveFiles } from "./drive-files";
 import { WebsiteAccounts } from "./website-accounts";
@@ -84,7 +84,6 @@ import {
   type ContentFormat,
   type LinkPosition,
 } from "../shared/channels";
-import { createHash } from "node:crypto";
 import { mkdir, writeFile, copyFile, readdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { Database, id, now } from "./database";
@@ -125,6 +124,8 @@ import { driveMembershipSchema } from "../shared/drive-membership";
 import { driveCapacitySchema } from "../shared/drive-capacity";
 import { parseShare, validateOutgoingLinks } from "./links";
 import { normalizedDirectory, type DriveProvider } from "./providers/provider";
+import { resourceTransferDirectory } from "./resource-records";
+import { copySource } from "./resource-drive-links";
 import type {
   Account,
   BrowserBinding,
@@ -996,6 +997,7 @@ export class AppService {
       },
       invoke: (method, raw) => this.invoke(method, raw),
     });
+    this.tiebaAutocare.scheduler(true);
     this.music.start();
   }
   snapshot(resourceId?: string) {
@@ -1273,6 +1275,9 @@ export class AppService {
     const indexedSource = indexedOwnSource(this.db, input);
     const source = indexedSource ?? parseShare(input.sourceText, input.extractionCode),
       account = this.account(input.accountId);
+    const attachedCopy = input.copyId ? this.repo.getCopy(input.copyId) : undefined;
+    if (attachedCopy?.source && (input.enqueue || input.isOwnResource))
+      throw new AppError("SUPPLEMENTAL_TRANSFER_EXISTS", "已有补充副本，请在原转存任务中核对或恢复。");
     if (source.provider !== account.provider)
       throw new AppError(
         "CROSS_PROVIDER_UNSUPPORTED",
@@ -1294,7 +1299,7 @@ export class AppService {
     const editedResource = input.id
       ? this.repo.getResource(input.id)
       : undefined;
-    if (editedResource && editedResource.sourceUrl !== source.url)
+    if (editedResource && (attachedCopy?.source?.url ?? editedResource.sourceUrl) !== source.url)
       throw new AppError(
         "SOURCE_IMMUTABLE",
         "已有资源的来源链接不能直接更换，请新建资源。",
@@ -1309,28 +1314,24 @@ export class AppService {
       provisionalTitle: mode === "local-draft" && input.category === "",
     };
     assertResourceUnique(this.db, uniqueness);
-    let coverId: string | null | undefined;
-    if (input.coverData === null) coverId = null;
-    else if (input.coverData) {
-      const match = input.coverData.match(
-        /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/,
-      );
-      if (!match)
-        throw new AppError("INVALID_COVER", "仅支持PNG、JPEG、WebP封面。");
-      const bytes = Buffer.from(match[2], "base64");
-      if (bytes.length > 8 * 1024 * 1024)
-        throw new AppError("COVER_TOO_LARGE", "封面不能超过8MB。");
-      const unchangedWebp =
-        match[1] === "webp" &&
-        input.id &&
-        this.repo.getResource(input.id).coverId ===
-          createHash("sha256").update(bytes).digest("hex");
-      coverId = await saveResourceCover(
-        this.dataPath,
-        unchangedWebp ? bytes : await this.ports.normalizeCover(bytes, "webp"),
-      );
-    }
-    if (source.code)
+    const previousImageIds = editedResource?.imageIds ?? [];
+    const legacyImages = input.coverData === null
+      ? []
+      : input.coverData
+        ? [{ data: input.coverData }]
+        : undefined;
+    const imageInput = input.images ?? legacyImages;
+    const changedImageIds = imageInput === undefined
+      ? undefined
+      : await prepareResourceImages(
+          this.dataPath,
+          imageInput,
+          previousImageIds,
+          (bytes) => this.ports.normalizeCover(bytes, "webp"),
+        );
+    if (changedImageIds && input.images === undefined)
+      changedImageIds.push(...previousImageIds.slice(1));
+    if (source.code && !attachedCopy?.source)
       await this.secrets.set(`source:${resourceId}`, source.code);
     const resourceExists = !!existing || !!input.id;
     const editedCopy = input.copyId
@@ -1363,14 +1364,7 @@ export class AppService {
         ? editedCopy.directory
         : input.isOwnResource
           ? normalizedDirectory(input.directory || "/")
-          : normalizedDirectory(parentDirectory) +
-            "/" +
-            input.title
-              .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
-              .trim()
-              .slice(0, 40) +
-            "__" +
-            resourceId.slice(-8);
+          : resourceTransferDirectory(parentDirectory, input.title, resourceId);
     const priorCopy = input.copyId
       ? this.db.get<{ id: string; status: string }>(
           "SELECT id,status FROM copies WHERE id=?",
@@ -1447,9 +1441,12 @@ export class AppService {
     this.resourceDeletion.assertMutable(resourceId);
     this.db.transaction(() => {
       assertResourceUnique(this.db, uniqueness);
+      if (editedResource && changedImageIds &&
+        JSON.stringify(this.repo.getResource(editedResource.id).imageIds) !== JSON.stringify(previousImageIds))
+        throw new AppError("RESOURCE_IMAGE_CHANGED", "图片资源已在其他窗口更新，请重新打开资料后再保存。");
       if (!resourceExists)
         this.db.run(
-          "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,cover_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO resources(id,title,source_url,source_key,provider,category,tags,summary,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
           resourceId,
           input.title,
           source.url,
@@ -1458,21 +1455,24 @@ export class AppService {
           input.category,
           JSON.stringify(resourceTags(input.tags)),
           input.summary,
-          coverId ?? null,
           time,
           time,
         );
       else if (input.id)
         this.db.run(
-          "UPDATE resources SET title=?,category=?,tags=?,summary=?,cover_id=?,revision=revision+1,updated_at=? WHERE id=?",
+          "UPDATE resources SET title=?,category=?,tags=?,summary=?,revision=revision+1,updated_at=? WHERE id=?",
           input.title,
           input.category,
           JSON.stringify(resourceTags(input.tags)),
           input.summary,
-          coverId === undefined
-            ? this.repo.getResource(input.id).coverId
-            : coverId,
           time,
+          resourceId,
+        );
+      if ((!resourceExists || input.id) && changedImageIds !== undefined)
+        this.db.run(
+          "UPDATE resources SET cover_id=?,additional_image_ids=? WHERE id=?",
+          changedImageIds[0] ?? null,
+          JSON.stringify(changedImageIds.slice(1)),
           resourceId,
         );
       if ((!resourceExists || input.id) && input.searchKeywords !== undefined)
@@ -1663,12 +1663,13 @@ export class AppService {
         async (account, provider) => {
           const copy = this.repo.getCopy(copyId);
           const resource = this.repo.getResource(copy.resourceId);
+          const origin = copySource(copy, resource);
           if (copy.accountId !== account.id)
             throw new AppError(
               "COPY_MISMATCH",
               "资源所属账号已变化，请重新打开资源。",
             );
-          if (copy.status === "recorded" && resource.sourceKind === "owned") {
+          if (copy.status === "recorded" && origin.kind === "owned") {
             await verifyRecordedOwnShare(
               this.repo,
               this.secrets,
@@ -1683,8 +1684,7 @@ export class AppService {
             copy.status !== "ready" ||
             !copy.shareId ||
             !copy.shareUrl ||
-            (copy.shareUrl === resource.sourceUrl &&
-              resource.sourceKind !== "owned") ||
+            (copy.shareUrl === origin.url && origin.kind !== "owned") ||
             !copy.files.length ||
             !copy.verifiedAt ||
             copy.ownerUid !== account.uid ||

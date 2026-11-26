@@ -134,11 +134,11 @@ test("意图检查拿到完整资源事实、原分组和全部17条旧文案，
   assert.equal(checked, 17);
 });
 
-test("提前排除教程及无依据版本，完整匹配已知版本，不把已提供教程资源的下载当作方法题", () => {
+test("方法类词交给事实规划，不再提前排除；无依据版本仍拦截", () => {
   const resource = record(cases[0]).resource;
-  assert.match(
+  assert.equal(
     publishingKeywordExclusion("共享打印机主机ip地址怎么看", resource),
-    /教程/,
+    "",
   );
   assert.match(
     publishingKeywordExclusion("一键共享打印机工具V1.0", resource),

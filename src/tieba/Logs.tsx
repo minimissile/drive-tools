@@ -69,7 +69,7 @@ export function TiebaLogs({
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(
-              formatRuntimeLogs(items, context),
+              formatRuntimeLogs(items, context, { newestFirst: true }),
             );
             notify("当前日志已复制", "success");
           } catch {
@@ -86,6 +86,7 @@ export function TiebaLogs({
       {items.length ? (
         <LogWindow
           items={items}
+          newestFirst
           simple
           label="贴吧自动养号运行日志"
           context={context}
@@ -94,7 +95,7 @@ export function TiebaLogs({
         />
       ) : (
         <Empty compact title={onlyIssues ? "当前日志没有异常" : "尚未运行"}>
-          同步、签到和结果核对的过程会显示在这里。
+          同步、签到、点赞和结果核对的过程会显示在这里。
         </Empty>
       )}
       <small className="muted">

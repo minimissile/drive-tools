@@ -594,6 +594,16 @@ export class BrowserEnvironments {
       this.forAccount(ref).id,
       `${ref.kind}:${ref.id}`,
       action,
+      { headless: this.isTiebaRequest([ref]) ? false : undefined },
+    );
+  }
+  private isTiebaRequest(refs: EnvironmentAccountRef[]) {
+    return (
+      refs.length > 0 &&
+      refs.every(
+        (ref) =>
+          ref.kind === "website" && this.accountInfo(ref).platform === "tieba",
+      )
     );
   }
   async runEnvironment<T>(
@@ -655,7 +665,15 @@ export class BrowserEnvironments {
         for (const id of ids) {
           await this.refreshExternal(id);
           await this.ports.browserEnvironments?.prepare(await this.runtime(id));
-          if (this.get(id).requireProxy) await this.probeNetwork(id);
+          if (this.get(id).requireProxy)
+            await this.probeNetwork(
+              id,
+              this.isTiebaRequest(
+                refs.filter((ref) => this.forAccount(ref).id === id),
+              )
+                ? false
+                : undefined,
+            );
         }
         return action();
       });
@@ -981,8 +999,11 @@ export class BrowserEnvironments {
   ) {
     const env = await this.runtime(environmentId);
     headless ??=
-      this.refs(environmentId).some(r => r.kind === "drive" || (r.kind === "website" && this.accountInfo(r).platform === "zhihu")) &&
-      env.engine === "bitbrowser";
+      this.refs(environmentId).some(
+        (r) =>
+          r.kind === "drive" ||
+          (r.kind === "website" && this.accountInfo(r).platform === "zhihu"),
+      ) && env.engine === "bitbrowser";
     const ip =
       env.engine === "bitbrowser"
         ? await this.externalNetwork?.(env.profileId, headless)

@@ -24,6 +24,7 @@ import {
   tiebaAutocareAddSchema,
 } from "../shared/tieba-autocare";
 import type { TiebaForumDiscoveryResult } from "../shared/tieba-forum-discovery";
+import type { TiebaLikeReading } from "../shared/tieba-actions";
 import {
   normalizeTiebaForumName,
   tiebaForumInputName,
@@ -966,7 +967,7 @@ test("贴吧：关闭发生在提交前时不再点击，重开不延长原批�
   }
 });
 
-test("贴吧：提交结果未知跨重启保留，只读补核不重新签到，阻断同号后续写入", async () => {
+test("贴吧：提交结果未知跨重启自动只读核对原记录，不重新签到", async () => {
   const f = await fixture();
   try {
     await f.configure(2);
@@ -980,9 +981,9 @@ test("贴吧：提交结果未知跨重启保留，只读补核不重新签到�
     f.restart();
     await f.service.tick();
     assert.equal(f.submissions, 1);
-    await f.service.reconcile({ taskId: task.id });
     assert.equal(f.submissions, 1);
     assert.equal(f.service.store.task(task.id)!.status, "verified");
+    assert.equal(f.service.store.task(task.id)!.submittedAt, task.submittedAt);
   } finally {
     await f.close();
   }
@@ -2451,10 +2452,11 @@ test("贴吧同步并启动：结果未知不重放，账号读取失败不改�
     });
     await f.service.tick();
     assert.equal(f.submissions, 1);
-    assert.deepEqual(
-      f.service.snapshot().tasks.find((t) => t.id === original.id),
-      original,
-    );
+    const recovered = f.service
+      .snapshot()
+      .tasks.find((t) => t.id === original.id)!;
+    assert.equal(recovered.status, "verified");
+    assert.equal(recovered.submittedAt, original.submittedAt);
     const before = f.service.snapshot();
     const originalList = f.ports.tieba!.listForums;
     f.ports.tieba!.listForums = async () => {
@@ -2912,5 +2914,316 @@ test("半小时截止：最终提交前跨过30分钟不写入，并行停止也
     release();
     await running;
     await next.f.close();
+  }
+});
+
+function likeReading(
+  f: Awaited<ReturnType<typeof fixture>>,
+  forumId = "101",
+  liked = false,
+): TiebaLikeReading {
+  return {
+    uid: f.accounts.get(f.account.id).uid!,
+    forumId,
+    threadId: "901",
+    authorUid: "222",
+    title: "学习心得",
+    url: "https://tieba.baidu.com/p/901",
+    liked,
+    checkedAt: new Date(f.time).toISOString(),
+  };
+}
+
+test("可选动作：只选点赞不创建签到；同一账号多个吧每日仅一个点赞任务", async () => {
+  const f = await fixture();
+  try {
+    let writes = 0;
+    f.ports.tieba!.readLike = async (_a, _uid, forum) =>
+      likeReading(f, forum.forumId, true);
+    f.ports.tieba!.likePost = async (
+      _a,
+      _uid,
+      forum,
+      excludedUids,
+      _threads,
+      checkpoint,
+    ) => {
+      assert.ok(excludedUids.includes(f.accounts.get(f.account.id).uid!));
+      await checkpoint(likeReading(f, forum.forumId));
+      const task = f.service.snapshot().tasks.find((t) => t.action === "like")!;
+      assert.equal(task.status, "submitting");
+      assert.equal(task.threadId, "901");
+      assert.ok(task.submittedAt);
+      writes++;
+      return likeReading(f, forum.forumId, true);
+    };
+    await f.service.syncForums({ accountId: f.account.id });
+    let s = f.service.snapshot();
+    assert.deepEqual(s.availableActions, ["checkin", "like"]);
+    s = f.service.apply({
+      revision: s.revision,
+      config: { targetIds: s.targets.map((t) => t.id), actions: ["like"] },
+      confirmed: true,
+    });
+    assert.deepEqual(
+      s.tasks.map((t) => t.action),
+      ["like"],
+    );
+    assert.equal(Date.parse(s.run!.deadlineAt) - f.time, 30 * 60000);
+    await f.service.tick();
+    assert.equal(writes, 1);
+    assert.equal(f.submissions, 0);
+    assert.equal(f.service.snapshot().tasks[0].status, "verified");
+    // Changing forums or restarting must not grant another daily like attempt.
+    s = f.service.snapshot();
+    f.service.apply({
+      revision: s.revision,
+      config: { targetIds: [s.targets[1].id], actions: ["like"] },
+      confirmed: true,
+    });
+    f.restart();
+    f.time += 60000;
+    await f.service.tick();
+    assert.equal(writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("可选动作：保存并开启保留已完成签到，取消被取消勾选的未提交动作", async () => {
+  const f = await fixture();
+  try {
+    f.ports.tieba!.readLike = async (_a, _uid, forum) =>
+      likeReading(f, forum.forumId, true);
+    f.ports.tieba!.likePost = async () => null;
+    await f.configure(2);
+    await f.service.tick();
+    let s = f.service.snapshot();
+    assert.equal(f.submissions, 1);
+    s = f.service.apply({
+      revision: s.revision,
+      config: { targetIds: s.config.targetIds, actions: ["checkin", "like"] },
+      confirmed: true,
+    });
+    assert.equal(s.tasks.filter((t) => t.action === "checkin").length, 2);
+    assert.equal(
+      s.tasks.filter((t) => t.action === "like" && t.status === "pending")
+        .length,
+      1,
+    );
+    s = f.service.apply({
+      revision: s.revision,
+      config: { targetIds: s.config.targetIds, actions: ["checkin"] },
+      confirmed: true,
+    });
+    assert.equal(s.tasks.find((t) => t.action === "like")?.status, "cancelled");
+    assert.equal(
+      s.tasks.filter((t) => t.action === "checkin" && t.status === "verified")
+        .length,
+      1,
+    );
+    assert.throws(() =>
+      f.service.apply({
+        revision: s.revision,
+        config: { targetIds: s.config.targetIds, actions: [] },
+        confirmed: true,
+      }),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("点赞提交后的断线或空回执保留原帖，仅只读核对；重启和重复开启不再次点击", async () => {
+  for (const mode of ["throw", "null", "unconfirmed"] as const) {
+    const f = await fixture();
+    try {
+      let writes = 0,
+        reads = 0;
+      f.ports.tieba!.likePost = async (
+        _a,
+        _uid,
+        forum,
+        _users,
+        _threads,
+        checkpoint,
+      ) => {
+        await checkpoint(likeReading(f, forum.forumId));
+        writes++;
+        if (mode === "throw") throw new Error("点击后断线");
+        return mode === "null" ? null : likeReading(f, forum.forumId);
+      };
+      f.ports.tieba!.readLike = async (_a, _uid, forum, threadId) => {
+        reads++;
+        assert.equal(threadId, "901");
+        return likeReading(f, forum.forumId, true);
+      };
+      await f.service.syncForums({ accountId: f.account.id });
+      let s = f.service.snapshot();
+      f.service.apply({
+        revision: s.revision,
+        config: { targetIds: [s.targets[0].id], actions: ["like"] },
+        confirmed: true,
+      });
+      await f.service.tick();
+      assert.equal(f.service.snapshot().tasks[0].status, "uncertain", mode);
+      f.restart();
+      s = f.service.snapshot();
+      f.service.apply({
+        revision: s.revision,
+        config: s.config,
+        confirmed: true,
+      });
+      f.time += 60000;
+      await f.service.tick();
+      assert.equal(writes, 1, mode);
+      s = f.service.snapshot();
+      assert.equal(s.tasks[0].status, "verified");
+      assert.equal(reads, 1);
+      assert.equal(writes, 1);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("点赞的原帖身份校验、暂停及未加载能力在提交前拒绝", async () => {
+  const f = await fixture();
+  try {
+    await f.service.syncForums({ accountId: f.account.id });
+    let s = f.service.snapshot();
+    const config = { targetIds: [s.targets[0].id], actions: ["like" as const] };
+    assert.throws(
+      () => f.service.apply({ revision: s.revision, config, confirmed: true }),
+      /接入点赞/,
+    );
+    let writes = 0;
+    f.ports.tieba!.readLike = async () => likeReading(f, "101", true);
+    f.ports.tieba!.likePost = async (
+      _a,
+      _uid,
+      _forum,
+      _users,
+      _threads,
+      checkpoint,
+    ) => {
+      await checkpoint({
+        ...likeReading(f),
+        authorUid: f.accounts.get(f.account.id).uid!,
+      });
+      writes++;
+      return likeReading(f, "101", true);
+    };
+    f.service.apply({ revision: s.revision, config, confirmed: true });
+    await f.service.tick();
+    s = f.service.snapshot();
+    assert.equal(writes, 0);
+    assert.equal(s.tasks[0].status, "failed");
+    assert.equal(s.tasks[0].submittedAt, null);
+    f.service.pauseTarget({
+      targetId: s.targets[0].id,
+      paused: true,
+      revision: s.revision,
+    });
+    s = f.service.snapshot();
+    assert.throws(
+      () => f.service.apply({ revision: s.revision, config, confirmed: true }),
+      /均已暂停/,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("点赞与签到共用账号提交间隔，未知点赞阻断后续写入；执行中取消勾选在点击前生效", async () => {
+  for (const stopBeforeClick of [false, true]) {
+    const f = await fixture();
+    try {
+      let likes = 0;
+      f.ports.tieba!.readLike = async () => likeReading(f, "101", true);
+      f.ports.tieba!.likePost = async (
+        _a,
+        _uid,
+        forum,
+        _users,
+        _threads,
+        checkpoint,
+      ) => {
+        if (stopBeforeClick) {
+          const s = f.service.snapshot();
+          f.service.apply({
+            revision: s.revision,
+            config: { ...s.config, actions: ["checkin"] },
+            confirmed: true,
+          });
+        }
+        await checkpoint(likeReading(f, forum.forumId));
+        likes++;
+        throw new Error("点击后的网络中断");
+      };
+      await f.service.syncForums({ accountId: f.account.id });
+      const s = f.service.snapshot();
+      f.service.apply({
+        revision: s.revision,
+        config: {
+          targetIds: s.targets.map((t) => t.id),
+          actions: ["checkin", "like"],
+        },
+        confirmed: true,
+      });
+      await f.service.tick();
+      assert.equal(f.submissions, 1);
+      assert.equal(likes, 0);
+      f.time += 60000;
+      await f.service.tick();
+      assert.equal(likes, stopBeforeClick ? 0 : 1);
+      const like = f.service.snapshot().tasks.find((t) => t.action === "like")!;
+      assert.equal(like.status, stopBeforeClick ? "cancelled" : "uncertain");
+      f.time += 60000;
+      await f.service.tick();
+      assert.equal(f.submissions, stopBeforeClick ? 2 : 1);
+      assert.equal(likes, stopBeforeClick ? 0 : 1);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("单吧签到未知不冻结同账号其他贴吧；原吧只读核对最多3次，重启不重置次数", async () => {
+  const f = await fixture();
+  try {
+    await f.configure(2);
+    f.unknown = true;
+    await f.service.tick();
+    const original = f.service
+      .snapshot()
+      .tasks.find((t) => t.status === "uncertain")!;
+    const submittedAt = original.submittedAt;
+    f.signed.delete(original.forumId); // 官网明确未签仍不足以证明原请求的最终结果。
+    f.unknown = false;
+    const attempts = () =>
+      f.service.store.task(original.id)!.reconcileAttempts ?? 0;
+    for (let i = 1; i <= 3; i++) {
+      f.time += 60000;
+      await f.service.tick();
+      assert.equal(attempts(), i);
+      await f.service.tick();
+      assert.equal(attempts(), i, "同一分钟不重复查询");
+    }
+    f.restart();
+    f.time += 60000;
+    await f.service.tick();
+    const current = f.service.store.task(original.id)!;
+    assert.equal(current.status, "uncertain");
+    assert.equal(current.submittedAt, submittedAt);
+    assert.equal(current.reconcileAttempts, 3);
+    assert.match(current.message, /3次/);
+    assert.equal(f.submissions, 2, "原吧不再提交，另一个吧可以完成签到");
+    assert.equal(
+      f.service.snapshot().tasks.filter((t) => t.status === "verified").length,
+      1,
+    );
+  } finally {
+    await f.close();
   }
 });

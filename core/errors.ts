@@ -15,6 +15,7 @@ export class ProviderHttpError extends AppError {
     public remoteCode: string,
     message: string,
     uncertain = false,
+    public retryAfterMs: number | null = null,
   ) {
     super(
       status === 401 ? "AUTH_EXPIRED" : "PROVIDER_HTTP_ERROR",

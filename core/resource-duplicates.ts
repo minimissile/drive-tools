@@ -57,6 +57,22 @@ export function similarResources(db: Database, title: string, excludeId = "") {
     .slice(0, 10);
 }
 
+export function sameProviderTitledResources(
+  db: Database,
+  provider: Provider,
+  excludeId = "",
+) {
+  return db.all<{ id: string; title: string }>(
+    `SELECT id,title FROM resources r
+       WHERE (provider=? OR EXISTS(SELECT 1 FROM resource_drive_links l
+         JOIN copies c ON c.source_link_id=l.id WHERE l.resource_id=r.id AND l.provider=?))
+         AND id!=? AND category<>'' ORDER BY created_at`,
+    provider,
+    provider,
+    excludeId,
+  );
+}
+
 export function exactTitleResource(
   db: Database,
   title: string,
@@ -65,13 +81,9 @@ export function exactTitleResource(
 ) {
   const normalized = normalizedResourceTitle(title);
   if (!normalized) return undefined;
-  return db
-    .all<{ id: string; title: string }>(
-      "SELECT id,title FROM resources WHERE provider=? AND id!=? AND category<>'' ORDER BY created_at",
-      provider,
-      excludeId,
-    )
-    .find((resource) => normalizedResourceTitle(resource.title) === normalized);
+  return sameProviderTitledResources(db, provider, excludeId).find(
+    (resource) => normalizedResourceTitle(resource.title) === normalized,
+  );
 }
 
 export function duplicateResourceError(title: string, provider: Provider) {
@@ -96,8 +108,13 @@ export function assertResourceUnique(
   },
 ) {
   const bySource = db.get<{ id: string; title: string }>(
-    "SELECT id,title FROM resources WHERE source_url=?",
+    `SELECT id,title FROM resources WHERE source_url=?
+     UNION ALL
+     SELECT r.id,r.title FROM resources r JOIN resource_drive_links l ON l.resource_id=r.id
+     JOIN copies c ON c.source_link_id=l.id WHERE l.url=? AND r.id!=?`,
     input.sourceUrl,
+    input.sourceUrl,
+    input.resourceId,
   );
   if (bySource && bySource.id !== input.resourceId)
     throw duplicateResourceError(bySource.title, input.provider);

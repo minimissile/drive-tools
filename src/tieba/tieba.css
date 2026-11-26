@@ -17,34 +17,96 @@
   color: var(--muted);
   font-size: 12px;
 }
-.tieba-master {
+.tieba-care-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.tieba-care-fieldset + .tieba-care-fieldset {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.tieba-care-fieldset legend {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+.tieba-care-accounts,
+.tieba-care-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+}
+.tieba-care-account,
+.tieba-care-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.tieba-care-action {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.tieba-care-setup small,
+.tieba-care-scope {
+  color: var(--muted);
+  font-size: 12px;
+}
+.tieba-care-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.tieba-care-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+  margin-top: var(--space-4);
 }
-.tieba-master-status {
+.tieba-care-state {
   display: flex;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
   flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: 13px;
   min-width: 0;
-  font-size: 13px;
 }
-.tieba-master-status > span:not(.status) {
-  overflow-wrap: anywhere;
-}
-.tieba-master-status small {
+.tieba-care-state small {
   flex-basis: 100%;
-  color: var(--muted);
-  font-size: 12px;
 }
-.tieba-power {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-shrink: 0;
+.tieba-care-details {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.tieba-care-details > summary {
+  cursor: pointer;
+  color: var(--muted);
   font-size: 13px;
+  width: fit-content;
+}
+.tieba-care-details[open] > summary {
+  margin-bottom: var(--space-3);
+}
+.tieba-care-details > .panel + .panel {
+  margin-top: var(--space-3);
+}
+.modal.tieba-manage-dialog {
+  width: min(1200px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+}
+.tieba-manage-dialog .tieba-targets {
+  padding: 0;
+  border: 0;
 }
 .tieba-target-tools {
   display: flex;

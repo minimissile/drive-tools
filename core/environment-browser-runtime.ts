@@ -30,6 +30,16 @@ export async function withEnvironmentBrowser<T>(
     ?.accounts.some(
       (a) => a.kind === ref.kind && a.id === ref.id && a.platform === "zhihu",
     );
+  const isTieba = environments
+    .list()
+    .find((e) => e.id === env.id)
+    ?.accounts.some(
+      (a) => a.kind === ref.kind && a.id === ref.id && a.platform === "tieba",
+    );
+  // A forum job may share a profile with a drive account without becoming a
+  // drive background request. Keep the held lease and reuse the current profile.
+  if (isTieba && !visible)
+    return bit.withProfile(env.profileId, action, env.connectorKey);
   if ((sharesDrive || isZhihu) && !visible)
     return bit.withDriveProfile(env.profileId, false, action, env.connectorKey);
   if ((sharesDrive || isZhihu) && visible)

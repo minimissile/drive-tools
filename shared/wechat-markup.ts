@@ -170,6 +170,7 @@ export function wechatHtml(
         entryLabels: version >= 3,
         resourceBlocks: version >= 4,
         templateId: version >= 5 ? templateId : undefined,
+        templateVersion: version,
       },
     ),
   );

@@ -45,7 +45,7 @@ test("新版论坛响应只接收当前登录用户及同一用户的签到状�
   wrong.forum.sign_in_info.user_info.user_id = 222;
   assert.equal(tiebaModernForum(wrong), null);
 });
-test("新版无PageData页面配对原始UID，读取完整资料并仅点击一次普通签到", async () => {
+test("新版无PageData页面配对原始UID，浮动控件仅点击一次并核实普通签到", async () => {
   const context = await browser.newContext();
   const manualPage = await context.newPage();
   let signed = 0,
@@ -79,7 +79,7 @@ test("新版无PageData页面配对原始UID，读取完整资料并仅点击一
       if (u.pathname === "/f")
         return route.fulfill({
           contentType: "text/html; charset=utf-8",
-          body: `<div class="bar-info"><div class="operate-btn follow-sign"><div class="center">${signed ? "已签到" : "签到"}</div></div><div class="follow-btn">已关注</div></div><script>fetch('/c/f/frs/page_pc?kw='+encodeURIComponent(${JSON.stringify(u.searchParams.get("kw"))}));document.querySelector('.follow-sign').onclick=async()=>{await fetch('/fixture-sign',{method:'POST'});document.querySelector('.follow-sign .center').textContent='已签'}</script>`,
+          body: `<style>.follow-sign{animation:float 0.1s infinite alternate}@keyframes float{from{transform:translateX(0)}to{transform:translateX(2px)}}</style><div class="bar-info"><div class="operate-btn follow-sign"><div class="center">${signed ? "已签到" : "签到"}</div></div><div class="follow-btn">已关注</div></div><script>fetch('/c/f/frs/page_pc?kw='+encodeURIComponent(${JSON.stringify(u.searchParams.get("kw"))}));document.querySelector('.follow-sign').onclick=async()=>{await fetch('/fixture-sign',{method:'POST'});document.querySelector('.follow-sign .center').textContent='已签'}</script>`,
         });
       return route.fulfill({
         contentType: "text/html; charset=utf-8",

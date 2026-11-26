@@ -275,6 +275,7 @@ export type IpcArguments<M extends IpcMethod> =
 /** Local reads permitted in automatic query hooks; generation and polling stay explicit commands. */
 export const queryMethods = [
   "driveSync.index",
+  "driveSync.logs",
   "accountBatch.current",
   "jianshu.list", "jianshu.get", "jianshu.sources", "jianshu.matches", "jianshu.image",
   "zhidao.workflow.get",
@@ -396,6 +397,7 @@ export const queryMethods = [
   "insertion.list",
   "insertion.get",
   "resource.get",
+  "resource.driveLinks",
   "share.creationOptions",
   "share.creationResult",
   "share.passphrase",

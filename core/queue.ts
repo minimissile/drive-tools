@@ -8,6 +8,7 @@ import { AppError, safeMessage } from "./errors";
 import { SecretStore } from "./secrets";
 import { NoteExporter } from "./notes";
 import { parseShare } from "./links";
+import { copySource, readDriveSourceCode } from "./resource-drive-links";
 
 export class AccountMutex {
   private locks = new Map<string, Promise<void>>();
@@ -156,11 +157,18 @@ export class TransferQueue {
             );
         };
         await assertIdentity();
-        const source: ShareInput = parseShare(
-          resource.sourceUrl,
-          (await this.secrets.get(`source:${resource.id}`)) ?? "",
-        );
         let checkpoint = this.repo.getJob(jobId).checkpoint;
+        const origin = copySource(copy, resource);
+        // Once a request has been accepted, recovery uses the destination and
+        // the checkpoint. It does not require the original extraction code.
+        const source: ShareInput = parseShare(
+          origin.url,
+          ["new", "folder_ready"].includes(checkpoint)
+            ? await readDriveSourceCode(this.secrets, origin)
+            : "",
+        );
+        if (source.provider !== account.provider)
+          throw new AppError("CROSS_PROVIDER_UNSUPPORTED", "请使用与补充来源相同网盘的账号。");
         let selected = this.repo.selectedFiles(copy.id);
         let folder = copy.folderId;
         let recoveredFiles: RemoteFile[] | undefined;
@@ -489,9 +497,10 @@ export class TransferQueue {
       );
     const parsed = parseShare(share.url);
     const resource = this.repo.getResource(copy.resourceId);
+    const origin = copySource(copy, resource);
     if (
-      parsed.provider !== resource.provider ||
-      parsed.url === resource.sourceUrl
+      parsed.provider !== origin.provider ||
+      parsed.url === origin.url
     )
       throw new AppError(
         "FOREIGN_SHARE_BLOCKED",
@@ -519,7 +528,7 @@ export class TransferQueue {
       this.secrets,
       {
         key: `share-passphrase:copy:${copyId}`,
-        provider: resource.provider,
+        provider: origin.provider,
         accountId: copy.accountId,
         ownerUid: uid,
         shareId: share.id,

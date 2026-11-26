@@ -12,8 +12,9 @@ import { QueryError } from "../ui/QueryError";
 import { SelectionCheckbox } from "../ui/SelectionCheckbox";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useIpcQuery } from "../api/useIpcQuery";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
-import { ArrowRight, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
+import { ArrowRight, FolderOpen, Link2, Plus, Trash2 } from "lucide-react";
+import { ResourceDriveLinksDialog } from "../library/ResourceDriveLinksDialog";
 import {
   useAppActions,
   useAppActivity,
@@ -34,7 +35,7 @@ import { providerName } from "../resources/labels";
 import { providerIds, providerDriveName } from "../../shared/providers";
 import { updateSelection } from "../lib/selection";
 import { Pagination } from "../ui/Pagination";
-import type { Resource, ResourcePage } from "../../shared/types";
+import type { Resource, ResourceCopy, ResourcePage } from "../../shared/types";
 import { readLibraryView, saveLibraryView } from "../library/view-state";
 const emptyPage: ResourcePage = { items: [], total: 0, page: 1, pageSize: 25 };
 export default function LibraryPage() {
@@ -68,6 +69,11 @@ export default function LibraryPage() {
     );
   const accounts = data!.accounts.filter(
     (a) => provider === "all" || a.provider === provider,
+  );
+  const matchesCopy = useCallback((resource: Resource, copy: ResourceCopy) =>
+    (accountId === "all" || copy.accountId === accountId) &&
+    (provider === "all" || (copy.source?.provider ?? resource.provider) === provider),
+    [accountId, provider],
   );
   useEffect(() => {
     listBody.current?.scrollTo(0, 0);
@@ -125,12 +131,12 @@ export default function LibraryPage() {
             (c) =>
               c.id === id &&
               c.status === "ready" &&
-              (accountId === "all" || c.accountId === accountId),
+              matchesCopy(r, c),
           ),
         ),
       ),
     );
-  }, [result, loading, page, accountId]);
+  }, [result, loading, page, matchesCopy]);
   const results = result ?? emptyPage;
   const rows = results.items;
   const checkable = rows.flatMap((r) =>
@@ -138,7 +144,7 @@ export default function LibraryPage() {
       .filter(
         (c) =>
           c.status === "ready" &&
-          (accountId === "all" || c.accountId === accountId),
+          matchesCopy(r, c),
       )
       .map((c) => c.id),
   );
@@ -150,19 +156,18 @@ export default function LibraryPage() {
     );
   };
   const resource = rows.find((r) => r.id === selectedResourceId) ?? rows[0];
-  const copies =
-    resource?.copies.filter(
-      (c) => accountId === "all" || c.accountId === accountId,
-    ) ?? [];
+  const matchedCopies = resource?.copies.filter((c) => matchesCopy(resource, c)) ?? [];
+  const copies = matchedCopies.length ? matchedCopies : (resource?.copies ?? []);
   const copy = copies.find((c) => c.id === selectedCopyId) ?? copies[0];
   const compact = useMediaQuery("(max-width: 1100px)");
   const [detailOpen, setDetailOpen] = useState(false);
   const [viewing, setViewing] = useState<DriveResourceTarget | null>(null);
   const [deleting, setDeleting] = useState<Resource | null>(null);
+  const [editingLinks, setEditingLinks] = useState<Resource | null>(null);
   const viewResource = (item: Resource, copyId?: string) => {
+    const available = item.copies.filter((c) => matchesCopy(item, c));
     const chosen =
-      item.copies.find((c) => c.id === copyId) ??
-      item.copies.find((c) => accountId === "all" || c.accountId === accountId);
+      available.find((c) => c.id === copyId) ?? available[0] ?? item.copies[0];
     setViewing({ kind: "resource", resource: item, copy: chosen });
   };
   useEffect(() => {
@@ -358,7 +363,7 @@ export default function LibraryPage() {
                       !r.copies.some(
                         (c) =>
                           c.status === "ready" &&
-                          (accountId === "all" || c.accountId === accountId),
+                          matchesCopy(r, c),
                       ) || loading
                     }
                     checked={r.copies.some((c) => checked.includes(c.id))}
@@ -367,7 +372,7 @@ export default function LibraryPage() {
                         .filter(
                           (c) =>
                             c.status === "ready" &&
-                            (accountId === "all" || c.accountId === accountId),
+                            matchesCopy(r, c),
                         )
                         .map((c) => c.id);
                       setChecked((old) =>
@@ -428,9 +433,17 @@ export default function LibraryPage() {
                           </span>
                         ))}
                         <ResourceShareState
-                          resource={r}
-                          accountId={accountId}
+                          copies={r.copies.filter((copy) => matchesCopy(r, copy))}
                         />
+                        {r.driveLinkProviders?.map((linkedProvider) => (
+                          <span
+                            key={linkedProvider}
+                            className="tag"
+                            title="已补充分享链接"
+                          >
+                            {providerDriveName(linkedProvider)}
+                          </span>
+                        ))}
                       </div>
                     </div>
                     <small className="resource-date">
@@ -441,6 +454,18 @@ export default function LibraryPage() {
                     </small>
                   </button>
                   <div className="resource-row-actions">
+                    {r.driveLinkProviders !== undefined ? (
+                      <Button
+                        quiet
+                        size="compact"
+                        title="补充链接"
+                        aria-label={`补充链接：${r.title}`}
+                        onClick={() => setEditingLinks(r)}
+                      >
+                        <Link2 size={15} />
+                        补充链接
+                      </Button>
+                    ) : null}
                     <Button
                       quiet
                       size="compact"
@@ -567,6 +592,13 @@ export default function LibraryPage() {
           onClose={() => setViewing(null)}
         />
       ) : null}
+      {editingLinks ? (
+        <ResourceDriveLinksDialog
+          resource={editingLinks}
+          onClose={() => setEditingLinks(null)}
+          onUpdated={reload}
+        />
+      ) : null}
       {deleting ? (
         <ResourceDeleteDialog
           resource={deleting}
@@ -585,16 +617,12 @@ export default function LibraryPage() {
 }
 
 function ResourceShareState({
-  resource,
-  accountId,
+  copies,
 }: {
-  resource: Resource;
-  accountId: string;
+  copies: ResourceCopy[];
 }) {
   const { data } = useAppData();
-  const statuses = resource.copies
-    .filter((copy) => accountId === "all" || copy.accountId === accountId)
-    .map((copy) =>
+  const statuses = copies.map((copy) =>
       copyShareStatus(
         copy,
         data?.accounts.find((account) => account.id === copy.accountId),

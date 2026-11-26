@@ -57,7 +57,10 @@ import {
 } from "../../shared/wechat-read-more";
 import type { ResourceLinks } from "../resource-links";
 import { wechatTypesettingVersion } from "../../shared/wechat-typesetting";
-import { wechatTemplateIds } from "../../shared/wechat-templates";
+import {
+  currentWechatTemplateId,
+  selectableWechatTemplateIds,
+} from "../../shared/wechat-templates";
 import {
   articleLinks,
   articleLinkOccurrences,
@@ -464,6 +467,8 @@ export class WechatArticles {
     const text = wechatTextInput.parse(raw ?? parent);
     text.readMore ??= parent.readMore;
     text.templateId ??= parent.templateId;
+    if (text.templateId)
+      text.templateId = currentWechatTemplateId(text.templateId);
     text.body = linkifyWechatMarkdown(text.body);
     const number =
       Math.max(...this.editionHistory(parent).map((item) => item.number)) + 1;
@@ -556,7 +561,7 @@ export class WechatArticles {
       coverModelSelection: this.d.cropImageToSize ? true : undefined,
       coverVariantSelection: this.d.cropImageToSize ? true : undefined,
       coverStyleReferences: this.d.cropImageToSize ? true : undefined,
-      supportedTemplates: wechatTemplateIds,
+      supportedTemplates: selectableWechatTemplateIds,
       supportedRewriteStyles: wechatRewriteStyleIds,
       readMoreEntries: this.readMoreEntries(article),
       editions: this.editionHistory(article, family),
@@ -1008,6 +1013,8 @@ export class WechatArticles {
     // Older callers may omit the new setting; retain the saved choice.
     text.readMore ??= article.readMore;
     text.templateId ??= article.templateId;
+    if (text.templateId)
+      text.templateId = currentWechatTemplateId(text.templateId);
     text.body = linkifyWechatMarkdown(text.body);
     this.editable(article);
     this.assertRevision(article, revision);

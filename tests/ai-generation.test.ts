@@ -8,6 +8,7 @@ import { AiService } from "../core/ai";
 import type { fetchJson } from "../core/http";
 import { ServiceHttpError } from "../core/errors";
 import { createAiHandlers } from "../core/ipc/ai";
+import { aiWebSources } from "../core/ai-web-search";
 
 const article = z.object({
   title: z.string().min(1),
@@ -75,6 +76,85 @@ async function fixture(
       ),
   };
 }
+
+test("web grounding is explicit, reserves search charges and injected text, and only exposes real citation excerpts", async () => {
+  const annotations = [
+    {
+      type: "url_citation",
+      url_citation: {
+        url: "https://example.com/manual",
+        title: "手册",
+        content: "有依据的具体操作步骤",
+      },
+    },
+    {
+      type: "url_citation",
+      url_citation: { url: "https://example.com/empty", title: "无摘录" },
+    },
+    {
+      type: "url_citation",
+      url_citation: { url: "javascript:alert(1)", content: "不可点击" },
+    },
+    {
+      type: "url_citation",
+      url_citation: {
+        url: "https://user:secret@example.com/private",
+        content: "凭据不可出现",
+      },
+    },
+  ];
+  assert.equal(aiWebSources(annotations).length, 1);
+  const f = await fixture({
+    usage: { cost: 0.009 },
+    choices: [
+      {
+        finish_reason: "stop",
+        message: { content: JSON.stringify(value), annotations },
+      },
+    ],
+  });
+  try {
+    f.db.setSetting("dailyAiBudgetMicros", 5000);
+    await assert.rejects(
+      () =>
+        f.ai.resourceExport("grounding", article, "检索", {}, [], {
+          maxTokens: 512,
+          webSearch: true,
+        }),
+      { code: "AI_BUDGET_EXCEEDED" },
+    );
+    assert.equal(f.requests(), 0);
+    f.db.setSetting("dailyAiBudgetMicros", 100000);
+    let sources: unknown;
+    await f.ai.resourceExport("grounding", article, "检索", {}, [], {
+      maxTokens: 512,
+      webSearch: true,
+      onWebSources: (items) => {
+        sources = items;
+      },
+    });
+    assert.deepEqual(f.payloads[0].plugins, [
+      { id: "web", engine: "exa", mode: "auto", max_results: 5 },
+    ]);
+    assert.deepEqual(sources, [
+      {
+        url: "https://example.com/manual",
+        title: "手册",
+        content: "有依据的具体操作步骤",
+      },
+    ]);
+    const call = f.db.get<{
+      estimated_micros: number;
+      confirmed_micros: number;
+    }>("SELECT estimated_micros,confirmed_micros FROM api_calls");
+    assert.ok(call!.estimated_micros > 13000);
+    assert.equal(call!.confirmed_micros, 9000);
+    await f.run();
+    assert.equal(f.payloads[1].plugins, undefined, "普通写作不启用付费联网");
+  } finally {
+    f.db.close();
+  }
+});
 
 test("explicit incomplete generation states reject even syntactically valid schema-conforming JSON and keep the known charge", async (t) => {
   for (const finishReason of [

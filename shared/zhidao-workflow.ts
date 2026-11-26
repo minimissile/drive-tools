@@ -88,6 +88,13 @@ export interface PublishingGenerationDraft {
   question: string;
   introduction: string;
 }
+export interface PublishingResearch {
+  checkedAt: string;
+  sources: { url: string; title: string; content: string }[];
+  facts: { statement: string; sourceUrls: string[] }[];
+  gaps: string[];
+}
+export type PublishingTopicKind = "resource" | "knowledge";
 export interface PublishingGeneration {
   id: string;
   status: "running" | "paused" | "failed" | "completed";
@@ -101,8 +108,12 @@ export interface PublishingGeneration {
     keyword: string;
     relatedKeywords: string[];
     intent?: string;
+    kind?: PublishingTopicKind;
+    answerPoints?: string[];
   }[];
-  planVersion?: 2;
+  planVersion?: 2 | 3;
+  research?: PublishingResearch;
+  replacesRows?: true;
   excludedKeywords?: { keyword: string; reason: string }[];
   validation?: {
     status: "passed" | "failed";
@@ -208,9 +219,13 @@ export function publishingRowsWithLinks(
     const url = new URL(destination?.url ?? share.url);
     if (!destination && share.code) url.searchParams.set("pwd", share.code);
     const href = escapePublishingHtml(url.href);
+    const link = `<p><strong>${destination?.type === "landing" ? "点击查看资源介绍与获取入口：" : destination?.type === "redirect" ? "点击直达网盘资源：" : "点击链接获取网盘资源："}</strong><br/></p><p><a href="${href}">${href}</a><br/></p>`;
+    const knowledge =
+      record.generation?.topics?.find((topic) => topic.id === row.id)?.kind ===
+      "knowledge";
     return {
       ...row,
-      answer: `<p><strong>${destination?.type === "landing" ? "点击查看资源介绍与获取入口：" : destination?.type === "redirect" ? "点击直达网盘资源：" : "点击链接获取网盘资源："}</strong><br/></p><p><a href="${href}">${href}</a><br/></p>${row.answer}`,
+      answer: knowledge ? row.answer + link : link + row.answer,
     };
   });
 }
@@ -289,7 +304,7 @@ export interface ZhidaoWorkflowContract {
     value: PublishingRecord;
   };
   "zhidao.workflow.generate": {
-    args: { id: string; upgradeLegacy?: true; optimize?: true };
+    args: { id: string; upgradeLegacy?: true; optimize?: true; expand?: true };
     value: PublishingRecord;
   };
   "zhidao.workflow.generateMany": {

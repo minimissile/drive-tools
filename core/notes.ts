@@ -134,7 +134,7 @@ export class NoteExporter {
       `copy_id: ${yaml(copy.id)}`,
       `title: ${yaml(resource.title)}`,
       `category: ${yaml(resource.category)}`,
-      `provider: ${yaml(resource.provider)}`,
+      `provider: ${yaml(account.provider)}`,
       `account: ${yaml(account.alias)}`,
       `tags: ${JSON.stringify(resource.tags)}`,
       `share_url: ${yaml(copy.shareUrl ?? "")}`,
@@ -142,7 +142,7 @@ export class NoteExporter {
       `updated: ${yaml(resource.updatedAt)}`,
       "---",
     ].join("\n");
-    let managed = `# ${resource.title}\n\n${coverLink}\n${resource.summary}\n\n## 保存与分享\n- 保存账号：${account.alias}\n- 本人分享：${copy.shareUrl ?? "尚未生成"}\n- 目标目录：${copy.directory}\n- 提取码：${code ?? "未导出；在盘序中复制内容包获取"}\n\n## 内部追溯（禁止对外分发）\n来源链接：${resource.sourceUrl}\n\n## 文件清单\n${copy.files.map((f) => `- ${f.name}`).join("\n")}\n`;
+    let managed = `# ${resource.title}\n\n${coverLink}\n${resource.summary}\n\n## 保存与分享\n- 保存账号：${account.alias}\n- 本人分享：${copy.shareUrl ?? "尚未生成"}\n- 目标目录：${copy.directory}\n- 提取码：${code ?? "未导出；在盘序中复制内容包获取"}\n\n## 内部追溯（禁止对外分发）\n来源链接：${copy.source?.url ?? resource.sourceUrl}\n\n## 文件清单\n${copy.files.map((f) => `- ${f.name}`).join("\n")}\n`;
     if (splitLines.length)
       managed += `\n## 本人拆分链接\n${splitLines.join("\n")}\n`;
     const managedHash = hash(frontmatter + "\n" + managed);

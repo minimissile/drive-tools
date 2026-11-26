@@ -16,6 +16,12 @@ import { AppError, safeMessage, ServiceHttpError } from "./errors";
 import { fetchJson } from "./http";
 import { nonnegativePrice } from "./model-pricing";
 import { budgetDayStart } from "./traffic";
+import {
+  aiWebSources,
+  aiWebSearchFeeMicros,
+  aiWebSearchPromptAllowance,
+  type AiWebSource,
+} from "./ai-web-search";
 import { ideaResponse } from "../shared/ideas";
 import { ideaInstruction } from "./idea-prompt";
 import { creativeResponse, creativeCard } from "../shared/studio";
@@ -50,6 +56,9 @@ type ResponseOptions = {
   /** Recheck workflow authorization after credential lookup, before reserving or sending. */
   beforeRequest?(): void;
   normalizeResponse?(data: unknown): unknown;
+  /** Explicit, billed grounding for workflows that need external facts. */
+  webSearch?: true;
+  onWebSources?(sources: AiWebSource[]): void;
 };
 
 const keywordSchema = z.object({
@@ -488,6 +497,13 @@ export class AiService {
         },
       ],
       max_tokens: maxTokens,
+      ...(options.webSearch
+        ? {
+            plugins: [
+              { id: "web", engine: "exa", mode: "auto", max_results: 5 },
+            ],
+          }
+        : {}),
       response_format: options.plainJson
         ? undefined
         : options.jsonMode
@@ -516,9 +532,12 @@ export class AiService {
       promptPrice != null && completionPrice != null
         ? Math.ceil(
             (Buffer.byteLength(JSON.stringify(payload), "utf8") * promptPrice +
-              maxTokens * completionPrice) *
+              maxTokens * completionPrice +
+              (options.webSearch
+                ? aiWebSearchPromptAllowance * promptPrice
+                : 0)) *
               1_000_000,
-          )
+          ) + (options.webSearch ? aiWebSearchFeeMicros : 0)
         : null;
     const budget = this.repo.db.setting<number | null>(
       "dailyAiBudgetMicros",
@@ -670,6 +689,10 @@ export class AiService {
         callId,
       );
       const raw = response.choices?.[0]?.message?.content;
+      if (options.webSearch)
+        options.onWebSources?.(
+          aiWebSources(response.choices?.[0]?.message?.annotations),
+        );
       if (options.retainResponse && typeof raw === "string")
         this.repo.db.run(
           "INSERT OR REPLACE INTO api_cache(key,value,expires_at) VALUES(?,?,?)",

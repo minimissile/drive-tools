@@ -1,5 +1,6 @@
 import {
   tiebaAutocareSaveSchema,
+  tiebaAutocareApplySchema,
   tiebaAutocareSyncSchema,
   tiebaAutocareStartSchema,
   tiebaAutocareObserveSchema,
@@ -17,6 +18,8 @@ export function createTiebaAutocareHandlers({
 }: Pick<HandlerServices, "tiebaAutocare">) {
   return {
     "tieba.autocare.snapshot": () => tiebaAutocare.snapshot(),
+    "tieba.autocare.apply": (raw) =>
+      tiebaAutocare.apply(tiebaAutocareApplySchema.parse(raw)),
     "tieba.autocare.save": (raw) =>
       tiebaAutocare.save(tiebaAutocareSaveSchema.parse(raw)),
     "tieba.autocare.sync": (raw) =>

@@ -1,3 +1,4 @@
+import { tiebaCareActions, type TiebaCareAction } from "./tieba-actions";
 import { z } from "zod";
 import {
   websiteAccountIdSchema,
@@ -49,6 +50,12 @@ export interface TiebaAutocareTarget extends TiebaForumReading {
   followIntent?: TiebaFollowIntent;
 }
 export const tiebaAutocareConfigSchema = z.object({
+  actions: z
+    .array(z.enum(tiebaCareActions))
+    .min(1, "请选择至少一项自动化操作")
+    .max(2)
+    .transform((actions) => [...new Set(actions)])
+    .optional(),
   targetIds: z
     .array(z.string().regex(/^tiebatarget_[\w-]+$/))
     .max(300)
@@ -73,7 +80,11 @@ export interface TiebaAutocareTask {
   uid: string;
   forumId: string;
   forumName: string;
-  action: "checkin";
+  action: TiebaCareAction;
+  threadId?: string;
+  threadTitle?: string;
+  threadUrl?: string;
+  authorUid?: string;
   day: string;
   status: TiebaAutocareTaskStatus;
   plannedAt: string;
@@ -94,6 +105,7 @@ export interface TiebaAutocareRun {
   status: "running" | "ended" | "stopped";
 }
 export interface TiebaAutocareSnapshot {
+  availableActions?: TiebaCareAction[];
   startResult?: {
     accounts: {
       accountId: string;
@@ -134,6 +146,11 @@ export interface TiebaAutocareSnapshot {
   logs: RuntimeLogPage;
   message: string;
 }
+export const tiebaAutocareApplySchema = z.object({
+  config: tiebaAutocareConfigSchema,
+  revision: z.number().int().positive(),
+  confirmed: z.literal(true),
+});
 export const tiebaAutocareSaveSchema = z.object({
   config: tiebaAutocareConfigSchema,
   revision: z.number().int().positive(),
@@ -194,6 +211,7 @@ export const tiebaAutocareFollowSchema = z.object({
 type Contract<A> = { args: A; value: TiebaAutocareSnapshot };
 export interface TiebaAutocareContract {
   "tieba.autocare.snapshot": Contract<undefined>;
+  "tieba.autocare.apply": Contract<z.infer<typeof tiebaAutocareApplySchema>>;
   "tieba.autocare.save": Contract<z.infer<typeof tiebaAutocareSaveSchema>>;
   "tieba.autocare.sync": Contract<z.infer<typeof tiebaAutocareSyncSchema>>;
   "tieba.autocare.start": Contract<z.infer<typeof tiebaAutocareStartSchema>>;

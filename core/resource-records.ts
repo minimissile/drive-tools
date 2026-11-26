@@ -1,5 +1,12 @@
 import { now, type Database } from "./database";
+import { removeResourceDriveLinkCodes } from "./resource-drive-links";
+import { normalizedDirectory } from "./providers/provider";
 import type { Resource, ResourceCopy } from "../shared/types";
+
+export function resourceTransferDirectory(parent: string, title: string, resourceId: string) {
+  const name = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, " ").trim().slice(0, 40);
+  return `${normalizedDirectory(parent)}/${name}__${resourceId.slice(-8)}`;
+}
 
 /** Local cleanup only. Callers validate references and own the surrounding transaction. */
 export function removeResourceRecords(
@@ -95,6 +102,7 @@ export function removeResourceRecords(
     db.run("DELETE FROM copies WHERE id=?", copy.id);
   }
   if (wholeResource) {
+    removeResourceDriveLinkCodes(db, resource.id);
     db.run("DELETE FROM secrets WHERE key=?", `source:${resource.id}`);
     const fixed = db.get<{ id: string }>(
       "SELECT id FROM resource_links WHERE resource_id=?",

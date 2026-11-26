@@ -29,12 +29,13 @@ export function PublishingKeywordPlan({
         {unknown.length ? ` · ${unknown.length}个词未记录原因` : ""}
       </summary>
       <p className="publishing-help">
-        每组生成一条问答。关联词表示同一需求，不代表逐字写入正文；问答删减以当前检查列表为准。
+        每个独立需求生成一条问答，同义词合并；正文直接回答问题。资料不足的词列出所缺依据，最多20条。
       </p>
       <ol className="publishing-keyword-groups">
         {topics.map((topic) => (
           <li key={topic.id}>
             <strong>{topic.keyword}</strong>
+            {topic.kind === "knowledge" ? <span>内容解答</span> : null}
             {topic.intent ? <span>{topic.intent}</span> : null}
             {topic.relatedKeywords.length ? (
               <span>并入：{topic.relatedKeywords.join("、")}</span>
@@ -60,6 +61,30 @@ export function PublishingKeywordPlan({
           旧记录未保存以下词的取舍原因：{unknown.join("、")}
           。已发布内容保留，重新生成时才使用新检查规则。
         </p>
+      ) : null}
+      {generation.research ? (
+        <details className="publishing-research">
+          <summary>
+            补充资料 · {generation.research.sources.length} 个来源
+          </summary>
+          <p className="publishing-help">
+            检索时间：
+            {new Date(generation.research.checkedAt).toLocaleString("zh-CN")}
+            。用于核对回答事实，不代表网盘文件进度。
+          </p>
+          <ul className="publishing-keyword-exclusions">
+            {generation.research.sources.map((source) => (
+              <li key={source.url}>
+                <a href={source.url} target="_blank" rel="noreferrer">
+                  {source.title}
+                </a>
+              </li>
+            ))}
+            {generation.research.gaps.map((gap, index) => (
+              <li key={index}>{gap}</li>
+            ))}
+          </ul>
+        </details>
       ) : null}
     </details>
   );

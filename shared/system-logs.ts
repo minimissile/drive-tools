@@ -54,6 +54,7 @@ const labels: Record<string, string> = {
   pipix: "皮皮虾",
   resource: "资源管理",
   account: "网盘账号",
+  "drive-sync": "网盘目录同步",
   "website-accounts": "其他账号",
   studio: "内容工作室",
   video: "视频制作",

@@ -24,6 +24,10 @@ export const removeV34 = `
   DROP TABLE IF EXISTS drive_index_entries;
   DROP TABLE IF EXISTS drive_sync_folders;
   DROP TABLE IF EXISTS drive_sync_runs;
+  DROP INDEX IF EXISTS copies_supplemental_source;
+  ALTER TABLE copies DROP COLUMN source_link_id;
+  DROP TABLE IF EXISTS resource_drive_links;
+  ALTER TABLE resources DROP COLUMN additional_image_ids;
   DROP TABLE IF EXISTS tieba_forum_cache_posts;
   DROP TABLE IF EXISTS tieba_forum_cache;
   DROP TRIGGER IF EXISTS traffic_queries_revision_insert;

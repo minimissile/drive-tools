@@ -91,6 +91,7 @@ export class BitBrowser {
       binding: BrowserBinding,
       action: () => Promise<T>,
     ) => Promise<T>,
+    private existingEndpoint = existingBitBrowserEndpoint,
   ) {}
   private async call(path: string, data: unknown = {}, expectedUrl?: string) {
     const config = await this.config();
@@ -383,34 +384,51 @@ export class BitBrowser {
     action: (context: BrowserContext) => Promise<T>,
     expectedUrl?: string,
   ): Promise<T> {
-    const connector = expectedUrl ?? (await this.config()).url;
+    const config = await this.config();
+    const connector = expectedUrl ?? config.url;
+    if (connector !== config.url)
+      throw new AppError(
+        "BIT_CONNECTION_CHANGED",
+        "比特连接地址已变化，请重新读取窗口列表后操作。",
+      );
+    const local = validateLoopback(connector);
+    if (local.pathname !== "/" && local.pathname !== "")
+      throw new AppError(
+        "INVALID_LOCAL_URL",
+        "比特接口应填写服务根地址，不包含路径。",
+      );
     const key = this.lifecycle.key(connector, profileId);
     this.lifecycle.begin(key);
     try {
-      let endpoint: string;
-      try {
-        const response = await this.call(
-          "/browser/open",
-          {
-            id: profileId,
-            loadExtensions: true,
-            args: [this.lifecycle.token],
-          },
-          connector,
-        );
-        endpoint = String(response.data?.ws ?? "");
-      } catch (error) {
-        if (
-          !(error instanceof AppError) ||
-          error.code !== "BIT_ERROR" ||
-          !error.message.includes("打开窗口失败")
-        )
-          throw error;
-        // A browser may outlive the client's registry. Only reconnect to the
-        // locally attested process of this exact profile; retain all auth errors.
-        const existing = await existingBitBrowserEndpoint(profileId);
-        if (!existing) throw error;
-        endpoint = existing;
+      // A live, exact profile is already the requested environment. Reusing its
+      // attested PID/lock/CDP endpoint avoids Local API launch calls (and their
+      // timeouts) for every identity read and business action. No process changes.
+      let endpoint = await this.existingEndpoint(profileId);
+      if (!endpoint) {
+        try {
+          const response = await this.call(
+            "/browser/open",
+            {
+              id: profileId,
+              loadExtensions: true,
+              args: [this.lifecycle.token],
+            },
+            connector,
+          );
+          endpoint = String(response.data?.ws ?? "");
+        } catch (error) {
+          if (
+            !(error instanceof AppError) ||
+            error.code !== "BIT_ERROR" ||
+            !error.message.includes("打开窗口失败")
+          )
+            throw error;
+          // A browser may outlive the client's registry. Only reconnect to the
+          // locally attested process of this exact profile; retain all auth errors.
+          const existing = await this.existingEndpoint(profileId);
+          if (!existing) throw error;
+          endpoint = existing;
+        }
       }
       const debug = validateLoopback(endpoint, true);
       if (!["ws:", "wss:"].includes(debug.protocol))
@@ -420,6 +438,7 @@ export class BitBrowser {
         );
       const browser = await chromium.connectOverCDP(endpoint, {
         timeout: 15_000,
+        noDefaults: true,
       });
       try {
         const context = browser.contexts()[0];

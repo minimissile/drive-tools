@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError } from "./errors";
+import {
+  resourceImageLimit,
+  resourceImageMaxBytes,
+  type ResourceImageInput,
+} from "../shared/resource-images";
 
 // Use decimal KB so the saved file also fits a 200 KiB limit.
 export const resourceCoverMaxBytes = 200_000;
@@ -35,6 +40,47 @@ export async function saveResourceCover(dataPath: string, bytes: Buffer) {
     mode: 0o600,
   });
   return coverId;
+}
+
+export async function prepareResourceImages(
+  dataPath: string,
+  images: ResourceImageInput[],
+  existingIds: string[],
+  normalize: (bytes: Buffer) => Promise<Buffer>,
+) {
+  if (images.length > resourceImageLimit)
+    throw new AppError("RESOURCE_IMAGE_LIMIT", "一份资源最多保存3张图片。");
+  const ids: string[] = [];
+  for (const image of images) {
+    if ("id" in image) {
+      if (!existingIds.includes(image.id))
+        throw new AppError(
+          "RESOURCE_IMAGE_CHANGED",
+          "此图片已不在当前资源中，请重新打开资料或移除此图片。",
+        );
+      await readResourceCover(dataPath, image.id);
+      ids.push(image.id);
+      continue;
+    }
+    const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
+      image.data,
+    );
+    if (!match)
+      throw new AppError("INVALID_COVER", "仅支持PNG、JPEG、WebP图片。");
+    const bytes = Buffer.from(match[2], "base64");
+    if (bytes.length > resourceImageMaxBytes)
+      throw new AppError("COVER_TOO_LARGE", "每张图片不能超过8MB。");
+    const unchangedWebp =
+      match[1] === "webp" &&
+      existingIds.includes(createHash("sha256").update(bytes).digest("hex"));
+    ids.push(
+      await saveResourceCover(
+        dataPath,
+        unchangedWebp ? bytes : await normalize(bytes),
+      ),
+    );
+  }
+  return ids;
 }
 
 export async function readResourceCover(dataPath: string, coverId: string) {

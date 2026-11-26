@@ -14,6 +14,8 @@ export interface TargetRecord extends TiebaAutocareTarget {
 export interface TaskRecord extends TiebaAutocareTask {
   stamp: EnvironmentStamp;
   configSnapshot: TiebaAutocareConfig;
+  reconcileAttempts?: number;
+  reconcileAfter?: string;
 }
 export interface AutocareState {
   planVersion?: 2;

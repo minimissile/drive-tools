@@ -7,6 +7,7 @@ import {
   isIndexedOwnSource,
 } from "../shared/owned-file-source";
 import { indexedOwnSource } from "../core/drive-sync-resource";
+import type { DriveSyncLog } from "../shared/drive-sync";
 import type { ResourceInput } from "../shared/types";
 
 test("UC、迅雷、光鸭原生账号通过原分区同步，不注册为指纹浏览器账号", async () => {
@@ -35,6 +36,73 @@ test("UC、迅雷、光鸭原生账号通过原分区同步，不注册为指纹
       );
       assert.match(view.run!.environment, new RegExp(`persist:panxu-${a.id}`));
     }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("真实应用 IPC 读取同步日志，删除账号时清除日志和自动录入状态", async () => {
+  const f = await fixture();
+  const folder = {
+    ...file,
+    id: "folder",
+    name: "资料",
+    isDirectory: true,
+    size: null,
+  };
+  Object.assign(f.provider, {
+    listPage: async (_: unknown, id: string) => ({
+      files: id === "0" ? [folder] : [file],
+      next: null,
+    }),
+  });
+  try {
+    const account = (await f.app.invoke("account.add", {
+      provider: "uc",
+      alias: "本人 UC",
+    })) as { id: string };
+    await f.app.invoke("account.check", { id: account.id });
+    await f.app.invoke("driveSync.start", {
+      accountId: account.id,
+      autoRegister: true,
+    });
+    await f.app.driveSync.settled(account.id);
+    assert.deepEqual(f.app.driveSync.current(account.id)?.autoRegister, {
+      enabled: true,
+      added: 2,
+      skipped: 0,
+    });
+    const logs = (await f.app.invoke("driveSync.logs", {
+      accountId: account.id,
+    })) as DriveSyncLog[];
+    assert.match(logs[0].message, /^同步完成/);
+    assert.match(logs[0].message, /自动录入新增 2 项/);
+    assert.match(logs.at(-1)!.message, /^开始同步/);
+    assert.equal(
+      f.app.driveSync.index({ accountId: account.id }).items[0].state,
+      "recorded",
+    );
+    assert.equal(
+      f.app.driveSync.index({ accountId: account.id, parentId: folder.id })
+        .items[0].state,
+      "recorded",
+    );
+    const preview = (await f.app.invoke("account.deletePreview", {
+      id: account.id,
+    })) as { token: string; blockers: string[] };
+    assert.deepEqual(preview.blockers, []);
+    await f.app.invoke("account.remove", { token: preview.token });
+    assert.equal(
+      f.app.db.get(
+        "SELECT 1 FROM runtime_logs WHERE domain='drive-sync' AND account_id=?",
+        account.id,
+      ),
+      undefined,
+    );
+    assert.equal(
+      f.app.db.setting(`drive-sync:auto-register:${account.id}`, null),
+      null,
+    );
   } finally {
     await f.cleanup();
   }

@@ -63,6 +63,7 @@ import { ArticleReadMore } from "./ArticleReadMore";
 import { ArticleTemplateSelect } from "./ArticleTemplateSelect";
 import { InsertArticleModule } from "./ArticleModules";
 import {
+  currentWechatTemplateId,
   defaultWechatTemplate,
   wechatTemplateSchema,
 } from "../../shared/wechat-templates";
@@ -86,7 +87,7 @@ const text = (article: WechatText) => ({
   digest: article.digest,
   coverUrl: article.coverUrl,
   readMore: article.readMore,
-  templateId: article.templateId ?? defaultWechatTemplate,
+  templateId: currentWechatTemplateId(article.templateId),
 });
 const bodyLimit = 200_000;
 const editorSchema = z.object({
@@ -96,7 +97,9 @@ const editorSchema = z.object({
   digest: z.string().max(500),
   coverUrl: z.string().max(4000),
   readMore: wechatReadMoreSchema.optional(),
-  templateId: wechatTemplateSchema.default(defaultWechatTemplate),
+  templateId: wechatTemplateSchema
+    .default(defaultWechatTemplate)
+    .transform((id): WechatText["templateId"] => currentWechatTemplateId(id)),
   coverAddress: z.string().max(4000).nullable().default(null),
   imageAddress: z.string().max(4000).nullable().default(null),
   revision: z.number().int().positive(),
@@ -336,11 +339,7 @@ export function ArticleEditor({
     onChanged();
   };
   const requireTemplateSupport = () => {
-    const supported =
-      detail.supportedTemplates ??
-      (detail.templateSupport
-        ? ["classic", "minimal"]
-        : [defaultWechatTemplate]);
+    const supported = detail.supportedTemplates ?? [defaultWechatTemplate];
     if (!supported.includes(draft.value.templateId ?? defaultWechatTemplate))
       throw new Error(
         "排版模板更新尚未加载，请点击顶部“应用更新并重启”后保存。模板选择已保留在本窗口。",

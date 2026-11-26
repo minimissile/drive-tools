@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { chromium, type Browser, type BrowserContext } from "playwright-core";
 import type { WebsiteAccount } from "../shared/website-accounts";
 import { tiebaAutocareBrowser } from "../core/tieba/autocare-browser";
+import { disposablePage } from "../core/browser-page-lifecycle";
 import {
   assertTiebaPage,
   parseTiebaFollowedPage,
@@ -155,6 +156,8 @@ after(async () => {
 /** Dedicated offline browser context: only fixture business documents are fulfilled. */
 async function fixture(mode: TiebaFixtureMode = "success", uid = "111") {
   const context = await browser.newContext({ serviceWorkers: "block" });
+  const userPage = await context.newPage();
+  await userPage.setContent("<title>existing user page</title>");
   const events: string[] = [];
   await context.route("https://tieba.baidu.com/**", async (route) => {
     const request = route.request(),
@@ -185,7 +188,7 @@ async function fixture(mode: TiebaFixtureMode = "success", uid = "111") {
     ) => action(context),
     { resultTimeoutMs: 250, pageTimeoutMs: 250 },
   );
-  return { context, events, api };
+  return { context, events, api, userPage };
 }
 
 test("followed forums resolve real IDs, deduplicate names and close disposable pages", async () => {
@@ -203,7 +206,7 @@ test("followed forums resolve real IDs, deduplicate names and close disposable p
     assert.equal(result[0].experience, 35);
     assert.equal(result[0].signed, false);
     assert.equal(f.events.length, 0);
-    assert.equal(f.context.pages().length, 0);
+    assert.deepEqual(f.context.pages(), [f.userPage]);
   } finally {
     await f.context.close();
   }
@@ -213,21 +216,32 @@ test("live PC header-only followed table is empty only after loading completes a
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    await page.route("https://tieba.baidu.com/**", route => route.fulfill({
-      contentType: "text/html; charset=utf-8",
-      body: `<!doctype html><html><body><script>window.PageData={user:{user_id:'111',is_login:1}};</script><div id="like_pagelet"><div class="forum_table"><table><tbody><tr><th>吧名</th><th>经验值</th><th>等级</th><th>取消关注</th></tr></tbody></table></div></div></body></html>`,
-    }));
+    await page.route("https://tieba.baidu.com/**", (route) =>
+      route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        body: `<!doctype html><html><body><script>window.PageData={user:{user_id:'111',is_login:1}};</script><div id="like_pagelet"><div class="forum_table"><table><tbody><tr><th>吧名</th><th>经验值</th><th>等级</th><th>取消关注</th></tr></tbody></table></div></div></body></html>`,
+      }),
+    );
     await page.goto("https://tieba.baidu.com/i/i/forum?pn=1");
-    const read = () => page.evaluate<TiebaAutocarePageSnapshot>(tiebaAutocarePageScript);
-    assert.deepEqual(parseTiebaFollowedPage(await read(), "111"), { names: [], next: null });
-    await page.evaluate(() => document.querySelector(".forum_table")!.setAttribute("aria-busy", "true"));
+    const read = () =>
+      page.evaluate<TiebaAutocarePageSnapshot>(tiebaAutocarePageScript);
+    assert.deepEqual(parseTiebaFollowedPage(await read(), "111"), {
+      names: [],
+      next: null,
+    });
+    await page.evaluate(() =>
+      document.querySelector(".forum_table")!.setAttribute("aria-busy", "true"),
+    );
     assert.equal((await read()).listEmpty, false);
     await page.evaluate(() => {
       document.querySelector(".forum_table")!.removeAttribute("aria-busy");
-      document.querySelector("table")!.insertRow().insertCell().textContent = "尚在加载的记录";
+      document.querySelector("table")!.insertRow().insertCell().textContent =
+        "尚在加载的记录";
     });
     assert.equal((await read()).listEmpty, false);
-  } finally { await context.close(); }
+  } finally {
+    await context.close();
+  }
 });
 
 test("check-in saves the checkpoint before exactly one mutation and requires visible signed evidence", async () => {
@@ -239,7 +253,7 @@ test("check-in saves the checkpoint before exactly one mutation and requires vis
     assert.deepEqual(f.events, ["checkpoint", "submitted"]);
     assert.equal(result.signed, true);
     assert.equal(result.canSign, false);
-    assert.equal(f.context.pages().length, 0);
+    assert.deepEqual(f.context.pages(), [f.userPage]);
   } finally {
     await f.context.close();
   }
@@ -253,7 +267,7 @@ test("already signed is read-only and never consumes a submit checkpoint", async
     });
     assert.equal(result.signed, true);
     assert.equal(f.events.length, 0);
-    assert.equal(f.context.pages().length, 0);
+    assert.deepEqual(f.context.pages(), [f.userPage]);
   } finally {
     await f.context.close();
   }
@@ -270,7 +284,7 @@ test("unknown, paid or ambiguous controls cannot submit", async () => {
         { code: "TIEBA_SIGN_UNAVAILABLE" },
       );
       assert.deepEqual(f.events, []);
-      assert.equal(f.context.pages().length, 0);
+      assert.deepEqual(f.context.pages(), [f.userPage]);
     } finally {
       await f.context.close();
     }
@@ -298,7 +312,7 @@ test("expired scope or changed account prevents the click", async () => {
       { code: "TIEBA_IDENTITY_MISMATCH", uncertain: true },
     );
     assert.deepEqual(f.events, []);
-    assert.equal(f.context.pages().length, 0);
+    assert.deepEqual(f.context.pages(), [f.userPage]);
   } finally {
     await f.context.close();
   }
@@ -315,7 +329,7 @@ test("a lost receipt or challenge after submit is uncertain and never clicks aga
         { uncertain: true },
       );
       assert.deepEqual(f.events, ["checkpoint", "submitted"]);
-      assert.equal(f.context.pages().length, 0);
+      assert.deepEqual(f.context.pages(), [f.userPage]);
     } finally {
       await f.context.close();
     }
@@ -332,7 +346,7 @@ test("identity mismatch is rejected before any business page mutation", async ()
       { code: "TIEBA_IDENTITY_MISMATCH" },
     );
     assert.deepEqual(f.events, []);
-    assert.equal(f.context.pages().length, 0);
+    assert.deepEqual(f.context.pages(), [f.userPage]);
   } finally {
     await f.context.close();
   }
@@ -370,7 +384,13 @@ test("cross-origin and HTTP redirects are stopped within the disposable page", a
         code: "TIEBA_PAGE_REDIRECT",
       });
       assert.deepEqual(f.events, []);
-      assert.equal(f.context.pages().length, 0);
+      assert.ok(f.context.pages().includes(f.userPage));
+      for (const page of f.context.pages().filter((p) => p !== f.userPage))
+        assert.equal(
+          await disposablePage(page),
+          false,
+          "未知跳转保留受保护页面",
+        );
     } finally {
       await f.context.close();
     }

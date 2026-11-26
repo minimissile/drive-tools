@@ -30,8 +30,7 @@ export function existingBitBrowserDirectory(
     : null;
 }
 
-/** Recover a live local profile after the client loses its process registry.
- * Called only after an authenticated Local API open reports a launch failure.
+/** Reuse a live local profile, including when the Local API cannot reply.
  * No process is launched, stopped, or changed; PID, lock and CDP file must agree. */
 export async function existingBitBrowserEndpoint(
   profileId: string,

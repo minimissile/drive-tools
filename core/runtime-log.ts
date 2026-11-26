@@ -16,6 +16,24 @@ type Input = Omit<
   taskId?: string;
   details?: Record<string, unknown>;
 };
+
+export function writeRuntimeLog(db: Database, domain: string, input: Input) {
+  const clean = cleanKnowledge(input) as Input;
+  const createdAt = now();
+  const saved = db.run(
+    "INSERT INTO runtime_logs(domain,level,event,message,account_id,task_id,details,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    domain,
+    clean.level,
+    clean.event,
+    clean.message.slice(0, 4000),
+    clean.accountId ?? null,
+    clean.taskId ?? null,
+    JSON.stringify(clean.details ?? {}),
+    createdAt,
+  );
+  return { ...clean, id: Number(saved.lastInsertRowid), domain, createdAt };
+}
+
 /** Durable, credential-cleaned events. JSONL is a local mirror; SQLite is authoritative. */
 export class RuntimeLog {
   readonly folder: string;
@@ -29,25 +47,8 @@ export class RuntimeLog {
     this.folder = join(dataPath, "logs", domain);
   }
   record(input: Input) {
-    const clean = cleanKnowledge(input) as Input;
-    const createdAt = now();
-    const saved = this.db.run(
-      "INSERT INTO runtime_logs(domain,level,event,message,account_id,task_id,details,created_at) VALUES(?,?,?,?,?,?,?,?)",
-      this.domain,
-      clean.level,
-      clean.event,
-      clean.message.slice(0, 4000),
-      clean.accountId ?? null,
-      clean.taskId ?? null,
-      JSON.stringify(clean.details ?? {}),
-      createdAt,
-    );
-    const entry = {
-      ...clean,
-      id: Number(saved.lastInsertRowid),
-      domain: this.domain,
-      createdAt,
-    };
+    const entry = writeRuntimeLog(this.db, this.domain, input);
+    const { createdAt } = entry;
     try {
       mkdirSync(this.folder, { recursive: true, mode: 0o700 });
       const day = new Intl.DateTimeFormat("en-CA", {

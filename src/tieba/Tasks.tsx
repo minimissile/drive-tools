@@ -1,3 +1,4 @@
+import { tiebaCareActionLabels } from "../../shared/tieba-actions";
 import { tiebaAccountName } from "./account-label";
 import { z } from "zod";
 import type { TiebaAutocareSnapshot } from "../../shared/tieba-autocare";
@@ -49,7 +50,7 @@ export function TiebaTasks({
   );
   return (
     <Panel
-      title={history ? "签到历史" : "本轮签到计划"}
+      title={history ? "操作历史" : "任务进度"}
       className="tieba-tasks"
       extra={
         <CheckboxField
@@ -65,10 +66,10 @@ export function TiebaTasks({
         <>
           <div className="tieba-task-summary">
             <span>
-              签到已核实 <strong>{summary.verified}</strong>
+              已完成 <strong>{summary.verified}</strong>
             </span>
             <span>
-              原已签到 <strong>{summary.already}</strong>
+              原已完成 <strong>{summary.already}</strong>
             </span>
             <span>
               结果待核对 <strong>{summary.uncertain}</strong>
@@ -82,11 +83,11 @@ export function TiebaTasks({
           <div className="table-scroll">
             <table
               className="tieba-task-table"
-              aria-label={history ? "签到历史记录" : "本轮签到任务"}
+              aria-label={history ? "自动化历史记录" : "本轮自动化任务"}
             >
               <thead>
                 <tr>
-                  <th scope="col">贴吧 / 账号</th>
+                  <th scope="col">动作 / 贴吧 / 账号</th>
                   <th scope="col">计划时间</th>
                   <th scope="col">结果</th>
                   <th scope="col">运行情况</th>
@@ -99,7 +100,13 @@ export function TiebaTasks({
                   .map((task) => (
                     <tr key={task.id}>
                       <td>
-                        <strong>{task.forumName}吧</strong>
+                        <strong>
+                          {tiebaCareActionLabels[task.action]} ·{" "}
+                          {task.forumName}吧
+                        </strong>
+                        {task.threadTitle ? (
+                          <small>{task.threadTitle}</small>
+                        ) : null}
                         <small>
                           {accounts.get(task.accountId) ?? "历史账号"}
                         </small>
@@ -145,17 +152,17 @@ export function TiebaTasks({
             pageSize={8}
             total={tasks.length}
             onPageChange={(value) => filters.update({ page: value })}
-            label="签到任务分页"
+            label="自动化任务分页"
           />
           {history && s.tasks.length === 500 ? (
             <small className="muted">当前展示最近500项记录。</small>
           ) : null}
         </>
       ) : (
-        <Empty compact title={history ? "暂无签到历史" : "尚未安排本轮任务"}>
+        <Empty compact title={history ? "暂无操作历史" : "尚未安排本轮任务"}>
           {history
             ? "执行记录会保留计划时间、提交与官网核验结果。"
-            : "保存目标并开启自动签到后，具体安排会显示在这里。"}
+            : "选择账号和操作后点击“保存并开启”，具体安排会显示在这里。"}
         </Empty>
       )}
     </Panel>

@@ -95,6 +95,22 @@ export interface PublicationPackage {
 
 /** Business command contracts shared by renderer adapters, never component-local casts. */
 export interface IpcCommands {
+  "resource.driveLinks": Contract<
+    { resourceId: string },
+    import("./resource-drive-links").ResourceDriveLink[]
+  >;
+  "resource.transferDriveLink": Contract<
+    import("./resource-drive-links").ResourceDriveTransferInput,
+    { copyId: string; jobId: string }
+  >;
+  "resource.updateDriveSourceCode": Contract<
+    { resourceId: string; linkId: string; text: string },
+    import("./resource-drive-links").ResourceDriveLink[]
+  >;
+  "resource.removeDriveLink": Contract<
+    { resourceId: string; linkId: string },
+    import("./resource-drive-links").ResourceDriveLink[]
+  >;
   "resource.keywordBatch": Contract<
     import("zod").z.infer<
       typeof import("./resource-keywords").keywordBatchSchema
@@ -355,6 +371,7 @@ export interface IpcCommands {
       sourceText: string;
       code?: string;
       resourceId?: string;
+      sourceLinkId?: string;
       parentId?: string;
       page?: number;
       cursor?: string;
@@ -366,6 +383,7 @@ export interface IpcCommands {
     sourceText: string;
     code?: string;
     resourceId?: string;
+    sourceLinkId?: string;
   }>;
   "share.parse": Contract<{ text: string; code?: string }, ShareInput>;
   "share.validate": Contract<

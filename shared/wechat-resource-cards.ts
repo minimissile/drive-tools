@@ -46,10 +46,11 @@ export function wechatResourceCard(
   help: string,
   appearance: WechatResourceAppearance = getWechatTemplate().resource,
 ) {
+  const linkStyle = appearance.link ? ` style="${appearance.link}"` : "";
   return (
     `<section style="${appearance.container}">` +
     `<p style="${appearance.title}">${title}</p>` +
-    `<p style="${appearance.address}"><a href="${href}" rel="noopener noreferrer">${href}</a></p>` +
+    `<p style="${appearance.address}"><a href="${href}" rel="noopener noreferrer"${linkStyle}>${href}</a></p>` +
     (code ? `<p style="${appearance.code}">${code}</p>` : "") +
     `<p style="${appearance.help}">${help}</p></section>`
   );

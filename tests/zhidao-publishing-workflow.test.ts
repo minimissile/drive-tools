@@ -19,6 +19,7 @@ import {
   generationQuestion,
 } from "../shared/zhidao-generation";
 import { publishingGenerationInstruction } from "../core/zhidao/publishing-generation";
+import coverageReplay from "./fixtures/zhidao-keyword-coverage-20261125.json";
 
 type GenerationInput = {
   resource: {
@@ -27,7 +28,12 @@ type GenerationInput = {
     category: string;
     files: { name: string }[];
   };
-  rows: { index: number; keyword: string }[];
+  rows: {
+    index: number;
+    keyword: string;
+    kind?: string;
+    answerPoints?: string[];
+  }[];
   previous: { question: string; introduction: string }[];
 };
 
@@ -40,6 +46,7 @@ async function setup() {
   let reviewOutput: unknown = { issues: [] };
   const reviewCalls: unknown[] = [];
   const planCalls: unknown[] = [];
+  const researchCalls: unknown[] = [];
   let aiOutput: ((input: GenerationInput) => unknown) | undefined;
   let beforeAi: (() => Promise<void> | void) | undefined;
   f.app.ai.resourceExport = (async (
@@ -50,6 +57,14 @@ async function setup() {
     _images,
     options,
   ) => {
+    if (_name === "zhidao_publishing_research") {
+      options?.beforeRequest?.();
+      researchCalls.push(input);
+      return schema.parse({
+        facts: [],
+        gaps: ["测试未提供外部资料，知识题须使用资源说明"],
+      });
+    }
     if (_name === "zhidao_publishing_plan") {
       options?.beforeRequest?.();
       planCalls.push(input);
@@ -230,6 +245,7 @@ async function setup() {
     receipts,
     aiCalls,
     planCalls,
+    researchCalls,
     reviewCalls,
     setReviewOutput: (value: unknown) => {
       reviewOutput = value;
@@ -983,12 +999,6 @@ test("每个关键词有独立 AI 标题与简介，20行分三批并提供原�
     assert.equal(result.generation?.status, "completed");
     await f.flow.generate(resource.key);
     assert.equal(f.aiCalls.length, 3, "读取既有结果不能再次计费");
-    assert.match(
-      publishingGenerationInstruction,
-      /关键词是搜索意图，不是资源事实/,
-    );
-    assert.match(publishingGenerationInstruction, /百度网盘最多出现一次/);
-    assert.match(publishingGenerationInstruction, /未经资料证实/);
   } finally {
     await f.cleanup();
   }
@@ -1501,7 +1511,7 @@ test("本地已提交URL不再次分配，导出前新增提交记录也会阻�
   }
 });
 
-test("第三步逐词记录去向：漏词/重复排除阻断，教程不改成下载题，无有效词保留原因", async () => {
+test("第三步逐词记录去向：漏词/重复排除阻断，缺资料的方法词说明原因，无有效词保留原因", async () => {
   const f = await setup();
   try {
     const resource = {
@@ -1517,17 +1527,19 @@ test("第三步逐词记录去向：漏词/重复排除阻断，教程不改成�
     assert.equal(f.aiCalls.length, 0);
     f.setPlanOutput({
       groups: [{ index: 0, related: [1, 2], intent: "办公工具安装包获取" }],
-      excluded: [],
+      excluded: [{ index: 2, reason: "重复序号测试" }],
     });
     await assert.rejects(() => f.flow.generate(resource.key), /重复或无效序号/);
     f.setPlanOutput({
       groups: [{ index: 0, related: [1], intent: "办公工具安装包获取" }],
-      excluded: [],
+      excluded: [
+        { index: 2, reason: "未提供查看IP的具体方法依据，需补充步骤资料" },
+      ],
     });
     const result = await f.flow.generate(resource.key);
     assert.equal(result.rows.length, 1);
     assert.equal(result.generation?.excludedKeywords?.length, 1);
-    assert.equal(result.generation?.planVersion, 2);
+    assert.equal(result.generation?.planVersion, 3);
     assert.equal(result.generation?.validation?.status, "passed");
     assert.equal(f.reviewCalls.length, 1);
     const plan = result.keywordPlan;
@@ -1546,7 +1558,7 @@ test("第三步逐词记录去向：漏词/重复排除阻断，教程不改成�
       groups: [],
       excluded: [{ index: 0, reason: "属于查看IP教程，不能生成资源获取题" }],
     });
-    await assert.rejects(() => f.flow.generate(empty.key), /没有适合生成/);
+    await assert.rejects(() => f.flow.generate(empty.key), /没有资料充分/);
     assert.equal(f.flow.get(empty.key).generation?.excludedKeywords?.length, 1);
     assert.equal(f.flow.get(empty.key).rows.length, 0);
     assert.equal(f.aiCalls.length, 2);
@@ -1773,6 +1785,185 @@ test("修正已完成但检查连接中断时保留新旧草稿，继续仅重�
     assert.equal(result.generation?.rejectedDrafts, undefined);
     assert.deepEqual(result.links, before.links);
     assert.equal(f.counts().creates, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("14词旧稿扩展：不同需求可形成7题，先保留旧稿，失败续跑复用资料；确认后禁止重新分组", async () => {
+  const f = await setup();
+  try {
+    const resource = {
+      ...f.resource,
+      ...coverageReplay,
+      // Deliberately synthetic editorial input, not facts about the real programme.
+      summary:
+        "测试资料：提供该剧剧情梗概、角色结局、演员其他作品、12集的剧集安排和有日期的播出说明；包含十部爱情泰剧的选片介绍和推荐理由。",
+    };
+    f.flow.planMany([resource]);
+    f.setAiOutput(() => ({
+      rows: [
+        {
+          index: 0,
+          question: "《爱情契约》的百度网盘资源在哪？",
+          introduction:
+            "这是测试资料中列出的影视资源，用于验证旧问答保留与扩展流程，不承诺免费观看。",
+        },
+      ],
+    }));
+    f.setPlanOutput({
+      groups: [{ index: 0, related: [3, 12], intent: "获取该剧网盘资源" }],
+      excluded: resource.keywords.flatMap((_, index) =>
+        [0, 3, 12].includes(index)
+          ? []
+          : [{ index, reason: "旧版仅处理资源获取需求" }],
+      ),
+    });
+    const old = await f.flow.generate(resource.key);
+    assert.equal(old.rows.length, 1);
+    const groups = [
+      {
+        index: 0,
+        related: [3, 12],
+        intent: "资源获取",
+        kind: "resource",
+        answerPoints: [],
+      },
+      {
+        index: 2,
+        related: [5],
+        intent: "十部爱情泰剧的选片推荐及理由",
+        kind: "knowledge",
+        answerPoints: [
+          "依据测试资料十部作品的介绍比较题材与观剧偏好，不宣称热度排名",
+        ],
+      },
+      {
+        index: 4,
+        related: [6],
+        intent: "主演的其他影视作品",
+        kind: "knowledge",
+        answerPoints: ["列出测试资料确认的演员和作品，不与同名作品混淆"],
+      },
+      {
+        index: 7,
+        related: [],
+        intent: "角色结局",
+        kind: "knowledge",
+        answerPoints: ["先提示剧透，再据测试资料交代角色关系的结局与原因"],
+      },
+      {
+        index: 9,
+        related: [],
+        intent: "官方更新安排",
+        kind: "knowledge",
+        answerPoints: ["按资料日期说明官方播出安排，不保证网盘更新"],
+      },
+      {
+        index: 10,
+        related: [],
+        intent: "第12集的剧情衔接及观看顺序",
+        kind: "knowledge",
+        answerPoints: ["按测试资料说明第12集位置及前后剧情衔接，不承诺免费"],
+      },
+      {
+        index: 11,
+        related: [],
+        intent: "剧情解析",
+        kind: "knowledge",
+        answerPoints: ["依据测试剧情资料分析主要冲突和人物动机"],
+      },
+    ];
+    f.setPlanOutput({
+      groups,
+      excluded: [1, 8, 13].map((index) => ({
+        index,
+        reason: "作品身份或未删减版本缺少可靠依据",
+      })),
+    });
+    f.setAiOutput(({ rows }) => ({
+      rows: rows.map(({ index, kind }) => ({
+        index,
+        question:
+          kind === "resource"
+            ? "泰剧《爱情契约》的百度网盘分享链接在哪？"
+            : `泰剧《爱情契约》的${groups[index].intent}是什么？`,
+        introduction: `以下为测试回答${index + 1}。${groups[index].answerPoints.join("。")}。本段按对应需求分别组织实质内容，使用测试资料中提供的事实，验证内容题不再被强制改为链接获取问题。`,
+      })),
+    }));
+    const researchCount = f.researchCalls.length;
+    f.setReviewOutput({
+      issues: [
+        {
+          index: 6,
+          kind: "unsupported",
+          duplicateOf: null,
+          reason: "测试拦截：剧情分析需补充依据",
+        },
+      ],
+    });
+    await assert.rejects(
+      () => f.flow.generate(resource.key, false, false, true),
+      /问答意图检查/,
+    );
+    let current = f.flow.get(resource.key);
+    assert.deepEqual(current.rows, old.rows, "新稿失败不能覆盖原稿");
+    assert.equal(current.generation?.drafts.length, 7);
+    assert.equal(
+      current.generation?.topics?.filter((topic) => topic.kind === "knowledge")
+        .length,
+      6,
+    );
+    const accounted = current
+      .generation!.topics!.flatMap((topic) => [
+        topic.keyword,
+        ...topic.relatedKeywords,
+      ])
+      .concat(
+        current.generation!.excludedKeywords!.map((entry) => entry.keyword),
+      );
+    assert.equal(accounted.length, 14);
+    assert.equal(new Set(accounted).size, 14);
+    const calls = f.aiCalls.length;
+    f.setReviewOutput({ issues: [] });
+    current = await f.flow.generate(resource.key);
+    assert.equal(current.rows.length, 7);
+    assert.equal(
+      f.researchCalls.length,
+      researchCount,
+      "复用已保存的检索资料，不重复付费检索",
+    );
+    assert.equal(f.aiCalls.length, calls, "续验不重写已完成正文");
+    assert.equal(current.generation?.planVersion, 3);
+    assert.ok(
+      current.rows.slice(1).every((row) => !row.question.includes("百度网盘")),
+    );
+    assert.equal(f.counts().creates, 0, "生成和检查不建链");
+    const linked = {
+      ...current,
+      rowShares: Object.fromEntries(
+        current.rows.map((row, index) => [
+          row.id!,
+          { url: `https://pan.baidu.com/s/test${index}`, code: "" },
+        ]),
+      ),
+    };
+    const answers = publishingRowsWithLinks(linked);
+    assert.ok(answers[0].answer.startsWith("<p><strong>点击链接"));
+    assert.ok(
+      answers[1].answer.startsWith(current.rows[1].answer),
+      "内容题先给实质解答再附资源入口",
+    );
+    const confirmed = f.flow.saveRows(
+      current.id,
+      current.rows.map((row) => ({ ...row, reviewed: true })),
+      current.generation!.id,
+    );
+    await assert.rejects(
+      () => f.flow.generate(current.id, false, false, true),
+      /已确认/,
+    );
+    assert.deepEqual(f.flow.get(current.id).rows, confirmed.rows);
   } finally {
     await f.cleanup();
   }

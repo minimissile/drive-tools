@@ -8,6 +8,7 @@ import {
   FolderSync,
   Pause,
   Play,
+  ScrollText,
 } from "lucide-react";
 import type { Account } from "../../shared/types";
 import {
@@ -32,10 +33,12 @@ import {
   SearchField,
 } from "../ui/primitives";
 import { QueryError } from "../ui/QueryError";
+import { CheckboxField } from "../ui/CheckboxField";
 import { Select } from "../ui/Select";
 import { SelectionCheckbox } from "../ui/SelectionCheckbox";
 import { Pagination } from "../ui/Pagination";
 import { DropdownMenu, MenuAction } from "../ui/DropdownMenu";
+import { DriveSyncLogs } from "./DriveSyncLogs";
 import "./drive-index.css";
 
 const statuses: Record<DriveSyncStatus, string> = {
@@ -89,6 +92,11 @@ export function LocalDriveIndex({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [preview, setPreview] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [autoRegisterChoice, setAutoRegisterChoice] = useState<{
+    runId: string | null;
+    enabled: boolean;
+  } | null>(null);
   const previewInput = useRef<HTMLInputElement>(null);
   const previewTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -109,6 +117,19 @@ export function LocalDriveIndex({
   const data = query.data,
     run = data?.run,
     active = driveSyncActive(run);
+  const supportsAutoRegister = data?.autoRegisterSupported === true;
+  const runId = run?.id ?? null;
+  const resumable =
+    !!run && run.status !== "completed" && run.status !== "blocked";
+  const autoRegister =
+    supportsAutoRegister &&
+    (!active && autoRegisterChoice?.runId === runId
+      ? autoRegisterChoice.enabled
+      : (active || resumable) && run?.autoRegister?.enabled === true);
+  const restartForAutoRegister =
+    autoRegister &&
+    resumable &&
+    (!run.autoRegister?.enabled || run.autoRegister.requiresRescan === true);
   const go = (id: string) =>
     draft.update({ parentId: id, search: "", page: 1 });
   const perform = async (action: () => Promise<unknown>, success?: string) => {
@@ -131,6 +152,23 @@ export function LocalDriveIndex({
       if (mounted.current) setBusy(false);
     }
   };
+  const startSync = (restart = false) =>
+    perform(async () => {
+      await ipc("driveSync.start", {
+        accountId: account.id,
+        ...(restart ? { restart } : {}),
+        ...(autoRegister ? { autoRegister: true } : {}),
+      });
+      if (mounted.current) setAutoRegisterChoice(null);
+    });
+  const resumeSync = () =>
+    perform(async () => {
+      await ipc("driveSync.resume", {
+        accountId: account.id,
+        ...(supportsAutoRegister ? { autoRegister } : {}),
+      });
+      if (mounted.current) setAutoRegisterChoice(null);
+    });
   const selectable = (data?.items ?? []).filter(
     (e) => !e.missing && e.state !== "recorded",
   );
@@ -201,6 +239,14 @@ export function LocalDriveIndex({
                   ? `发现 ${run.files.toLocaleString()} 个文件 · ${run.folders.toLocaleString()} 个目录 · ${run.pending} 个待处理${run.failed ? ` · ${run.failed} 个失败` : ""}`
                   : "同步目录信息后，可离线查询并筛选尚未录入的内容。"}
               </span>
+              {run?.autoRegister ? (
+                <span>
+                  自动录入 {run.autoRegister.added.toLocaleString()} 项
+                  {run.autoRegister.skipped
+                    ? ` · 跳过 ${run.autoRegister.skipped.toLocaleString()} 项`
+                    : ""}
+                </span>
+              ) : null}
             </div>
             <div className="drive-index-meta">
               {data?.lastCompleteAt ? (
@@ -215,9 +261,42 @@ export function LocalDriveIndex({
                     : ""}
                 </p>
               </details>
+              {supportsAutoRegister ? (
+                <CheckboxField
+                  label="同步时自动录入资源库"
+                  checked={autoRegister}
+                  disabled={active || busy || !account.enabled || !!queryError}
+                  onChange={(event) =>
+                    setAutoRegisterChoice({
+                      runId,
+                      enabled: event.target.checked,
+                    })
+                  }
+                />
+              ) : null}
             </div>
+            {autoRegister && !active ? (
+              <p className="drive-index-auto-hint">
+                {restartForAutoRegister
+                  ? run?.autoRegister?.requiresRescan
+                    ? "当前任务使用旧的录入规则，将从根目录重新扫描。"
+                    : "将从根目录重新扫描。"
+                  : ""}
+                {data?.autoRegisterIncludesFolders
+                  ? "文件夹和里面的文件会分别录入资源库。"
+                  : "应用后端更新后也可录入文件夹。"}
+              </p>
+            ) : null}
           </div>
           <div className="drive-index-actions">
+            <Button
+              quiet
+              aria-haspopup="dialog"
+              onClick={() => setShowLogs(true)}
+            >
+              <ScrollText size={15} aria-hidden="true" />
+              同步日志
+            </Button>
             {active ? (
               <Button
                 disabled={busy || run?.status === "pausing"}
@@ -230,30 +309,19 @@ export function LocalDriveIndex({
                 <Pause size={15} />
                 暂停同步
               </Button>
-            ) : run?.status === "blocked" ? (
+            ) : run?.status === "blocked" || restartForAutoRegister ? (
               <Button
                 primary
-                disabled={busy || !account.enabled}
-                onClick={() =>
-                  void perform(() =>
-                    ipc("driveSync.start", {
-                      accountId: account.id,
-                      restart: true,
-                    }),
-                  )
-                }
+                disabled={busy || !account.enabled || !!queryError}
+                onClick={() => void startSync(true)}
               >
-                核对账号并重新扫描
+                {autoRegister ? "重新扫描并录入" : "核对账号并重新扫描"}
               </Button>
             ) : run && run.status !== "completed" ? (
               <Button
                 primary
                 disabled={busy || !account.enabled}
-                onClick={() =>
-                  void perform(() =>
-                    ipc("driveSync.resume", { accountId: account.id }),
-                  )
-                }
+                onClick={() => void resumeSync()}
               >
                 <Play size={15} />
                 {run.status === "partial" ? "重试未完成目录" : "继续同步"}
@@ -262,14 +330,14 @@ export function LocalDriveIndex({
               <Button
                 primary
                 disabled={busy || !account.enabled || !data || !!queryError}
-                onClick={() =>
-                  void perform(() =>
-                    ipc("driveSync.start", { accountId: account.id }),
-                  )
-                }
+                onClick={() => void startSync()}
               >
                 <FolderSync size={15} />
-                {run ? "更新本地目录" : "同步整个网盘"}
+                {autoRegister
+                  ? "同步并自动录入"
+                  : run
+                    ? "更新本地目录"
+                    : "同步整个网盘"}
               </Button>
             )}
           </div>
@@ -536,6 +604,12 @@ export function LocalDriveIndex({
           </div>
         ) : null}
       </Panel>
+      {showLogs ? (
+        <DriveSyncLogs
+          accountId={account.id}
+          onClose={() => setShowLogs(false)}
+        />
+      ) : null}
       {preview && selection.length ? (
         <Panel
           className="drive-index-preview-panel"

@@ -1,13 +1,14 @@
 import { useId } from "react";
 import { Select } from "../ui/Select";
 import {
-  defaultWechatTemplate,
-  wechatTemplates,
+  currentWechatTemplateId,
+  getWechatTemplate,
+  selectableWechatTemplateIds,
   type WechatTemplateId,
 } from "../../shared/wechat-templates";
 
 export function ArticleTemplateSelect({
-  value = defaultWechatTemplate,
+  value,
   disabled,
   onChange,
 }: {
@@ -20,12 +21,12 @@ export function ArticleTemplateSelect({
     <div className="wechat-template-control">
       <span id={label}>排版模板</span>
       <Select
-        value={value}
+        value={currentWechatTemplateId(value)}
         aria-labelledby={label}
         disabled={disabled}
-        items={wechatTemplates.map((template) => ({
-          value: template.id,
-          label: template.name,
+        items={selectableWechatTemplateIds.map((id) => ({
+          value: id,
+          label: getWechatTemplate(id).name,
         }))}
         onValueChange={(id) => onChange(id as WechatTemplateId)}
       />

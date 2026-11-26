@@ -65,7 +65,7 @@ import type { ProviderTransport } from "../core/providers/provider";
 import { documentDownloadAllowed } from "./resource-document-network";
 import type { Account, Result } from "../shared/types";
 import { AppError, ProviderHttpError, safeMessage } from "../core/errors";
-import { readLimited } from "../core/http";
+import { readLimited, retryAfterMilliseconds } from "../core/http";
 import { ZodError } from "zod";
 import { createUpdater } from "./updater";
 import type { UpdateManager } from "../core/updates";
@@ -221,6 +221,7 @@ async function providerResponse(
         ),
       ),
       !!init.method && !["GET", "HEAD"].includes(init.method),
+      retryAfterMilliseconds(response.headers.get("retry-after")),
     );
   }
   return response;

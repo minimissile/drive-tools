@@ -101,7 +101,7 @@ function DriveResourceViewer({
   const knownOwn =
     target.kind === "own" || !!(account?.uid && copy?.ownerUid === account.uid);
   const sourceText =
-    resource?.sourceUrl ?? (target.kind === "share" ? target.sourceText : "");
+    copy?.source?.url ?? resource?.sourceUrl ?? (target.kind === "share" ? target.sourceText : "");
   const sourceCode = target.kind === "share" ? target.code : undefined;
   const title =
     resource?.title ??
@@ -202,6 +202,7 @@ function DriveResourceViewer({
               sourceText,
               code: sourceCode,
               resourceId: resource?.id,
+              sourceLinkId: copy?.source?.linkId,
               parentId: "0",
               page: 1,
             });
@@ -255,6 +256,7 @@ function DriveResourceViewer({
         sourceText,
         code: sourceCode,
         resourceId: resource?.id,
+        sourceLinkId: copy?.source?.linkId,
         parentId,
         page,
         cursor,
@@ -408,6 +410,7 @@ function DriveResourceViewer({
                 sourceText,
                 code: sourceCode,
                 resourceId: resource?.id,
+                sourceLinkId: copy?.source?.linkId,
               }).catch((cause: unknown) => {
                 if (mounted.current && currentIdentity.current === identity)
                   setError(

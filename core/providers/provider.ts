@@ -132,6 +132,7 @@ export interface DriveProvider {
     code?: string,
   ): Promise<OwnShare | null>;
   findOwnShare(account: Account, files: RemoteFile[]): Promise<OwnShare | null>;
+  ownShareLookup?(account: Account): Promise<(files: RemoteFile[], shareId?: string) => Promise<OwnShare | null>>;
   recoverOwnShare(
     account: Account,
     source: ShareInput,

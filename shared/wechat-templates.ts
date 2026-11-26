@@ -3,11 +3,20 @@ import { z } from "zod";
 export const wechatTemplateIds = ["classic", "minimal", "ice-blue"] as const;
 export const wechatTemplateSchema = z.enum(wechatTemplateIds);
 export type WechatTemplateId = z.infer<typeof wechatTemplateSchema>;
-export const defaultWechatTemplate: WechatTemplateId = "classic";
+export const defaultWechatTemplate = "classic";
+export const selectableWechatTemplateIds = wechatTemplateIds.filter(
+  (id) => id !== "minimal",
+);
+export function currentWechatTemplateId(
+  id: WechatTemplateId = defaultWechatTemplate,
+) {
+  return id === "minimal" ? defaultWechatTemplate : id;
+}
 export interface WechatResourceAppearance {
   container: string;
   title: string;
   address: string;
+  link?: string;
   code: string;
   help: string;
 }
@@ -60,8 +69,54 @@ const classicResource: WechatResourceAppearance = {
   help: "margin:0;font-size:13px;line-height:1.6;color:#52627a;",
 };
 
-/** Stable built-in definitions. Add future templates here; selection never changes the manuscript. */
-export const wechatTemplates: readonly WechatTemplate[] = [
+const legacyIceBlueResource: WechatResourceAppearance = {
+  container:
+    "margin:18px 0 0;padding:15px;background-color:#f6fcff;text-align:left;text-align-last:left;letter-spacing:0;box-sizing:border-box;",
+  title:
+    "margin:0 0 10px;font-size:15px;font-weight:700;line-height:1.7;color:#2d699c;letter-spacing:1px;",
+  address:
+    "margin:0 0 10px;font-size:14px;line-height:1.9;text-align:left;text-align-last:left;letter-spacing:0;word-break:break-all;overflow-wrap:anywhere;",
+  code: "margin:0 0 8px;font-size:13px;line-height:1.8;color:#3e3e3e;letter-spacing:0;",
+  help: "margin:0;font-size:13px;line-height:1.8;color:#2d699c;letter-spacing:0;",
+};
+
+const iceBlueResourceV6: WechatResourceAppearance = {
+  container:
+    "margin:20px 0;padding:14px 16px;border:1px solid #9ac4e1;border-left:4px solid #256596;border-radius:10px;background-color:#eaf5ff;text-align:left;text-align-last:left;letter-spacing:0;box-sizing:border-box;",
+  title:
+    "display:inline-block;max-width:100%;margin:0 0 10px;padding:4px 10px;border-radius:5px;background-color:#205d8c;color:#fff;font-size:15px;font-weight:700;line-height:1.6;overflow-wrap:anywhere;box-sizing:border-box;",
+  address:
+    "margin:0;padding:8px 10px;border:1px solid #c0dbed;border-radius:6px;background-color:#fff;font-size:14px;line-height:1.65;text-align:left;text-align-last:left;letter-spacing:0;word-break:break-all;overflow-wrap:anywhere;",
+  link: "color:#174d79;font-weight:600;text-decoration:underline;word-break:break-all;overflow-wrap:anywhere;letter-spacing:0;",
+  code: "display:inline-block;margin:10px 0 0;padding:2px 8px;border-radius:4px;background-color:#d7eafb;color:#174d79;font-size:14px;font-weight:700;line-height:1.65;",
+  help: "margin:10px 0 0;font-size:14px;font-weight:700;line-height:1.6;color:#174d79;",
+};
+
+const iceBlueSections: NonNullable<WechatTemplate["sectionLayout"]> = {
+  intro:
+    "width:95%;margin:0 auto 24px;padding:15px;border:1px solid #6ca1c3;border-radius:20px 0;background-color:#fff;box-sizing:border-box;",
+  panel:
+    "width:95%;margin:0 auto 24px;padding:15px;border:1px solid #6ca1c3;background-color:#fff;box-sizing:border-box;",
+  heading:
+    "width:95%;margin:24px auto 20px;padding:0;font-size:18px;font-weight:700;line-height:1.6;text-align:center;text-align-last:center;letter-spacing:0;",
+  headingLabel:
+    "display:inline-block;max-width:calc(100% - 76px);margin:0 6px;padding:5px 16px;vertical-align:middle;background-color:#2d699c;color:#fff;font-size:18px;font-weight:700;line-height:1.6;letter-spacing:2px;overflow-wrap:anywhere;box-sizing:border-box;",
+  chevrons: ["#dbeaf2", "#a9cde2", "#6ca1c3"],
+};
+
+const iceBlueFrame = "border:1px solid #a9cde2;border-radius:10px;";
+const iceBlueDetailRadius = "border-radius:6px;";
+const iceBlueTitleFill = "background-color:#2d699c;color:#fff;";
+const iceBluePanel = `width:95%;margin:0 auto 24px;padding:15px;${iceBlueFrame}background-color:#fff;box-sizing:border-box;`;
+const iceBlueSectionsV7 = {
+  ...iceBlueSections,
+  intro: iceBluePanel,
+  panel: iceBluePanel,
+  headingLabel: `display:inline-block;max-width:calc(100% - 76px);margin:0 6px;padding:5px 16px;vertical-align:middle;${iceBlueDetailRadius}${iceBlueTitleFill}font-size:18px;font-weight:700;line-height:1.6;letter-spacing:2px;overflow-wrap:anywhere;box-sizing:border-box;`,
+};
+
+/** The retired template is kept for historical draft verification. */
+const wechatTemplates: readonly WechatTemplate[] = [
   {
     id: "classic",
     name: "清爽卡片",
@@ -125,32 +180,26 @@ export const wechatTemplates: readonly WechatTemplate[] = [
       pre: "margin:16px 0;padding:12px 15px;background-color:#f6fcff;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.8;letter-spacing:0;",
     },
     resource: {
-      container:
-        "margin:18px 0 0;padding:15px;background-color:#f6fcff;text-align:left;text-align-last:left;letter-spacing:0;box-sizing:border-box;",
-      title:
-        "margin:0 0 10px;font-size:15px;font-weight:700;line-height:1.7;color:#2d699c;letter-spacing:1px;",
-      address:
-        "margin:0 0 10px;font-size:14px;line-height:1.9;text-align:left;text-align-last:left;letter-spacing:0;word-break:break-all;overflow-wrap:anywhere;",
-      code: "margin:0 0 8px;font-size:13px;line-height:1.8;color:#3e3e3e;letter-spacing:0;",
-      help: "margin:0;font-size:13px;line-height:1.8;color:#2d699c;letter-spacing:0;",
+      ...iceBlueResourceV6,
+      container: `margin:20px 0;padding:14px 15px;${iceBlueFrame}background-color:#eaf5ff;text-align:left;text-align-last:left;letter-spacing:0;box-sizing:border-box;`,
+      title: `display:inline-block;max-width:100%;margin:0 0 10px;padding:4px 10px;${iceBlueDetailRadius}${iceBlueTitleFill}font-size:15px;font-weight:700;line-height:1.6;overflow-wrap:anywhere;box-sizing:border-box;`,
+      address: `margin:0;padding:8px 10px;${iceBlueDetailRadius}background-color:#fff;font-size:14px;line-height:1.65;text-align:left;text-align-last:left;letter-spacing:0;word-break:break-all;overflow-wrap:anywhere;`,
+      code: `display:inline-block;margin:10px 0 0;padding:2px 8px;${iceBlueDetailRadius}background-color:#d7eafb;color:#174d79;font-size:14px;font-weight:700;line-height:1.65;`,
     },
-    sectionLayout: {
-      intro:
-        "width:95%;margin:0 auto 24px;padding:15px;border:1px solid #6ca1c3;border-radius:20px 0;background-color:#fff;box-sizing:border-box;",
-      panel:
-        "width:95%;margin:0 auto 24px;padding:15px;border:1px solid #6ca1c3;background-color:#fff;box-sizing:border-box;",
-      heading:
-        "width:95%;margin:24px auto 20px;padding:0;font-size:18px;font-weight:700;line-height:1.6;text-align:center;text-align-last:center;letter-spacing:0;",
-      headingLabel:
-        "display:inline-block;max-width:calc(100% - 76px);margin:0 6px;padding:5px 16px;vertical-align:middle;background-color:#2d699c;color:#fff;font-size:18px;font-weight:700;line-height:1.6;letter-spacing:2px;overflow-wrap:anywhere;box-sizing:border-box;",
-      chevrons: ["#dbeaf2", "#a9cde2", "#6ca1c3"],
-    },
+    sectionLayout: iceBlueSections,
   },
 ];
 export function getWechatTemplate(
   id: WechatTemplateId = defaultWechatTemplate,
+  version = Number.POSITIVE_INFINITY,
 ) {
-  return (
-    wechatTemplates.find((template) => template.id === id) ?? wechatTemplates[0]
-  );
+  const resolved = version < 6 ? id : currentWechatTemplateId(id);
+  const template =
+    wechatTemplates.find((item) => item.id === resolved) ?? wechatTemplates[0];
+  if (resolved !== "ice-blue" || version >= 8) return template;
+  if (version === 7) return { ...template, sectionLayout: iceBlueSectionsV7 };
+  return {
+    ...template,
+    resource: version < 6 ? legacyIceBlueResource : iceBlueResourceV6,
+  };
 }

@@ -24,7 +24,8 @@ import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { Workspace } from "../ui/Workspace";
 import { ActionBar } from "../ui/ActionBar";
-import { useAttachmentDraft } from "../hooks/useAttachmentDraft";
+import { useIntakeImages } from "../resources/useIntakeImages";
+import { IntakeImages } from "../resources/IntakeImages";
 import { z } from "zod";
 import { useLocalDraft } from "../hooks/useLocalDraft";
 import { ipc } from "../api/client";
@@ -38,11 +39,8 @@ import {
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
-  ImagePlus,
   LogIn,
   RotateCcw,
-  Upload,
-  X,
 } from "lucide-react";
 import {
   useAppActions,
@@ -59,7 +57,7 @@ export default function Intake() {
   const { data } = useAppData(),
     { activeAccounts, select, resource } = useAppSelection(),
     { editResourceId, editCopyId, navigate } = useAppNavigation(),
-    { command, notify } = useAppActions(),
+    { command } = useAppActions(),
     { busy } = useAppActivity();
   const existing =
       data!.resources.find((r) => r.id === editResourceId) ??
@@ -69,10 +67,11 @@ export default function Intake() {
         ? undefined
         : (existing?.copies.find((c) => c.id === editCopyId) ??
           existing?.copies[0]);
-  const indexedOwned = !!existing && existing.sourceKind === "owned" && isIndexedOwnSource(existing.sourceUrl);
+  const indexedOwned = !priorCopy?.source && !!existing && existing.sourceKind === "owned" && isIndexedOwnSource(existing.sourceUrl);
   const priorOwnResource =
     priorCopy?.status === "recorded" ||
     (!!priorCopy &&
+      !priorCopy.source &&
       existing?.sourceKind === "owned" &&
       (priorCopy.shareUrl === existing.sourceUrl || indexedOwned));
   const chooseAccount = (p: Provider) =>
@@ -80,10 +79,10 @@ export default function Intake() {
   const draft = useLocalDraft(
     `panxu-intake-v1:${data!.dataPath}:${editResourceId ?? "new"}:${editCopyId ?? "new"}`,
     {
-      provider: existing?.provider ?? "quark",
+      provider: priorCopy?.source?.provider ?? existing?.provider ?? "quark",
       accountId:
         priorCopy?.accountId ?? chooseAccount(existing?.provider ?? "quark"),
-      sourceText: existing?.sourceUrl ?? "",
+      sourceText: priorCopy?.source?.url ?? existing?.sourceUrl ?? "",
       code: "",
       title: existing?.title ?? "",
       category: existing?.category ?? "效率办公",
@@ -126,10 +125,9 @@ export default function Intake() {
   const [step, setStep] = useState<"info" | "keywords" | "files">("info");
   const [keywordSearching, setKeywordSearching] = useState(false);
   const [resetRevision, setResetRevision] = useState(0);
-  const formRevision = useRef(0);
   const keywordWords = parseResourceKeywordText(keywords.text);
   const tooManyKeywords = keywordWords.length > resourceKeywordLimit;
-  const canTransfer = !isOwnResource && priorCopy?.status !== "ready";
+  const canTransfer = !priorCopy?.source && !isOwnResource && priorCopy?.status !== "ready";
   const currentStep = step === "files" && !canTransfer ? "keywords" : step;
   const stepRegion = useRef<HTMLDivElement>(null);
   const previousStep = useRef(currentStep);
@@ -151,11 +149,10 @@ export default function Intake() {
   const setTags = (tags: string) => draft.update({ tags });
   const setSummary = (summary: string) => draft.update({ summary });
   const setDirectory = (directory: string) => draft.update({ directory });
-  const imageDraft = useAttachmentDraft(
+  const images = useIntakeImages(
     `panxu-intake-cover:${data!.dataPath}:${editResourceId ?? "new"}:${editCopyId ?? "new"}`,
+    existing,
   );
-  const cover = imageDraft.value;
-  const setCover = imageDraft.update;
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -188,13 +185,6 @@ export default function Intake() {
     originalTitle: priorCopy && existing?.category ? existing.title : undefined,
     invalidate: data?.resources,
   });
-  const imageInput = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (existing?.coverId && cover === undefined && !imageDraft.loading)
-      void ipc("cover.get", { id: existing.coverId })
-        .then(imageDraft.restore)
-        .catch(() => {});
-  }, [existing?.coverId, imageDraft.loading]);
   const changeProvider = (value: Provider) => {
     setRequestedCheckAccount("");
     setProvider(value);
@@ -210,6 +200,7 @@ export default function Intake() {
     setParents([{ id: "0", name: "分享根目录" }]);
   };
   const options = useIpcQuery("resource.intakeOptions", { accountId });
+  const imageUpdateRequired = images.input !== undefined && !options.data?.imageLimit;
   const linkStatusId = useId();
   const link = useIntakeShare({
     sourceText,
@@ -218,7 +209,11 @@ export default function Intake() {
     accountId,
     directory,
     resourceId: existing?.id,
-    localSource: indexedOwned ? {provider:existing!.provider,url:existing!.sourceUrl,shareKey:"",code:""} : undefined,
+    localSource: priorCopy?.source
+      ? { provider: priorCopy.source.provider, url: priorCopy.source.url, shareKey: "", code: "" }
+      : indexedOwned
+        ? { provider: existing!.provider, url: existing!.sourceUrl, shareKey: "", code: "" }
+        : undefined,
     accounts: data!.accounts,
     activeAccounts,
     onParsed: (result) => {
@@ -328,30 +323,12 @@ export default function Intake() {
       }
     }
   };
-  const readImage = (file?: File) => {
-    if (!file) return;
-    if (
-      !["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
-      file.size > 8 * 1024 * 1024
-    ) {
-      notify("请选择8MB以内的PNG、JPEG或WebP图片。", "warning");
-      return;
-    }
-    const reader = new FileReader();
-    const revision = formRevision.current;
-    reader.onload = () => {
-      if (mounted.current && revision === formRevision.current)
-        setCover(String(reader.result));
-    };
-    reader.readAsDataURL(file);
-  };
   const saveInFlight = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const nextInFlight = useRef(false);
   const [preparing, setPreparing] = useState(false);
   const reset = () => {
     if (existing || submitting || preparing) return;
-    formRevision.current++;
     inspectionRevision.current++;
     inspectionPending.current = null;
     link.invalidate();
@@ -368,8 +345,7 @@ export default function Intake() {
       keywords: initialIntakeKeywords(),
       isOwnResource: false,
     });
-    setCover(null);
-    if (imageInput.current) imageInput.current.value = "";
+    images.reset();
     setRequestedCheckAccount("");
     setInspection(null);
     setInspectionLoading(false);
@@ -378,7 +354,7 @@ export default function Intake() {
     setParents([{ id: "0", name: "分享根目录" }]);
     setKeywordSearching(false);
     setStep("info");
-    setResetRevision(formRevision.current);
+    setResetRevision((value) => value + 1);
     requestAnimationFrame(() => {
       if (mounted.current) {
         stepRegion.current?.scrollIntoView({ block: "start" });
@@ -392,7 +368,7 @@ export default function Intake() {
     <Button
       disabled={submitting || preparing}
       onClick={reset}
-      title="清空资源资料、封面和全部流量词，保留账号与保存目录"
+      title="清空资源资料、图片和全部流量词，保留账号与保存目录"
     >
       <RotateCcw size={15} />
       重置
@@ -411,7 +387,7 @@ export default function Intake() {
     !!duplicateCopy ||
     similarity.blocked ||
     inspectionLoading ||
-    imageDraft.loading ||
+    images.loading ||
     busy > 0 ||
     !!requiredDetailsHint;
   const next = async (target: "keywords" | "files") => {
@@ -441,7 +417,7 @@ export default function Intake() {
       (!canTransfer || currentStep !== "files" || !selected.length)
     )
       return;
-    if (formBlocked || nextInFlight.current) return;
+    if (formBlocked || imageUpdateRequired || nextInFlight.current) return;
     if (saveInFlight.current) return;
     saveInFlight.current = true;
     setSubmitting(true);
@@ -460,7 +436,7 @@ export default function Intake() {
           tags: parseResourceTagInput(tags),
           searchKeywords: keywordWords,
           summary,
-          coverData: cover,
+          images: images.input,
           accountId: parsed.accountId,
           directory: isOwnResource
             ? (priorCopy?.directory ?? "/")
@@ -479,7 +455,7 @@ export default function Intake() {
       );
       if (result) {
         draft.clear();
-        imageDraft.clear();
+        images.clear();
         if (!mounted.current) return;
         select(result.resourceId, result.copyId);
         navigate(enqueue ? "tasks" : "library");
@@ -493,13 +469,14 @@ export default function Intake() {
     <Workspace
       className={currentStep === "keywords" ? "intake-keyword-workspace" : ""}
       onPaste={(e) => {
-        if (currentStep !== "info") return;
-        const image = [...e.clipboardData.items]
-          .find((i) => i.kind === "file" && i.type.startsWith("image/"))
-          ?.getAsFile();
-        if (image) {
+        if (currentStep !== "info" || submitting || preparing) return;
+        const files = Array.from(e.clipboardData.items)
+          .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null);
+        if (files.length) {
           e.preventDefault();
-          readImage(image);
+          void images.add(files);
         }
       }}
       footer={
@@ -508,7 +485,11 @@ export default function Intake() {
             label="资源保存操作"
             status={
               <>
-                {requiredDetailsHint ||
+                {(imageUpdateRequired && !options.loading
+                  ? options.error
+                    ? "请重试读取录入选项后保存图片。"
+                    : "应用后端更新后即可保存图片资源。"
+                  : "") || requiredDetailsHint ||
                   (duplicateCopy || similarity.duplicate
                     ? "此类网盘已有这份资源，请编辑已有记录。"
                     : similarity.loading
@@ -546,7 +527,7 @@ export default function Intake() {
                 </Button>
                 <Button
                   primary
-                  disabled={formBlocked || !selected.length}
+                  disabled={formBlocked || imageUpdateRequired || !selected.length}
                   onClick={() => void save(true)}
                 >
                   {submitting ? "正在保存…" : "保存并开始转存"}
@@ -565,7 +546,7 @@ export default function Intake() {
                 {!canTransfer ? resetButton : null}
                 <Button
                   primary={!canTransfer}
-                  disabled={formBlocked}
+                  disabled={formBlocked || imageUpdateRequired}
                   onClick={() => void save(false)}
                 >
                   {submitting
@@ -624,7 +605,7 @@ export default function Intake() {
         restored={!draft.error && draft.restored && currentStep === "info"}
         needsFileRead={canTransfer && !inspection}
       />
-      {imageDraft.error ? <Notice danger>{imageDraft.error}</Notice> : null}
+      {images.error ? <Notice danger>{images.error}</Notice> : null}
       {draft.error ? <Notice danger>{draft.error}</Notice> : null}
       {!hasAccounts ? (
         <Empty
@@ -808,9 +789,9 @@ export default function Intake() {
                       check={similarity}
                       disabled={
                         submitting ||
-                        imageDraft.loading ||
+                        images.loading ||
                         !!draft.error ||
-                        !!imageDraft.error
+                        !!images.error
                       }
                       onOpen={(id) => {
                         select(id);
@@ -904,53 +885,14 @@ export default function Intake() {
                   </div>
                 </Panel>
                 <div className="intake-info-side">
-                  <Panel
-                    title="资源封面"
-                    className="intake-cover-panel"
-                    extra={<small>支持粘贴与拖放</small>}
-                  >
-                    <div
-                      className="cover-drop intake-cover-preview"
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        readImage(e.dataTransfer.files[0]);
-                      }}
-                    >
-                      {cover ? (
-                        <img src={cover} alt="待保存封面" />
-                      ) : (
-                        <>
-                          <ImagePlus size={26} />
-                          <strong>粘贴或拖入封面</strong>
-                          <small>在当前表单按 ⌘V / Ctrl+V</small>
-                        </>
-                      )}
-                    </div>
-                    <div className="intake-cover-actions">
-                      <Button onClick={() => imageInput.current?.click()}>
-                        <Upload size={14} />
-                        选择图片
-                      </Button>
-                      {cover ? (
-                        <Button quiet onClick={() => setCover(null)}>
-                          <X size={14} />
-                          移除
-                        </Button>
-                      ) : null}
-                    </div>
-                    <input
-                      ref={imageInput}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      hidden
-                      onChange={(e) => readImage(e.target.files?.[0])}
-                    />
-                    <small className="intake-cover-note">
-                      JPG / PNG / WebP ·
-                      原图最大8MB，保存时自动转为200KB以内的WebP。
-                    </small>
-                  </Panel>
+                  <IntakeImages
+                    items={images.items}
+                    loading={images.loading}
+                    disabled={images.loading || submitting || preparing}
+                    onAdd={(files) => void images.add(files)}
+                    onRemove={images.remove}
+                    onCover={images.setCover}
+                  />
                   <Panel
                     title={isOwnResource ? "资源归属" : "保存位置"}
                     className="intake-location-panel"
@@ -963,9 +905,9 @@ export default function Intake() {
                           size="compact"
                           disabled={
                             submitting ||
-                            imageDraft.loading ||
+                            images.loading ||
                             !!draft.error ||
-                            !!imageDraft.error
+                            !!images.error
                           }
                           onClick={() => {
                             select(existing.id, duplicateCopy.id);

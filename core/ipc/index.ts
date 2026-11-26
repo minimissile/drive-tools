@@ -40,6 +40,7 @@ import { createIpcRegistry } from "./registry";
 import type { HandlerServices } from "./types";
 import { createWorkspaceHandlers } from "./workspace";
 import { createResourcesHandlers } from "./resources";
+import { createResourceDriveLinkHandlers } from "./resource-drive-links";
 import { createResourceExportsHandlers } from "./resource-exports";
 import { createOperationsHandlers } from "./operations";
 import { createAccountHandlers } from "./account";
@@ -114,6 +115,7 @@ export function createApplicationHandlers(services: HandlerServices) {
     createZhidaoPageDiscoveryHandlers(services),
     createWorkspaceHandlers(services),
     createResourcesHandlers(services),
+    createResourceDriveLinkHandlers(services),
     createResourceExportsHandlers(services),
     createOperationsHandlers(services),
     createInsertionHandlers(services),

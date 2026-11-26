@@ -599,6 +599,7 @@ export class ResourceLinks {
   private currentCopy(resource: Resource) {
     return (
       resource.copies.find((copy) => {
+        if (copy.source) return false;
         if (!hasVerifiedShare(copy, this.d.repo.getAccount(copy.accountId)))
           return false;
         const check = this.db.get<{ status: string; checked_at: string }>(
@@ -951,6 +952,7 @@ export class ResourceLinks {
       );
     const copy = resource.copies.find(
       (item) =>
+        !item.source &&
         item.verifiedAt &&
         item.files.length &&
         item.ownerUid &&

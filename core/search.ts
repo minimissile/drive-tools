@@ -233,7 +233,8 @@ export class SearchOperations {
       );
     const url = split?.shareUrl ?? copy.shareUrl;
     const resource = this.repo.getResource(copy.resourceId);
-    if (url === resource.sourceUrl && resource.sourceKind !== "owned")
+    if (url === (copy.source?.url ?? resource.sourceUrl) &&
+      (copy.source || resource.sourceKind !== "owned"))
       throw new AppError(
         "FOREIGN_SHARE_BLOCKED",
         "来源链接不能作为配套本人资料。",

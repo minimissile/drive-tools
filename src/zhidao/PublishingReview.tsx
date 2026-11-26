@@ -33,7 +33,7 @@ export function PublishingReview({
   onTextChange(rows: PublishingQuestion[]): void;
   pending: boolean;
   onPreview(): void;
-  onOptimize(): void;
+  onOptimize(expand?: true): void;
   upgrading: boolean;
   editingVersion: { generationId?: string; legacyUpgraded?: true };
   conflict: boolean;
@@ -76,6 +76,13 @@ export function PublishingReview({
   const confirmed = effective.filter((row) => row.reviewed).length;
   const firstIssue = issues.findIndex(Boolean);
   const dirty = JSON.stringify(effective) !== JSON.stringify(record.rows);
+  const canExpand =
+    record.contentFirst &&
+    confirmed === 0 &&
+    !record.links.length &&
+    !Object.keys(record.rowShares ?? {}).length &&
+    !record.publicationRunId &&
+    !!record.generation?.excludedKeywords?.length;
   const changeRows = (next: PublishingQuestion[]) => {
     onDirty();
     draft.update({ rows: next });
@@ -97,13 +104,23 @@ export function PublishingReview({
             <span className="muted"> · 已确认 {confirmed} 条</span>
           </strong>
           <p className="publishing-help">
-            检查标题和介绍，可删减或调整顺序，确认后按实际条数准备独立链接。 AI
-            优化只改写未确认的标题和简介，使用文案创作模型与现有预算。
+            检查标题和回答，确认后按实际条数准备独立链接。扩展覆盖会检索补充资料、重新分组并生成，计入现有
+            AI 预算；新结果通过前保留原稿。
           </p>
         </div>
         <div className="publishing-review-actions">
+          {canExpand ? (
+            <Button
+              onClick={() => onOptimize(true)}
+              disabled={
+                upgrading || conflict || dirty || pending || !!action.pending
+              }
+            >
+              扩展关键词覆盖
+            </Button>
+          ) : null}
           <Button
-            onClick={onOptimize}
+            onClick={() => onOptimize()}
             disabled={
               upgrading ||
               conflict ||
@@ -113,7 +130,7 @@ export function PublishingReview({
               confirmed === effective.length
             }
           >
-            {upgrading ? "正在 AI 优化…" : "AI 优化标题与简介"}
+            {upgrading ? "正在 AI 处理…" : "AI 优化标题与回答"}
           </Button>
           <Button onClick={onPreview}>
             <Eye size={15} aria-hidden="true" />
@@ -283,7 +300,7 @@ export function PublishingReview({
                 />
               </Field>
               <Field
-                label={record.contentFirst ? "资源介绍" : "回答内容"}
+                label="回答内容"
                 hint={
                   record.contentFirst
                     ? "链接将在下一步自动插入"

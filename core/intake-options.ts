@@ -3,6 +3,7 @@ import { Database } from "./database";
 import { Repository } from "./repository";
 import { AppError } from "./errors";
 import { normalizedDirectory } from "./providers/provider";
+import { resourceImageLimit } from "../shared/resource-images";
 import {
   defaultResourceCategories,
   type IntakeOptions,
@@ -16,6 +17,7 @@ export function intakeOptions(
 ): IntakeOptions {
   const account = accountId ? repo.getAccount(accountId) : undefined;
   return {
+    imageLimit: resourceImageLimit,
     categories: [
       ...new Set([
         ...defaultResourceCategories,

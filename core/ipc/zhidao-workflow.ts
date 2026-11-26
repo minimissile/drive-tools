@@ -77,13 +77,18 @@ export function createZhidaoWorkflowHandlers({
           .id,
       ),
     "zhidao.workflow.generate": (raw) => {
-      const { id, upgradeLegacy, optimize } = publishingIdSchema
+      const { id, upgradeLegacy, optimize, expand } = publishingIdSchema
         .extend({
           upgradeLegacy: z.literal(true).optional(),
           optimize: z.literal(true).optional(),
+          expand: z.literal(true).optional(),
         })
+        .refine(
+          (input) => !input.expand || (!input.optimize && !input.upgradeLegacy),
+          "扩展覆盖不能同时改写旧稿",
+        )
         .parse(raw);
-      return zhidaoWorkflow.generate(id, upgradeLegacy, optimize);
+      return zhidaoWorkflow.generate(id, upgradeLegacy, optimize, expand);
     },
     "zhidao.workflow.generateMany": (raw) =>
       zhidaoWorkflow.generateMany(ids.parse(raw).ids),

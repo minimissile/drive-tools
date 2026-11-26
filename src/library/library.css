@@ -180,6 +180,48 @@
 .resource-row-actions .button {
   white-space: nowrap;
 }
+.resource-drive-links-dialog {
+  width: min(600px, 100%);
+}
+.modal.resource-drive-transfer-dialog {
+  width: min(900px, 100%);
+  max-width: none;
+}
+.resource-drive-links-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.resource-drive-links-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  border-block: 1px solid var(--line);
+  list-style: none;
+}
+.resource-drive-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+.resource-drive-link + .resource-drive-link {
+  border-top: 1px solid var(--line);
+}
+.resource-drive-link-address {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.resource-drive-link-address small {
+  color: var(--amber);
+}
+.resource-drive-links-feedback {
+  margin-right: auto;
+  color: var(--green);
+  font-size: 12px;
+}
 .resource-delete-title {
   color: var(--text);
   font-weight: 600;

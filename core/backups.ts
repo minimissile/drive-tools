@@ -14,9 +14,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { Database, databaseSchemaVersion, id, now } from "./database";
+import { Database, databaseSchemaVersion, id, now, parseJson } from "./database";
 import { AppError } from "./errors";
 import { coverFilePattern } from "./cover-assets";
+import { resourceImageIdPattern, resourceImageLimit } from "../shared/resource-images";
 import { sourceWeiboPostBackup, weiboPostBackup } from "../shared/weibo-posts";
 import { intelligentOperationsStateKey } from "../shared/intelligent-operations";
 import { restoreIntelligentOperationsState } from "./intelligent-operations/state";
@@ -175,6 +176,15 @@ export async function inspectBackup(folder: string) {
       )
       .all()
       .map((r) => String(r.cover_id));
+    if (manifest.schemaVersion >= 46) {
+      const schema = z.array(z.string().regex(resourceImageIdPattern)).max(resourceImageLimit - 1);
+      for (const row of db.prepare("SELECT DISTINCT additional_image_ids FROM resources WHERE additional_image_ids <> '[]'").all()) {
+        const images = schema.safeParse(parseJson(row.additional_image_ids, null));
+        if (!images.success)
+          throw new AppError("INVALID_BACKUP", "备份中的资源图片记录不正确。");
+        required.push(...images.data);
+      }
+    }
     if (manifest.schemaVersion >= 9)
       requiredMedia = db
         .prepare(
@@ -254,16 +264,13 @@ export async function inspectBackup(folder: string) {
       throw new AppError("BACKUP_HASH_MISMATCH", "封面校验失败，未恢复。");
     covers.push(name);
   }
+  const availableImages = new Set(covers.map((name) => name.slice(0, 64)));
   if (
     required.some(
-      (cover) =>
-        !/^[a-f0-9]{64}$/.test(cover) ||
-        !["webp", "png"].some((extension) =>
-          covers.includes(`${cover}.${extension}`),
-        ),
+      (cover) => !availableImages.has(cover),
     )
   )
-    throw new AppError("INVALID_BACKUP", "备份缺少资源引用的封面。");
+    throw new AppError("INVALID_BACKUP", "备份缺少资源引用的图片。");
   let media: string[] = [];
   try {
     const info = await lstat(join(folder, "media"));

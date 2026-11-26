@@ -82,6 +82,9 @@ export interface Resource {
   tags: string[];
   summary: string;
   coverId: string | null;
+  /** In display order, with the cover first. */
+  imageIds?: string[];
+  driveLinkProviders?: Provider[];
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -136,6 +139,12 @@ export interface ResourceCopy {
   id: string;
   resourceId: string;
   accountId: string;
+  source?: {
+    linkId: string;
+    provider: Provider;
+    url: string;
+    needsCode: boolean;
+  };
   directory: string;
   folderId: string | null;
   files: RemoteFile[];
@@ -394,6 +403,7 @@ export interface ResourceInput {
   tags: string[];
   summary: string;
   coverData?: string | null;
+  images?: import("./resource-images").ResourceImageInput[];
   accountId: string;
   directory: string;
   /** Legacy callers may still send this; resource intake no longer requires a checkbox. */
